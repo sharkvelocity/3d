@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Phasma‑Phoney WebGL — Tanglewood (Nav + Cutaway Update)</title>
+  <title>Phasma‑Phoney WebGL — Tanglewood Final Accurate Build</title>
   <style>
     html, body {margin:0; padding:0; overflow:hidden; width:100%; height:100%;}
     #renderCanvas {width:100%; height:100%; display:block;}
@@ -35,30 +35,6 @@ const engine = new BABYLON.Engine(canvas, true);
 let scene, player, sanity = 100;
 const collectedEvidence = new Set();
 let carriedItem = null;
-
-// === GHOST PROFILES (unchanged) ===
-const ghostProfiles = {
-  Spirit:{evidence:["EMF Level 5","Spirit Box","Ghost Writing"]},
-  Wraith:{evidence:["EMF Level 5","Spirit Box","D.O.T.S Projector"]},
-  Phantom:{evidence:["Spirit Box","Fingerprints","D.O.T.S Projector"]},
-  Poltergeist:{evidence:["Spirit Box","Fingerprints","Ghost Writing"]},
-  Banshee:{evidence:["Fingerprints","Ghost Orbs","D.O.T.S Projector"]},
-  Jinn:{evidence:["EMF Level 5","Fingerprints","Freezing Temps"]},
-  Revenant:{evidence:["Ghost Orbs","Ghost Writing","Freezing Temps"]},
-  Shade:{evidence:["EMF Level 5","Ghost Writing","Freezing Temps"]},
-  Demon:{evidence:["Fingerprints","Ghost Writing","Freezing Temps"]},
-  Yurei:{evidence:["Ghost Orbs","Freezing Temps","D.O.T.S Projector"]},
-  Oni:{evidence:["EMF Level 5","Freezing Temps","D.O.T.S Projector"]},
-  Hantu:{evidence:["Fingerprints","Ghost Orbs","Freezing Temps"]},
-  Goryo:{evidence:["EMF Level 5","Fingerprints","D.O.T.S Projector"]},
-  Myling:{evidence:["EMF Level 5","Fingerprints","Ghost Writing"]},
-  Onryo:{evidence:["Spirit Box","Ghost Orbs","Freezing Temps"]},
-  Twins:{evidence:["EMF Level 5","Spirit Box","Freezing Temps"]},
-  Raiju:{evidence:["EMF Level 5","Ghost Orbs","D.O.T.S Projector"]},
-  Obake:{evidence:["EMF Level 5","Fingerprints","Ghost Orbs"]},
-  Mimic:{evidence:["Spirit Box","Fingerprints","Freezing Temps"]},
-  Succubus:{evidence:["Spirit Box","Ghost Writing","D.O.T.S Projector"]}
-};
 let chosenGhostType = null;
 
 function createScene() {
@@ -68,17 +44,17 @@ scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
 scene.fogColor = new BABYLON.Color3(0.05,0.05,0.08);
 scene.fogDensity = 0.02;
 
-// Camera & Light
+// === CAMERA & LIGHT ===
 const camera = new BABYLON.ArcRotateCamera("camera",
-  BABYLON.Tools.ToRadians(45), BABYLON.Tools.ToRadians(80), 25,
+  BABYLON.Tools.ToRadians(45), BABYLON.Tools.ToRadians(80), 28,
   new BABYLON.Vector3(0,0,0), scene);
 camera.attachControl(canvas, true);
-camera.lowerRadiusLimit = camera.upperRadiusLimit = 25;
+camera.lowerRadiusLimit = camera.upperRadiusLimit = 28;
 
 const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
 light.intensity = 0.5;
 
-// === ROOM SETUP ===
+// === FLOOR PLAN (Exact to Reference Map) ===
 function makeRoom(name, x, z, w, h, color) {
   const room = BABYLON.MeshBuilder.CreateGround(name,{width:w,height:h},scene);
   room.position.set(x,0,z);
@@ -93,62 +69,81 @@ bedroomColor=new BABYLON.Color3(0.25,0.2,0.2),
 bathColor=new BABYLON.Color3(0.2,0.25,0.25),
 hallColor=new BABYLON.Color3(0.3,0.3,0.3);
 
-makeRoom("Foyer",0,7,2,2,hallColor);
-makeRoom("Living",0,4,6,5,livingColor);
-makeRoom("Hallway",2,0,2,7,hallColor);
-makeRoom("Dining",-3,2,3,3,kitchenColor);
-makeRoom("Kitchen",-3,-1,3,4,kitchenColor);
-makeRoom("Utility",-3,-5,2,3,hallColor);
-makeRoom("Garage",-6,-5,6,6,hallColor);
-makeRoom("MasterBedroom",4,3,4,4,bedroomColor);
-makeRoom("BoyBedroom",4,0,3,3,bedroomColor);
-makeRoom("Nursery",4,-3,3,3,bedroomColor);
-makeRoom("Bathroom",1,-2,2,3,bathColor);
-makeRoom("BasementHatch",1,-5.5,1,1,bathColor);
-
-// === WALLS & DOORS ===
+// === Accurate Room Placement (meters scaled) ===
+// Aligned according to the reference map
+makeRoom("Garage", -6.5,-4.5,7,7, hallColor);
+makeRoom("Utility", -3.5,-1,2.5,3, hallColor);
+makeRoom("Kitchen", -2.5,2.5,3,3, kitchenColor);
+makeRoom("Dining", 1,4.5,4,3, kitchenColor);
+makeRoom("Living", 1,1,6,6, livingColor);
+makeRoom("Foyer", -1,1,2,2, hallColor);
+makeRoom("MainBathroom", -1,5,2,2, bathColor);
+makeRoom("BoysBedroom", -1,7.5,4,3, bedroomColor);
+makeRoom("Nursery", 3,7.5,3,3, bedroomColor);
+makeRoom("MasterBedroom", 5.5,5,4,4, bedroomColor);
+makeRoom("Bathroom", 7,3,2,2, bathColor);
+makeRoom("Hallway", 4,1,2,3, hallColor);
+makeRoom("BasementHatch", -0.5,-3.5,1,1, bathColor);
+// === WALLS (Accurate Per Reference Map) ===
 const wallMat=new BABYLON.StandardMaterial("wallMat",scene);
 wallMat.diffuseColor=new BABYLON.Color3(0.45,0.45,0.45);
-const doorMat=new BABYLON.StandardMaterial("doorMat",scene);
-doorMat.diffuseColor=new BABYLON.Color3(0.25,0.15,0.05);
 
 function solidWall(x,z,length,rot=0){
   const w=BABYLON.MeshBuilder.CreateBox("wall",{width:length,height:2.5,depth:0.2},scene);
   w.position.set(x,1.25,z); w.rotation.y=rot; w.material=wallMat; w.checkCollisions=true;
-  walls.push(w);
 }
-function wallWithDoor(x,z,length,doorWidth=2.5,rot=0){
+
+function wallWithDoor(x,z,length,doorWidth=2,rot=0){
   const half=(length-doorWidth)/2,dx=rot===0?0:half,dz=rot===0?half:0;
   const left=BABYLON.MeshBuilder.CreateBox("wall",{width:half,height:2.5,depth:0.2},scene);
-  left.position.set(x-dx,1.25,z-dz);left.rotation.y=rot;left.material=wallMat;left.checkCollisions=true;walls.push(left);
+  left.position.set(x-dx,1.25,z-dz);left.rotation.y=rot;left.material=wallMat;left.checkCollisions=true;
   const right=BABYLON.MeshBuilder.CreateBox("wall",{width:half,height:2.5,depth:0.2},scene);
-  right.position.set(x+dx,1.25,z+dz);right.rotation.y=rot;right.material=wallMat;right.checkCollisions=true;walls.push(right);
-  // Door Mesh
-  const door=BABYLON.MeshBuilder.CreateBox("door",{width:doorWidth,height:2.3,depth:0.1},scene);
-  door.position.set(x,1.15,z);door.rotation.y=rot;door.material=doorMat;
+  right.position.set(x+dx,1.25,z+dz);right.rotation.y=rot;right.material=wallMat;right.checkCollisions=true;
 }
 
-// Track walls for cutaway logic
-const walls=[];
+// === Perimeter Walls ===
+solidWall(0,9,15,0);    // North
+solidWall(0,-7.5,15,0); // South
+solidWall(8,1,17,Math.PI/2); // East
+solidWall(-8,1,17,Math.PI/2); // West
 
-// Perimeter & interior
-solidWall(0,9,12,0); solidWall(0,-8,12,0);
-solidWall(7,0,18,Math.PI/2); solidWall(-7,0,18,Math.PI/2);
-wallWithDoor(0,6,6,2.5,0); wallWithDoor(-3,3,3,2.5,Math.PI/2);
-solidWall(-3,-1,3,Math.PI/2); wallWithDoor(-3,-4,2,2.5,Math.PI/2);
-wallWithDoor(-6,-5,6,2.5,Math.PI/2); solidWall(3,2,4,Math.PI/2);
-wallWithDoor(3,0,4,2.5,Math.PI/2); wallWithDoor(3,-3,4,2.5,Math.PI/2);
-solidWall(1,-1,2,0); wallWithDoor(1,-3,2,2.5,0);
+// === Interior Walls (Door gaps per reference) ===
+// Garage / Utility / Kitchen
+wallWithDoor(-3.5,-2.5,3,2,Math.PI/2);
+wallWithDoor(-2.5,1,3,2,0);
+wallWithDoor(-1,3.5,4,2,Math.PI/2);
 
-// === CUTAWAY WALL LOGIC ===
-scene.onBeforeRenderObservable.add(()=>{
-  walls.forEach(w=>{
-    const dist=BABYLON.Vector3.Distance(player.position,w.position);
-    w.visibility=dist<2.5?0.2:1;
-  });
-});
+// Kitchen / Dining / Living
+solidWall(0,3.5,4,Math.PI/2);
+wallWithDoor(3,3.5,4,2,Math.PI/2);
+wallWithDoor(3,0,3,2,Math.PI/2);
 
-// === PROPS (aligned to walls) ===
+// Hallway to Bedrooms
+wallWithDoor(5,3.5,4,2,Math.PI/2);
+wallWithDoor(5,6,4,2,Math.PI/2);
+wallWithDoor(5,8,4,2,Math.PI/2);
+
+// Bathroom, Foyer, Basement Hatch
+wallWithDoor(7,3,2,2,0);
+wallWithDoor(-1,0,3,2,Math.PI/2);
+wallWithDoor(-0.5,-2,2,2,0);
+
+// === DOOR MESHES (Placeholders for future open/close animation) ===
+const doorMat=new BABYLON.StandardMaterial("doorMat",scene);
+doorMat.diffuseColor=new BABYLON.Color3(0.3,0.2,0.1);
+
+function addDoor(x,z,rot=0){
+  const d=BABYLON.MeshBuilder.CreateBox("door",{width:1,height:2,depth:0.1},scene);
+  d.position.set(x,1,z);d.rotation.y=rot;d.material=doorMat;return d;
+}
+
+// Example Door Placement
+addDoor(-3.5,-2.5,Math.PI/2);  // Garage/Utility
+addDoor(-2.5,1,0);             // Utility/Kitchen
+addDoor(3,3.5,Math.PI/2);      // Dining/Living
+addDoor(5,3.5,Math.PI/2);      // Hallway/Master
+
+// === PROPS (Scaled & Oriented to Match Reference) ===
 function makeBox(name,x,y,z,w,h,d,color,rot=0){
   const box=BABYLON.MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene);
   box.position.set(x,y+h/2,z);
@@ -162,20 +157,28 @@ fabric=new BABYLON.Color3(0.3,0.3,0.35),
 metal=new BABYLON.Color3(0.6,0.6,0.6),
 white=new BABYLON.Color3(0.9,0.9,0.9);
 
-makeBox("Couch",0,0,5.2,3,1,1,fabric,Math.PI);
-makeBox("CoffeeTable",0,0,4.3,2,0.5,1,wood);
-makeBox("TV",0,1,3.3,2,1,0.2,new BABYLON.Color3(0,0,0));
-makeBox("DiningTable",-3,0,2.2,2.5,0.7,1.5,wood);
-makeBox("KitchenCounter",-3,0,-1.8,3,1,0.5,metal);
-makeBox("Fridge",-2.4,0,-2.8,1,2,1,white,Math.PI/2);
-makeBox("MasterBed",4,0,3.3,3,0.6,2,fabric,Math.PI/2);
-makeBox("BoyBed",4,0,0.3,2.5,0.6,1.5,fabric,Math.PI/2);
-makeBox("Crib",4,0,-3.3,1.5,0.8,1,white);
-makeBox("Bathtub",1,0,-2.3,2,0.8,1,white);
-makeBox("Washer",-3,0,-5.3,1,1,1,white);
-makeBox("Car",-6,0,-5,4,1.5,6,metal);
+// Living Room
+makeBox("Couch",1,0,3.5,3,1,1,fabric,Math.PI);
+makeBox("CoffeeTable",1,0,2.5,2,0.5,1,wood);
+makeBox("TV",1,1,1.5,2,1,0.2,new BABYLON.Color3(0,0,0));
 
-// === PLAYER ===
+// Kitchen & Dining
+makeBox("DiningTable",1,0,4.5,3,0.7,1.5,wood);
+makeBox("KitchenCounter",-2.5,0,2.5,3,1,0.5,metal);
+makeBox("Fridge",-2.5,0,1.5,1,2,1,white,Math.PI/2);
+
+// Bedrooms
+makeBox("MasterBed",6,0,5.5,3,0.6,2,fabric,Math.PI/2);
+makeBox("BoyBed",-1,0,7.5,2.5,0.6,1.5,fabric);
+makeBox("Crib",3,0,7.5,1.5,0.8,1,white);
+
+// Bathroom & Utility
+makeBox("Bathtub",7,0,3,2,0.8,1,white);
+makeBox("Washer",-3.5,0,-1,1,1,1,white);
+
+// Garage
+makeBox("Car",-6.5,0,-4.5,4,1.5,6,metal);
+// === PLAYER SETUP ===
 player = BABYLON.MeshBuilder.CreateSphere("player",{diameter:1},scene);
 player.position.y=0.5;
 const pMat=new BABYLON.StandardMaterial("pMat",scene);
@@ -199,9 +202,8 @@ function addRoomLight(x,z,intensity=0.6){
   const l=new BABYLON.PointLight("roomLight",new BABYLON.Vector3(x,2.5,z),scene);
   l.diffuse=new BABYLON.Color3(1,1,0.9);l.intensity=intensity;roomLights.push(l);return l;
 }
-addRoomLight(0,4);addRoomLight(-3,2);addRoomLight(-3,-1);
-addRoomLight(4,3);addRoomLight(4,0);addRoomLight(4,-3);
-addRoomLight(1,-2);addRoomLight(-3,-5);addRoomLight(-6,-5);
+addRoomLight(1,3.5);addRoomLight(-2.5,2.5);addRoomLight(6,5.5);
+addRoomLight(-6.5,-4.5);addRoomLight(3,7.5);addRoomLight(-1,7.5);
 
 function randomFlicker(){
   const light=roomLights[Math.floor(Math.random()*roomLights.length)];
@@ -215,9 +217,9 @@ setInterval(()=>{if(Math.random()<0.3)randomFlicker();},3000);
 
 function randomAmbientSound(){
   const s=[
-    "👣 Faint footsteps echo down the hall...",
-    "🕯 A whisper brushes past your ear...",
-    "📦 A creak echoes from the garage..."
+    "👣 Footsteps echo near the hallway...",
+    "📦 A thud in the garage...",
+    "🕯 Whisper brushes past your ear..."
   ];
   console.log(s[Math.floor(Math.random()*s.length)]);
 }
@@ -230,12 +232,36 @@ setInterval(()=>{if(Math.random()<0.5)randomAmbientSound();},5000);
 setInterval(()=>{if(Math.random()<0.2)randomObjectMove();},8000);
 
 // === GHOST LOGIC ===
+const ghostProfiles = {
+  Spirit:{evidence:["EMF Level 5","Spirit Box","Ghost Writing"]},
+  Wraith:{evidence:["EMF Level 5","Spirit Box","D.O.T.S Projector"]},
+  Phantom:{evidence:["Spirit Box","Fingerprints","D.O.T.S Projector"]},
+  Poltergeist:{evidence:["Spirit Box","Fingerprints","Ghost Writing"]},
+  Banshee:{evidence:["Fingerprints","Ghost Orbs","D.O.T.S Projector"]},
+  Jinn:{evidence:["EMF Level 5","Fingerprints","Freezing Temps"]},
+  Revenant:{evidence:["Ghost Orbs","Ghost Writing","Freezing Temps"]},
+  Shade:{evidence:["EMF Level 5","Ghost Writing","Freezing Temps"]},
+  Demon:{evidence:["Fingerprints","Ghost Writing","Freezing Temps"]},
+  Yurei:{evidence:["Ghost Orbs","Freezing Temps","D.O.T.S Projector"]},
+  Oni:{evidence:["EMF Level 5","Freezing Temps","D.O.T.S Projector"]},
+  Hantu:{evidence:["Fingerprints","Ghost Orbs","Freezing Temps"]},
+  Goryo:{evidence:["EMF Level 5","Fingerprints","D.O.T.S Projector"]},
+  Myling:{evidence:["EMF Level 5","Fingerprints","Ghost Writing"]},
+  Onryo:{evidence:["Spirit Box","Ghost Orbs","Freezing Temps"]},
+  Twins:{evidence:["EMF Level 5","Spirit Box","Freezing Temps"]},
+  Raiju:{evidence:["EMF Level 5","Ghost Orbs","D.O.T.S Projector"]},
+  Obake:{evidence:["EMF Level 5","Fingerprints","Ghost Orbs"]},
+  Mimic:{evidence:["Spirit Box","Fingerprints","Freezing Temps"]},
+  Succubus:{evidence:["Spirit Box","Ghost Writing","D.O.T.S Projector"]}
+};
+
 const tanglewoodRooms=[
-  {name:"Living",x:0,z:4},{name:"Dining",x:-3,z:2},{name:"Kitchen",x:-3,z:-1},
-  {name:"Master Bedroom",x:4,z:3},{name:"Boy Bedroom",x:4,z:0},
-  {name:"Nursery",x:4,z:-3},{name:"Bathroom",x:1,z:-2},
-  {name:"Utility",x:-3,z:-5},{name:"Garage",x:-6,z:-5}
+  {name:"Living",x:1,z:3.5},{name:"Dining",x:1,z:4.5},{name:"Kitchen",x:-2.5,z:2.5},
+  {name:"Master Bedroom",x:6,z:5.5},{name:"Boy Bedroom",x:-1,z:7.5},
+  {name:"Nursery",x:3,z:7.5},{name:"Bathroom",x:7,z:3},
+  {name:"Utility",x:-3.5,z:-1},{name:"Garage",x:-6.5,z:-4.5}
 ];
+
 let ghost={currentRoom:null,mesh:null};
 
 function spawnGhost(){
@@ -276,12 +302,12 @@ function placeEvidence(){
   evidence.emfReader=BABYLON.MeshBuilder.CreateBox("emfReader",{width:0.4,height:0.2,depth:0.8},scene);
   evidence.emfReader.material=new BABYLON.StandardMaterial("emfMat",scene);
   evidence.emfReader.material.diffuseColor=new BABYLON.Color3(0,0.3,0);
-  evidence.emfReader.position.set(0.5,0.1,5);
+  evidence.emfReader.position.set(1,0.1,3.5);
 
   evidence.writingBook=BABYLON.MeshBuilder.CreateBox("writingBook",{width:0.6,height:0.1,depth:0.8},scene);
   evidence.writingBook.material=new BABYLON.StandardMaterial("bookMat",scene);
   evidence.writingBook.material.diffuseColor=new BABYLON.Color3(0.5,0.5,0.4);
-  evidence.writingBook.position.set(4,0.05,3);
+  evidence.writingBook.position.set(6,0.05,5.5);
 
   evidence.dotsProjector=BABYLON.MeshBuilder.CreatePlane("dotsProjector",{width:3,height:3},scene);
   evidence.dotsProjector.position.set(ghost.currentRoom.x,1.5,ghost.currentRoom.z);
@@ -292,7 +318,7 @@ function placeEvidence(){
 }
 placeEvidence();
 
-// Pickup & Drop Items
+// Pickup & Drop Logic
 window.addEventListener("keydown",e=>{
   if(e.key.toLowerCase()==="e")pickUpNearest();
   if(e.key.toLowerCase()==="q")dropItem();
@@ -337,7 +363,7 @@ function freezingBreath(){
   pm.diffuseColor=new BABYLON.Color3(0.8,0.9,1);pm.alpha=0.5;p.material=pm;setTimeout(()=>p.dispose(),500);
 }
 
-// Evidence Logic
+// Main Evidence Loop
 scene.onBeforeRenderObservable.add(()=>{
   if(carriedItem){carriedItem.position.copyFrom(player.position).addInPlace(new BABYLON.Vector3(0,0.5,0.5));}
 
