@@ -2,125 +2,80 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Phasma‑Phoney 3D — Outdoor House (Linked Logic)</title>
+  <title>Phasma‑Phoney 3D — Outdoor House Only</title>
   <style>
     html, body {margin:0; padding:0; overflow:hidden; width:100%; height:100%;}
     #renderCanvas {width:100%; height:100%; display:block;}
-    #hud {
-      position:absolute; top:10px; left:10px; color:white; font-family:monospace;
-      background:rgba(0,0,0,0.5); padding:8px; border-radius:6px;
-    }
-    #evidence-log {
-      position:absolute; top:60px; left:10px; color:white; font-family:monospace;
-      background:rgba(0,0,0,0.5); padding:8px; border-radius:6px;
-    }
-    #guess-ghost {
-      margin-top:5px; display:block; background:black; color:white;
-      border:1px solid white; cursor:pointer;
-    }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script type="module">
-
-// ✅ === IMPORT PHASMA‑PHONEY LOGIC DIRECTLY ===
-import { ghostProfiles, spawnGhost, moveGhost } from "https://sharkvelocity.github.io/game/js/ghostBehavior.js";
-import { sanity, updateSanity } from "https://sharkvelocity.github.io/game/js/state.js";
-import { checkEvidence, collectedEvidence } from "https://sharkvelocity.github.io/game/js/items.js";
-
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <script>
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
-let scene, player, ghost = { mesh:null };
 
 function createScene() {
-  scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color3(0,0,0);
-  scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-  scene.fogColor = new BABYLON.Color3(0.05,0.05,0.08);
-  scene.fogDensity = 0.02;
+  const scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color3(0.4, 0.6, 0.8);
 
   // === CAMERA & LIGHT ===
   const camera = new BABYLON.ArcRotateCamera("camera",
-    BABYLON.Tools.ToRadians(45), BABYLON.Tools.ToRadians(80), 60,
+    BABYLON.Tools.ToRadians(45), BABYLON.Tools.ToRadians(75), 120,
     new BABYLON.Vector3(0,0,0), scene);
   camera.attachControl(canvas, true);
 
   const sun = new BABYLON.HemisphericLight("sun", new BABYLON.Vector3(0,1,0), scene);
-  sun.intensity = 0.6;
+  sun.intensity = 0.9;
 
-  // === OUTDOOR ENVIRONMENT ===
+  // === BIG DIRT GROUND ===
   const dirtMat = new BABYLON.StandardMaterial("dirtMat", scene);
   dirtMat.diffuseColor = new BABYLON.Color3(0.35,0.25,0.15);
   const ground = BABYLON.MeshBuilder.CreateGround("bigGround", {width:200, height:200}, scene);
-  ground.position.y = 0;
   ground.material = dirtMat;
-  ground.checkCollisions = true;
 
+  // === SIMPLE HOUSE BOX ===
   const brickMat = new BABYLON.StandardMaterial("brickMat", scene);
   brickMat.diffuseColor = new BABYLON.Color3(0.55,0.3,0.25);
   const houseSize = { width:30, depth:30, height:5 };
   function createWall(x,z,w,h,d,rot=0){
     const wall = BABYLON.MeshBuilder.CreateBox("houseWall",{width:w,height:h,depth:d},scene);
-    wall.position.set(x,h/2,z); wall.rotation.y = rot; wall.material = brickMat; wall.checkCollisions = true;
+    wall.position.set(x,h/2,z);
+    wall.rotation.y = rot;
+    wall.material = brickMat;
   }
-  createWall(0, houseSize.depth/2, houseSize.width, houseSize.height, 0.5);
-  createWall(0, -houseSize.depth/2, houseSize.width, houseSize.height, 0.5);
-  createWall(houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2);
-  createWall(-houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2);
+  createWall(0, houseSize.depth/2, houseSize.width, houseSize.height, 0.5);      // North
+  createWall(0, -houseSize.depth/2, houseSize.width, houseSize.height, 0.5);     // South
+  createWall(houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2); // East
+  createWall(-houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2); // West
 
+  // === SIDEWALK ===
   const sidewalkMat = new BABYLON.StandardMaterial("sidewalkMat", scene);
   sidewalkMat.diffuseColor = new BABYLON.Color3(0.8,0.8,0.8);
   const sidewalk = BABYLON.MeshBuilder.CreateBox("sidewalk", {width:3, height:0.1, depth:20}, scene);
   sidewalk.position.set(0,0.05,houseSize.depth/2+10);
   sidewalk.material = sidewalkMat;
 
+  // === ROAD ===
   const roadMat = new BABYLON.StandardMaterial("roadMat", scene);
   roadMat.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
   const road = BABYLON.MeshBuilder.CreateBox("road", {width:60, height:0.1, depth:10}, scene);
   road.position.set(0,0.05,houseSize.depth/2+25);
   road.material = roadMat;
 
+  // === VAN (Moving Truck) ===
   const vanGroup = new BABYLON.TransformNode("van", scene);
   const vanBody = BABYLON.MeshBuilder.CreateBox("vanBody", {width:4, height:3, depth:8}, scene);
   vanBody.position.set(0,1.5,houseSize.depth/2+23);
   vanBody.material = new BABYLON.StandardMaterial("vanBodyMat", scene);
   vanBody.material.diffuseColor = new BABYLON.Color3(1,1,1);
   vanBody.parent = vanGroup;
+
   const vanCab = BABYLON.MeshBuilder.CreateBox("vanCab", {width:3, height:2, depth:3}, scene);
   vanCab.position.set(0,1,houseSize.depth/2+19.5);
   vanCab.material = new BABYLON.StandardMaterial("vanCabMat", scene);
   vanCab.material.diffuseColor = new BABYLON.Color3(0.9,0.9,0.9);
   vanCab.parent = vanGroup;
-
-  // === PLAYER ===
-  player = BABYLON.MeshBuilder.CreateSphere("player",{diameter:1},scene);
-  player.position.y = 0.5;
-  const pMat = new BABYLON.StandardMaterial("pMat",scene);
-  pMat.diffuseColor = new BABYLON.Color3(0,1,0);
-  player.material = pMat;
-  scene.collisionsEnabled = true;
-  player.checkCollisions = true;
-
-  const keys={w:false,a:false,s:false,d:false};
-  window.addEventListener("keydown",e=>{if(keys[e.key.toLowerCase()]!==undefined)keys[e.key.toLowerCase()]=true;});
-  window.addEventListener("keyup",e=>{if(keys[e.key.toLowerCase()]!==undefined)keys[e.key.toLowerCase()]=false;});
-  scene.onBeforeRenderObservable.add(()=>{
-    const sp=0.2;
-    const move=new BABYLON.Vector3((keys.a?-sp:0)+(keys.d?sp:0),0,(keys.w?-sp:0)+(keys.s?sp:0));
-    player.moveWithCollisions(move);
-  });
-
-  // === GHOST LOGIC FROM MAIN GAME ===
-  ghost = spawnGhost(scene, { area:"house", width:houseSize.width, depth:houseSize.depth });
-
-  setInterval(()=> moveGhost(scene, ghost),10000);
-
-  // === SANITY & EVIDENCE (main game logic) ===
-  scene.onBeforeRenderObservable.add(()=>{
-    updateSanity(player.position, ghost.mesh.position);
-    document.getElementById("sanity").textContent = sanity.toFixed(0);
-    checkEvidence(player.position, ghost.mesh.position, scene);
-    document.getElementById("evidence-list").textContent = [...collectedEvidence].join(", ");
-  });
 
   return scene;
 }
@@ -128,15 +83,6 @@ function createScene() {
 const scene = createScene();
 engine.runRenderLoop(()=>scene.render());
 window.addEventListener("resize",()=>engine.resize());
-
-</script>
-</head>
-<body>
-  <canvas id="renderCanvas"></canvas>
-  <div id="hud">Sanity: <span id="sanity">100</span>%</div>
-  <div id="evidence-log">
-    Evidence: <span id="evidence-list">None</span>
-    <button id="guess-ghost" onclick="alert('Guessing handled by main game logic!')">Guess Ghost</button>
-  </div>
+  </script>
 </body>
 </html>
