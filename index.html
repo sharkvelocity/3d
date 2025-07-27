@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Phasma‑Phoney WebGL — Tanglewood Realistic Home Build</title>
+  <title>Phasma‑Phoney 3D — Outdoor House (Linked Logic)</title>
   <style>
     html, body {margin:0; padding:0; overflow:hidden; width:100%; height:100%;}
     #renderCanvas {width:100%; height:100%; display:block;}
@@ -20,445 +20,123 @@
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script type="module">
+
+// ✅ === IMPORT PHASMA‑PHONEY LOGIC DIRECTLY ===
+import { ghostProfiles, spawnGhost, moveGhost } from "https://sharkvelocity.github.io/game/js/ghostBehavior.js";
+import { sanity, updateSanity } from "https://sharkvelocity.github.io/game/js/state.js";
+import { checkEvidence, collectedEvidence } from "https://sharkvelocity.github.io/game/js/items.js";
+
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+let scene, player, ghost = { mesh:null };
+
+function createScene() {
+  scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color3(0,0,0);
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
+  scene.fogColor = new BABYLON.Color3(0.05,0.05,0.08);
+  scene.fogDensity = 0.02;
+
+  // === CAMERA & LIGHT ===
+  const camera = new BABYLON.ArcRotateCamera("camera",
+    BABYLON.Tools.ToRadians(45), BABYLON.Tools.ToRadians(80), 60,
+    new BABYLON.Vector3(0,0,0), scene);
+  camera.attachControl(canvas, true);
+
+  const sun = new BABYLON.HemisphericLight("sun", new BABYLON.Vector3(0,1,0), scene);
+  sun.intensity = 0.6;
+
+  // === OUTDOOR ENVIRONMENT ===
+  const dirtMat = new BABYLON.StandardMaterial("dirtMat", scene);
+  dirtMat.diffuseColor = new BABYLON.Color3(0.35,0.25,0.15);
+  const ground = BABYLON.MeshBuilder.CreateGround("bigGround", {width:200, height:200}, scene);
+  ground.position.y = 0;
+  ground.material = dirtMat;
+  ground.checkCollisions = true;
+
+  const brickMat = new BABYLON.StandardMaterial("brickMat", scene);
+  brickMat.diffuseColor = new BABYLON.Color3(0.55,0.3,0.25);
+  const houseSize = { width:30, depth:30, height:5 };
+  function createWall(x,z,w,h,d,rot=0){
+    const wall = BABYLON.MeshBuilder.CreateBox("houseWall",{width:w,height:h,depth:d},scene);
+    wall.position.set(x,h/2,z); wall.rotation.y = rot; wall.material = brickMat; wall.checkCollisions = true;
+  }
+  createWall(0, houseSize.depth/2, houseSize.width, houseSize.height, 0.5);
+  createWall(0, -houseSize.depth/2, houseSize.width, houseSize.height, 0.5);
+  createWall(houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2);
+  createWall(-houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2);
+
+  const sidewalkMat = new BABYLON.StandardMaterial("sidewalkMat", scene);
+  sidewalkMat.diffuseColor = new BABYLON.Color3(0.8,0.8,0.8);
+  const sidewalk = BABYLON.MeshBuilder.CreateBox("sidewalk", {width:3, height:0.1, depth:20}, scene);
+  sidewalk.position.set(0,0.05,houseSize.depth/2+10);
+  sidewalk.material = sidewalkMat;
+
+  const roadMat = new BABYLON.StandardMaterial("roadMat", scene);
+  roadMat.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
+  const road = BABYLON.MeshBuilder.CreateBox("road", {width:60, height:0.1, depth:10}, scene);
+  road.position.set(0,0.05,houseSize.depth/2+25);
+  road.material = roadMat;
+
+  const vanGroup = new BABYLON.TransformNode("van", scene);
+  const vanBody = BABYLON.MeshBuilder.CreateBox("vanBody", {width:4, height:3, depth:8}, scene);
+  vanBody.position.set(0,1.5,houseSize.depth/2+23);
+  vanBody.material = new BABYLON.StandardMaterial("vanBodyMat", scene);
+  vanBody.material.diffuseColor = new BABYLON.Color3(1,1,1);
+  vanBody.parent = vanGroup;
+  const vanCab = BABYLON.MeshBuilder.CreateBox("vanCab", {width:3, height:2, depth:3}, scene);
+  vanCab.position.set(0,1,houseSize.depth/2+19.5);
+  vanCab.material = new BABYLON.StandardMaterial("vanCabMat", scene);
+  vanCab.material.diffuseColor = new BABYLON.Color3(0.9,0.9,0.9);
+  vanCab.parent = vanGroup;
+
+  // === PLAYER ===
+  player = BABYLON.MeshBuilder.CreateSphere("player",{diameter:1},scene);
+  player.position.y = 0.5;
+  const pMat = new BABYLON.StandardMaterial("pMat",scene);
+  pMat.diffuseColor = new BABYLON.Color3(0,1,0);
+  player.material = pMat;
+  scene.collisionsEnabled = true;
+  player.checkCollisions = true;
+
+  const keys={w:false,a:false,s:false,d:false};
+  window.addEventListener("keydown",e=>{if(keys[e.key.toLowerCase()]!==undefined)keys[e.key.toLowerCase()]=true;});
+  window.addEventListener("keyup",e=>{if(keys[e.key.toLowerCase()]!==undefined)keys[e.key.toLowerCase()]=false;});
+  scene.onBeforeRenderObservable.add(()=>{
+    const sp=0.2;
+    const move=new BABYLON.Vector3((keys.a?-sp:0)+(keys.d?sp:0),0,(keys.w?-sp:0)+(keys.s?sp:0));
+    player.moveWithCollisions(move);
+  });
+
+  // === GHOST LOGIC FROM MAIN GAME ===
+  ghost = spawnGhost(scene, { area:"house", width:houseSize.width, depth:houseSize.depth });
+
+  setInterval(()=> moveGhost(scene, ghost),10000);
+
+  // === SANITY & EVIDENCE (main game logic) ===
+  scene.onBeforeRenderObservable.add(()=>{
+    updateSanity(player.position, ghost.mesh.position);
+    document.getElementById("sanity").textContent = sanity.toFixed(0);
+    checkEvidence(player.position, ghost.mesh.position, scene);
+    document.getElementById("evidence-list").textContent = [...collectedEvidence].join(", ");
+  });
+
+  return scene;
+}
+
+const scene = createScene();
+engine.runRenderLoop(()=>scene.render());
+window.addEventListener("resize",()=>engine.resize());
+
+</script>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
   <div id="hud">Sanity: <span id="sanity">100</span>%</div>
   <div id="evidence-log">
     Evidence: <span id="evidence-list">None</span>
-    <button id="guess-ghost">Guess Ghost</button>
+    <button id="guess-ghost" onclick="alert('Guessing handled by main game logic!')">Guess Ghost</button>
   </div>
-
-<script>
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
-let scene, player, sanity = 100;
-const collectedEvidence = new Set();
-let carriedItem = null;
-let chosenGhostType = null;
-
-function createScene() {
-scene = new BABYLON.Scene(engine);
-scene.clearColor = new BABYLON.Color3(0,0,0);
-scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-scene.fogColor = new BABYLON.Color3(0.05,0.05,0.08);
-scene.fogDensity = 0.02;
-
-// === CAMERA & LIGHT ===
-const camera = new BABYLON.ArcRotateCamera("camera",
-  BABYLON.Tools.ToRadians(45), BABYLON.Tools.ToRadians(80), 35,
-  new BABYLON.Vector3(0,0,0), scene);
-camera.attachControl(canvas, true);
-camera.lowerRadiusLimit = camera.upperRadiusLimit = 35;
-
-const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
-light.intensity = 0.6;
-
-// === FLOOR PLAN (ACCURATE TILE MEASUREMENT) ===
-// 1 Babylon unit = 1 meter = ~1 Phasmophobia grid tile
-
-function makeRoom(name, x, z, w, h, color) {
-  const room = BABYLON.MeshBuilder.CreateGround(name,{width:w,height:h},scene);
-  room.position.set(x,0,z);
-  room.material = new BABYLON.StandardMaterial(`${name}Mat`,scene);
-  room.material.diffuseColor=color;
-  room.checkCollisions=true; return room;
-}
-
-const livingColor=new BABYLON.Color3(0.25,0.25,0.3),
-kitchenColor=new BABYLON.Color3(0.3,0.28,0.25),
-bedroomColor=new BABYLON.Color3(0.3,0.25,0.25),
-bathColor=new BABYLON.Color3(0.25,0.3,0.3),
-hallColor=new BABYLON.Color3(0.32,0.32,0.32);
-
-// Room Sizes & Positions (aligned to real Tanglewood)
-makeRoom("Garage", -6.5,-4.5,7,7, hallColor);
-makeRoom("Utility", -3.5,-0.5,2.5,3, hallColor);
-makeRoom("Kitchen", -1,2.5,4,4, kitchenColor);
-makeRoom("Dining", 2,5,4,3, kitchenColor);
-makeRoom("Living", 2,1.5,7,6, livingColor);
-makeRoom("Foyer", -1,1.5,2,2, hallColor);
-makeRoom("MainBathroom", -1,5.5,2,2, bathColor);
-makeRoom("BoysBedroom", -1,8,4,3, bedroomColor);
-makeRoom("Nursery", 3,8,3,3, bedroomColor);
-makeRoom("MasterBedroom", 6,6,4,4, bedroomColor);
-makeRoom("MasterBath", 7.5,4,2,2, bathColor);
-makeRoom("Hallway", 5,2,2,4, hallColor);
-makeRoom("BasementHatch", -0.5,-3.5,1,1, bathColor);
-
-// === REALISTIC WALLS (THICK & CONTINUOUS) ===
-const wallMat=new BABYLON.StandardMaterial("wallMat",scene);
-wallMat.diffuseColor=new BABYLON.Color3(0.5,0.5,0.5);
-const wallThickness=0.4;
-
-function solidWall(x,z,length,rot=0){
-  const w=BABYLON.MeshBuilder.CreateBox("wall",{width:length,height:2.6,depth:wallThickness},scene);
-  w.position.set(x,1.3,z); w.rotation.y=rot; w.material=wallMat; w.checkCollisions=true;
-  walls.push(w);
-}
-
-function wallWithDoor(x,z,length,doorWidth=2.2,rot=0){
-  const half=(length-doorWidth)/2,dx=rot===0?0:half,dz=rot===0?half:0;
-  const left=BABYLON.MeshBuilder.CreateBox("wall",{width:half,height:2.6,depth:wallThickness},scene);
-  left.position.set(x-dx,1.3,z-dz);left.rotation.y=rot;left.material=wallMat;left.checkCollisions=true;walls.push(left);
-  const right=BABYLON.MeshBuilder.CreateBox("wall",{width:half,height:2.6,depth:wallThickness},scene);
-  right.position.set(x+dx,1.3,z+dz);right.rotation.y=rot;right.material=wallMat;right.checkCollisions=true;walls.push(right);
-}
-
-const walls=[];
-
-// Perimeter Walls (continuous)
-solidWall(0,10,18,0);         // North
-solidWall(0,-8,18,0);         // South
-solidWall(9,1,20,Math.PI/2);  // East
-solidWall(-9,1,20,Math.PI/2); // West
-
-// Interior Walls (aligned)
-wallWithDoor(-3.5,-1,3,2.2,Math.PI/2);   // Garage/Utility
-wallWithDoor(-2,2,4,2.2,0);              // Utility/Kitchen
-wallWithDoor(1,4.5,4,2.2,Math.PI/2);     // Kitchen/Dining
-wallWithDoor(4,4.5,4,2.2,Math.PI/2);     // Dining/Living
-wallWithDoor(5,6,4,2.2,Math.PI/2);       // Hallway/Master
-wallWithDoor(5,8,3,2.2,Math.PI/2);       // Hallway/Nursery
-wallWithDoor(-1,5.5,3,2.2,Math.PI/2);    // Bathroom/Hallway
-wallWithDoor(7.5,4,2,2.2,0);             // MasterBath
-wallWithDoor(-0.5,-2,2,2.2,0);           // Basement Hatch
-// === DOOR MESHES WITH OPEN/CLOSE LOGIC ===
-const doorMat=new BABYLON.StandardMaterial("doorMat",scene);
-doorMat.diffuseColor=new BABYLON.Color3(0.35,0.25,0.15);
-
-function addDoor(name,x,z,rot=0){
-  const d=BABYLON.MeshBuilder.CreateBox(name,{width:1,height:2,depth:0.05},scene);
-  d.position.set(x,1,z);
-  d.rotation.y=rot;
-  d.material=doorMat;
-  d.isOpen=false;
-  d.onBeforeRenderObservable=scene.onBeforeRenderObservable.add(()=>{}); // placeholder for toggling
-  return d;
-}
-
-const doors=[
-  addDoor("GarageDoor",-3.5,-1,Math.PI/2),
-  addDoor("UtilityDoor",-2,2,0),
-  addDoor("KitchenDiningDoor",1,4.5,Math.PI/2),
-  addDoor("DiningLivingDoor",4,4.5,Math.PI/2),
-  addDoor("HallMasterDoor",5,6,Math.PI/2),
-  addDoor("HallNurseryDoor",5,8,Math.PI/2),
-  addDoor("BathroomDoor",-1,5.5,Math.PI/2),
-  addDoor("MasterBathDoor",7.5,4,0),
-  addDoor("BasementDoor",-0.5,-2,0)
-];
-
-// Door toggle (E to open/close if near)
-window.addEventListener("keydown",e=>{
-  if(e.key.toLowerCase()==="f"){
-    doors.forEach(d=>{
-      if(BABYLON.Vector3.Distance(player.position,d.position)<2){
-        if(!d.isAnimating){
-          d.isAnimating=true;
-          const targetRot=d.isOpen?0:Math.PI/2;
-          const initialRot=d.rotation.y;
-          let step=0;
-          const anim=setInterval(()=>{
-            step+=0.05;
-            d.rotation.y=initialRot+(targetRot-initialRot)*step;
-            if(step>=1){clearInterval(anim);d.isAnimating=false;d.isOpen=!d.isOpen;}
-          },16);
-        }
-      }
-    });
-  }
-});
-
-// === REALISTIC PROP PLACEMENT ===
-function makeBox(name,x,y,z,w,h,d,color,rot=0){
-  const box=BABYLON.MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene);
-  box.position.set(x,y+h/2,z);
-  box.material=new BABYLON.StandardMaterial(`${name}Mat`,scene);
-  box.material.diffuseColor=color; box.rotation.y=rot; box.checkCollisions=true;
-  return box;
-}
-
-const wood=new BABYLON.Color3(0.4,0.25,0.15),
-fabric=new BABYLON.Color3(0.3,0.3,0.35),
-metal=new BABYLON.Color3(0.6,0.6,0.6),
-white=new BABYLON.Color3(0.9,0.9,0.9);
-
-// Living Room
-makeBox("Couch",3,0,2,3,1,1,fabric,Math.PI);
-makeBox("CoffeeTable",3,0,1,2,0.5,1,wood);
-makeBox("TV",3,1,0,2,1,0.2,new BABYLON.Color3(0,0,0));
-makeBox("Shelf",4,0,3,1,1.5,0.5,wood);
-
-// Dining
-makeBox("DiningTable",2,0,5,3,0.7,1.5,wood);
-makeBox("DiningChair1",1.5,0,4.5,0.5,0.8,0.5,wood);
-makeBox("DiningChair2",2.5,0,4.5,0.5,0.8,0.5,wood);
-
-// Kitchen
-makeBox("KitchenCounter",-1,0,2.5,3.5,1,0.5,metal);
-makeBox("Fridge",-1,0,1.5,1,2,1,white,Math.PI/2);
-
-// Bedrooms
-makeBox("MasterBed",6,0,6,3,0.6,2,fabric,Math.PI/2);
-makeBox("MasterDresser",7,0,6,1.5,1,0.5,wood);
-makeBox("BoyBed",-1,0,8,2.5,0.6,1.5,fabric);
-makeBox("BoyDresser",-2,0,8,1,1,0.5,wood);
-makeBox("Crib",3,0,8,1.5,0.8,1,white);
-makeBox("ToyBox",3.5,0,8.5,1,0.7,0.7,wood);
-
-// Bathrooms
-makeBox("Bathtub",7.5,0,4,2.2,0.8,1,white);
-makeBox("Toilet",7.5,0,3.5,0.6,0.8,0.6,white);
-makeBox("Sink",7,0,4.5,1,0.7,0.5,white);
-
-// Utility & Garage
-makeBox("Washer",-3.5,0,-0.5,1,1,1,white);
-makeBox("Dryer",-4,0,-0.5,1,1,1,white);
-makeBox("Car",-6.5,0,-4.5,4,1.5,6,metal);
-makeBox("GarageShelf",-6,0,-5.5,0.5,2,1,wood);
-// === PLAYER SETUP ===
-player = BABYLON.MeshBuilder.CreateSphere("player",{diameter:1},scene);
-player.position.y=0.5;
-const pMat=new BABYLON.StandardMaterial("pMat",scene);
-pMat.diffuseColor=new BABYLON.Color3(0,1,0);
-player.material=pMat;
-scene.collisionsEnabled=true; player.checkCollisions=true;
-
-const keys={w:false,a:false,s:false,d:false};
-window.addEventListener("keydown",e=>{if(keys[e.key.toLowerCase()]!==undefined)keys[e.key.toLowerCase()]=true;});
-window.addEventListener("keyup",e=>{if(keys[e.key.toLowerCase()]!==undefined)keys[e.key.toLowerCase()]=false;});
-
-scene.onBeforeRenderObservable.add(()=>{
-  const sp=0.1;
-  const move=new BABYLON.Vector3((keys.a?-sp:0)+(keys.d?sp:0),0,(keys.w?-sp:0)+(keys.s?sp:0));
-  player.moveWithCollisions(move);
-});
-
-// === LIGHTING & AMBIENT EFFECTS ===
-const roomLights=[];
-function addRoomLight(x,z,intensity=0.6){
-  const l=new BABYLON.PointLight("roomLight",new BABYLON.Vector3(x,2.5,z),scene);
-  l.diffuse=new BABYLON.Color3(1,1,0.9);l.intensity=intensity;roomLights.push(l);return l;
-}
-addRoomLight(3,2);addRoomLight(2,5);addRoomLight(-1,8);
-addRoomLight(6,6);addRoomLight(-6.5,-4.5);
-
-function randomFlicker(){
-  const light=roomLights[Math.floor(Math.random()*roomLights.length)];
-  const orig=light.intensity;let c=0;
-  const i=setInterval(()=>{
-    light.intensity=Math.random()>0.5?0:orig;
-    if(++c>5){light.intensity=orig;clearInterval(i);}
-  },100);
-}
-setInterval(()=>{if(Math.random()<0.3)randomFlicker();},3000);
-
-function randomAmbientSound(){
-  const s=[
-    "👣 Footsteps in the hallway...",
-    "📦 A thud in the garage...",
-    "🕯 A faint whisper near you..."
-  ];
-  console.log(s[Math.floor(Math.random()*s.length)]);
-}
-function randomObjectMove(){
-  const p=["Couch","DiningTable","Crib"];
-  const item=scene.getMeshByName(p[Math.floor(Math.random()*p.length)]);
-  if(item){const o=item.position.y;item.position.y=o+0.1;setTimeout(()=>item.position.y=o,300);}
-}
-setInterval(()=>{if(Math.random()<0.5)randomAmbientSound();},5000);
-setInterval(()=>{if(Math.random()<0.2)randomObjectMove();},8000);
-
-// === GHOST LOGIC ===
-const ghostProfiles = {
-  Spirit:{evidence:["EMF Level 5","Spirit Box","Ghost Writing"]},
-  Wraith:{evidence:["EMF Level 5","Spirit Box","D.O.T.S Projector"]},
-  Phantom:{evidence:["Spirit Box","Fingerprints","D.O.T.S Projector"]},
-  Poltergeist:{evidence:["Spirit Box","Fingerprints","Ghost Writing"]},
-  Banshee:{evidence:["Fingerprints","Ghost Orbs","D.O.T.S Projector"]},
-  Jinn:{evidence:["EMF Level 5","Fingerprints","Freezing Temps"]},
-  Revenant:{evidence:["Ghost Orbs","Ghost Writing","Freezing Temps"]},
-  Shade:{evidence:["EMF Level 5","Ghost Writing","Freezing Temps"]},
-  Demon:{evidence:["Fingerprints","Ghost Writing","Freezing Temps"]},
-  Yurei:{evidence:["Ghost Orbs","Freezing Temps","D.O.T.S Projector"]},
-  Oni:{evidence:["EMF Level 5","Freezing Temps","D.O.T.S Projector"]},
-  Hantu:{evidence:["Fingerprints","Ghost Orbs","Freezing Temps"]},
-  Goryo:{evidence:["EMF Level 5","Fingerprints","D.O.T.S Projector"]},
-  Myling:{evidence:["EMF Level 5","Fingerprints","Ghost Writing"]},
-  Onryo:{evidence:["Spirit Box","Ghost Orbs","Freezing Temps"]},
-  Twins:{evidence:["EMF Level 5","Spirit Box","Freezing Temps"]},
-  Raiju:{evidence:["EMF Level 5","Ghost Orbs","D.O.T.S Projector"]},
-  Obake:{evidence:["EMF Level 5","Fingerprints","Ghost Orbs"]},
-  Mimic:{evidence:["Spirit Box","Fingerprints","Freezing Temps"]},
-  Succubus:{evidence:["Spirit Box","Ghost Writing","D.O.T.S Projector"]}
-};
-
-const tanglewoodRooms=[
-  {name:"Living",x:3,z:2},{name:"Dining",x:2,z:5},{name:"Kitchen",x:-1,z:2.5},
-  {name:"Master Bedroom",x:6,z:6},{name:"Boy Bedroom",x:-1,z:8},
-  {name:"Nursery",x:3,z:8},{name:"Main Bathroom",x:-1,z:5.5},
-  {name:"Utility",x:-3.5,z:-0.5},{name:"Garage",x:-6.5,z:-4.5}
-];
-
-let ghost={currentRoom:null,mesh:null};
-
-function spawnGhost(){
-  const room=tanglewoodRooms[Math.floor(Math.random()*tanglewoodRooms.length)];
-  ghost.currentRoom=room;
-  if(!chosenGhostType){
-    const keys=Object.keys(ghostProfiles);
-    chosenGhostType=keys[Math.floor(Math.random()*keys.length)];
-    console.log(`👻 Ghost Type: ${chosenGhostType}`);
-  }
-  if(!ghost.mesh){
-    ghost.mesh=BABYLON.MeshBuilder.CreateSphere("ghost",{diameter:1.2},scene);
-    ghost.mesh.material=new BABYLON.StandardMaterial("ghostMat",scene);
-    ghost.mesh.material.diffuseColor=new BABYLON.Color3(1,1,1);
-    ghost.mesh.material.alpha=0.4;
-  }
-  ghost.mesh.position.set(room.x,0.6,room.z);
-}
-function moveGhost(){
-  const room=tanglewoodRooms[Math.floor(Math.random()*tanglewoodRooms.length)];
-  ghost.currentRoom=room;
-  ghost.mesh.position.set(room.x,0.6,room.z);
-}
-setInterval(moveGhost,10000); spawnGhost();
-
-// === SANITY DRAIN ===
-scene.onBeforeRenderObservable.add(()=>{
-  const d=BABYLON.Vector3.Distance(player.position,ghost.mesh.position);
-  if(d<3){
-    sanity=Math.max(0,sanity-0.02);
-    document.getElementById("sanity").textContent=sanity.toFixed(0);
-  }
-});
-
-// === EVIDENCE SYSTEM ===
-const evidence={emfReader:null,writingBook:null,dotsProjector:null};
-function placeEvidence(){
-  evidence.emfReader=BABYLON.MeshBuilder.CreateBox("emfReader",{width:0.4,height:0.2,depth:0.8},scene);
-  evidence.emfReader.material=new BABYLON.StandardMaterial("emfMat",scene);
-  evidence.emfReader.material.diffuseColor=new BABYLON.Color3(0,0.3,0);
-  evidence.emfReader.position.set(3,0.1,2);
-
-  evidence.writingBook=BABYLON.MeshBuilder.CreateBox("writingBook",{width:0.6,height:0.1,depth:0.8},scene);
-  evidence.writingBook.material=new BABYLON.StandardMaterial("bookMat",scene);
-  evidence.writingBook.material.diffuseColor=new BABYLON.Color3(0.5,0.5,0.4);
-  evidence.writingBook.position.set(6,0.05,6);
-
-  evidence.dotsProjector=BABYLON.MeshBuilder.CreatePlane("dotsProjector",{width:3,height:3},scene);
-  evidence.dotsProjector.position.set(ghost.currentRoom.x,1.5,ghost.currentRoom.z);
-  evidence.dotsProjector.rotation.x=Math.PI/2;
-  const dm=new BABYLON.StandardMaterial("dotsMat",scene);
-  dm.diffuseColor=new BABYLON.Color3(0,1,0);dm.alpha=0.2;
-  evidence.dotsProjector.material=dm;
-}
-placeEvidence();
-
-// Pickup & Drop Logic
-window.addEventListener("keydown",e=>{
-  if(e.key.toLowerCase()==="e")pickUpNearest();
-  if(e.key.toLowerCase()==="q")dropItem();
-});
-function pickUpNearest(){
-  if(carriedItem)return;
-  const items=[evidence.emfReader,evidence.writingBook,evidence.dotsProjector];
-  let nearest=null,min=2;
-  items.forEach(it=>{
-    const d=BABYLON.Vector3.Distance(player.position,it.position);
-    if(d<min&&!it.isPicked){nearest=it;min=d;}
-  });
-  if(nearest){carriedItem=nearest;nearest.isPicked=true;console.log(`✅ Picked up ${nearest.name}`);}
-}
-function dropItem(){
-  if(!carriedItem)return;
-  carriedItem.position.copyFrom(player.position).addInPlace(new BABYLON.Vector3(0,0,0.5));
-  carriedItem.isPicked=false;console.log(`⬇️ Dropped ${carriedItem.name}`);carriedItem=null;
-}
-
-function logEvidence(type){
-  if(!collectedEvidence.has(type)){
-    collectedEvidence.add(type);
-    document.getElementById("evidence-list").textContent=[...collectedEvidence].join(", ");
-  }
-}
-function ghostHasEvidence(type){return ghostProfiles[chosenGhostType].evidence.includes(type);}
-
-// Orbs & Freezing Temps
-const orbMat=new BABYLON.StandardMaterial("orbMat",scene);
-orbMat.emissiveColor=new BABYLON.Color3(1,1,1);
-function spawnOrb(){
-  const o=BABYLON.MeshBuilder.CreateSphere("orb",{diameter:0.2},scene);
-  o.material=orbMat;
-  o.position.copyFrom(ghost.mesh.position).addInPlace(new BABYLON.Vector3(Math.random()-0.5,1,Math.random()-0.5));
-  o.material.alpha=0.7;setTimeout(()=>o.dispose(),3000);
-}
-function freezingBreath(){
-  const p=BABYLON.MeshBuilder.CreateSphere("puff",{diameter:0.1},scene);
-  p.position.copyFrom(player.position).addInPlace(new BABYLON.Vector3(0,1,0));
-  const pm=new BABYLON.StandardMaterial("puffMat",scene);
-  pm.diffuseColor=new BABYLON.Color3(0.8,0.9,1);pm.alpha=0.5;p.material=pm;setTimeout(()=>p.dispose(),500);
-}
-
-// Main Evidence Loop
-scene.onBeforeRenderObservable.add(()=>{
-  if(carriedItem){carriedItem.position.copyFrom(player.position).addInPlace(new BABYLON.Vector3(0,0.5,0.5));}
-
-  if(!evidence.emfReader.isPicked&&ghostHasEvidence("EMF Level 5")&&
-     BABYLON.Vector3.Distance(evidence.emfReader.position,ghost.mesh.position)<3){
-    evidence.emfReader.material.diffuseColor=new BABYLON.Color3(1,0,0);
-    logEvidence("EMF Level 5");
-  } else evidence.emfReader.material.diffuseColor=new BABYLON.Color3(0,0.3,0);
-
-  if(!evidence.writingBook.isPicked&&ghostHasEvidence("Ghost Writing")&&
-     BABYLON.Vector3.Distance(evidence.writingBook.position,ghost.mesh.position)<2){
-    if(!evidence.writingBook.hasWritten&&Math.random()<0.001){
-      evidence.writingBook.hasWritten=true;
-      evidence.writingBook.material.diffuseColor=new BABYLON.Color3(0.2,0.2,0.2);
-      logEvidence("Ghost Writing");
-    }
-  }
-
-  if(!evidence.dotsProjector.isPicked&&ghostHasEvidence("D.O.T.S Projector")&&
-     BABYLON.Vector3.Distance(evidence.dotsProjector.position,ghost.mesh.position)<3&&Math.random()<0.002){
-    evidence.dotsProjector.material.alpha=0.8;
-    setTimeout(()=>evidence.dotsProjector.material.alpha=0.2,500);
-    logEvidence("D.O.T.S Projector");
-  }
-});
-
-// Ambient Orbs & Freezing Temps near ghost
-setInterval(()=>{
-  if(BABYLON.Vector3.Distance(player.position,ghost.mesh.position)<3){
-    if(ghostHasEvidence("Ghost Orbs")&&Math.random()<0.4)spawnOrb();
-    if(ghostHasEvidence("Freezing Temps")&&Math.random()<0.2)freezingBreath();
-  }
-},1000);
-
-// === INVESTIGATION FLOW ===
-document.getElementById("guess-ghost").onclick=openGhostGuess;
-function openGhostGuess(){
-  const g=prompt(`Choose your ghost:\n${Object.keys(ghostProfiles).join(", ")}`);
-  if(!g)return; endInvestigation(g);
-}
-function endInvestigation(guess){
-  const success=guess.toLowerCase()===chosenGhostType.toLowerCase();
-  alert(`You guessed: ${guess}
-Correct Ghost: ${chosenGhostType}
-${success?"✅ Correct!":"❌ Wrong!"}
-Evidence Found: ${[...collectedEvidence].join(", ")}
-Sanity left: ${sanity.toFixed(0)}%`);
-  location.reload();
-}
-
-return scene;
-}
-
-scene=createScene();
-engine.runRenderLoop(()=>scene.render());
-window.addEventListener("resize",()=>engine.resize());
-</script>
 </body>
 </html>
