@@ -1,88 +1,956 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Phasma‑Phoney 3D — Outdoor House Only</title>
+  <meta charset="UTF-8" />
+  <title>Phasma‑Phoney 3D</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    html, body {margin:0; padding:0; overflow:hidden; width:100%; height:100%;}
-    #renderCanvas {width:100%; height:100%; display:block;}
+    html, body {
+      margin: 0; padding: 0;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      background: black;
+      font-family: monospace;
+    }
+    #hud {
+      position: absolute;
+      top: 10px; left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      z-index: 10;
+    }
+    #touch-controls {
+      position: absolute;
+      bottom: 60px;
+      left: 10px;
+      z-index: 20;
+    }
+    #touch-controls button {
+      width: 50px; height: 50px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid #888;
+      color: white;
+      font-size: 18px;
+      margin: 2px;
+    }
+    #item-bar {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 20;
+    }
+    .item-slot {
+      width: 60px; height: 60px;
+      background: rgba(255,255,255,0.1);
+      border: 2px solid #999;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 12px;
+      color: #eee;
+    }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
+  <div id="hud">Initializing Phasma‑Phoney 3D...</div>
+
+  <div id="touch-controls">
+    <div>
+      <button onclick="movePlayer('up')">↑</button>
+    </div>
+    <div>
+      <button onclick="movePlayer('left')">←</button>
+      <button onclick="movePlayer('down')">↓</button>
+      <button onclick="movePlayer('right')">→</button>
+    </div>
+  </div>
+
+  <div id="item-bar">
+    <div class="item-slot" id="slot-1">Empty</div>
+    <div class="item-slot" id="slot-2">Empty</div>
+    <div class="item-slot" id="slot-3">Empty</div>
+    <div class="item-slot">Lighter</div>
+    <div class="item-slot">Journal</div>
+  </div>
+
   <canvas id="renderCanvas"></canvas>
+
   <script>
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
 
-function createScene() {
-  const scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color3(0.4, 0.6, 0.8);
+    let scene, camera, player, ghost, ghostRoom = null, ghostType = null;
+    let sanity = 100;
+    const allRooms = {};
+    const inventory = [];
+    const placedItems = {};
+    const maxItems = 3;
+    let currentRoom = "outside";
 
-  // === CAMERA & LIGHT ===
-  const camera = new BABYLON.ArcRotateCamera("camera",
-    BABYLON.Tools.ToRadians(45), BABYLON.Tools.ToRadians(75), 120,
-    new BABYLON.Vector3(0,0,0), scene);
-  camera.attachControl(canvas, true);
+    // Utility
+    function randomFrom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
 
-  const sun = new BABYLON.HemisphericLight("sun", new BABYLON.Vector3(0,1,0), scene);
-  sun.intensity = 0.9;
+    function logHUD(msg) {
+      const hud = document.getElementById("hud");
+      hud.innerHTML = msg;
+    }
 
-  // === BIG DIRT GROUND ===
-  const dirtMat = new BABYLON.StandardMaterial("dirtMat", scene);
-  dirtMat.diffuseColor = new BABYLON.Color3(0.35,0.25,0.15);
-  const ground = BABYLON.MeshBuilder.CreateGround("bigGround", {width:200, height:200}, scene);
-  ground.material = dirtMat;
+    function movePlayer(dir) {
+      if (!player) return;
+      const step = 1;
+      switch (dir) {
+        case 'up': player.position.z -= step; break;
+        case 'down': player.position.z += step; break;
+        case 'left': player.position.x -= step; break;
+        case 'right': player.position.x += step; break;
+      }
+    }
 
-  // === SIMPLE HOUSE BOX ===
-  const brickMat = new BABYLON.StandardMaterial("brickMat", scene);
-  brickMat.diffuseColor = new BABYLON.Color3(0.55,0.3,0.25);
-  const houseSize = { width:30, depth:30, height:5 };
-  function createWall(x,z,w,h,d,rot=0){
-    const wall = BABYLON.MeshBuilder.CreateBox("houseWall",{width:w,height:h,depth:d},scene);
-    wall.position.set(x,h/2,z);
-    wall.rotation.y = rot;
-    wall.material = brickMat;
+    async function createScene() {
+      scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color3.Black();
+
+      camera = new BABYLON.UniversalCamera("camera1", new BABYLON.Vector3(0, 2, -20), scene);
+      camera.attachControl(canvas, true);
+      camera.speed = 0.5;
+
+      const light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
+      light.intensity = 0.8;
+
+      // Ground
+      const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 200, height: 200 }, scene);
+      const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+      groundMat.diffuseColor = new BABYLON.Color3(0.15, 0.12, 0.1);
+      ground.material = groundMat;
+
+      // Sidewalk
+      const sidewalk = BABYLON.MeshBuilder.CreateBox("sidewalk", { width: 4, height: 0.1, depth: 20 }, scene);
+      sidewalk.position = new BABYLON.Vector3(0, 0.05, -10);
+      const sideMat = new BABYLON.StandardMaterial("sidewalkMat", scene);
+      sideMat.diffuseColor = new BABYLON.Color3(0.7, 0.7, 0.7);
+      sidewalk.material = sideMat;
+
+      // Road
+      const road = BABYLON.MeshBuilder.CreateBox("road", { width: 60, height: 0.1, depth: 10 }, scene);
+      road.position = new BABYLON.Vector3(0, 0.05, -25);
+      const roadMat = new BABYLON.StandardMaterial("roadMat", scene);
+      roadMat.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+      road.material = roadMat;
+
+      // House Shell
+      const house = BABYLON.MeshBuilder.CreateBox("house", { width: 30, height: 10, depth: 30 }, scene);
+      house.position = new BABYLON.Vector3(0, 5, 10);
+      const houseMat = new BABYLON.StandardMaterial("houseMat", scene);
+      houseMat.diffuseColor = new BABYLON.Color3(0.3, 0.2, 0.2);
+      houseMat.alpha = 0.85;
+      house.material = houseMat;
+
+      // Van
+      const van = BABYLON.MeshBuilder.CreateBox("van", { width: 6, height: 3, depth: 12 }, scene);
+      van.position = new BABYLON.Vector3(0, 1.5, -18);
+      const vanMat = new BABYLON.StandardMaterial("vanMat", scene);
+      vanMat.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.9);
+      van.material = vanMat;
+
+      // Player
+      player = new BABYLON.MeshBuilder.CreateBox("player", { size: 1 }, scene);
+      player.isVisible = false;
+      player.position = new BABYLON.Vector3(0, 1, -20);
+
+      // Ghost
+      ghost = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 2 }, scene);
+      ghost.position = new BABYLON.Vector3(1000, 1000, 1000); // Offscreen
+      const ghostMat = new BABYLON.StandardMaterial("ghostMat", scene);
+      ghostMat.diffuseColor = new BABYLON.Color3(1, 1, 1);
+      ghostMat.alpha = 0.2;
+      ghost.material = ghostMat;
+      ghost.isVisible = false;
+
+      // Room Zones (invisible triggers)
+      const rooms = [
+        { name: "Living Room", pos: [0, 0.1, 5], size: [10, 1, 10] },
+        { name: "Kitchen", pos: [-10, 0.1, 5], size: [10, 1, 10] },
+        { name: "Garage", pos: [10, 0.1, 5], size: [10, 1, 10] },
+        { name: "Bedroom", pos: [0, 0.1, 15], size: [10, 1, 10] },
+        { name: "Van", pos: [0, 0.1, -18], size: [6, 1, 12] }
+      ];
+
+      rooms.forEach(room => {
+        const zone = BABYLON.MeshBuilder.CreateBox(room.name, {
+          width: room.size[0], height: room.size[1], depth: room.size[2]
+        }, scene);
+        zone.position = new BABYLON.Vector3(...room.pos);
+        zone.visibility = 0;
+        zone.isPickable = false;
+        allRooms[room.name] = zone;
+      });
+
+      return scene;
+    }
+
+    createScene().then(scene => {
+      engine.runRenderLoop(() => {
+        scene.render();
+        checkRoomTriggers();
+      });
+    });
+
+    window.addEventListener("resize", () => engine.resize());
+
+    // ========== GLOBAL GHOST LOGIC ==========
+    const ghostProfiles = {
+      Spirit: { evidence: ["EMF Level 5", "Spirit Box", "Ghost Writing"], behavior: "standard" },
+      Wraith: { evidence: ["EMF Level 5", "Spirit Box", "D.O.T.S Projector"], behavior: "no footsteps" },
+      Phantom: { evidence: ["Spirit Box", "Fingerprints", "D.O.T.S Projector"], behavior: "photo banish" },
+      Poltergeist: { evidence: ["Spirit Box", "Fingerprints", "Ghost Writing"], behavior: "throws items" },
+      Banshee: { evidence: ["Fingerprints", "Ghost Orb", "D.O.T.S Projector"], behavior: "targets 1 player" },
+      Jinn: { evidence: ["EMF Level 5", "Fingerprints", "Freezing Temperatures"], behavior: "power dependent" },
+      Mare: { evidence: ["Spirit Box", "Ghost Orb", "Ghost Writing"], behavior: "lights out" },
+      Revenant: { evidence: ["Ghost Orb", "Ghost Writing", "Freezing Temperatures"], behavior: "slow until seen" },
+      Shade: { evidence: ["EMF Level 5", "Ghost Writing", "Freezing Temperatures"], behavior: "shy" },
+      Demon: { evidence: ["Fingerprints", "Ghost Writing", "Freezing Temperatures"], behavior: "hunts early" },
+      Yurei: { evidence: ["Ghost Orb", "Freezing Temperatures", "D.O.T.S Projector"], behavior: "sanity drain" },
+      Oni: { evidence: ["EMF Level 5", "Freezing Temperatures", "D.O.T.S Projector"], behavior: "visible often" },
+      Goryo: { evidence: ["EMF Level 5", "Fingerprints", "D.O.T.S Projector"], behavior: "stays in room" },
+      Myling: { evidence: ["EMF Level 5", "Fingerprints", "Ghost Writing"], behavior: "quiet footstep" },
+      Onryo: { evidence: ["Spirit Box", "Ghost Orb", "Freezing Temperatures"], behavior: "candle trigger" },
+      The Twins: { evidence: ["EMF Level 5", "Spirit Box", "Freezing Temperatures"], behavior: "dual actions" },
+      Raiju: { evidence: ["EMF Level 5", "Ghost Orb", "D.O.T.S Projector"], behavior: "electronic speed" },
+      Obake: { evidence: ["EMF Level 5", "Fingerprints", "Ghost Orb"], behavior: "fingerprint morph" },
+      The Mimic: { evidence: ["Spirit Box", "Fingerprints", "Freezing Temperatures"], behavior: "fakes orbs" },
+      Moroi: { evidence: ["Spirit Box", "Ghost Writing", "Freezing Temperatures"], behavior: "cursed breath" },
+      Deogen: { evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S Projector"], behavior: "slow when close" },
+      Thaye: { evidence: ["Ghost Orb", "Ghost Writing", "D.O.T.S Projector"], behavior: "ages over time" },
+      Hantu: { evidence: ["Fingerprints", "Ghost Orb", "Freezing Temperatures"], behavior: "cold speed" },
+      Yokai: { evidence: ["Spirit Box", "Ghost Orb", "D.O.T.S Projector"], behavior: "voice range" },
+      Succubus: { evidence: ["Ghost Writing", "Freezing Temperatures", "D.O.T.S Projector"], behavior: "drains fast" },
+    };
+
+    let ghostName = "";
+    let ghostEvidence = [];
+    let ghostRoom = null;
+    let currentRoom = "Van";
+    let sanity = 100;
+    let turnsInGhostRoom = 0;
+    let ghostVisible = false;
+
+    function pickGhost() {
+      const keys = Object.keys(ghostProfiles);
+      ghostName = keys[Math.floor(Math.random() * keys.length)];
+      ghostEvidence = ghostProfiles[ghostName].evidence;
+      ghostRoom = randomRoomExcept("Van");
+      console.log("🎯 Ghost is:", ghostName, "in", ghostRoom);
+    }
+
+    function randomRoomExcept(exclude) {
+      const keys = Object.keys(allRooms).filter(name => name !== exclude);
+      return keys[Math.floor(Math.random() * keys.length)];
+    }
+
+    function checkRoomTriggers() {
+      Object.entries(allRooms).forEach(([name, mesh]) => {
+        if (player.intersectsMesh(mesh)) {
+          if (currentRoom !== name) {
+            currentRoom = name;
+            turnsInGhostRoom = 0;
+            console.log("📍 Entered:", currentRoom);
+          }
+          if (currentRoom === ghostRoom) {
+            turnsInGhostRoom++;
+            if (turnsInGhostRoom % 2 === 0) sanity -= 1;
+            if (["Yurei", "Succubus", "Moroi"].includes(ghostName)) sanity -= 0.5;
+          }
+        }
+      });
+    }
+
+    function updateGhostBehavior() {
+      if (ghostName === "Goryo") return;
+
+      if (Math.random() < 0.005) {
+        ghostRoom = randomRoomExcept("Van");
+        console.log("👻 Ghost moved to:", ghostRoom);
+      }
+    }
+
+    function toggleGhostAppearance() {
+      if (currentRoom === ghostRoom && Math.random() < 0.05) {
+        ghost.position = allRooms[ghostRoom].position.clone().add(new BABYLON.Vector3(0, 2, 0));
+        ghost.isVisible = true;
+        ghostVisible = true;
+      } else {
+        ghost.position.set(1000, 1000, 1000);
+        ghost.isVisible = false;
+        ghostVisible = false;
+      }
+    }
+
+    setInterval(() => {
+      updateGhostBehavior();
+      toggleGhostAppearance();
+    }, 4000); // Ghost event cycle
+
+    // ========== INVENTORY SYSTEM ==========
+    const allItems = ["EMF Reader", "Spirit Box", "Thermometer", "Camera", "Notebook", "Crucifix", "Smudge Stick"];
+    let heldItems = ["EMF Reader", "Notebook", "Lighter"];
+    let vanItems = allItems.filter(i => !heldItems.includes(i));
+    const roomItems = {}; // { roomName: ["Item1", "Item2"] }
+
+    function dropItem(item) {
+      if (!roomItems[currentRoom]) roomItems[currentRoom] = [];
+      roomItems[currentRoom].push(item);
+      heldItems = heldItems.filter(i => i !== item);
+    }
+
+    function pickUpItem(item) {
+      if (heldItems.length >= 3 && item !== "Notebook" && item !== "Lighter") return;
+      heldItems.push(item);
+      roomItems[currentRoom] = roomItems[currentRoom].filter(i => i !== item);
+    }
+
+    function swapWithVan(itemOut, itemIn) {
+      if (heldItems.includes(itemOut)) heldItems = heldItems.filter(i => i !== itemOut);
+      if (!heldItems.includes(itemIn)) heldItems.push(itemIn);
+      vanItems = vanItems.filter(i => i !== itemIn);
+      vanItems.push(itemOut);
+    }
+
+    function renderInventoryUI() {
+      const hud = document.getElementById("hud");
+      const heldText = `🎒 Held: ${heldItems.join(", ")}`;
+      const sanityText = `🧠 Sanity: ${Math.round(sanity)}%`;
+      hud.innerHTML = `${heldText}<br>${sanityText}<br>📍 Location: ${currentRoom}`;
+    }
+
+    function useItem(item) {
+      if (!heldItems.includes(item)) return;
+      if (item === "EMF Reader") checkEvidence("EMF Level 5");
+      if (item === "Spirit Box") checkEvidence("Spirit Box");
+      if (item === "Thermometer") checkEvidence("Freezing Temperatures");
+      if (item === "Notebook") checkEvidence("Ghost Writing");
+      if (item === "Camera" && ghostVisible) logEvent("📸 You captured a ghost photo!");
+      if (item === "Smudge Stick" && ghostVisible) repelGhost();
+    }
+
+    function checkEvidence(type) {
+      if (ghostEvidence.includes(type) && currentRoom === ghostRoom) {
+        logEvent(`✅ Detected evidence: ${type}`);
+      } else {
+        logEvent(`❌ No evidence detected for: ${type}`);
+      }
+    }
+
+    function repelGhost() {
+      ghost.isVisible = false;
+      ghost.position.set(1000, 1000, 1000);
+      logEvent("💨 Smudge Stick used — ghost repelled.");
+      sanity += 3;
+    }
+
+    function logEvent(msg) {
+      const hud = document.getElementById("hud");
+      const old = hud.innerHTML;
+      hud.innerHTML = `${msg}<br>` + old;
+    }
+
+    // ========== GHOST ENTITY ==========
+    let ghost;
+
+    function createGhostEntity() {
+      const body = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 1 }, scene);
+      const ghostMat = new BABYLON.StandardMaterial("ghostMat", scene);
+      ghostMat.emissiveColor = new BABYLON.Color3(0.8, 0.8, 1);
+      ghostMat.alpha = 0.6;
+      body.material = ghostMat;
+      body.isVisible = false;
+      body.position.set(1000, 1000, 1000); // hidden offscreen
+      body.isPickable = false;
+      ghost = body;
+    }
+
+    function moveGhostToRoom(roomName) {
+      if (allRooms[roomName]) {
+        ghostRoom = roomName;
+        const pos = allRooms[roomName].position.clone();
+        ghost.position = pos.add(new BABYLON.Vector3(0, 2, 0));
+      }
+    }
+
+    function updateGhostVisual() {
+      if (!ghost || !allRooms[ghostRoom]) return;
+
+      if (currentRoom === ghostRoom && Math.random() < 0.15) {
+        ghost.position = allRooms[ghostRoom].position.clone().add(new BABYLON.Vector3(0, 2, 0));
+        ghost.isVisible = true;
+        ghostVisible = true;
+      } else {
+        ghost.position.set(1000, 1000, 1000);
+        ghost.isVisible = false;
+        ghostVisible = false;
+      }
+    }
+
+    function roamGhost() {
+      if (ghostName === "Goryo") return; // stays put
+      if (Math.random() < 0.01) {
+        const newRoom = randomRoomExcept("Van");
+        if (newRoom !== ghostRoom) moveGhostToRoom(newRoom);
+      }
+    }
+
+    setInterval(() => {
+      updateGhostVisual();
+      roamGhost();
+    }, 4000);
+</script>
+  <style>
+    #touch-controls {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .touch-row { display: flex; gap: 6px; justify-content: center; }
+    .touch-btn {
+      width: 48px;
+      height: 48px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid white;
+      color: white;
+      font-weight: bold;
+      font-size: 18px;
+      border-radius: 8px;
+    }
+    #inventory-bar {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 200;
+    }
+    .item-slot {
+      width: 48px;
+      height: 48px;
+      background: rgba(255,255,255,0.15);
+      border: 2px solid #fff;
+      border-radius: 6px;
+      text-align: center;
+      line-height: 48px;
+      font-size: 12px;
+      color: white;
+      font-family: monospace;
+    }
+  </style>
+
+  <div id="touch-controls">
+    <div class="touch-row">
+      <button class="touch-btn" onclick="movePlayer('forward')">↑</button>
+    </div>
+    <div class="touch-row">
+      <button class="touch-btn" onclick="movePlayer('left')">←</button>
+      <button class="touch-btn" onclick="movePlayer('backward')">↓</button>
+      <button class="touch-btn" onclick="movePlayer('right')">→</button>
+    </div>
+  </div>
+
+  <div id="inventory-bar">
+    <div class="item-slot" id="slot1"></div>
+    <div class="item-slot" id="slot2"></div>
+    <div class="item-slot" id="slot3"></div>
+    <div class="item-slot">🕯</div>
+    <div class="item-slot">📓</div>
+  </div>
+
+  <script>
+    // Movement
+    let playerMesh;
+
+    function movePlayer(direction) {
+      if (!playerMesh) return;
+      const speed = 1;
+      let delta = new BABYLON.Vector3(0, 0, 0);
+      switch (direction) {
+        case "forward": delta = new BABYLON.Vector3(0, 0, 1); break;
+        case "backward": delta = new BABYLON.Vector3(0, 0, -1); break;
+        case "left": delta = new BABYLON.Vector3(1, 0, 0); break;
+        case "right": delta = new BABYLON.Vector3(-1, 0, 0); break;
+      }
+      playerMesh.position.addInPlace(delta);
+      updateRoomZone();
+    }
+
+    // Prevent below-ground clipping
+    engine.runRenderLoop(() => {
+      if (playerMesh && playerMesh.position.y < 1) {
+        playerMesh.position.y = 1;
+      }
+      scene.render();
+    });
+
+    // Player entity (capsule)
+    function createPlayer() {
+      const player = BABYLON.MeshBuilder.CreateCapsule("player", { height: 2, radius: 0.5 }, scene);
+      player.position = new BABYLON.Vector3(0, 1, -10);
+      const mat = new BABYLON.StandardMaterial("playerMat", scene);
+      mat.alpha = 0.0;
+      player.material = mat;
+      playerMesh = player;
+    }
+
+    // Inventory bar population
+    function renderInventoryBar() {
+      document.getElementById("slot1").textContent = heldItems[0] || "";
+      document.getElementById("slot2").textContent = heldItems[1] || "";
+      document.getElementById("slot3").textContent = heldItems[2] || "";
+    }
+
+    scene.onBeforeRenderObservable.add(() => {
+      renderInventoryBar();
+    });
+
+    window.addEventListener("keydown", (e) => {
+      switch (e.key) {
+        case "ArrowUp": movePlayer("forward"); break;
+        case "ArrowDown": movePlayer("backward"); break;
+        case "ArrowLeft": movePlayer("left"); break;
+        case "ArrowRight": movePlayer("right"); break;
+      }
+    });
+  </script>
+
+<script>
+  // === Global Game State ===
+  const game = {
+    currentRoom: null,
+    ghostRoom: null,
+    sanity: 100,
+    ghostVisible: false,
+    ghost: null,
+    ghostProfile: null,
+    turnsInGhostRoom: 0,
+    lastRoamCheck: 0,
+  };
+
+  const roomZones = [];
+
+  function createRoomZone(name, center, size) {
+    const box = BABYLON.MeshBuilder.CreateBox(name, { width: size.x, height: 6, depth: size.z }, scene);
+    box.position = center;
+    box.visibility = 0;
+    box.isPickable = false;
+    roomZones.push({ name, mesh: box });
   }
-  createWall(0, houseSize.depth/2, houseSize.width, houseSize.height, 0.5);      // North
-  createWall(0, -houseSize.depth/2, houseSize.width, houseSize.height, 0.5);     // South
-  createWall(houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2); // East
-  createWall(-houseSize.width/2, 0, 0.5, houseSize.height, houseSize.depth, Math.PI/2); // West
 
-  // === SIDEWALK ===
-  const sidewalkMat = new BABYLON.StandardMaterial("sidewalkMat", scene);
-  sidewalkMat.diffuseColor = new BABYLON.Color3(0.8,0.8,0.8);
-  const sidewalk = BABYLON.MeshBuilder.CreateBox("sidewalk", {width:3, height:0.1, depth:20}, scene);
-  sidewalk.position.set(0,0.05,houseSize.depth/2+10);
-  sidewalk.material = sidewalkMat;
+  // === Define rooms (just placeholder zones for now) ===
+  function setupRoomZones() {
+    createRoomZone("Foyer", new BABYLON.Vector3(0, 3, 5), new BABYLON.Vector3(10, 6, 10));
+    createRoomZone("Living Room", new BABYLON.Vector3(10, 3, 5), new BABYLON.Vector3(10, 6, 10));
+    createRoomZone("Kitchen", new BABYLON.Vector3(-10, 3, 5), new BABYLON.Vector3(10, 6, 10));
+    createRoomZone("Garage", new BABYLON.Vector3(0, 3, 15), new BABYLON.Vector3(10, 6, 10));
+    createRoomZone("Van", new BABYLON.Vector3(0, 3, -20), new BABYLON.Vector3(8, 6, 10));
+  }
 
-  // === ROAD ===
-  const roadMat = new BABYLON.StandardMaterial("roadMat", scene);
-  roadMat.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
-  const road = BABYLON.MeshBuilder.CreateBox("road", {width:60, height:0.1, depth:10}, scene);
-  road.position.set(0,0.05,houseSize.depth/2+25);
-  road.material = roadMat;
+  // === Determine which room player is currently in ===
+  function updateRoomZone() {
+    for (let zone of roomZones) {
+      if (playerMesh.intersectsMesh(zone.mesh, false)) {
+        if (game.currentRoom !== zone.name) {
+          game.currentRoom = zone.name;
+          logStatus(`📍 You entered the ${zone.name}`);
+        }
+        return;
+      }
+    }
+    game.currentRoom = null;
+  }
 
-  // === VAN (Moving Truck) ===
-  const vanGroup = new BABYLON.TransformNode("van", scene);
-  const vanBody = BABYLON.MeshBuilder.CreateBox("vanBody", {width:4, height:3, depth:8}, scene);
-  vanBody.position.set(0,1.5,houseSize.depth/2+23);
-  vanBody.material = new BABYLON.StandardMaterial("vanBodyMat", scene);
-  vanBody.material.diffuseColor = new BABYLON.Color3(1,1,1);
-  vanBody.parent = vanGroup;
+  function logStatus(msg) {
+    const hud = document.getElementById("hud");
+    hud.innerHTML = `🧠 Sanity: ${Math.floor(game.sanity)}<br>${msg}`;
+  }
 
-  const vanCab = BABYLON.MeshBuilder.CreateBox("vanCab", {width:3, height:2, depth:3}, scene);
-  vanCab.position.set(0,1,houseSize.depth/2+19.5);
-  vanCab.material = new BABYLON.StandardMaterial("vanCabMat", scene);
-  vanCab.material.diffuseColor = new BABYLON.Color3(0.9,0.9,0.9);
-  vanCab.parent = vanGroup;
+  // === Ghost behavior ===
+  function selectRandomGhost() {
+    const names = Object.keys(ghostProfiles);
+    const chosen = names[Math.floor(Math.random() * names.length)];
+    game.ghost = chosen;
+    game.ghostProfile = ghostProfiles[chosen];
+    console.log(`Ghost selected: ${chosen}`);
+  }
 
-  return scene;
-}
+  function pickGhostRoom() {
+    const candidates = roomZones.filter(z => z.name !== "Van");
+    const randRoom = candidates[Math.floor(Math.random() * candidates.length)];
+    game.ghostRoom = randRoom.name;
+    console.log("Ghost room:", game.ghostRoom);
+  }
 
-const scene = createScene();
-engine.runRenderLoop(()=>scene.render());
-window.addEventListener("resize",()=>engine.resize());
+  function updateSanityLogic() {
+    if (game.currentRoom === game.ghostRoom) {
+      game.turnsInGhostRoom++;
+      game.sanity -= 0.2 + Math.random() * 0.5;
+    } else if (game.turnsInGhostRoom > 0) {
+      game.turnsInGhostRoom--;
+      game.sanity -= 0.05;
+    } else {
+      game.sanity -= 0.01;
+    }
+
+    if (game.sanity < 0) {
+      game.sanity = 0;
+      logStatus("💀 You blacked out...");
+      // add game over trigger here
+    }
+  }
+
+  // === Periodic ghost room roaming ===
+  function maybeRoamGhostRoom() {
+    const now = performance.now();
+    if (game.ghost === "Goryo") return; // Goryo doesn't roam
+
+    if (now - game.lastRoamCheck > 10000 + Math.random() * 15000) {
+      pickGhostRoom();
+      game.lastRoamCheck = now;
+    }
+  }
+
+  // === Main game loop ===
+  scene.onBeforeRenderObservable.add(() => {
+    updateRoomZone();
+    updateSanityLogic();
+    maybeRoamGhostRoom();
+  });
+</script> <script>
+  let ghostMesh;
+  let ghostOpacity = 0;
+  let ghostMaterial;
+  let nextGhostEvent = 0;
+
+  // === Create ghost entity (invisible at first) ===
+  function createGhostEntity() {
+    ghostMesh = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 2 }, scene);
+    ghostMesh.position = new BABYLON.Vector3(0, 2, 5);
+    ghostMesh.isPickable = false;
+    ghostMesh.visibility = 0;
+
+    ghostMaterial = new BABYLON.StandardMaterial("ghostMat", scene);
+    ghostMaterial.diffuseColor = new BABYLON.Color3(1, 1, 1);
+    ghostMaterial.alpha = 0;
+    ghostMesh.material = ghostMaterial;
+  }
+
+  // === Update ghost visibility and position ===
+  function ghostEventTrigger() {
+    const chance = Math.random();
+
+    // 30% chance to appear if you're in or near ghost room
+    const playerNearGhostRoom = (game.currentRoom === game.ghostRoom);
+    if (chance < 0.3 && playerNearGhostRoom) {
+      showGhost();
+    } else {
+      hideGhost();
+    }
+
+    // Optional: small jump or drift effect
+    const room = roomZones.find(r => r.name === game.ghostRoom);
+    if (room) {
+      ghostMesh.position = room.mesh.position.add(new BABYLON.Vector3(
+        (Math.random() - 0.5) * 3,
+        2,
+        (Math.random() - 0.5) * 3
+      ));
+    }
+
+    // Schedule next ghost event
+    nextGhostEvent = performance.now() + 6000 + Math.random() * 6000;
+  }
+
+  function showGhost() {
+    ghostMesh.visibility = 1;
+    ghostMaterial.alpha = 0.5 + Math.random() * 0.3;
+    game.ghostVisible = true;
+    logStatus(`👻 The ghost briefly manifests...`);
+  }
+
+  function hideGhost() {
+    ghostMesh.visibility = 0;
+    ghostMaterial.alpha = 0;
+    game.ghostVisible = false;
+  }
+
+  // === Ghost event trigger loop ===
+  scene.onBeforeRenderObservable.add(() => {
+    if (performance.now() > nextGhostEvent) {
+      ghostEventTrigger();
+    }
+  });
+
+  // === Initialize ghost-related systems ===
+  selectRandomGhost();
+  pickGhostRoom();
+  createGhostEntity();
+  setupRoomZones();
+</script>
+
+<script>
+  const evidenceTypes = ["EMF Level 5", "Ghost Writing", "Spirit Box", "Freezing Temps", "Fingerprints", "Ghost Orbs"];
+  const itemToEvidence = {
+    EMFReader: "EMF Level 5",
+    SpiritBox: "Spirit Box",
+    Thermometer: "Freezing Temps",
+    UVLight: "Fingerprints",
+    GhostWritingBook: "Ghost Writing",
+    Camera: "Ghost Orbs"
+  };
+
+  let evidenceFound = [];
+
+  function useItem(itemName) {
+    if (!game.inventory.includes(itemName)) {
+      logStatus(`⚠️ You don't have the ${itemName}.`);
+      return;
+    }
+
+    const ghost = ghostProfiles[game.ghost];
+    const evidence = itemToEvidence[itemName];
+
+    if (!evidence || !ghost.evidence.includes(evidence)) {
+      logStatus(`❌ ${itemName} shows no useful result here.`);
+      return;
+    }
+
+    // Special case: Mimic always shows orbs (camera) regardless
+    const isMimic = game.ghost === "Mimic";
+    const isCamera = itemName === "Camera";
+    const isGhostRoom = game.currentRoom === game.ghostRoom;
+
+    if (isGhostRoom && (ghost.evidence.includes(evidence) || (isMimic && isCamera))) {
+      if (!evidenceFound.includes(evidence)) {
+        evidenceFound.push(evidence);
+        logStatus(`✅ Evidence found: ${evidence}`);
+        checkWinCondition();
+      } else {
+        logStatus(`📝 You've already recorded this evidence.`);
+      }
+    } else {
+      logStatus(`⚠️ No evidence detected here.`);
+    }
+  }
+
+  function checkWinCondition() {
+    if (evidenceFound.length === 3) {
+      logStatus(`🧩 All evidence collected. Try to guess the ghost!`);
+    }
+  }
+
+  function placeItem(itemName) {
+    if (!game.inventory.includes(itemName)) return;
+    logStatus(`🪛 You place the ${itemName} on the floor of the ${game.currentRoom}.`);
+    // Items can stay and still detect later, advanced logic optional
+  }
+</script>
+
+<!-- TOUCH CONTROLS -->
+<div id="touch-controls" style="position:absolute; bottom:100px; left:20px; z-index:1000;">
+  <button onclick="movePlayer('forward')" style="width:60px;height:60px;">↑</button><br>
+  <button onclick="movePlayer('left')" style="width:60px;height:60px;">←</button>
+  <button onclick="movePlayer('backward')" style="width:60px;height:60px;">↓</button>
+  <button onclick="movePlayer('right')" style="width:60px;height:60px;">→</button>
+</div>
+
+<script>
+  // Define room trigger zones (just coordinates now)
+  const roomZones = {
+    "Foyer": { x: [-5, 5], z: [5, 15] },
+    "Living Room": { x: [-10, -1], z: [5, 15] },
+    "Kitchen": { x: [1, 10], z: [5, 15] },
+    "Garage": { x: [10, 20], z: [5, 15] },
+    "Basement": { x: [-10, -5], z: [15, 25] },
+    "Van": { x: [-3, 3], z: [-20, -10] }
+  };
+
+  const player = {
+    mesh: null,
+    speed: 1,
+    position: new BABYLON.Vector3(0, 1, -15)
+  };
+
+  function movePlayer(direction) {
+    const delta = player.speed;
+    if (!player.mesh) return;
+
+    switch (direction) {
+      case 'forward': player.mesh.position.z += delta; break;
+      case 'backward': player.mesh.position.z -= delta; break;
+      case 'left': player.mesh.position.x -= delta; break;
+      case 'right': player.mesh.position.x += delta; break;
+    }
+
+    updateCurrentRoom();
+  }
+
+  function updateCurrentRoom() {
+    const px = player.mesh.position.x;
+    const pz = player.mesh.position.z;
+    for (const [room, bounds] of Object.entries(roomZones)) {
+      const [minX, maxX] = bounds.x;
+      const [minZ, maxZ] = bounds.z;
+      if (px >= minX && px <= maxX && pz >= minZ && pz <= maxZ) {
+        if (game.currentRoom !== room) {
+          game.currentRoom = room;
+          logStatus(`📍 Entered ${room}`);
+        }
+        return;
+      }
+    }
+    game.currentRoom = "Outside";
+  }
+
+  function spawnPlayer(scene) {
+    const sphere = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 1 }, scene);
+    sphere.position = player.position.clone();
+    player.mesh = sphere;
+    sphere.visibility = 0; // Invisible but exists for position
+  }
+
+  // Keyboard controls
+  window.addEventListener("keydown", e => {
+    const keys = { "w": "forward", "s": "backward", "a": "left", "d": "right" };
+    if (keys[e.key]) movePlayer(keys[e.key]);
+  });
+</script>
+
+    // =========================
+    // === MAIN GAME LOOP ===
+    // =========================
+    engine.runRenderLoop(() => {
+      if (!scene || !player || !ghost) return;
+
+      scene.render();
+
+      // --- Sanity Drain ---
+      if (frameCount % 60 === 0) {
+        const inGhostRoom = ghostRoom === getCurrentRoom(player.position);
+        if (inGhostRoom) {
+          gameState.sanity -= 0.5 + Math.random(); // faster drain
+        } else {
+          gameState.sanity -= 0.2;
+        }
+        if (gameState.sanity < 0) gameState.sanity = 0;
+        document.getElementById("sanity-bar").style.width = gameState.sanity + "%";
+      }
+
+      // --- Ghost Roaming ---
+      if (frameCount % ghost.roamInterval === 0 && ghost.name !== "Goryo") {
+        const available = rooms.filter(r => r !== ghostRoom);
+        ghostRoom = available[Math.floor(Math.random() * available.length)];
+        ghost.roamInterval = 600 + Math.floor(Math.random() * 900);
+      }
+
+      // --- Ghost Visual Trigger ---
+      if (frameCount % 300 === 0 && Math.random() < 0.2) {
+        ghostVisible = !ghostVisible;
+        ghost.visibility = ghostVisible ? 1 : 0;
+      }
+
+      // --- Ghost Position Update ---
+      const targetPos = roomZones[ghostRoom];
+      ghost.position.x += (targetPos.x - ghost.position.x) * 0.01;
+      ghost.position.z += (targetPos.z - ghost.position.z) * 0.01;
+
+      // --- Evidence Item Glow or Reactivity ---
+      heldItems.forEach(item => {
+        if (gameState.evidence.includes(item)) return;
+        const evidence = ghostData[ghost.name].evidence;
+        if (evidence.includes(item) && ghostRoom === getCurrentRoom(player.position)) {
+          glowItem(item);
+        }
+      });
+
+      // --- Hunt Check ---
+      if (gameState.sanity < 20 && !huntCooldown && Math.random() < ghost.huntChance) {
+        startHunt();
+      }
+
+      // --- Hunt Visual Flicker ---
+      if (huntActive) {
+        if (frameCount % 10 === 0) {
+          scene.clearColor = new BABYLON.Color3(Math.random(), 0, 0);
+        }
+        if (frameCount % 300 === 0) {
+          endHunt();
+        }
+      } else {
+        scene.clearColor = new BABYLON.Color3.Black();
+      }
+
+      frameCount++;
+    });
+
+    // =========================
+    // === CLEANUP & EVENTS ===
+    // =========================
+    window.addEventListener("resize", () => engine.resize());
+
+    function getCurrentRoom(pos) {
+      for (const room in roomZones) {
+        const zone = roomZones[room];
+        const dx = Math.abs(pos.x - zone.x);
+        const dz = Math.abs(pos.z - zone.z);
+        if (dx < 8 && dz < 8) return room;
+      }
+      return "Outside";
+    }
+
+    function glowItem(item) {
+      const itemMeshes = scene.meshes.filter(m => m.name.includes(item));
+      itemMeshes.forEach(m => {
+        m.material.emissiveColor = new BABYLON.Color3(0.8, 0.8, 1);
+      });
+    }
+
+    function startHunt() {
+      huntActive = true;
+      huntCooldown = true;
+      ghostVisible = true;
+      ghost.visibility = 1;
+      setTimeout(() => {
+        ghost.position = player.position.clone().add(new BABYLON.Vector3(0, 0, -1));
+      }, 500);
+
+      setTimeout(() => {
+        if (getCurrentRoom(player.position) === ghostRoom) {
+          alert("You died.");
+          location.reload();
+        }
+      }, 3000);
+
+      setTimeout(() => {
+        endHunt();
+      }, 5000);
+    }
+
+    function endHunt() {
+      huntActive = false;
+      ghostVisible = false;
+      ghost.visibility = 0;
+      setTimeout(() => {
+        huntCooldown = false;
+      }, 8000);
+    }
   </script>
 </body>
 </html>
