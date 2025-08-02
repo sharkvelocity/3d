@@ -1,852 +1,1165 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Phasma‑Phoney 3D</title>
+  <meta charset="UTF-8" />
+  <title>Phasma-Phoney 3D — Full Build</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     html, body {
       margin: 0;
+      padding: 0;
+      background: black;
       overflow: hidden;
+      font-family: monospace;
+      user-select: none;
+    }
+
+    canvas {
       width: 100%;
       height: 100%;
-      background: black;
-      font-family: monospace;
+      display: block;
     }
-    #renderCanvas { width: 100%; height: 100%; display: block; }
+
     #hud {
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 100;
       color: white;
+      background: rgba(0,0,0,0.6);
+      padding: 10px;
       font-size: 14px;
-      background: rgba(0,0,0,0.5);
-      padding: 4px 10px;
-      border-radius: 6px;
+      z-index: 1000;
     }
+
     #touch-controls {
       position: absolute;
-      left: 10px;
-      bottom: 80px;
-      z-index: 200;
+      bottom: 20px;
+      left: 20px;
+      z-index: 1001;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
-    #touch-controls button {
-      width: 40px; height: 40px;
-      margin: 2px;
-      font-size: 20px;
+
+    .touch-btn {
+      width: 50px;
+      height: 50px;
+      background: rgba(255,255,255,0.2);
+      color: white;
+      text-align: center;
+      line-height: 50px;
+      border-radius: 5px;
+      font-size: 18px;
+      user-select: none;
     }
+
     #item-bar {
       position: absolute;
-      bottom: 10px;
-      left: 50%;
-      transform: translateX(-50%);
+      bottom: 20px;
+      right: 20px;
       display: flex;
-      gap: 6px;
-      z-index: 200;
+      gap: 8px;
+      z-index: 1001;
     }
-    .slot {
+
+    .item-slot {
+      width: 50px;
+      height: 50px;
+      border: 2px solid white;
       background: rgba(255,255,255,0.1);
-      color: white;
-      border: 1px solid #999;
-      width: 60px;
-      height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
+      color: white;
       font-size: 12px;
+      font-family: monospace;
+    }
+
+    #ghostGuessModal {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.9);
+      display: none;
+      z-index: 9999;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      font-family: monospace;
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <canvas id="renderCanvas"></canvas>
-  <div id="hud">Initializing Phasma‑Phoney 3D...</div>
-
-  <!-- Touch D-Pad -->
+  <div id="hud">Initializing...</div>
+  <div id="ghostGuessModal">
+    <h2>Select the Ghost</h2>
+    <div id="ghostGuessList" style="max-height:60vh;overflow:auto;padding:10px;"></div>
+    <button onclick="submitGhostGuess()" style="margin-top:20px;">Confirm Guess</button>
+  </div>
   <div id="touch-controls">
-    <div><button onclick="move('up')">↑</button></div>
-    <div>
-      <button onclick="move('left')">←</button>
-      <button onclick="move('down')">↓</button>
-      <button onclick="move('right')">→</button>
+    <div class="touch-btn" id="upBtn">↑</div>
+    <div style="display:flex; gap:10px;">
+      <div class="touch-btn" id="leftBtn">←</div>
+      <div class="touch-btn" id="downBtn">↓</div>
+      <div class="touch-btn" id="rightBtn">→</div>
     </div>
   </div>
-
-  <!-- Item Bar -->
   <div id="item-bar">
-    <div class="slot" id="slot1">Empty</div>
-    <div class="slot" id="slot2">Empty</div>
-    <div class="slot" id="slot3">Empty</div>
-    <div class="slot" id="slot4">Lighter</div>
-    <div class="slot" id="slot5">Journal</div>
+    <div class="item-slot" id="slot1">1</div>
+    <div class="item-slot" id="slot2">2</div>
+    <div class="item-slot" id="slot3">3</div>
+    <div class="item-slot">L</div>
+    <div class="item-slot">J</div>
   </div>
+  <canvas id="renderCanvas"></canvas>
 
-  <script>
-    const canvas = document.getElementById("renderCanvas");
-    const engine = new BABYLON.Engine(canvas, true);
-    let scene, player, ghost;
+<script>
+// ====== GHOST PROFILES ======
+const ghostProfiles = {
+  Spirit: { evidence: ["EMF 5", "Spirit Box", "Ghost Writing"], traits: {} },
+  Wraith: { evidence: ["EMF 5", "Spirit Box", "D.O.T.S"], traits: { noFootsteps: true } },
+  Phantom: { evidence: ["Spirit Box", "Fingerprints", "D.O.T.S"], traits: { photoVanish: true } },
+  Poltergeist: { evidence: ["Spirit Box", "Fingerprints", "Ghost Writing"], traits: { throwsItems: true } },
+  Banshee: { evidence: ["Fingerprints", "Ghost Orb", "D.O.T.S"], traits: { prefersOnePlayer: true } },
+  Jinn: { evidence: ["EMF 5", "Fingerprints", "Freezing Temps"], traits: { fastWhenPowerOn: true } },
+  Mare: { evidence: ["Spirit Box", "Ghost Orb", "Ghost Writing"], traits: { lightOffAggression: true } },
+  Revenant: { evidence: ["Ghost Orb", "Ghost Writing", "Freezing Temps"], traits: { superFastWhenSeen: true } },
+  Shade: { evidence: ["EMF 5", "Ghost Writing", "Freezing Temps"], traits: { shy: true } },
+  Demon: { evidence: ["Fingerprints", "Ghost Writing", "Freezing Temps"], traits: { frequentHunts: true } },
+  Yurei: { evidence: ["Ghost Orb", "D.O.T.S", "Freezing Temps"], traits: { sanityDrain: true } },
+  Oni: { evidence: ["EMF 5", "Freezing Temps", "D.O.T.S"], traits: { visibleOften: true } },
+  Yokai: { evidence: ["Spirit Box", "Ghost Orb", "D.O.T.S"], traits: { voiceTrigger: true } },
+  Hantu: { evidence: ["Fingerprints", "Ghost Orb", "Freezing Temps"], traits: { coldSpeed: true } },
+  Goryo: { evidence: ["EMF 5", "Fingerprints", "D.O.T.S"], traits: { doesn'tRoam: true } },
+  Myling: { evidence: ["EMF 5", "Fingerprints", "Ghost Writing"], traits: { soundSuppression: true } },
+  Onryo: { evidence: ["Spirit Box", "Ghost Orb", "Freezing Temps"], traits: { candleHuntTrigger: true } },
+  Twins: { evidence: ["EMF 5", "Spirit Box", "Freezing Temps"], traits: { dualActivity: true } },
+  Raiju: { evidence: ["EMF 5", "Ghost Orb", "D.O.T.S"], traits: { techSpeedBoost: true } },
+  Obake: { evidence: ["EMF 5", "Fingerprints", "Ghost Orb"], traits: { fingerprintShifting: true } },
+  The Mimic: { evidence: ["Spirit Box", "Fingerprints", "Freezing Temps"], traits: { fakeOrbs: true, mimicsOthers: true } },
+  Moroi: { evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"], traits: { cursedSanity: true } },
+  Deogen: { evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S"], traits: { alwaysSeesYou: true } },
+  Thaye: { evidence: ["Ghost Orb", "Ghost Writing", "D.O.T.S"], traits: { weakensOverTime: true } },
+  **Succubus**: { evidence: ["EMF 5", "Spirit Box", "Ghost Orb"], traits: { drainsSanityFast: true, seductiveAmbient: true } },
+};
 
-    function move(dir) {
-      const step = 0.5;
-      if (!player) return;
-      if (dir === "up") player.position.z -= step;
-      if (dir === "down") player.position.z += step;
-      if (dir === "left") player.position.x -= step;
-      if (dir === "right") player.position.x += step;
+// ====== GAME STATE ======
+const game = {
+  ghostName: null,
+  ghostProfile: null,
+  ghostRoom: null,
+  ghostCurrentRoom: null,
+  ghostCooldown: 0,
+  ghostVisible: false,
+  mimicTarget: null,
+  mimicCounter: 0,
+  sanity: 100,
+  turn: 0,
+  currentRoom: null,
+  inventory: [],
+  placedItems: [],
+  foundEvidence: [],
+  huntInProgress: false,
+  gameOver: false
+};
+
+// ====== ROOMS ======
+const allRooms = ["Foyer", "Kitchen", "Living Room", "Basement", "Garage", "Master Bedroom", "Kids Room", "Bathroom", "Dining Room"];
+function randomRoom() {
+  return allRooms[Math.floor(Math.random() * allRooms.length)];
+}
+
+// ====== ITEM SYSTEM ======
+const allItems = [
+  "EMF Reader", "Spirit Box", "Ghost Writing Book", "D.O.T.S Projector",
+  "UV Flashlight", "Camera", "Thermometer", "Crucifix", "Smudge Stick"
+];
+
+const itemEffects = {
+  "EMF Reader": { type: "evidence", detects: "EMF 5" },
+  "Spirit Box": { type: "evidence", detects: "Spirit Box" },
+  "Ghost Writing Book": { type: "evidence", detects: "Ghost Writing" },
+  "D.O.T.S Projector": { type: "evidence", detects: "D.O.T.S" },
+  "UV Flashlight": { type: "evidence", detects: "Fingerprints" },
+  "Camera": { type: "evidence", detects: "Ghost Orb" },
+  "Thermometer": { type: "evidence", detects: "Freezing Temps" },
+  "Crucifix": { type: "defense" },
+  "Smudge Stick": { type: "defense" }
+};
+</script>
+
+<script>
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+let scene, camera, player, ghostEntity, roomZones = {};
+
+async function createScene() {
+  scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color3.Black();
+
+  // Camera & Light
+  camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(0, 2, -20), scene);
+  camera.attachControl(canvas, true);
+  camera.speed = 0.5;
+  new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+
+  // Ground
+  const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 200, height: 200 }, scene);
+  const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+  groundMat.diffuseColor = new BABYLON.Color3(0.15, 0.1, 0.1);
+  ground.material = groundMat;
+
+  // Road
+  const road = BABYLON.MeshBuilder.CreateBox("road", { width: 60, height: 0.1, depth: 10 }, scene);
+  road.position = new BABYLON.Vector3(0, 0.05, -25);
+  road.material = new BABYLON.StandardMaterial("roadMat", scene);
+  road.material.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+
+  // Sidewalk
+  const sidewalk = BABYLON.MeshBuilder.CreateBox("sidewalk", { width: 6, height: 0.1, depth: 20 }, scene);
+  sidewalk.position = new BABYLON.Vector3(0, 0.05, -12);
+  sidewalk.material = new BABYLON.StandardMaterial("sidewalkMat", scene);
+  sidewalk.material.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.6);
+
+  // House
+  const house = BABYLON.MeshBuilder.CreateBox("house", { width: 30, height: 10, depth: 30 }, scene);
+  house.position = new BABYLON.Vector3(0, 5, 10);
+  house.material = new BABYLON.StandardMaterial("houseMat", scene);
+  house.material.diffuseColor = new BABYLON.Color3(0.3, 0.2, 0.2);
+  house.material.alpha = 0.7;
+
+  // Van
+  const van = BABYLON.MeshBuilder.CreateBox("van", { width: 5, height: 3, depth: 10 }, scene);
+  van.position = new BABYLON.Vector3(0, 1.5, -18);
+  van.material = new BABYLON.StandardMaterial("vanMat", scene);
+  van.material.diffuseColor = new BABYLON.Color3(0.8, 0.8, 1.0);
+
+  // Room Zones (invisible boxes)
+  const roomPositions = {
+    "Foyer": [0, 5, 2],
+    "Living Room": [-8, 5, 6],
+    "Kitchen": [8, 5, 6],
+    "Dining Room": [8, 5, 12],
+    "Bathroom": [-8, 5, 12],
+    "Master Bedroom": [0, 5, 18],
+    "Kids Room": [-8, 5, 18],
+    "Basement": [0, 2, 10],
+    "Garage": [15, 5, 10]
+  };
+
+  for (let room in roomPositions) {
+    const zone = BABYLON.MeshBuilder.CreateBox(room, { width: 6, height: 10, depth: 6 }, scene);
+    zone.position = new BABYLON.Vector3(...roomPositions[room]);
+    zone.isVisible = false;
+    zone.isPickable = false;
+    roomZones[room] = zone;
+  }
+
+  // Ghost Entity (starts invisible)
+  ghostEntity = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 1 }, scene);
+  ghostEntity.position = new BABYLON.Vector3(0, 2, 10);
+  const ghostMat = new BABYLON.StandardMaterial("ghostMat", scene);
+  ghostMat.alpha = 0;
+  ghostMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+  ghostEntity.material = ghostMat;
+
+  return scene;
+}
+</script>
+
+<style>
+#touch-controls {
+  position: absolute;
+  left: 10px;
+  bottom: 100px;
+  width: 120px;
+  height: 120px;
+  z-index: 1000;
+}
+
+.touch-button {
+  width: 40px;
+  height: 40px;
+  background: rgba(255,255,255,0.2);
+  color: white;
+  border: 1px solid #aaa;
+  position: absolute;
+  text-align: center;
+  line-height: 40px;
+  font-family: monospace;
+  user-select: none;
+  border-radius: 4px;
+}
+
+.touch-up { top: 0; left: 40px; }
+.touch-down { bottom: 0; left: 40px; }
+.touch-left { top: 40px; left: 0; }
+.touch-right { top: 40px; right: 0; }
+
+#inventory-bar {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+  display: flex;
+  justify-content: space-between;
+  z-index: 1000;
+}
+
+.inventory-slot {
+  width: 50px;
+  height: 50px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid #888;
+  color: white;
+  text-align: center;
+  line-height: 50px;
+  font-family: monospace;
+  font-size: 12px;
+  border-radius: 6px;
+}
+</style>
+
+<div id="touch-controls">
+  <div class="touch-button touch-up" ontouchstart="movePlayer('up')">↑</div>
+  <div class="touch-button touch-down" ontouchstart="movePlayer('down')">↓</div>
+  <div class="touch-button touch-left" ontouchstart="movePlayer('left')">←</div>
+  <div class="touch-button touch-right" ontouchstart="movePlayer('right')">→</div>
+</div>
+
+<div id="inventory-bar">
+  <div class="inventory-slot" id="slot-1">Empty</div>
+  <div class="inventory-slot" id="slot-2">Empty</div>
+  <div class="inventory-slot" id="slot-3">Empty</div>
+  <div class="inventory-slot" id="slot-4">Lighter</div>
+  <div class="inventory-slot" id="slot-5">Journal</div>
+</div>
+
+<script>
+const player = {
+  heldItems: [null, null, null], // 3 usable items
+  lighter: true,
+  journal: true,
+  position: new BABYLON.Vector3(0, 2, -20),
+};
+
+function movePlayer(dir) {
+  const speed = 1;
+  const delta = {
+    up: new BABYLON.Vector3(0, 0, speed),
+    down: new BABYLON.Vector3(0, 0, -speed),
+    left: new BABYLON.Vector3(-speed, 0, 0),
+    right: new BABYLON.Vector3(speed, 0, 0)
+  };
+  const newPos = player.position.add(delta[dir]);
+  player.position = newPos;
+  camera.position = newPos;
+  updateRoomDetection();
+}
+
+window.addEventListener("keydown", e => {
+  if (e.key === "w") movePlayer("up");
+  if (e.key === "s") movePlayer("down");
+  if (e.key === "a") movePlayer("left");
+  if (e.key === "d") movePlayer("right");
+});
+
+function updateInventoryHUD() {
+  for (let i = 0; i < 3; i++) {
+    document.getElementById("slot-" + (i + 1)).textContent = player.heldItems[i] || "Empty";
+  }
+}
+</script>
+
+<script>
+const ghostProfiles = {
+  Spirit:        { evidence: ["EMF5", "Spirit Box", "Ghost Writing"], behavior: {} },
+  Wraith:        { evidence: ["EMF5", "Spirit Box", "D.O.T.S"], behavior: { floats: true } },
+  Phantom:       { evidence: ["Spirit Box", "Fingerprints", "D.O.T.S"], behavior: { disappearsOnPhoto: true } },
+  Poltergeist:   { evidence: ["Spirit Box", "Fingerprints", "Ghost Writing"], behavior: { throwsItems: true } },
+  Banshee:       { evidence: ["Orbs", "Fingerprints", "D.O.T.S"], behavior: { prefersOneTarget: true } },
+  // ... (Include all remaining 25 ghosts including Mimic and Succubus later)
+};
+
+let ghost = {
+  name: "",
+  evidence: [],
+  currentRoom: "",
+  visible: false,
+  cooldown: 0,
+};
+
+function selectRandomGhost() {
+  const keys = Object.keys(ghostProfiles);
+  ghost.name = keys[Math.floor(Math.random() * keys.length)];
+  ghost.evidence = ghostProfiles[ghost.name].evidence;
+}
+
+function randomlyChangeGhostRoom() {
+  if (ghost.name === "Goryo") return; // Goryo never changes rooms
+  if (Math.random() < 0.02) {
+    ghost.currentRoom = getRandomRoom(); // Invisible zones only for now
+  }
+}
+
+function ghostVisibilityLogic() {
+  if (Math.random() < 0.1) {
+    ghost.visible = !ghost.visible;
+  }
+}
+</script>
+
+<script>
+let sanity = 100;
+
+function drainSanity(base = 1) {
+  let roomFactor = (playerRoom === ghost.currentRoom) ? 2 : 1;
+  let ghostNearby = BABYLON.Vector3.Distance(player.position, ghostMesh.position) < 6;
+  let multiplier = ghostNearby ? 2 : 1;
+  sanity -= base * roomFactor * multiplier;
+  sanity = Math.max(0, sanity);
+  updateHUD();
+}
+</script>
+
+<script>
+function checkForEvidence(item) {
+  const e = ghost.evidence;
+  if (item === "EMF Reader" && e.includes("EMF5") && playerRoom === ghost.currentRoom && Math.random() < 0.5) {
+    log("📶 EMF Level 5 detected!");
+  } else if (item === "Spirit Box" && e.includes("Spirit Box") && playerRoom === ghost.currentRoom && Math.random() < 0.5) {
+    log("📻 Spirit Box response heard.");
+  } else if (item === "D.O.T.S" && e.includes("D.O.T.S") && playerRoom === ghost.currentRoom && ghost.visible) {
+    log("💨 Fast movement through D.O.T.S!");
+  } else if (item === "Ghost Writing Book" && e.includes("Ghost Writing") && playerRoom === ghost.currentRoom && Math.random() < 0.3) {
+    log("📓 Ghost Writing appeared!");
+  } else if (item === "UV Light" && e.includes("Fingerprints") && playerRoom === ghost.currentRoom && Math.random() < 0.4) {
+    log("🖐️ Fingerprints visible on door.");
+  } else if (item === "Video Camera" && e.includes("Orbs") && playerRoom === ghost.currentRoom && Math.random() < 0.6) {
+    log("🔮 Ghost Orbs seen through camera.");
+  }
+}
+</script>
+
+<script>
+let ghostMesh;
+
+function addGhostMesh(scene) {
+  ghostMesh = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 1.5 }, scene);
+  ghostMesh.material = new BABYLON.StandardMaterial("ghostMat", scene);
+  ghostMesh.material.emissiveColor = new BABYLON.Color3(0.6, 0.6, 1);
+  ghostMesh.visibility = 0;
+  ghostMesh.position = new BABYLON.Vector3(0, 2, 10);
+}
+</script>
+
+<script>
+const roomZones = [
+  { name: "Living Room", zone: new BABYLON.Vector3(0, 0, 10), radius: 6 },
+  { name: "Basement", zone: new BABYLON.Vector3(-12, 0, 10), radius: 5 },
+  { name: "Garage", zone: new BABYLON.Vector3(12, 0, 10), radius: 5 },
+  { name: "Kitchen", zone: new BABYLON.Vector3(0, 0, 20), radius: 6 },
+  { name: "Van", zone: new BABYLON.Vector3(0, 0, -18), radius: 4 }
+];
+
+let playerRoom = "Unknown";
+
+function updatePlayerRoom() {
+  for (let zone of roomZones) {
+    if (BABYLON.Vector3.Distance(player.position, zone.zone) < zone.radius) {
+      playerRoom = zone.name;
+      return;
     }
+  }
+  playerRoom = "Outside";
+}
+</script>
 
-    async function createScene() {
-      scene = new BABYLON.Scene(engine);
-      scene.clearColor = new BABYLON.Color3.Black();
+<script>
+let turnCount = 0;
+let lastRoamTurn = 0;
 
-      const camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(0, 5, -10), scene);
-      camera.setTarget(new BABYLON.Vector3(0, 2, 0));
-      camera.attachControl(canvas, true);
-      camera.minZ = 0.1;
+function advanceTurn() {
+  turnCount++;
+  updatePlayerRoom();
+  drainSanity();
 
-      const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
-      light.intensity = 1.0;
+  if (turnCount - lastRoamTurn > 4 + Math.floor(Math.random() * 4)) {
+    randomlyChangeGhostRoom();
+    lastRoamTurn = turnCount;
+    log(`📍 You hear distant movement...`);
+  }
 
-      const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 200, height: 200 }, scene);
-      const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-      groundMat.diffuseColor = new BABYLON.Color3(0.2, 0.15, 0.1);
-      ground.material = groundMat;
+  ghostVisibilityLogic();
+  updateGhostVisibility();
 
-      // Prevent clipping below ground
-      scene.onBeforeRenderObservable.add(() => {
-        if (camera.position.y < 1) camera.position.y = 1;
-      });
+  maybeTriggerHunt();
+  updateHUD();
+}
+</script>
 
-      return scene;
+<script>
+function updateGhostVisibility() {
+  if (ghost.visible && playerRoom === ghost.currentRoom) {
+    ghostMesh.visibility = 1;
+    ghostMesh.position = roomZones.find(z => z.name === ghost.currentRoom)?.zone || ghostMesh.position;
+  } else {
+    ghostMesh.visibility = 0;
+  }
+}
+</script>
+
+<script>
+let isHunting = false;
+let huntCooldown = 0;
+
+function maybeTriggerHunt() {
+  if (isHunting || huntCooldown > 0 || sanity > 25) return;
+
+  let ghostAggression = ghostProfiles[ghost.name]?.behavior?.aggressive ? 0.25 : 0.12;
+  if (Math.random() < ghostAggression) {
+    beginHunt();
+  }
+}
+
+function beginHunt() {
+  isHunting = true;
+  huntCooldown = 6;
+  log("💀 The air turns cold... the ghost is hunting!");
+
+  ghostMesh.visibility = 1;
+  ghostMesh.position = player.position.clone();
+  
+  setTimeout(() => {
+    if (BABYLON.Vector3.Distance(player.position, ghostMesh.position) < 4) {
+      log("☠️ You were caught by the ghost.");
+      endGame(false);
+    } else {
+      log("🫣 You managed to hide just in time.");
     }
+    isHunting = false;
+    ghost.visible = false;
+  }, 3000);
+}
 
-    createScene().then(s => {
-      document.getElementById("hud").textContent = "Scene loaded.";
-      engine.runRenderLoop(() => {
-        s.render();
-      });
-    });
+function reduceCooldowns() {
+  if (huntCooldown > 0) huntCooldown--;
+}
+</script>
 
-    window.addEventListener("resize", () => engine.resize());
-     // PLAYER SETUP
-    const playerBox = BABYLON.MeshBuilder.CreateBox("player", { size: 1 }, scene);
-    playerBox.position.y = 0.5;
-    const playerMat = new BABYLON.StandardMaterial("playerMat", scene);
-    playerMat.diffuseColor = new BABYLON.Color3.White();
-    playerBox.material = playerMat;
-    player = playerBox;
+<script>
+const allItems = [
+  { name: "EMF Reader", type: "tool", model: null },
+  { name: "Spirit Box", type: "tool", model: null },
+  { name: "UV Flashlight", type: "tool", model: null },
+  { name: "Ghost Writing Book", type: "tool", model: null },
+  { name: "Camera", type: "tool", model: null },
+  { name: "Thermometer", type: "tool", model: null },
+  { name: "Crucifix", type: "defense", model: null },
+  { name: "Smudge Stick", type: "defense", model: null }
+];
 
-    // GHOST SETUP (INVISIBLE UNTIL EVENTS)
-    const ghostBox = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 1.5 }, scene);
-    ghostBox.position = new BABYLON.Vector3(0, 0.75, 5);
-    const ghostMat = new BABYLON.StandardMaterial("ghostMat", scene);
-    ghostMat.diffuseColor = new BABYLON.Color3(1, 1, 1);
-    ghostMat.alpha = 0; // invisible until active
-    ghostBox.material = ghostMat;
-    ghost = ghostBox;
+let heldItems = [];
+let roomItems = {}; // { roomName: [itemNames] }
 
-    // ROOM ZONES (INVISIBLE)
-    const roomZones = [
-      { name: "Foyer", bounds: new BABYLON.Vector3(-10, 0, -10), size: 10 },
-      { name: "Kitchen", bounds: new BABYLON.Vector3(10, 0, -10), size: 10 },
-      { name: "Basement", bounds: new BABYLON.Vector3(-10, 0, 10), size: 10 },
-      { name: "Garage", bounds: new BABYLON.Vector3(10, 0, 10), size: 10 }
-    ];
+function addItemToInventory(item) {
+  if (heldItems.length >= 3) return false;
+  heldItems.push(item);
+  updateItemBar();
+  return true;
+}
 
-    const zoneMeshes = [];
-    roomZones.forEach(zone => {
-      const z = BABYLON.MeshBuilder.CreateBox(zone.name, {
-        width: zone.size,
-        height: 4,
-        depth: zone.size
-      }, scene);
-      z.position = zone.bounds;
-      z.visibility = 0;
-      zoneMeshes.push(z);
-    });
+function dropItem(item) {
+  heldItems = heldItems.filter(i => i !== item);
+  if (!roomItems[playerRoom]) roomItems[playerRoom] = [];
+  roomItems[playerRoom].push(item);
+  updateItemBar();
+}
 
-    // GAME STATE
-    let gameState = {
-      ghostType: null,
-      ghostRoom: null,
-      ghostVisible: false,
-      lastRoom: null,
-      sanity: 100,
-      turn: 0,
-      evidenceFound: [],
-      heldItems: ["EMF Reader", "Spirit Box", "Camera"],
-      placedItems: [],
-      ghostCooldown: 0
-    };
+function pickUpItem(item) {
+  if (addItemToInventory(item)) {
+    roomItems[playerRoom] = roomItems[playerRoom].filter(i => i !== item);
+    log(`📦 Picked up ${item}`);
+  } else {
+    log("🧳 You can't carry more than 3 items.");
+  }
+}
+</script>
 
-    // GHOST TYPES (25 GHOSTS)
-    const ghostProfiles = {
-      Spirit:    { evidence: ["EMF 5", "Spirit Box", "Writing"], aggressive: false },
-      Wraith:    { evidence: ["DOTS", "Spirit Box", "EMF 5"], aggressive: true },
-      Phantom:   { evidence: ["Spirit Box", "Fingerprints", "DOTS"], aggressive: false },
-      Poltergeist: { evidence: ["Spirit Box", "Writing", "Fingerprints"], aggressive: true },
-      Banshee:   { evidence: ["Orbs", "DOTS", "Fingerprints"], aggressive: true },
-      Jinn:      { evidence: ["EMF 5", "Freezing", "Fingerprints"], aggressive: true },
-      Mare:      { evidence: ["Spirit Box", "Orbs", "Writing"], aggressive: true },
-      Revenant:  { evidence: ["Writing", "Freezing", "Orbs"], aggressive: true },
-      Shade:     { evidence: ["Writing", "Freezing", "EMF 5"], aggressive: false },
-      Demon:     { evidence: ["Freezing", "Writing", "Fingerprints"], aggressive: true },
-      Yurei:     { evidence: ["Freezing", "Orbs", "DOTS"], aggressive: true },
-      Oni:       { evidence: ["EMF 5", "Freezing", "DOTS"], aggressive: true },
-      Yokai:     { evidence: ["Spirit Box", "Orbs", "DOTS"], aggressive: false },
-      Hantu:     { evidence: ["Fingerprints", "Freezing", "Orbs"], aggressive: true },
-      Goryo:     { evidence: ["DOTS", "EMF 5", "Fingerprints"], aggressive: false },
-      Myling:    { evidence: ["Writing", "EMF 5", "Fingerprints"], aggressive: true },
-      Onryo:     { evidence: ["Freezing", "Spirit Box", "Orbs"], aggressive: true },
-      Twins:     { evidence: ["EMF 5", "Freezing", "Spirit Box"], aggressive: true },
-      Raiju:     { evidence: ["EMF 5", "Orbs", "DOTS"], aggressive: true },
-      Obake:     { evidence: ["EMF 5", "Orbs", "Fingerprints"], aggressive: true },
-      The Mimic: { evidence: ["Spirit Box", "Fingerprints", "Freezing"], aggressive: true }, // always shows fake orbs
-      Moroi:     { evidence: ["Spirit Box", "Writing", "Freezing"], aggressive: true },
-      Deogen:    { evidence: ["Spirit Box", "Writing", "DOTS"], aggressive: true },
-      Thaye:     { evidence: ["Orbs", "Writing", "DOTS"], aggressive: true },
-      Succubus:  { evidence: ["Writing", "Orbs", "Spirit Box"], aggressive: true }
-    };
+<style>
+#item-bar {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 99;
+}
+.item-slot {
+  width: 60px;
+  height: 60px;
+  background: rgba(255,255,255,0.1);
+  border: 2px solid #fff;
+  text-align: center;
+  line-height: 60px;
+  font-family: monospace;
+  font-size: 12px;
+  color: white;
+}
+</style>
 
-    // RANDOM GHOST SELECTION
-    function randomGhost() {
-      const keys = Object.keys(ghostProfiles);
-      const pick = keys[Math.floor(Math.random() * keys.length)];
-      gameState.ghostType = pick;
-      console.log("Ghost Selected:", pick);
+<div id="item-bar">
+  <div class="item-slot" id="slot1">--</div>
+  <div class="item-slot" id="slot2">--</div>
+  <div class="item-slot" id="slot3">--</div>
+  <div class="item-slot" id="slot4">Lighter</div>
+  <div class="item-slot" id="slot5">Journal</div>
+</div>
+
+<script>
+function updateItemBar() {
+  for (let i = 0; i < 3; i++) {
+    const slot = document.getElementById(`slot${i + 1}`);
+    slot.textContent = heldItems[i] || "--";
+  }
+}
+</script>
+
+<script>
+function placeItemInScene(itemName) {
+  const mesh = BABYLON.MeshBuilder.CreateBox(itemName, { size: 0.5 }, scene);
+  mesh.position = player.position.add(new BABYLON.Vector3(0, 1, 0));
+  mesh.metadata = { item: itemName };
+
+  mesh.actionManager = new BABYLON.ActionManager(scene);
+  mesh.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
+    BABYLON.ActionManager.OnPickTrigger,
+    () => pickUpItem(itemName)
+  ));
+}
+</script>
+
+<style>
+#touch-controls {
+  position: absolute;
+  left: 10px;
+  bottom: 80px;
+  z-index: 100;
+}
+.touch-btn {
+  background: rgba(255,255,255,0.1);
+  color: white;
+  font-size: 20px;
+  width: 60px;
+  height: 60px;
+  text-align: center;
+  line-height: 60px;
+  margin: 2px;
+  font-family: monospace;
+}
+</style>
+
+<div id="touch-controls">
+  <div class="touch-btn" onclick="movePlayer(0, 1)">↑</div>
+  <div>
+    <div class="touch-btn" onclick="movePlayer(-1, 0)">←</div>
+    <div class="touch-btn" onclick="movePlayer(1, 0)">→</div>
+  </div>
+  <div class="touch-btn" onclick="movePlayer(0, -1)">↓</div>
+</div>
+
+<script>
+function movePlayer(dx, dz) {
+  player.position.x += dx * 1.5;
+  player.position.z += dz * 1.5;
+  advanceTurn();
+}
+</script>
+
+<style>
+#hud span {
+  display: inline-block;
+  margin-right: 12px;
+}
+</style>
+
+<script>
+let sanity = 100;
+const sanityDrainBase = 1.5;
+let sanityInterval;
+
+function updateSanity() {
+  const hud = document.getElementById("hud");
+  hud.innerHTML = `Phasma‑Phoney 3D<br>
+    <span>📍 Room: ${playerRoom}</span>
+    <span>🧠 Sanity: ${Math.round(sanity)}%</span>
+    <span>🎯 Ghost Room: ${ghostRoom}</span>
+    <span>🕵️ Evidence: ${foundEvidence.join(", ") || "None"}`;
+}
+
+function drainSanity() {
+  let drain = sanityDrainBase;
+
+  if (playerRoom === ghostRoom) drain += 2;
+  if (isGhostNearPlayer()) drain += 3;
+
+  sanity -= drain;
+  sanity = Math.max(0, sanity);
+  updateSanity();
+}
+
+function isGhostNearPlayer() {
+  return ghost.isVisible && BABYLON.Vector3.Distance(ghost.position, player.position) < 5;
+}
+</script>
+
+<script>
+let ghostCooldown = 0;
+let smudgedTurns = 0;
+
+function useItem(itemName) {
+  if (!heldItems.includes(itemName)) return log("You don't have that item.");
+  if (itemName === "Smudge Stick") {
+    log("🔥 You use a Smudge Stick.");
+    smudgedTurns = 5;
+    dropItem(itemName);
+  }
+  if (itemName === "Crucifix") {
+    log("✝️ You place a Crucifix.");
+    placeItemInScene("Crucifix");
+    dropItem(itemName);
+  }
+}
+
+function applySmudgeEffect() {
+  if (smudgedTurns > 0) {
+    smudgedTurns--;
+    ghostCooldown = 3;
+  }
+}
+</script>
+
+<script>
+let usingCamera = false;
+
+function useCamera() {
+  if (!heldItems.includes("Camera")) return log("You don't have a Camera.");
+  if (playerRoom === ghostRoom && gameGhost === "Mimic") {
+    log("📸 You see floating orbs through the Camera.");
+    if (!foundEvidence.includes("Ghost Orbs")) {
+      foundEvidence.push("Ghost Orbs");
+      checkWinCondition();
     }
+  } else {
+    log("📸 Nothing appears through the Camera.");
+  }
+}
+</script>
 
-    randomGhost();
+<script>
+let foundEvidence = [];
 
-    // TRACK PLAYER'S CURRENT ROOM
-    function getPlayerRoom() {
-      for (let i = 0; i < zoneMeshes.length; i++) {
-        if (player.intersectsMesh(zoneMeshes[i], false)) {
-          return roomZones[i].name;
-        }
-      }
-      return null;
+function interactWithTool(item) {
+  if (!heldItems.includes(item)) return log("You're not holding that.");
+
+  if (item === "EMF Reader" && playerRoom === ghostRoom && ghostTriggers.EMF5) {
+    if (!foundEvidence.includes("EMF Level 5")) {
+      foundEvidence.push("EMF Level 5");
+      log("🔎 EMF Reader spikes to Level 5!");
     }
+  }
 
-    // GHOST ROOM SYSTEM
-    function updateGhostRoom() {
-      if (gameState.ghostType === "Goryo") return; // Goryo never moves
-      if (Math.random() < 0.1) { // 10% chance per interval to change rooms
-        const otherRooms = roomZones.filter(z => z.name !== gameState.ghostRoom);
-        const newRoom = otherRooms[Math.floor(Math.random() * otherRooms.length)];
-        gameState.ghostRoom = newRoom.name;
-        ghost.position = newRoom.bounds.add(new BABYLON.Vector3(0, 0.75, 0));
-        console.log("👻 Ghost moved to:", newRoom.name);
-      }
+  if (item === "Spirit Box" && playerRoom === ghostRoom && ghostTriggers.SpiritBox) {
+    if (!foundEvidence.includes("Spirit Box")) {
+      foundEvidence.push("Spirit Box");
+      log("🔊 Spirit Box replies with static whispers.");
     }
+  }
 
-    // GHOST VISIBILITY + PROXIMITY CHECK
-    function updateGhostVisibility() {
-      const playerRoom = getPlayerRoom();
-      if (playerRoom === gameState.ghostRoom && Math.random() < 0.3) {
-        ghost.material.alpha = 0.6;
-        gameState.ghostVisible = true;
-      } else {
-        ghost.material.alpha = 0;
-        gameState.ghostVisible = false;
-      }
+  if (item === "Thermometer" && playerRoom === ghostRoom && ghostTriggers.FreezingTemps) {
+    if (!foundEvidence.includes("Freezing Temps")) {
+      foundEvidence.push("Freezing Temps");
+      log("❄️ The room temperature drops below zero!");
     }
+  }
 
-    // SANITY DRAIN BASED ON PROXIMITY
-    function drainSanity() {
-      let drain = 0.2;
-      const inGhostRoom = getPlayerRoom() === gameState.ghostRoom;
-      if (inGhostRoom) {
-        drain += 0.5;
-        if (gameState.ghostVisible) drain += 0.8;
-      }
-      gameState.sanity = Math.max(0, gameState.sanity - drain);
-      document.getElementById("hud").innerText = `Sanity: ${Math.floor(gameState.sanity)}%`;
+  if (item === "Ghost Writing Book" && playerRoom === ghostRoom && ghostTriggers.GhostWriting) {
+    if (!foundEvidence.includes("Ghost Writing")) {
+      foundEvidence.push("Ghost Writing");
+      log("🖊️ Strange writing appears in the book.");
     }
+  }
 
-    // GHOST MIMIC BEHAVIOR (Mimic picks another ghost's traits every 3–6 turns)
-    let mimicTimer = Math.floor(Math.random() * 3) + 3;
-    let mimicBehavior = null;
-
-    function updateMimic() {
-      if (gameState.ghostType !== "The Mimic") return;
-      if (mimicTimer <= 0) {
-        const nonMimics = Object.keys(ghostProfiles).filter(g => g !== "The Mimic");
-        mimicBehavior = ghostProfiles[nonMimics[Math.floor(Math.random() * nonMimics.length)]];
-        mimicTimer = Math.floor(Math.random() * 3) + 3;
-        console.log("🌀 Mimic is mimicking:", mimicBehavior);
-      } else {
-        mimicTimer--;
-      }
+  if (item === "UV Flashlight" && playerRoom === ghostRoom && ghostTriggers.Fingerprints) {
+    if (!foundEvidence.includes("Fingerprints")) {
+      foundEvidence.push("Fingerprints");
+      log("🖐️ You spot glowing handprints.");
     }
+  }
 
-    // CAMERA ORB DETECTION
-    function detectOrbs() {
-      if (!gameState.heldItems.includes("Camera")) return;
-      const inGhostRoom = getPlayerRoom() === gameState.ghostRoom;
-      const isMimic = gameState.ghostType === "The Mimic";
-      if ((isMimic || ghostProfiles[gameState.ghostType].evidence.includes("Orbs")) && inGhostRoom) {
-        if (Math.random() < 0.4) {
-          logMessage("✨ You see ghost orbs on the camera.");
-          gameState.evidenceFound.push("Orbs");
-        }
-      }
+  checkWinCondition();
+}
+</script>
+
+<script>
+const ghostProfiles = {
+  Spirit:        { evidence: ["EMF Level 5", "Spirit Box", "Ghost Writing"], aggressive: false },
+  Wraith:        { evidence: ["EMF Level 5", "Spirit Box", "D.O.T.S Projector"], aggressive: true },
+  Phantom:       { evidence: ["Spirit Box", "Fingerprints", "D.O.T.S Projector"], aggressive: true },
+  Poltergeist:   { evidence: ["Spirit Box", "Fingerprints", "Ghost Writing"], aggressive: true },
+  Banshee:       { evidence: ["Ghost Orbs", "Fingerprints", "D.O.T.S Projector"], aggressive: true },
+  Jinn:          { evidence: ["EMF Level 5", "Spirit Box", "Fingerprints"], aggressive: true },
+  Mare:          { evidence: ["Spirit Box", "Ghost Orbs", "Ghost Writing"], aggressive: true },
+  Revenant:      { evidence: ["Ghost Orbs", "Ghost Writing", "Freezing Temps"], aggressive: true },
+  Shade:         { evidence: ["EMF Level 5", "Ghost Writing", "Freezing Temps"], aggressive: false },
+  Demon:         { evidence: ["Ghost Writing", "Freezing Temps", "Fingerprints"], aggressive: true },
+  Yurei:         { evidence: ["Ghost Orbs", "Freezing Temps", "D.O.T.S Projector"], aggressive: true },
+  Oni:           { evidence: ["EMF Level 5", "Freezing Temps", "D.O.T.S Projector"], aggressive: true },
+  Hantu:         { evidence: ["Fingerprints", "Ghost Orbs", "Freezing Temps"], aggressive: true },
+  Goryo:         { evidence: ["EMF Level 5", "Fingerprints", "D.O.T.S Projector"], aggressive: false },
+  Myling:        { evidence: ["EMF Level 5", "Ghost Writing", "Fingerprints"], aggressive: true },
+  Onryo:         { evidence: ["Spirit Box", "Ghost Orbs", "Freezing Temps"], aggressive: true },
+  Twins:         { evidence: ["EMF Level 5", "Spirit Box", "Freezing Temps"], aggressive: true },
+  Raiju:         { evidence: ["EMF Level 5", "Ghost Orbs", "D.O.T.S Projector"], aggressive: true },
+  Obake:         { evidence: ["EMF Level 5", "Ghost Orbs", "Fingerprints"], aggressive: true },
+  The Mimic:     { evidence: ["Spirit Box", "Fingerprints", "Freezing Temps"], fakeOrbs: true, aggressive: true },
+  Moroi:         { evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"], aggressive: true },
+  Deogen:        { evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S Projector"], aggressive: true },
+  Thaye:         { evidence: ["Ghost Orbs", "Ghost Writing", "D.O.T.S Projector"], aggressive: true },
+  Yokai:         { evidence: ["Spirit Box", "Ghost Orbs", "D.O.T.S Projector"], aggressive: true },
+  Succubus:      { evidence: ["Spirit Box", "Ghost Writing", "Fingerprints"], aggressive: true }
+};
+
+let gameGhost = randomFromArray(Object.keys(ghostProfiles));
+let ghostData = ghostProfiles[gameGhost];
+let ghostRoom = randomFromArray(Object.keys(roomZones));
+let ghostVisible = false;
+let ghostCooldown = 0;
+let yureiLock = 0;
+
+function randomFromArray(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+</script>
+
+<script>
+function maybeChangeGhostRoom() {
+  if (gameGhost === "Goryo") return;
+  if (yureiLock > 0) return;
+
+  if (Math.random() < 0.05) {
+    let newRoom;
+    do {
+      newRoom = randomFromArray(Object.keys(roomZones));
+    } while (newRoom === ghostRoom);
+    ghostRoom = newRoom;
+    log(`📍 Ghost has changed rooms.`);
+  }
+}
+</script>
+
+<script>
+function applyYureiSmudge() {
+  if (gameGhost === "Yurei") {
+    yureiLock = 5;
+    log("🌀 The Yurei has been confined for 5 turns.");
+  }
+}
+
+function decrementGhostLocks() {
+  if (yureiLock > 0) yureiLock--;
+  if (ghostCooldown > 0) ghostCooldown--;
+}
+</script>
+
+<script>
+function attemptGhostHunt() {
+  if (ghostCooldown > 0) return;
+  if (sanity > 25) return;
+
+  const chance = ghostData.aggressive ? 0.2 : 0.05;
+  if (Math.random() < chance) {
+    triggerHunt();
+  }
+}
+
+function triggerHunt() {
+  ghostVisible = true;
+  log("💀 The ghost starts hunting!");
+  // Optional: Add flashing screen or red tint
+  setTimeout(() => {
+    if (playerRoom === ghostRoom && !hasCrucifixProtection()) {
+      log("☠️ You were caught during the hunt!");
+      endGame(false);
+    } else {
+      log("😮 You survived the hunt.");
     }
+    ghostVisible = false;
+    ghostCooldown = 4;
+  }, 4000);
+}
 
-    // TURN HANDLER
-    function advanceTurn() {
-      gameState.turn++;
-      updateMimic();
-      updateGhostRoom();
-      updateGhostVisibility();
-      drainSanity();
-      detectOrbs();
-      checkHunt();
+function hasCrucifixProtection() {
+  return placedItems.includes("Crucifix") && playerRoom === ghostRoom;
+}
+</script>
+
+<style>
+.orb {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  animation: floatOrb 8s linear infinite;
+  pointer-events: none;
+}
+@keyframes floatOrb {
+  0% { transform: translateY(0) scale(1); opacity: 0.2; }
+  50% { transform: translateY(-50px) scale(1.5); opacity: 0.8; }
+  100% { transform: translateY(0) scale(1); opacity: 0.2; }
+}
+</style>
+
+<div id="orb-layer" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:3; pointer-events:none;"></div>
+
+<script>
+function spawnOrbs() {
+  if (!heldItems.includes("Camera")) return;
+  if (playerRoom !== ghostRoom) return;
+  if (gameGhost !== "The Mimic" && !ghostData.evidence.includes("Ghost Orbs")) return;
+
+  for (let i = 0; i < 6; i++) {
+    const orb = document.createElement("div");
+    orb.className = "orb";
+    orb.style.left = `${Math.random() * 90 + 5}%`;
+    orb.style.top = `${Math.random() * 90 + 5}%`;
+    document.getElementById("orb-layer").appendChild(orb);
+    setTimeout(() => orb.remove(), 8000);
+  }
+}
+</script>
+
+<div id="guess-popup" style="display:none; position:fixed; top:20%; left:10%; width:80%; z-index:5000; background:#111; color:#fff; padding:20px; border:2px solid #aaa;">
+  <h3>👻 Guess the Ghost</h3>
+  <div id="ghost-choices" style="max-height:300px; overflow:auto;"></div>
+  <button onclick="closeGuess()">Cancel</button>
+</div>
+
+<script>
+function openGuess() {
+  const choices = Object.keys(ghostProfiles);
+  const container = document.getElementById("ghost-choices");
+  container.innerHTML = choices.map(g => `<button onclick="submitGuess('${g}')">${g}</button>`).join("<br>");
+  document.getElementById("guess-popup").style.display = "block";
+}
+
+function closeGuess() {
+  document.getElementById("guess-popup").style.display = "none";
+}
+
+function submitGuess(guess) {
+  closeGuess();
+  if (guess === gameGhost) {
+    endGame(true);
+  } else {
+    log(`❌ Incorrect. The ghost was ${gameGhost}.`);
+    endGame(false);
+  }
+}
+</script>
+
+<div id="end-screen" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000d; color:#fff; font-size:24px; z-index:9999; text-align:center; padding-top:20%;">
+  <div id="end-message"></div>
+  <button onclick="location.reload()">🔁 Start New Game</button>
+</div>
+
+<script>
+function endGame(win) {
+  document.getElementById("end-message").textContent = win ? "✅ Correct! You identified the ghost." : "☠️ Investigation Failed.";
+  document.getElementById("end-screen").style.display = "block";
+}
+</script>
+
+<script>
+let sanity = 100;
+let turnCount = 0;
+let ghostRoamCooldown = Math.floor(Math.random() * 5) + 3;
+
+function drainSanity() {
+  let drain = Math.floor(Math.random() * 3) + 2; // passive drain
+  if (playerRoom === ghostRoom) drain += 3;
+  if (ghostVisible) drain += 4;
+  if (heldItems.includes("Cursed Mirror")) drain += 5;
+
+  sanity -= drain;
+  if (sanity < 0) sanity = 0;
+  updateHUD();
+}
+
+function updateHUD() {
+  document.getElementById("hud").innerText = `
+    Turn: ${turnCount} | Sanity: ${sanity}%
+    Location: ${playerRoom} | Ghost: ${ghostVisible ? '👻 Nearby' : '—'}
+  `;
+}
+</script>
+
+<script>
+function advanceTurn() {
+  turnCount++;
+  drainSanity();
+  handleGhostRoam();
+  maybeShowGhost();
+  spawnOrbs();
+  maybeTriggerHunt();
+  updateHUD();
+
+  if (sanity <= 0) {
+    log("💀 You lost all sanity.");
+    endGame(false);
+  }
+}
+
+function maybeShowGhost() {
+  const appearChance = playerRoom === ghostRoom ? 0.3 : 0.05;
+  ghostVisible = Math.random() < appearChance;
+}
+
+function maybeTriggerHunt() {
+  if (sanity < 30 && Math.random() < 0.2) {
+    if (heldItems.includes("Crucifix")) {
+      log("✝️ Crucifix repelled the ghost!");
+      removeItem("Crucifix");
+      return;
+    } else if (heldItems.includes("Smudge Stick")) {
+      log("💨 You used a Smudge Stick to repel the ghost.");
+      removeItem("Smudge Stick");
+      return;
+    } else {
+      log("‼️ The ghost hunts you!");
+      endGame(false);
     }
+  }
+}
 
-    // AUTO TURN ADVANCE INTERVAL
-    setInterval(() => {
-      advanceTurn();
-    }, 7000); // every 7 seconds
+function removeItem(name) {
+  const index = heldItems.indexOf(name);
+  if (index !== -1) heldItems.splice(index, 1);
+}
+</script>
 
-    // INITIAL GHOST POSITION
-    const initialRoom = roomZones[Math.floor(Math.random() * roomZones.length)];
-    gameState.ghostRoom = initialRoom.name;
-    ghost.position = initialRoom.bounds.add(new BABYLON.Vector3(0, 0.75, 0));
+<script>
+let gameStarted = false;
 
-    // ============================
-    // INVENTORY AND ITEM SYSTEM
-    // ============================
+function startMonitorBoot() {
+  const bootDiv = document.createElement("div");
+  bootDiv.id = "monitor";
+  bootDiv.style = `
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: black; color: lime;
+    font-family: monospace; font-size: 18px;
+    padding: 20px; z-index: 999;
+  `;
+  bootDiv.innerHTML = `>C:/boot ghost.os<br>`;
+  document.body.appendChild(bootDiv);
 
-    const allItems = ["Camera", "EMF Reader", "Thermometer", "Spirit Box", "Writing Book", "UV Flashlight", "Crucifix", "Smudge Stick"];
-    const heldItems = []; // max 3 items
-    const roomItems = {}; // { roomName: [item1, item2] }
+  let lines = [
+    "Booting Van Monitor System...",
+    "Loading Evidence Protocols...",
+    "Initializing Ghost Threat Database...",
+    "Loading Visual Matrix...",
+    "Establishing Sanity Thresholds...",
+    "✓ Monitor Online — Press to Continue"
+  ];
 
-    // INVENTORY SLOTS UI
-    const slotContainer = document.createElement("div");
-    slotContainer.style.position = "absolute";
-    slotContainer.style.bottom = "10px";
-    slotContainer.style.left = "50%";
-    slotContainer.style.transform = "translateX(-50%)";
-    slotContainer.style.display = "flex";
-    slotContainer.style.gap = "8px";
-    slotContainer.style.zIndex = 99;
-    document.body.appendChild(slotContainer);
-
-    for (let i = 0; i < 5; i++) {
-      const slot = document.createElement("div");
-      slot.className = "slot";
-      slot.style.width = "50px";
-      slot.style.height = "50px";
-      slot.style.border = "2px solid white";
-      slot.style.background = "rgba(255,255,255,0.1)";
-      slot.style.display = "flex";
-      slot.style.alignItems = "center";
-      slot.style.justifyContent = "center";
-      slot.style.fontSize = "10px";
-      slot.style.fontFamily = "monospace";
-      slot.innerText = (i < 3) ? "—" : (i === 3 ? "Lighter" : "Notebook");
-      slotContainer.appendChild(slot);
+  let i = 0;
+  let interval = setInterval(() => {
+    if (i < lines.length) {
+      bootDiv.innerHTML += lines[i++] + "<br>";
+    } else {
+      clearInterval(interval);
+      const contBtn = document.createElement("button");
+      contBtn.textContent = "Continue";
+      contBtn.onclick = () => {
+        bootDiv.remove();
+        initializeGame();
+      };
+      bootDiv.appendChild(contBtn);
     }
+  }, 800);
+}
+</script>
 
-    function refreshInventoryDisplay() {
-      for (let i = 0; i < 3; i++) {
-        slotContainer.children[i].innerText = heldItems[i] || "—";
-      }
+<script>
+const allRooms = ["Garage", "Kitchen", "Living Room", "Basement", "Bedroom", "Bathroom"];
+const allGhostNames = Object.keys(ghostProfiles);
+let ghostRoom = "Kitchen";
+let gameGhost = "";
+let playerRoom = "Van";
+let ghostVisible = false;
+
+function initializeGame() {
+  gameGhost = allGhostNames[Math.floor(Math.random() * allGhostNames.length)];
+  ghostRoom = allRooms[Math.floor(Math.random() * allRooms.length)];
+  heldItems = ["Camera", "Thermometer", "EMF Reader"];
+  updateHUD();
+  log("🎮 Investigation Started.");
+}
+</script>
+
+<script>
+const placedItems = {}; // room -> array
+const vanItems = ["Crucifix", "Spirit Box", "Ghost Writing Book", "Smudge Stick"];
+let heldItems = [];
+
+function placeItem(item) {
+  if (!placedItems[playerRoom]) placedItems[playerRoom] = [];
+  placedItems[playerRoom].push(item);
+  heldItems = heldItems.filter(i => i !== item);
+  log(`📦 Placed ${item} in ${playerRoom}`);
+}
+
+function pickupItem(item) {
+  if (heldItems.length >= 3) {
+    log("❌ Cannot carry more than 3 items.");
+    return;
+  }
+  if (placedItems[playerRoom]) {
+    const index = placedItems[playerRoom].indexOf(item);
+    if (index !== -1) {
+      placedItems[playerRoom].splice(index, 1);
+      heldItems.push(item);
+      log(`🎒 Picked up ${item}`);
     }
-
-    // PICK UP ITEM
-    function pickUpItem(itemName) {
-      if (heldItems.length >= 3) {
-        logMessage("You can't carry more than 3 items.");
-        return;
-      }
-      heldItems.push(itemName);
-      refreshInventoryDisplay();
-      logMessage(`Picked up: ${itemName}`);
-    }
-
-    // DROP ITEM
-    function dropItem(itemName) {
-      const room = getPlayerRoom();
-      if (!room) {
-        logMessage("You must be in a room to drop an item.");
-        return;
-      }
-      heldItems.splice(heldItems.indexOf(itemName), 1);
-      roomItems[room] = roomItems[room] || [];
-      roomItems[room].push(itemName);
-      logMessage(`Dropped ${itemName} in ${room}`);
-      refreshInventoryDisplay();
-    }
-
-    // USE ITEM
-    function useItem(itemName) {
-      const ghost = ghostProfiles[gameState.ghostType];
-      const isInGhostRoom = getPlayerRoom() === gameState.ghostRoom;
-
-      if (itemName === "EMF Reader" && isInGhostRoom && Math.random() < 0.4) {
-        logMessage("🔊 EMF spikes detected!");
-        gameState.evidenceFound.push("EMF5");
-      } else if (itemName === "Thermometer" && isInGhostRoom) {
-        const temp = (ghost.evidence.includes("Freezing Temps")) ? -5 : 10 + Math.random() * 10;
-        logMessage(`🌡️ Temperature: ${temp.toFixed(1)}°C`);
-        if (temp < 0) gameState.evidenceFound.push("Freezing Temps");
-      } else if (itemName === "Spirit Box" && isInGhostRoom && Math.random() < 0.3) {
-        logMessage("📻 Spirit Box: *unintelligible voice*");
-        gameState.evidenceFound.push("Spirit Box");
-      } else if (itemName === "Writing Book" && isInGhostRoom && Math.random() < 0.3) {
-        logMessage("📓 Ghost writing has appeared.");
-        gameState.evidenceFound.push("Ghost Writing");
-      } else if (itemName === "UV Flashlight" && isInGhostRoom && Math.random() < 0.3) {
-        logMessage("🦶 You see fingerprints or footprints.");
-        gameState.evidenceFound.push("Fingerprints");
-      } else if (itemName === "Crucifix" && isInGhostRoom) {
-        gameState.lastSmudgeOrCrucifixTurn = gameState.turn;
-        logMessage("✝️ Crucifix placed. May block a future hunt.");
-      } else if (itemName === "Smudge Stick" && isInGhostRoom) {
-        gameState.lastSmudgeOrCrucifixTurn = gameState.turn;
-        logMessage("💨 You smudged the room.");
-        if (gameState.ghostType === "Yurei") {
-          gameState.yureiStuckTurns = 5;
-          logMessage("The ghost seems trapped...");
-        }
-        heldItems.splice(heldItems.indexOf("Smudge Stick"), 1); // consumed
-        refreshInventoryDisplay();
-      } else {
-        logMessage("Nothing happens.");
-      }
-    }
-
-    function logMessage(msg) {
-      console.log("[LOG]", msg);
-      const hud = document.getElementById("hud");
-      hud.innerText = msg + "\n" + `Sanity: ${Math.floor(gameState.sanity)}%`;
-    }
-
-    // INITIAL EQUIPMENT
-    pickUpItem("EMF Reader");
-    pickUpItem("Thermometer");
-    pickUpItem("Spirit Box");
-
-    // ============================
-    // GHOST BEHAVIOR AND HUNTS
-    // ============================
-
-    function advanceTurn() {
-      gameState.turn++;
-      updateSanity();
-
-      if (shouldGhostRoam()) roamGhost();
-      maybeTriggerHunt();
-    }
-
-    function updateSanity() {
-      const inGhostRoom = getPlayerRoom() === gameState.ghostRoom;
-      let drain = 2 + Math.random() * 4;
-
-      if (inGhostRoom) drain += 5;
-      if (isGhostNearby()) drain += 4;
-      if (gameState.ghostType === "Demon") drain += 4;
-      if (gameState.ghostType === "Yurei" && gameState.yureiStuckTurns > 0) {
-        drain -= 4;
-        gameState.yureiStuckTurns--;
-      }
-
-      gameState.sanity = Math.max(0, gameState.sanity - drain);
-      logMessage(`Turn ${gameState.turn}. Sanity drained by ${drain.toFixed(1)}%.`);
-    }
-
-    function shouldGhostRoam() {
-      if (gameState.ghostType === "Goryo") return false;
-      return Math.random() < 0.1;
-    }
-
-    function roamGhost() {
-      const roomNames = Object.keys(roomZones);
-      let newRoom;
-      do {
-        newRoom = randomFromArray(roomNames);
-      } while (newRoom === gameState.ghostRoom);
-      gameState.ghostRoom = newRoom;
-      logMessage(`The ghost has moved...`);
-    }
-
-    function maybeTriggerHunt() {
-      if (gameState.sanity > 20) return;
-      if (gameState.turn - gameState.lastHuntTurn < gameState.ghostCooldown) return;
-      if (Math.random() < 0.4) {
-        startHunt();
-      }
-    }
-
-    function startHunt() {
-      gameState.lastHuntTurn = gameState.turn;
-      const crucifixProtected = gameState.turn - gameState.lastSmudgeOrCrucifixTurn <= 2;
-      if (crucifixProtected) {
-        logMessage("‼️ Crucifix prevented a hunt!");
-        return;
-      }
-
-      logMessage("💀 The ghost is hunting!");
-      showGhost();
-
-      setTimeout(() => {
-        const inSameRoom = getPlayerRoom() === gameState.ghostRoom;
-        if (inSameRoom && Math.random() < 0.7) {
-          logMessage("☠️ You were caught.");
-          endGame(false);
-        } else {
-          logMessage("😰 You survived the hunt.");
-        }
-        hideGhost();
-      }, 3000);
-    }
-
-    function showGhost() {
-      if (!ghostEntity) return;
-      ghostEntity.setEnabled(true);
-      ghostEntity.material.alpha = 1;
-    }
-
-    function hideGhost() {
-      if (!ghostEntity) return;
-      ghostEntity.setEnabled(false);
-    }
-
-    function isGhostNearby() {
-      return getPlayerRoom() === gameState.ghostRoom;
-    }
-
-    function endGame(success) {
-      const message = success ? "✅ You correctly identified the ghost!" : "💀 You died!";
-      logMessage(message + ` It was a ${gameState.ghostType}.`);
-      engine.stopRenderLoop();
-    }
-
-    function getPlayerRoom() {
-      for (const [room, box] of Object.entries(roomZones)) {
-        if (box.intersectsPoint(player.position)) return room;
-      }
-      return null;
-    }
-
-    // Start periodic turn advancement (1 turn every ~15 seconds)
-    setInterval(() => {
-      if (!gameState.ghostType) return;
-      advanceTurn();
-    }, 15000);
-
-    // ============================
-    // GHOST GUESSING & GAME ENDING
-    // ============================
-
-    function openGuessMenu() {
-      const guess = prompt("What ghost do you think it is?\n" + allGhosts.join(", "));
-      if (!guess) return;
-      if (guess.trim().toLowerCase() === gameState.ghostType.toLowerCase()) {
-        endGame(true);
-      } else {
-        endGame(false);
-      }
-    }
-
-    // ============================
-    // TOUCH CONTROLLER OVERLAY
-    // ============================
-
-    const hud = document.getElementById("hud");
-    hud.innerHTML += `
-      <div id="touch-controls" style="position: absolute; bottom: 60px; left: 20px; z-index: 100;">
-        <button onclick="movePlayer('up')" style="width:60px;height:60px;">⬆️</button><br>
-        <button onclick="movePlayer('left')" style="width:60px;height:60px;">⬅️</button>
-        <button onclick="movePlayer('down')" style="width:60px;height:60px;">⬇️</button>
-        <button onclick="movePlayer('right')" style="width:60px;height:60px;">➡️</button>
-      </div>
-      <div id="item-bar" style="position:absolute;bottom:0;left:0;width:100%;display:flex;justify-content:center;gap:10px;z-index:100;">
-        <div style="background:#222;padding:8px;border:1px solid #555;">1️⃣ ${gameState.items[0] || "-"}</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">2️⃣ ${gameState.items[1] || "-"}</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">3️⃣ ${gameState.items[2] || "-"}</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">🔥 Lighter</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">📓 Journal</div>
-      </div>
-      <button onclick="openGuessMenu()" style="position:absolute;top:10px;right:10px;z-index:100;">Guess Ghost</button>
-    `;
-
-    function movePlayer(direction) {
-      const moveAmount = 1;
-      switch (direction) {
-        case "up": player.position.z -= moveAmount; break;
-        case "down": player.position.z += moveAmount; break;
-        case "left": player.position.x -= moveAmount; break;
-        case "right": player.position.x += moveAmount; break;
-      }
-    }
-
-    // ============================
-    // SANITY BAR UI
-    // ============================
-
-    const sanityBar = document.createElement("div");
-    Object.assign(sanityBar.style, {
-      position: "absolute",
-      top: "10px",
-      left: "50%",
-      transform: "translateX(-50%)",
-      background: "#111",
-      border: "1px solid #999",
-      width: "200px",
-      height: "20px",
-      zIndex: 100
-    });
-    const sanityFill = document.createElement("div");
-    Object.assign(sanityFill.style, {
-      width: "100%",
-      height: "100%",
-      background: "lime"
-    });
-    sanityBar.appendChild(sanityFill);
-    document.body.appendChild(sanityBar);
-
-    function updateSanityBar() {
-      sanityFill.style.width = gameState.sanity + "%";
-      sanityFill.style.background = gameState.sanity < 20 ? "red" : gameState.sanity < 50 ? "orange" : "lime";
-    }
-
-    setInterval(updateSanityBar, 1000);
-
-    // ============================
-    // KEYBOARD SUPPORT
-    // ============================
-
-    window.addEventListener("keydown", e => {
-      switch (e.key.toLowerCase()) {
-        case "w": movePlayer("up"); break;
-        case "s": movePlayer("down"); break;
-        case "a": movePlayer("left"); break;
-        case "d": movePlayer("right"); break;
-        case "g": openGuessMenu(); break;
-      }
-    });
-
-    // ============================
-    // ITEM INTERACTION SYSTEM
-    // ============================
-
-    const itemEntities = {}; // roomName -> array of mesh items
-
-    function placeItem(itemName) {
-      if (!gameState.items.includes(itemName)) return;
-      if (!gameState.currentRoom) return;
-
-      const mesh = BABYLON.MeshBuilder.CreateBox(`${itemName}-${Date.now()}`, { size: 0.5 }, scene);
-      mesh.position = new BABYLON.Vector3(player.position.x, 0.25, player.position.z);
-      mesh.material = new BABYLON.StandardMaterial(`mat-${itemName}`, scene);
-      mesh.material.diffuseColor = BABYLON.Color3.Random();
-      mesh.metadata = { type: itemName };
-
-      if (!itemEntities[gameState.currentRoom]) itemEntities[gameState.currentRoom] = [];
-      itemEntities[gameState.currentRoom].push(mesh);
-
-      // Remove from player
-      const i = gameState.items.indexOf(itemName);
-      if (i !== -1) gameState.items.splice(i, 1);
-      refreshItemBar();
-    }
-
-    function pickupItemFromRoom() {
-      const roomItems = itemEntities[gameState.currentRoom] || [];
-      for (let i = 0; i < roomItems.length; i++) {
-        const mesh = roomItems[i];
-        const dist = BABYLON.Vector3.Distance(player.position, mesh.position);
-        if (dist < 2) {
-          if (gameState.items.length >= 3) return alert("Inventory full (3 items max). Drop one first.");
-          gameState.items.push(mesh.metadata.type);
-          mesh.dispose();
-          roomItems.splice(i, 1);
-          refreshItemBar();
-          break;
-        }
-      }
-    }
-
-    function refreshItemBar() {
-      const itemBar = document.getElementById("item-bar");
-      itemBar.innerHTML = `
-        <div style="background:#222;padding:8px;border:1px solid #555;">1️⃣ ${gameState.items[0] || "-"}</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">2️⃣ ${gameState.items[1] || "-"}</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">3️⃣ ${gameState.items[2] || "-"}</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">🔥 Lighter</div>
-        <div style="background:#222;padding:8px;border:1px solid #555;">📓 Journal</div>
-      `;
-    }
-
-    window.addEventListener("keydown", e => {
-      if (e.key === "e") pickupItemFromRoom();
-      if (e.key === "1") useItemSlot(0);
-      if (e.key === "2") useItemSlot(1);
-      if (e.key === "3") useItemSlot(2);
-    });
-
-    function useItemSlot(slot) {
-      const item = gameState.items[slot];
-      if (!item) return;
-
-      if (item === "Crucifix") {
-        placeItem(item);
-        gameState.activeItems.crucifix.push({ room: gameState.currentRoom, uses: 2 });
-      } else if (item === "Smudge Stick") {
-        if (gameState.ghostRoom === gameState.currentRoom) {
-          gameState.smudgeCooldown = 5;
-        }
-        gameState.items.splice(slot, 1);
-      } else if (item === "Camera") {
-        checkForGhostOrb();
-      } else {
-        placeItem(item);
-      }
-
-      refreshItemBar();
-    }
-
-    function checkForGhostOrb() {
-      if (gameState.ghostType === "Mimic" && gameState.currentRoom === gameState.ghostRoom) {
-        alert("You spot ghost orbs through the camera...");
-        if (!gameState.evidenceFound.includes("Ghost Orbs")) gameState.evidenceFound.push("Ghost Orbs");
-      } else if (ghostProfiles[gameState.ghostType].evidence.includes("Ghost Orbs") &&
-                 gameState.currentRoom === gameState.ghostRoom) {
-        alert("You spot ghost orbs through the camera.");
-        if (!gameState.evidenceFound.includes("Ghost Orbs")) gameState.evidenceFound.push("Ghost Orbs");
-      } else {
-        alert("No orbs detected.");
-      }
-    }
-
-    function openJournal() {
-      alert("Evidence found:\n" + gameState.evidenceFound.join(", "));
-    }
-
-    document.addEventListener("keydown", e => {
-      if (e.key === "j") openJournal();
-    });
-
-    // ============================
-    // GHOST EVENTS, ROAMING, HUNTS
-    // ============================
-
-    function randomGhostEvent() {
-      const r = Math.random();
-      const inGhostRoom = gameState.currentRoom === gameState.ghostRoom;
-
-      // Sanity drain (passive)
-      gameState.sanity -= inGhostRoom ? Math.random() * 3 + 2 : Math.random() * 2;
-
-      // Smudge effect wears off
-      if (gameState.smudgeCooldown > 0) gameState.smudgeCooldown--;
-
-      // Roaming logic (Goryo exception)
-      if (gameState.ghostType !== "Goryo" && Math.random() < 0.02) {
-        const possibleRooms = gameState.roomList.filter(r => r !== gameState.ghostRoom);
-        gameState.ghostRoom = randomFromArray(possibleRooms);
-      }
-
-      // Flicker ghost (chance)
-      if (inGhostRoom && Math.random() < 0.2) {
-        showGhost();
-        setTimeout(hideGhost, 3000);
-      }
-
-      // Hunt trigger
-      if (gameState.sanity < 20 && gameState.smudgeCooldown === 0) {
-        if (Math.random() < 0.1 * ghostProfiles[gameState.ghostType].aggression) {
-          startHunt();
-        }
-      }
-
-      updateHUD();
-    }
-
-    function showGhost() {
-      ghostMesh.visibility = 1;
-    }
-
-    function hideGhost() {
-      ghostMesh.visibility = 0;
-    }
-
-    function startHunt() {
-      ghostMesh.visibility = 1;
-      hud.innerText = "⚠️ The ghost is hunting! Find safety!";
-      setTimeout(() => {
-        const crucifix = gameState.activeItems.crucifix.find(c => c.room === gameState.currentRoom);
-        if (crucifix && crucifix.uses > 0) {
-          crucifix.uses--;
-          hud.innerText = "🙏 The crucifix saved you.";
-        } else {
-          endGame(false);
-        }
-        ghostMesh.visibility = 0;
-      }, 4000);
-    }
-
-    function endGame(won) {
-      engine.stopRenderLoop();
-      const msg = won ? "✅ You correctly identified the ghost!" : "☠️ You died.";
-      document.getElementById("hud").innerHTML = `${msg}<br><br><button onclick="location.reload()">Start New Game</button>`;
-    }
-
-    // ============================
-    // GHOST GUESSING INTERFACE
-    // ============================
-
-    function showGuessPopup() {
-      const modal = document.createElement("div");
-      modal.style.position = "absolute";
-      modal.style.top = "10%";
-      modal.style.left = "10%";
-      modal.style.width = "80%";
-      modal.style.height = "80%";
-      modal.style.background = "#000";
-      modal.style.color = "#fff";
-      modal.style.padding = "20px";
-      modal.style.zIndex = "9999";
-      modal.style.overflowY = "scroll";
-
-      modal.innerHTML = `<h2>Which ghost do you think it is?</h2>`;
-
-      Object.keys(ghostProfiles).forEach(ghost => {
-        const btn = document.createElement("button");
-        btn.textContent = ghost;
-        btn.style.margin = "4px";
-        btn.onclick = () => {
-          if (ghost === gameState.ghostType) {
-            endGame(true);
-          } else {
-            endGame(false);
-          }
-        };
-        modal.appendChild(btn);
-      });
-
-      const closeBtn = document.createElement("button");
-      closeBtn.innerText = "Cancel";
-      closeBtn.style.display = "block";
-      closeBtn.style.marginTop = "20px";
-      closeBtn.onclick = () => modal.remove();
-
-      modal.appendChild(closeBtn);
-      document.body.appendChild(modal);
-    }
-
-    document.addEventListener("keydown", e => {
-      if (e.key === "g") showGuessPopup();
-    });
-
-    // Call a ghost event every 10 seconds
-    setInterval(randomGhostEvent, 10000);
-
-  }); // End of createScene
-  window.addEventListener("resize", () => engine.resize());
+  }
+}
+
+function swapFromVan(item) {
+  if (heldItems.length >= 3) {
+    log("❌ Inventory full.");
+    return;
+  }
+  const index = vanItems.indexOf(item);
+  if (index !== -1) {
+    heldItems.push(item);
+    vanItems.splice(index, 1);
+    log(`🚐 Took ${item} from van`);
+  }
+}
+</script>
+
+<script>
+function log(msg) {
+  const hud = document.getElementById("hud");
+  hud.innerText += "\n" + msg;
+}
 </script>
 </body>
 </html>
