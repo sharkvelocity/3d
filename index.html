@@ -401,16 +401,9 @@ window.addEventListener("keydown", (e) => {
     case "v": playSpiritBox(); break;
   }
 });
-if (ghostType === "Onryo") {
-  const litCandles = countLitCandlesNearPlayer();
-  if (litCandles >= 3) triggerHunt();
 
-  const recentlyLit = getRecentlyLitCandle();
-  if (recentlyLit && timeSinceLit(recentlyLit) < 20) {
-    extinguishCandle(recentlyLit);
-  }
-}
-    // Setup basic camera (placeholder — will be replaced with player in PART 3)
+
+	// Setup basic camera (placeholder — will be replaced with player in PART 3)
     camera = new BABYLON.FreeCamera("freeCam", new BABYLON.Vector3(0, 2, -6), scene);
     camera.attachControl(canvas, true);
   
@@ -422,41 +415,55 @@ if (ghostType === "Onryo") {
 const activeGhost = ghostProfiles[Math.floor(Math.random() * ghostProfiles.length)];
 let mimicTarget = null;
 let mimicCounter = 0;
-
 function updateGhostBehavior(playerRoom, currentTurn, sanity) {
-  // Goryo logic: does not roam
+  // === Goryo Logic (does not roam)
   if (activeGhost.behavior.noWander) return;
 
-  // Mimic behavior swap every 3–6 turns
+  // === Mimic Logic: swaps behavior every 3–6 turns
   if (activeGhost.name === "The Mimic") {
     mimicCounter--;
     if (mimicCounter <= 0) {
       const otherGhosts = ghostProfiles.filter(g => g.name !== "The Mimic");
       mimicTarget = otherGhosts[Math.floor(Math.random() * otherGhosts.length)];
-      mimicCounter = 3 + Math.floor(Math.random() * 4);
+      mimicCounter = 3 + Math.floor(Math.random() * 4); // 3–6 turns
     }
   }
 
-  // Onryo behavior: hunt if too many candles or recently relit
+  // === Onryo Logic: hunts if too many candles or recently relit
   if (activeGhost.behavior.flameHunter) {
-    if (countLitFlames() >= 3) {
-      triggerHunt();
-    } else if (wasRelitCandleLitWithin(20)) {
-      extinguishFlame();
+    const litCandles = countLitCandlesNearPlayer?.() || countLitFlames(); // fallback to total
+    if (litCandles >= 3) triggerHunt();
+
+    if (wasRelitCandleLitWithin(20)) {
+      extinguishFlame(); // or extinguishCandle(candle)
       triggerHunt();
     }
   }
 
-  // Mare logic: randomly turns off light in player room
+  // === Mare Logic: turns off lights in player's room
   if (activeGhost.behavior.turnsOffLights && roomHasLight(playerRoom)) {
     maybeTurnOffLight(playerRoom);
   }
 
-  // Yurei smudge logic
+  // === Shade Logic: never interacts when player is in room
+  if (activeGhost.name === "Shade" && isPlayerInRoom(playerRoom)) return;
+
+  // === Yurei Smudge Lock
   if (activeGhost.name === "Yurei" && smudgeTurnsRemaining > 0) {
     smudgeTurnsRemaining--;
     return;
   }
+
+  // === Ghost Roaming
+  if (Math.random() < 0.2 && ghostCanRoam()) {
+    changeGhostRoom();
+  }
+
+  // === Hunt Chance (general)
+  if (sanity < 50 && Math.random() < 0.1) {
+    triggerHunt();
+  }
+}
 
   // Roaming chance
   if (Math.random() < 0.2 && ghostCanRoam()) {
@@ -492,7 +499,7 @@ function toggleEvidence(type) {
   console.log("Evidence:", evidenceCollected);
 }
 
-if (activeGhost.name === "Shade" && isPlayerInRoom(roomMesh.name)) return;
+
 
 // === Ghost Guess ===
 function submitGuess() {
