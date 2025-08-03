@@ -776,3 +776,121 @@ function ghostInteractionEvent() {
 }
 
 </script>
+<script>
+// === FLAME / CANDLE OBJECTS ===
+let flameMeshes = []; // [{mesh, roomName, lit, lastExtinguishedAt}]
+const flameCooldown = 20000; // 20s between Onryo flame extinguish
+
+function spawnCandle(position, roomName) {
+  const base = BABYLON.MeshBuilder.CreateCylinder("candleBase", { height: 0.4, diameter: 0.3 }, scene);
+  base.position = position.clone();
+  base.material = new BABYLON.StandardMaterial("candleMat", scene);
+  base.material.diffuseColor = new BABYLON.Color3(1, 1, 1);
+
+  const flame = BABYLON.MeshBuilder.CreateSphere("flame", { diameter: 0.15 }, scene);
+  flame.position = position.add(new BABYLON.Vector3(0, 0.3, 0));
+  flame.material = new BABYLON.StandardMaterial("flameMat", scene);
+  flame.material.emissiveColor = new BABYLON.Color3(1, 0.6, 0.1);
+  flame.isVisible = true;
+
+  flameMeshes.push({ mesh: flame, roomName, lit: true, lastExtinguishedAt: 0 });
+}
+
+// Example flame setup (put candles in house)
+scene.onReadyObservable.add(() => {
+  spawnCandle(new BABYLON.Vector3(2, 0.5, -4), "Living Room");
+  spawnCandle(new BABYLON.Vector3(-3, 0.5, 1), "Foyer");
+});
+
+// === ONRYO FLAME CHECK ===
+scene.onBeforeRenderObservable.add(() => {
+  if (currentGhost.name !== "Onryo") return;
+
+  const nearbyLitFlames = flameMeshes.filter(f =>
+    f.lit && f.roomName === ghostRoom
+  );
+
+  // 🔥 3 flames → instant hunt
+  if (nearbyLitFlames.length >= 3 && !isHunting) {
+    console.log("🔥 Onryo triggered by 3 flames");
+    startHunt();
+  }
+
+  // 🔥 Extinguish flames
+  nearbyLitFlames.forEach(flame => {
+    if (Date.now() - flame.lastExtinguishedAt > flameCooldown && Math.random() < 0.01) {
+      flame.mesh.isVisible = false;
+      flame.lit = false;
+      flame.lastExtinguishedAt = Date.now();
+      console.log("🔥 Onryo extinguished a candle");
+    }
+  });
+});
+
+// === RELIGHT FLAME (requires lighter) ===
+function relightNearbyCandle() {
+  if (!playerInventory.includes("Lighter")) return;
+  const nearby = flameMeshes.find(f =>
+    !f.lit && BABYLON.Vector3.Distance(f.mesh.position, playerMesh.position) < 2
+  );
+  if (nearby) {
+    nearby.mesh.isVisible = true;
+    nearby.lit = true;
+    console.log("🕯️ Candle re-lit");
+  }
+}
+
+// Bind to key press (e.g. L to relight)
+scene.onKeyboardObservable.add(kb => {
+  if (kb.type === BABYLON.KeyboardEventTypes.KEYUP && kb.event.key === "l") {
+    relightNearbyCandle();
+  }
+});
+</script>
+
+<script>
+// === IR CAMERA / ORB VISIBILITY ===
+let orbEntities = [];
+let usingCamera = false;
+
+function spawnGhostOrbs(roomName) {
+  for (let i = 0; i < 5; i++) {
+    const orb = BABYLON.MeshBuilder.CreateSphere("orb", { diameter: 0.1 }, scene);
+    orb.position = roomMeshes[roomName].getAbsolutePosition().add(new BABYLON.Vector3(
+      Math.random() * 4 - 2,
+      1.5 + Math.random(),
+      Math.random() * 4 - 2
+    ));
+    orb.material = new BABYLON.StandardMaterial("orbMat", scene);
+    orb.material.emissiveColor = new BABYLON.Color3(0.5, 0.5, 1);
+    orb.visibility = 0;
+    orbEntities.push({ mesh: orb, room: roomName });
+  }
+}
+
+// Spawn mimic orbs at ghost room on init
+scene.onReadyObservable.add(() => {
+  if (currentGhost.name === "Mimic") {
+    spawnGhostOrbs(ghostRoom); // fake orbs
+  } else if (currentGhost.evidence.includes("Orbs")) {
+    spawnGhostOrbs(ghostRoom);
+  }
+}
+
+// === IR CAMERA VISIBILITY TOGGLE ===
+scene.onBeforeRenderObservable.add(() => {
+  const holdingCamera = usingCamera || playerInventory.includes("Camera");
+  orbEntities.forEach(orb => {
+    const inRoom = getCurrentRoomName() === orb.room;
+    orb.mesh.visibility = holdingCamera && inRoom ? 1 : 0;
+  });
+});
+
+// === Toggle IR Camera View ===
+document.addEventListener("keydown", e => {
+  if (e.key === "c") {
+    usingCamera = !usingCamera;
+    console.log(usingCamera ? "📷 IR Camera activated" : "📷 IR Camera off");
+  }
+});
+</script>
