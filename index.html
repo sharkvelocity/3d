@@ -1,896 +1,733 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>Phasma‑Phoney 3D</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  
+  <!-- Babylon.js CDN -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylon.glTF2FileLoader.min.js"></script>
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+
+  <!-- Styling -->
   <style>
     html, body {
-      margin: 0; padding: 0;
-      width: 100%; height: 100%;
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
       overflow: hidden;
-      background: black;
-    }
-    #renderCanvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    #touch-controls {
-      position: absolute;
-      left: 10px;
-      bottom: 10px;
-      z-index: 20;
-    }
-    #touch-controls button {
-      background: rgba(255,255,255,0.2);
+      background-color: black;
+      font-family: monospace, sans-serif;
       color: white;
-      font-size: 20px;
-      margin: 2px;
-      width: 50px; height: 50px;
-      border: 1px solid white;
-      border-radius: 6px;
     }
+
+    #renderCanvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      touch-action: none;
+    }
+
     #hud {
       position: absolute;
-      top: 10px; left: 10px;
-      color: white;
-      font-family: monospace;
-      font-size: 14px;
-      background: rgba(0,0,0,0.4);
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.5);
       padding: 8px;
       border-radius: 6px;
+      font-size: 14px;
+    }
+
+    #van-monitor {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: black;
+      color: lime;
+      font-family: monospace;
+      font-size: 18px;
+      padding: 20px;
+      display: none;
       z-index: 50;
     }
-    #item-bar {
+
+    #nosignal {
+      display: none;
       position: absolute;
-      bottom: 10px;
+      top: 50%;
       left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      gap: 6px;
-      z-index: 30;
+      width: 320px;
+      height: auto;
+      transform: translate(-50%, -50%);
+      z-index: 9999;
     }
-    .item-slot {
-      width: 48px;
-      height: 48px;
-      background: rgba(255,255,255,0.15);
-      border: 2px solid white;
+
+    #notebookUI, #guessModal {
+      z-index: 20;
+      position: absolute;
+      background: rgba(0,0,0,0.85);
+      border: 1px solid #555;
       border-radius: 8px;
+      padding: 10px;
+      display: none;
+      color: #fff;
     }
+
+    .hidden { display: none; }
+	
+	#evidence-buttons button {
+  margin: 4px;
+  padding: 8px 12px;
+  font-family: monospace;
+}
+
+.found {
+  background-color: #0f0;
+  color: black;
+}
+
+.eliminated {
+  background-color: #900;
+  color: white;
+  text-decoration: line-through;
+}
+
+#ghost-suggestions {
+  margin-top: 10px;
+  padding: 5px;
+  border-top: 1px solid #666;
+}
+.ghost-match {
+  padding: 4px;
+  font-weight: bold;
+  color: #fff;
+}
+
   </style>
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
+
 <body>
+  <!-- Babylon.js render canvas -->
   <canvas id="renderCanvas"></canvas>
-  <div id="hud">Sanity: 100%</div>
-  <div id="item-bar">
-    <div class="item-slot" id="slot1"></div>
-    <div class="item-slot" id="slot2"></div>
-    <div class="item-slot" id="slot3"></div>
-    <div class="item-slot" id="slot4">🔥</div>
-    <div class="item-slot" id="slot5">📓</div>
-  </div>
-  <div id="touch-controls">
-    <button onclick="move('up')">↑</button><br>
-    <button onclick="move('left')">←</button>
-    <button onclick="move('down')">↓</button>
-    <button onclick="move('right')">→</button>
-  </div>
-  <div id="inventory-bar">
-  <div class="inv-slot" onclick="useItem(0)"></div>
-  <div class="inv-slot" onclick="useItem(1)"></div>
-  <div class="inv-slot" onclick="useItem(2)"></div>
-  <div class="inv-slot" id="inv-lighter">Lighter</div>
-  <div class="inv-slot" id="inv-journal">Notebook</div>
+
+  <!-- Fallback NO SIGNAL image -->
+  <img src="nosignal.gif" id="nosignal" alt="No Signal">
+
+  <!-- UI Containers -->
+  <div id="hud">Loading...</div>
+  <div id="van-monitor"></div>
+  <div id="notebookUI"></div>
+  <div id="guessModal"></div>
+  <!-- === HUD OVERLAY === -->
+<div id="hud" style="position: absolute; top: 10px; left: 10px; color: white; font-family: monospace; font-size: 14px; background: rgba(0,0,0,0.5); padding: 8px; border-radius: 6px; z-index: 100;">
+  <div>Room: <span id="room-label">Van</span></div>
+  <div>Sanity: <span id="sanity-label">100%</span></div>
+  <div>Weather: <span id="weather-label">Clear</span></div>
 </div>
 
-<style>
-#inventory-bar {
-  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
-  display: flex; gap: 10px; font-family: monospace;
-  background: rgba(0,0,0,0.4); padding: 6px 10px; border-radius: 6px;
-}
-.inv-slot {
-  min-width: 60px; padding: 4px 8px; background: #222; color: white;
-  border: 1px solid #888; cursor: pointer; text-align: center;
-}
-</style>
+<!-- === BUTTONS === -->
+<div id="hud-buttons" style="position: absolute; bottom: 10px; left: 10px; display: flex; gap: 10px; z-index: 100;">
+  <button onclick="toggleNotebook()">Notebook</button>
+  <button onclick="toggleGuess()">Guess Ghost</button>
+</div>
 
+<!-- === NOTEBOOK PANEL === -->
+<div id="notebook" style="position: absolute; bottom: 60px; left: 10px; width: 300px; background: rgba(30,30,30,0.9); padding: 10px; border-radius: 6px; color: white; font-family: monospace; display: none; z-index: 200;">
+<div id="evidence-buttons">
+  <h3>Evidence</h3>
+  <div class="evi-group">
+    <button id="evi-EMF" onclick="toggleEvidence('EMF')">EMF</button>
+    <button id="evi-Spirit Box" onclick="toggleEvidence('Spirit Box')">Spirit Box</button>
+    <button id="evi-Fingerprints" onclick="toggleEvidence('Fingerprints')">Fingerprints</button>
+    <button id="evi-Orbs" onclick="toggleEvidence('Orbs')">Ghost Orbs</button>
+    <button id="evi-Writing" onclick="toggleEvidence('Writing')">Ghost Writing</button>
+    <button id="evi-Freezing" onclick="toggleEvidence('Freezing')">Freezing Temps</button>
+    <button id="evi-D.O.T.S" onclick="toggleEvidence('D.O.T.S')">D.O.T.S</button>
+  </div>
+</div>
+
+<div id="ghost-suggestions">
+  <!-- Matching ghosts shown here -->
+</div>
+
+
+<!-- === GUESS PANEL === -->
+<div id="guess-panel" style="position: absolute; bottom: 60px; left: 10px; width: 300px; background: rgba(20,20,20,0.95); padding: 10px; border-radius: 6px; color: white; font-family: monospace; display: none; z-index: 200;">
+  <h3>Ghost Guess</h3>
+  <select id="ghost-select" style="width: 100%; margin-bottom: 8px;">
+    <option disabled selected>Select Ghost</option>
+    <!-- Filled dynamically -->
+  </select>
+  <button onclick="submitGuess()">Submit Guess</button>
+</div>
+
+<!-- === FADE SCREEN === -->
+<div id="fade-screen" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: black; opacity: 0; z-index: 1000; pointer-events: none; transition: opacity 1s;"></div>
+</div>
 <script>
-let canvas = document.getElementById("renderCanvas");
-let engine = new BABYLON.Engine(canvas, true);
-let scene, camera, playerMesh, ghostEntity, isThirdPerson = false;
+  let canvas = document.getElementById("renderCanvas");
+  let engine = new BABYLON.Engine(canvas, true);
+  let scene, camera, player, house, shadowGenerator;
 
-let roomMeshes = {}; // e.g. { "Kitchen": mesh, "Basement": mesh }
-let ghostRoom = "", ghostVisible = false;
+  async function createScene() {
+    scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color3.Black();
+    scene.ambientColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+    scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+    scene.fogDensity = 0.01;
+    scene.fogColor = new BABYLON.Color3(0, 0, 0);
 
-window.addEventListener("DOMContentLoaded", () => {
-  scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
-  scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-  scene.fogDensity = 0.015;
-  scene.fogColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+    // Create hemispheric light (soft ambient)
+    const light = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), scene);
+    light.intensity = 0.5;
 
-  // Ambient Light
-  const hemiLight = new BABYLON.HemisphericLight("hLight", new BABYLON.Vector3(0, 1, 0), scene);
-  hemiLight.intensity = 0.5;
+    // Directional light for shadows
+    const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
+    dirLight.position = new BABYLON.Vector3(10, 20, 10);
+    dirLight.intensity = 0.8;
+    shadowGenerator = new BABYLON.ShadowGenerator(1024, dirLight);
+    shadowGenerator.useBlurExponentialShadowMap = true;
+    shadowGenerator.blurKernel = 32;
 
-  // Player Camera
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, -10), scene);
-  camera.attachControl(canvas, true);
-  camera.speed = 0.3;
-  camera.ellipsoid = new BABYLON.Vector3(1, 1, 1);
+    // Create skybox (optional starry dark night)
+    const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, scene);
+    const skyMat = new BABYLON.StandardMaterial("skyBox", scene);
+    skyMat.backFaceCulling = false;
+    skyMat.disableLighting = true;
+    skyMat.diffuseColor = new BABYLON.Color3.Black();
+    skyMat.specularColor = new BABYLON.Color3.Black();
+    skyMat.emissiveTexture = new BABYLON.Texture("https://assets.babylonjs.com/environments/night.jpg", scene);
+    skyMat.emissiveTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+    skybox.material = skyMat;
 
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "v") toggleCamera();
+    // Load the Abandoned House model
+    await BABYLON.SceneLoader.AppendAsync("", "Abandoned_House.glb", scene);
+    house = scene.meshes.find(m => m.name.includes("House") || m.name.includes("Root"));
+
+    if (house) {
+      house.receiveShadows = true;
+      house.getChildMeshes().forEach(m => {
+        m.receiveShadows = true;
+        shadowGenerator.addShadowCaster(m);
+      });
+    }
+const inventory = [];
+let heldItem = null;
+let orbCameraActive = false;
+async function loadItemMesh(name, file, scale = 1) {
+  const result = await BABYLON.SceneLoader.ImportMeshAsync("", "models/items/", file, scene);
+  const mesh = result.meshes[0];
+  mesh.name = name;
+  mesh.scaling.scaleInPlace(scale);
+  mesh.setEnabled(false); // Hide until picked
+  return mesh;
+}
+function equipItem(mesh) {
+  heldItem = mesh;
+  mesh.setEnabled(true);
+  mesh.parent = camera;
+  mesh.position.set(0.3, -0.3, 0.6);
+  mesh.rotation.set(0, Math.PI, 0);
+}
+
+function dropHeldItem() {
+  if (!heldItem) return;
+  heldItem.setEnabled(true);
+  heldItem.setParent(null);
+  heldItem.position = camera.position.add(camera.getForwardRay().direction.scale(1));
+  inventory.push(heldItem);
+  heldItem = null;
+}
+
+async function setupItems() {
+  const items = {
+    emf: await loadItemMesh("EMF", "emf.glb", 0.5),
+    spiritBox: await loadItemMesh("SpiritBox", "spiritbox.glb", 0.5),
+    flashlight: await loadItemMesh("Flashlight", "flashlight.glb", 0.4),
+    candle: await loadItemMesh("Candle", "candle.glb", 0.5),
+    camera: await loadItemMesh("Camera", "camera.glb", 0.5)
+  };
+  inventory.push(items.emf, items.spiritBox, items.flashlight);
+  equipItem(items.emf);
+}
+function toggleCandle(mesh) {
+  if (!mesh.light) {
+    mesh.light = new BABYLON.PointLight("flame", mesh.position, scene);
+    mesh.light.intensity = 1.0;
+    mesh.light.range = 2;
+    mesh.material.emissiveColor = new BABYLON.Color3(1, 0.6, 0.2);
+  } else {
+    mesh.light.dispose();
+    delete mesh.light;
+    mesh.material.emissiveColor = BABYLON.Color3.Black();
+  }
+}
+function toggleCameraView() {
+  orbCameraActive = !orbCameraActive;
+  if (orbCameraActive) {
+    showFloatingOrbs(true); // your ghost-room only orb reveal function
+    playSound("Camera_ON");
+  } else {
+    showFloatingOrbs(false);
+    playSound("Camera_OFF");
+  }
+}
+function playSpiritBox() {
+  if (!heldItem || heldItem.name !== "SpiritBox") return;
+  const ghostInRoom = isPlayerInGhostRoom();
+  const chance = ghostInRoom ? 0.5 : 0.1;
+  if (Math.random() < chance) playSound("SpiritBox_Reply");
+}
+function checkEMFTrigger() {
+  const ghostNearby = isPlayerNearGhost();
+  if (ghostNearby && heldItem?.name === "EMF") {
+    playSound("EMF_Beep");
+    pulseEMFVisual(heldItem);
+  }
+}
+function playSound(name) {
+  const snd = new BABYLON.Sound(name, `sounds/${name}.mp3`, scene, null, {
+    volume: 1.0,
+    autoplay: true
   });
+}
+window.addEventListener("keydown", (e) => {
+  switch (e.key) {
+    case "f": if (heldItem?.name === "Flashlight") toggleFlashlight(heldItem); break;
+    case "c": if (heldItem?.name === "Candle") toggleCandle(heldItem); break;
+    case "e": if (heldItem?.name === "Camera") toggleCameraView(); break;
+    case "x": dropHeldItem(); break;
+    case "v": playSpiritBox(); break;
+  }
+});
+if (ghostType === "Onryo") {
+  const litCandles = countLitCandlesNearPlayer();
+  if (litCandles >= 3) triggerHunt();
 
-  function toggleCamera() {
-    isThirdPerson = !isThirdPerson;
-    if (isThirdPerson && playerMesh) {
-      camera.lockedTarget = playerMesh;
-      camera.radius = 8;
-    } else {
-      camera.lockedTarget = null;
-      camera.position = playerMesh ? playerMesh.position.add(new BABYLON.Vector3(0, 2, -6)) : camera.position;
+  const recentlyLit = getRecentlyLitCandle();
+  if (recentlyLit && timeSinceLit(recentlyLit) < 20) {
+    extinguishCandle(recentlyLit);
+  }
+}
+
+    // Setup basic camera (placeholder — will be replaced with player in PART 3)
+    camera = new BABYLON.FreeCamera("freeCam", new BABYLON.Vector3(0, 2, -6), scene);
+    camera.attachControl(canvas, true);
+  }
+
+  createScene().then(() => engine.runRenderLoop(() => scene.render()));
+  window.addEventListener("resize", () => engine.resize());
+</script>
+<script>
+const activeGhost = ghostProfiles[Math.floor(Math.random() * ghostProfiles.length)];
+let mimicTarget = null;
+let mimicCounter = 0;
+function updateGhostBehavior(playerRoom, currentTurn, sanity) {
+  // Goryo logic
+  if (activeGhost.behavior.noWander) return;
+
+  // Mimic behavior swap
+  if (activeGhost.name === "The Mimic") {
+    mimicCounter--;
+    if (mimicCounter <= 0) {
+      const otherGhosts = ghostProfiles.filter(g => g.name !== "The Mimic");
+      mimicTarget = otherGhosts[Math.floor(Math.random() * otherGhosts.length)];
+      mimicCounter = 3 + Math.floor(Math.random() * 4); // 3–6 turns
     }
   }
 
-  // Load GLB model
-  BABYLON.SceneLoader.ImportMeshAsync(null, "./", "Abandoned_House.glb", scene).then(result => {
-    const root = result.meshes[0];
+  // Onryo fire logic
+  if (activeGhost.behavior.flameHunter) {
+    if (countLitFlames() >= 3) {
+      triggerHunt();
+    } else if (wasRelitCandleLitWithin(20)) {
+      extinguishFlame();
+      triggerHunt();
+    }
+  }
 
-    // Identify rooms by name and store references
-    result.meshes.forEach(mesh => {
-      if (mesh.name.includes("Room") || mesh.name.includes("room") || mesh.name.match(/(Foyer|Kitchen|Basement|Bedroom|Garage|Living|Bathroom|Dining)/i)) {
-        roomMeshes[mesh.name] = mesh;
-      }
-    });
+  // Mare lighting logic
+  if (activeGhost.behavior.turnsOffLights && roomHasLight(playerRoom)) {
+    maybeTurnOffLight(playerRoom);
+  }
 
-    console.log("🏠 Rooms found:", Object.keys(roomMeshes));
+  // Yurei smudge lock
+  if (activeGhost.name === "Yurei" && smudgeTurnsRemaining > 0) {
+    smudgeTurnsRemaining--;
+    return;
+  }
 
-    // Place ghost in random room
-    const roomNames = Object.keys(roomMeshes);
-    ghostRoom = roomNames[Math.floor(Math.random() * roomNames.length)];
-    const ghostMesh = roomMeshes[ghostRoom];
+  // Roaming logic
+  if (Math.random() < 0.2 && ghostCanRoam()) {
+    changeGhostRoom();
+  }
 
-    ghostEntity = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 1.5 }, scene);
-    ghostEntity.position = ghostMesh.getAbsolutePosition().add(new BABYLON.Vector3(0, 2, 0));
-    ghostEntity.isVisible = false;
+  // Hunt logic
+  if (sanity < 50 && Math.random() < 0.1) {
+    triggerHunt();
+  }
+}
 
-    // Player mesh
-    playerMesh = BABYLON.MeshBuilder.CreateBox("player", { size: 1 }, scene);
-    playerMesh.position = new BABYLON.Vector3(0, 1, -12); // Outside front door
-    playerMesh.visibility = 0; // invisible box, camera represents view
+const evidenceCollected = [];
 
-    // Attach camera to player
-    camera.position = playerMesh.position.add(new BABYLON.Vector3(0, 2, -6));
+function toggleNotebook() {
+  const el = document.getElementById('notebook');
+  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
 
-    engine.runRenderLoop(() => {
-      scene.render();
-    });
+function toggleGuess() {
+  const el = document.getElementById('guess-panel');
+  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
+
+function toggleEvidence(type) {
+  const idx = evidenceCollected.indexOf(type);
+  if (idx === -1) {
+    evidenceCollected.push(type);
+  } else {
+    evidenceCollected.splice(idx, 1);
+  }
+  console.log("Evidence:", evidenceCollected);
+}
+if (ghostType === "Shade" && isPlayerInRoom(roomMesh.name)) return;
+
+function submitGuess() {
+  const ghost = document.getElementById("ghost-select").value;
+  if (!ghost) return;
+  alert("You guessed: " + ghost); // Replace with actual endgame logic
+}
+
+function updateHUD(room, sanity, weather) {
+  document.getElementById("room-label").innerText = room || "???";
+  document.getElementById("sanity-label").innerText = sanity + "%";
+  document.getElementById("weather-label").innerText = weather || "???";
+}
+
+function fadeScreen(toBlack = true, duration = 1000) {
+  const screen = document.getElementById("fade-screen");
+  screen.style.transition = `opacity ${duration / 1000}s`;
+  screen.style.opacity = toBlack ? "1" : "0";
+}
+
+let currentCamera, fpCamera, tpCamera, cameraMode = "first";
+let mobileJoystick = null;
+let ambientSound;
+
+function setAmbientWeatherSound(weather = "rain") {
+  if (ambientSound) ambientSound.stop();
+
+  const file = weather === "rain" ? "rainstorm.mp3" : "clearWeather.mp3";
+  ambientSound = new BABYLON.Sound("ambient", `sounds/${file}`, scene, null, {
+    loop: true,
+    autoplay: true,
+    volume: 0.4
   });
-});
+}
+
+function setupPlayerAndCamera(scene, canvas) {
+  // === First-Person Camera (default) ===
+  fpCamera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(0, 1.8, -10), scene);
+  fpCamera.attachControl(canvas, true);
+  fpCamera.applyGravity = true;
+  fpCamera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
+  fpCamera.checkCollisions = true;
+  fpCamera.speed = 0.25;
+
+  // === Third-Person Camera ===
+  tpCamera = new BABYLON.FollowCamera("tpCamera", new BABYLON.Vector3(0, 5, -10), scene);
+  tpCamera.lockedTarget = fpCamera; // Follows player body
+  tpCamera.radius = 6;
+  tpCamera.heightOffset = 3;
+  tpCamera.rotationOffset = 180;
+  tpCamera.cameraAcceleration = 0.05;
+  tpCamera.maxCameraSpeed = 10;
+
+  currentCamera = fpCamera;
+  scene.activeCamera = currentCamera;
+  currentCamera.attachControl(canvas, true);
+
+  // === Movement Keys ===
+  const inputMap = {};
+  scene.actionManager = new BABYLON.ActionManager(scene);
+  scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, evt => inputMap[evt.sourceEvent.key.toLowerCase()] = true));
+  scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, evt => inputMap[evt.sourceEvent.key.toLowerCase()] = false));
+
+  scene.onBeforeRenderObservable.add(() => {
+    let direction = new BABYLON.Vector3.Zero();
+    const forward = currentCamera.getDirection(BABYLON.Axis.Z);
+    const right = currentCamera.getDirection(BABYLON.Axis.X);
+
+    if (inputMap["w"]) direction.addInPlace(forward);
+    if (inputMap["s"]) direction.subtractInPlace(forward);
+    if (inputMap["a"]) direction.subtractInPlace(right);
+    if (inputMap["d"]) direction.addInPlace(right);
+
+    direction.y = 0;
+    direction.normalize();
+    direction.scaleInPlace(currentCamera.speed);
+
+    currentCamera.cameraDirection.addInPlace(direction);
+  });
+
+  // === Toggle Camera (First/Third) ===
+  window.addEventListener('keydown', e => {
+    if (e.key === 'v') {
+      currentCamera.detachControl(canvas);
+      cameraMode = cameraMode === "first" ? "third" : "first";
+      currentCamera = (cameraMode === "first") ? fpCamera : tpCamera;
+      scene.activeCamera = currentCamera;
+      currentCamera.attachControl(canvas, true);
+    }
+  });
+
+  // === Mobile Joystick (optional) ===
+  if (BABYLON.GUI) {
+    mobileJoystick = createMobileJoystick(scene);
+  }
+}
+
+function createMobileJoystick(scene) {
+  // TODO: Add GUI touch joystick later
+  return null;
+}
 </script>
   <script>
-// === GHOST PROFILES ===
 const ghostProfiles = [
   {
     name: "Spirit",
-    evidence: ["EMF 5", "Spirit Box", "Ghost Writing"],
-    aggression: 1,
-    huntCooldown: 10,
+    evidence: ["EMF", "Spirit Box", "Writing"],
     behavior: {}
   },
   {
     name: "Wraith",
-    evidence: ["EMF 5", "Spirit Box", "D.O.T.S Projector"],
-    aggression: 1.2,
-    huntCooldown: 8,
+    evidence: ["EMF", "Spirit Box", "D.O.T.S"],
     behavior: { noFootprints: true }
   },
   {
     name: "Phantom",
-    evidence: ["Spirit Box", "Fingerprints", "D.O.T.S Projector"],
-    aggression: 1,
-    huntCooldown: 10,
-    behavior: { cameraWeakness: true }
+    evidence: ["Spirit Box", "Fingerprints", "D.O.T.S"],
+    behavior: { blinkDisappear: true }
   },
   {
     name: "Poltergeist",
-    evidence: ["Spirit Box", "Fingerprints", "Ghost Writing"],
-    aggression: 1.1,
-    huntCooldown: 9,
-    behavior: { throwsObjects: true }
+    evidence: ["Spirit Box", "Fingerprints", "Writing"],
+    behavior: { throwsItems: true }
   },
   {
     name: "Banshee",
-    evidence: ["Fingerprints", "Ghost Orb", "D.O.T.S Projector"],
-    aggression: 1,
-    huntCooldown: 9,
-    behavior: { targetsOnePlayer: true }
+    evidence: ["Orbs", "Fingerprints", "D.O.T.S"],
+    behavior: { targetsSinglePlayer: true }
   },
   {
     name: "Jinn",
-    evidence: ["EMF 5", "Fingerprints", "Freezing Temps"],
-    aggression: 1.3,
-    huntCooldown: 10,
-    behavior: { prefersPowerOn: true }
+    evidence: ["EMF", "Fingerprints", "Freezing"],
+    behavior: { fastWhenPowerOn: true }
   },
   {
     name: "Mare",
-    evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"],
-    aggression: 1.2,
-    huntCooldown: 9,
+    evidence: ["Spirit Box", "Orbs", "Writing"],
     behavior: {
-      neverTurnOnLights: true,
-      prefersDarkRooms: true,
-      aggressiveInDark: true,
-      roomShiftable: true,
-      canFlipLightOffQuickly: true
+      prefersDark: true,
+      turnsOffLights: true,
+      neverTurnsOnLights: true,
+      roomAffinityDark: true
     }
   },
   {
     name: "Revenant",
-    evidence: ["Ghost Writing", "Ghost Orb", "Freezing Temps"],
-    aggression: 1.5,
-    huntCooldown: 12,
-    behavior: { fasterWhenSeen: true }
+    evidence: ["Orbs", "Writing", "Freezing"],
+    behavior: { fastWhenSeen: true }
   },
   {
     name: "Shade",
-    evidence: ["EMF 5", "Ghost Writing", "Freezing Temps"],
-    aggression: 0.6,
-    huntCooldown: 12,
-    behavior: { avoidsPlayer: true }
+    evidence: ["EMF", "Writing", "Freezing"],
+    behavior: { shy: true }
   },
   {
     name: "Demon",
-    evidence: ["Fingerprints", "Ghost Writing", "Freezing Temps"],
-    aggression: 1.6,
-    huntCooldown: 5,
-    behavior: { earlyHunt: true }
+    evidence: ["Fingerprints", "Writing", "Freezing"],
+    behavior: { huntsEarly: true }
   },
   {
     name: "Yurei",
-    evidence: ["Ghost Orb", "Freezing Temps", "D.O.T.S Projector"],
-    aggression: 1.1,
-    huntCooldown: 8,
-    behavior: { sanityDrainBurst: true, smudgeLock: true }
+    evidence: ["Orbs", "Freezing", "D.O.T.S"],
+    behavior: { smudgeLock: 5 }
   },
   {
     name: "Oni",
-    evidence: ["EMF 5", "Freezing Temps", "D.O.T.S Projector"],
-    aggression: 1.3,
-    huntCooldown: 9,
-    behavior: { veryVisible: true }
+    evidence: ["EMF", "Freezing", "D.O.T.S"],
+    behavior: { active: true }
   },
   {
     name: "Hantu",
-    evidence: ["Fingerprints", "Ghost Orb", "Freezing Temps"],
-    aggression: 1.2,
-    huntCooldown: 10,
-    behavior: { coldSpeedBoost: true, disablesBreaker: true }
+    evidence: ["Fingerprints", "Orbs", "Freezing"],
+    behavior: { breakerOff: true, colderFaster: true }
   },
   {
     name: "Goryo",
-    evidence: ["EMF 5", "Fingerprints", "D.O.T.S Projector"],
-    aggression: 1,
-    huntCooldown: 10,
-    behavior: { fixedRoom: true, dotsOnlyOnCamera: true }
+    evidence: ["EMF", "Fingerprints", "D.O.T.S"],
+    behavior: { noWander: true }
   },
   {
     name: "Myling",
-    evidence: ["EMF 5", "Fingerprints", "Ghost Writing"],
-    aggression: 1.1,
-    huntCooldown: 9,
-    behavior: { quietSteps: true }
+    evidence: ["EMF", "Fingerprints", "Writing"],
+    behavior: { silentSteps: true }
   },
   {
     name: "Onryo",
-    evidence: ["Spirit Box", "Ghost Orb", "Freezing Temps"],
-    aggression: 1.2,
-    huntCooldown: 8,
+    evidence: ["Spirit Box", "Orbs", "Freezing"],
     behavior: {
-      reactsToFlames: true,
-      won’tHuntNearFlame: true,
-      flameExtinguishTrigger: true
+      flameHunter: true,
+      avoidsFire: true,
+      tripleCandleHunt: true,
+      relightTimer: 20
     }
   },
   {
     name: "The Twins",
-    evidence: ["EMF 5", "Spirit Box", "Freezing Temps"],
-    aggression: 1.3,
-    huntCooldown: 9,
-    behavior: { mimicMultipleRooms: true }
+    evidence: ["EMF", "Spirit Box", "Freezing"],
+    behavior: { doubleActivity: true }
   },
   {
     name: "Raiju",
-    evidence: ["EMF 5", "Ghost Orb", "D.O.T.S Projector"],
-    aggression: 1.4,
-    huntCooldown: 8,
-    behavior: { feedsOnElectronics: true }
+    evidence: ["EMF", "Orbs", "D.O.T.S"],
+    behavior: { electronicsSpeedBoost: true }
   },
   {
     name: "Obake",
-    evidence: ["EMF 5", "Ghost Orb", "Fingerprints"],
-    aggression: 1.2,
-    huntCooldown: 9,
-    behavior: { fingerprintShapeShift: true }
+    evidence: ["EMF", "Fingerprints", "Orbs"],
+    behavior: { rareFingerprint: true }
   },
   {
     name: "The Mimic",
-    evidence: ["Spirit Box", "Fingerprints", "Freezing Temps"],
-    aggression: 1,
-    huntCooldown: 10,
-    behavior: {
-      fakeOrbs: true,
-      mimicOtherGhosts: true,
-      changeMimicTarget: true
-    }
+    evidence: ["Spirit Box", "Fingerprints", "Freezing"], // +fake orbs
+    behavior: { mimic: true, mimicTimer: 3 }
   },
   {
     name: "Moroi",
-    evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"],
-    aggression: 1.3,
-    huntCooldown: 8,
-    behavior: { cursesSanity: true }
+    evidence: ["Spirit Box", "Writing", "Freezing"],
+    behavior: { curseSpeech: true }
   },
   {
     name: "Deogen",
-    evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S Projector"],
-    aggression: 1.4,
-    huntCooldown: 10,
-    behavior: { alwaysSeesPlayer: true }
+    evidence: ["Spirit Box", "Writing", "D.O.T.S"],
+    behavior: { alwaysKnowsWhere: true }
   },
   {
     name: "Thaye",
-    evidence: ["Ghost Orb", "Ghost Writing", "D.O.T.S Projector"],
-    aggression: 1.5,
-    huntCooldown: 12,
-    behavior: { weakensOverTime: true }
+    evidence: ["Orbs", "Writing", "D.O.T.S"],
+    behavior: { agesOverTime: true }
+  },
+  {
+    name: "Yokai",
+    evidence: ["Orbs", "Spirit Box", "D.O.T.S"],
+    behavior: { noiseHuntTrigger: true }
   },
   {
     name: "Succubus",
-    evidence: ["Spirit Box", "Ghost Orb", "Ghost Writing"],
-    aggression: 1.4,
-    huntCooldown: 9,
-    behavior: { seductiveAmbience: true }
+    evidence: ["EMF", "Writing", "Spirit Box"],
+    behavior: { seductive: true, sanityDrain: 2 }
   }
 ];
   </script>
-<script>
-  
-// === Ghost State & Behavior ===
-let ghostProfile = {
-  name: "Mare",
-  evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"],
-  behavior: {
-    neverTurnOnLights: true,
-    prefersDarkRooms: true,
-    aggressiveInDark: true,
-    roomShiftable: true,
-  },
-};
+  <script>
+function countLitFlames() {
+  return scene.meshes.filter(m => m.name.includes("Candle") && m.metadata?.isLit).length;
+}
+function maybeTriggerGhostSound(roomMesh) {
+  const chance = 0.15; // adjustable
+  if (Math.random() < chance) {
+    const ghostSounds = ["ghostLaugh", "radio", "objectSlam", "whisper"];
+    const soundName = ghostSounds[Math.floor(Math.random() * ghostSounds.length)];
+    const pos = roomMesh.getAbsolutePosition().add(BABYLON.Vector3.Random().scaleInPlace(2));
+    playSound(soundName, pos, { volume: 0.8 });
+  }
+}
+function playCandleIgnite() {
+  playSound("candleIgnite", null, { volume: 0.5 });
+}
 
-let playerSanity = 100;
-let lastRoomSwitch = Date.now();
-let lastGhostVisible = 0;
-let isHunting = false;
-let ghostCooldown = 0;
 
-// === Sanity Drain System ===
-scene.onBeforeRenderObservable.add(() => {
-  if (!playerMesh || !ghostEntity) return;
+function wasRelitCandleLitWithin(seconds) {
+  // Track relit timestamp in your candle logic
+  return false;
+}
 
-  const dist = BABYLON.Vector3.Distance(playerMesh.position, ghostEntity.position);
-  const nearGhost = dist < 6;
+function extinguishFlame() {
+  // Modify candle object here
+}
 
-  // In ghost room or nearby
-  if (nearGhost) {
-    playerSanity -= 0.01 * (1 + Math.random()); // drain faster if closer
+function maybeTurnOffLight(room) {
+  // Switch room light off
+}
+
+function roomHasLight(room) {
+  // Check light in mesh
+  return true;
+}
+
+function ghostCanRoam() {
+  return !activeGhost.behavior.noWander;
+}
+
+function changeGhostRoom() {
+  // Move ghost to adjacent mesh room
+}
+// === Evidence Tracking System ===
+const allEvidence = ["EMF", "Spirit Box", "Fingerprints", "Orbs", "Writing", "Freezing", "D.O.T.S"];
+
+let foundEvidence = new Set();
+let eliminatedEvidence = new Set();
+
+
+
+function toggleEliminated(evi) {
+  if (eliminatedEvidence.has(evi)) {
+    eliminatedEvidence.delete(evi);
   } else {
-    playerSanity -= 0.002; // passive drain
+    eliminatedEvidence.add(evi);
+    foundEvidence.delete(evi);
   }
-
-  // Clamp
-  if (playerSanity < 0) playerSanity = 0;
-
-  // === Ghost Visibility: Flicker in/out ===
-  if (Date.now() - lastGhostVisible > 4000 + Math.random() * 8000) {
-    const visibleNow = Math.random() < 0.3; // 30% chance to appear
-    ghostEntity.isVisible = visibleNow;
-    lastGhostVisible = Date.now();
-  }
-
-  // === Ghost Roaming (except Goryo) ===
-  if (ghostProfile.name !== "Goryo" && Date.now() - lastRoomSwitch > 10000 + Math.random() * 20000) {
-    const roomNames = Object.keys(roomMeshes).filter(name => name !== ghostRoom);
-    const newRoom = roomNames[Math.floor(Math.random() * roomNames.length)];
-    ghostRoom = newRoom;
-    const newPos = roomMeshes[ghostRoom].getAbsolutePosition().add(new BABYLON.Vector3(0, 2, 0));
-    ghostEntity.position = newPos;
-    lastRoomSwitch = Date.now();
-  }
-
-  // === Hunt Trigger ===
-  if (!isHunting && playerSanity < 20 && Date.now() > ghostCooldown) {
-    const chance = Math.random();
-    if (chance < 0.015 || (nearGhost && chance < 0.05)) {
-      startHunt();
-    }
-  }
-});
-
-// === Hunt Logic ===
-function startHunt() {
-  isHunting = true;
-  ghostEntity.isVisible = true;
-  console.log("👻 HUNT STARTED");
-
-  scene.fogDensity = 0.03;
-  let redLight = new BABYLON.PointLight("red", ghostEntity.position, scene);
-  redLight.diffuse = new BABYLON.Color3(1, 0, 0);
-  redLight.intensity = 2;
-
-  setTimeout(() => {
-    endHunt(redLight);
-  }, 5000 + Math.random() * 3000);
+  updateEvidenceUI();
+  updateGhostSuggestions();
 }
 
-function endHunt(light) {
-  isHunting = false;
-  ghostCooldown = Date.now() + 20000; // 20s cooldown
-  scene.fogDensity = 0.015;
-  ghostEntity.isVisible = false;
-  light.dispose();
-  console.log("👻 Hunt ended");
-}
-</script>
-<script>
-// === Inventory Data ===
-let playerInventory = ["Crucifix", "Camera", "Smudge Stick"]; // example
-const maxCarry = 3;
-const placedItems = {}; // { roomName: [itemName, ...] }
-
-function updateInventoryUI() {
-  for (let i = 0; i < 3; i++) {
-    const slot = document.getElementById(`slot-${i + 1}`);
-    slot.textContent = playerInventory[i] || "-";
-  }
-}
-updateInventoryUI();
-
-// === Pickup / Drop Items ===
-function pickupItem(itemName) {
-  if (playerInventory.length >= maxCarry) {
-    console.log("Inventory full");
-    return;
-  }
-  playerInventory.push(itemName);
-  updateInventoryUI();
-}
-
-function dropItem(itemName) {
-  const idx = playerInventory.indexOf(itemName);
-  if (idx !== -1) {
-    playerInventory.splice(idx, 1);
-    updateInventoryUI();
-    const room = getCurrentRoomName();
-    if (!placedItems[room]) placedItems[room] = [];
-    placedItems[room].push(itemName);
-    console.log(`Placed ${itemName} in ${room}`);
-  }
-}
-
-// === Get Room From Position ===
-function getCurrentRoomName() {
-  for (let room in roomMeshes) {
-    const mesh = roomMeshes[room];
-    const dist = BABYLON.Vector3.Distance(playerMesh.position, mesh.getAbsolutePosition());
-    if (dist < 8) return room;
-  }
-  return "Unknown";
-}
-
-// === Key Events for Placing Items (1–3 = use/drop)
-scene.onKeyboardObservable.add(kb => {
-  if (kb.type === BABYLON.KeyboardEventTypes.KEYUP) {
-    if (kb.event.code === "Digit1") dropItem(playerInventory[0]);
-    if (kb.event.code === "Digit2") dropItem(playerInventory[1]);
-    if (kb.event.code === "Digit3") dropItem(playerInventory[2]);
-  }
-}
-);
-</script>
-<script>
-// === CAMERA TOGGLE ===
-let usingFirstPerson = true;
-const toggleBtn = document.getElementById("toggleViewBtn");
-
-toggleBtn.onclick = () => {
-  usingFirstPerson = !usingFirstPerson;
-  if (usingFirstPerson) {
-    camera.lockedTarget = playerMesh;
-    camera.radius = 0;
-    camera.alpha = 0;
-    camera.beta = Math.PI / 2;
-  } else {
-    camera.lockedTarget = playerMesh;
-    camera.radius = 6;
-    camera.alpha = Math.PI / 2;
-    camera.beta = Math.PI / 3;
-  }
-};
-
-// === TOUCH CONTROLS ===
-function handleDirection(dir) {
-  const move = new BABYLON.Vector3(0, 0, 0);
-  const speed = 0.3;
-  if (dir === "up") move.z = -speed;
-  if (dir === "down") move.z = speed;
-  if (dir === "left") move.x = -speed;
-  if (dir === "right") move.x = speed;
-  playerMesh.moveWithCollisions(move);
-}
-
-document.querySelectorAll(".touch-button").forEach(btn => {
-  btn.addEventListener("touchstart", e => {
-    const dir = btn.dataset.dir;
-    handleDirection(dir);
-  });
-});
-
-// === Enable touch UI if mobile ===
-if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-  document.getElementById("touch-controls").style.display = "flex";
-}
-</script>
-<script>
-// === GHOST SETUP ===
-let ghostMesh;
-let ghostRoom = null;
-let currentGhost = null;
-let ghostVisible = false;
-let turnsSinceGhostRoam = 0;
-let ghostRoamCooldown = 5;
-
-function setupGhostEntity(scene) {
-  ghostMesh = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 2 }, scene);
-  ghostMesh.visibility = 0;
-  ghostMesh.position = new BABYLON.Vector3(0, 1, 0);
-  ghostMesh.isPickable = false;
-  ghostMesh.material = new BABYLON.StandardMaterial("ghostMat", scene);
-  ghostMesh.material.emissiveColor = new BABYLON.Color3(1, 0, 1); // purple glow
-
-  // Set ghost room initially
-  ghostRoom = getRandomRoom();
-  currentGhost = getRandomGhostProfile(); // pulled from full ghost list
-}
-
-// === RANDOM ROAMING ===
-function maybeRoamGhost() {
-  if (currentGhost.name === "Goryo") return;
-
-  turnsSinceGhostRoam++;
-  if (turnsSinceGhostRoam >= ghostRoamCooldown && Math.random() < 0.4) {
-    ghostRoom = getRandomRoom();
-    console.log("👻 Ghost roamed to new room.");
-    turnsSinceGhostRoam = 0;
-    ghostRoamCooldown = 4 + Math.floor(Math.random() * 4); // 4–7
-  }
-}
-
-// === GHOST VISIBILITY LOGIC ===
-function updateGhostAppearance(playerPosition) {
-  const distance = BABYLON.Vector3.Distance(playerPosition, ghostMesh.position);
-  ghostVisible = distance < 4 && Math.random() < 0.1;
-  ghostMesh.visibility = ghostVisible ? 1 : 0;
-}
-
-// === SANITY SYSTEM ===
-let sanity = 100;
-
-function updateSanity(playerPosition) {
-  let loss = 0.05;
-  if (isPlayerInRoom(ghostRoom)) loss += 0.15;
-  if (ghostVisible) loss += 0.3;
-
-  sanity -= loss;
-  sanity = Math.max(sanity, 0);
-  document.getElementById("hud-sanity").innerText = `Sanity: ${Math.floor(sanity)}%`;
-
-  // Trigger hunt threshold
-  if (sanity <= 20) maybeTriggerHunt();
-}
-
-// === PLACEHOLDER FUNCTIONS ===
-function getRandomRoom() {
-  const roomKeys = Object.keys(roomZones);
-  return roomKeys[Math.floor(Math.random() * roomKeys.length)];
-}
-
-function isPlayerInRoom(roomName) {
-  if (!roomZones[roomName]) return false;
-  return roomZones[roomName].intersectsMesh(playerMesh, false);
-}
-</script>
-<script>
-// === HUNT SYSTEM ===
-let isHunting = false;
-let huntCooldown = 0;
-let huntDuration = 0;
-let huntTimer = 0;
-
-function maybeTriggerHunt() {
-  if (isHunting || huntCooldown > 0) return;
-  const ghostAggression = currentGhost.aggression || 1;
-  const baseChance = 0.1 + (1 - sanity / 100) * 0.3;
-  const huntChance = baseChance * ghostAggression;
-
-  if (Math.random() < huntChance) {
-    startHunt();
-  }
-}
-
-function startHunt() {
-  console.log("⚠️ Hunt started!");
-  isHunting = true;
-  huntDuration = 6 + Math.floor(Math.random() * 6);
-  huntTimer = 0;
-  huntCooldown = currentGhost.huntCooldown || 10;
-  playHeartbeat();
-  beginRedFlicker();
-
-  // Move ghost near player
-  ghostMesh.position = playerMesh.position.add(new BABYLON.Vector3(0, 0, -2));
-  ghostVisible = true;
-  ghostMesh.visibility = 1;
-}
-
-function updateHunt() {
-  if (!isHunting) return;
-
-  huntTimer++;
-  if (huntTimer >= huntDuration) {
-    endHunt();
-  } else {
-    // Ghost chases player
-    const direction = playerMesh.position.subtract(ghostMesh.position).normalize();
-    ghostMesh.position.addInPlace(direction.scale(0.1));
-    if (BABYLON.Vector3.Distance(ghostMesh.position, playerMesh.position) < 1.2) {
-      console.log("💀 Player caught!");
-      killPlayer();
-    }
-  }
-}
-
-function endHunt() {
-  console.log("✅ Hunt ended");
-  isHunting = false;
-  ghostMesh.visibility = 0;
-  stopHeartbeat();
-  stopRedFlicker();
-}
-
-function killPlayer() {
-  alert("You were killed by the ghost!");
-  location.reload();
-}
-
-// === RED FLICKER VISUAL ===
-let redOverlay = null;
-
-function beginRedFlicker() {
-  if (!redOverlay) {
-    redOverlay = new BABYLON.GUI.Rectangle();
-    redOverlay.width = "100%";
-    redOverlay.height = "100%";
-    redOverlay.background = "rgba(255,0,0,0.2)";
-    redOverlay.thickness = 0;
-    uiTexture.addControl(redOverlay);
-  }
-
-  let flicker = () => {
-    if (!isHunting) return;
-    redOverlay.alpha = Math.random() * 0.6;
-    setTimeout(flicker, 100 + Math.random() * 100);
-  };
-  flicker();
-}
-
-function stopRedFlicker() {
-  if (redOverlay) redOverlay.alpha = 0;
-}
-
-// === HEARTBEAT AUDIO ===
-let heartbeat = new Audio("heartbeat.mp3");
-
-function playHeartbeat() {
-  heartbeat.loop = true;
-  heartbeat.play();
-}
-
-function stopHeartbeat() {
-  heartbeat.pause();
-  heartbeat.currentTime = 0;
-}
-
-// === ITEM DEFENSE LOGIC ===
-function useCrucifix() {
-  if (isHunting && isPlayerInRoom(ghostRoom)) {
-    console.log("🕇 Crucifix blocked the hunt!");
-    endHunt();
-    huntCooldown += 10;
-    removeItem("Crucifix");
-  }
-}
-
-function useSmudgeStick() {
-  if (isHunting && BABYLON.Vector3.Distance(ghostMesh.position, playerMesh.position) < 5) {
-    console.log("💨 Smudge stick used to repel ghost!");
-    endHunt();
-    huntCooldown += 8;
-    removeItem("Smudge Stick");
-
-    if (currentGhost.name === "Yurei") {
-      console.log("Yurei trapped in room!");
-      ghostRoom = getCurrentRoom();
-    }
-  }
-}
-
-// === ONRYO FLAME LOGIC ===
-function onryoFlameBehavior() {
-  if (currentGhost.name !== "Onryo") return;
-  const flames = getNearbyFlames();
-  if (flames >= 3 && !isHunting) startHunt();
-  extinguishNearbyFlames();
-}
-
-function extinguishNearbyFlames() {
-  console.log("🔥 Onryo snuffed a candle!");
-  // Placeholder for extinguish visuals
-}
-
-// === MARE LOGIC ===
-function mareLightBehavior(room) {
-  if (currentGhost.name !== "Mare") return;
-  if (roomIsDark(room) && Math.random() < 0.5) {
-    console.log("💡 Mare turned lights off.");
-    setRoomLights(room, false);
-  }
-}
-
-function ghostInteractionEvent() {
-  if (Math.random() < 0.2) {
-    const flame = flameSources.find(f => f.lit);
-    if (flame) {
-      flame.flame.isVisible = false;
-      flame.lit = false;
-      lastFlameExtinguishTime = performance.now();
-      logToPlayer("👻 A sudden chill... the flame goes out.");
-    }
-  }
-}
-
-</script>
-<script>
-// === FLAME / CANDLE OBJECTS ===
-let flameMeshes = []; // [{mesh, roomName, lit, lastExtinguishedAt}]
-const flameCooldown = 20000; // 20s between Onryo flame extinguish
-
-function spawnCandle(position, roomName) {
-  const base = BABYLON.MeshBuilder.CreateCylinder("candleBase", { height: 0.4, diameter: 0.3 }, scene);
-  base.position = position.clone();
-  base.material = new BABYLON.StandardMaterial("candleMat", scene);
-  base.material.diffuseColor = new BABYLON.Color3(1, 1, 1);
-
-  const flame = BABYLON.MeshBuilder.CreateSphere("flame", { diameter: 0.15 }, scene);
-  flame.position = position.add(new BABYLON.Vector3(0, 0.3, 0));
-  flame.material = new BABYLON.StandardMaterial("flameMat", scene);
-  flame.material.emissiveColor = new BABYLON.Color3(1, 0.6, 0.1);
-  flame.isVisible = true;
-
-  flameMeshes.push({ mesh: flame, roomName, lit: true, lastExtinguishedAt: 0 });
-}
-
-// Example flame setup (put candles in house)
-scene.onReadyObservable.add(() => {
-  spawnCandle(new BABYLON.Vector3(2, 0.5, -4), "Living Room");
-  spawnCandle(new BABYLON.Vector3(-3, 0.5, 1), "Foyer");
-});
-
-// === ONRYO FLAME CHECK ===
-scene.onBeforeRenderObservable.add(() => {
-  if (currentGhost.name !== "Onryo") return;
-
-  const nearbyLitFlames = flameMeshes.filter(f =>
-    f.lit && f.roomName === ghostRoom
-  );
-
-  // 🔥 3 flames → instant hunt
-  if (nearbyLitFlames.length >= 3 && !isHunting) {
-    console.log("🔥 Onryo triggered by 3 flames");
-    startHunt();
-  }
-
-  // 🔥 Extinguish flames
-  nearbyLitFlames.forEach(flame => {
-    if (Date.now() - flame.lastExtinguishedAt > flameCooldown && Math.random() < 0.01) {
-      flame.mesh.isVisible = false;
-      flame.lit = false;
-      flame.lastExtinguishedAt = Date.now();
-      console.log("🔥 Onryo extinguished a candle");
+function updateEvidenceUI() {
+  allEvidence.forEach(evi => {
+    const btn = document.getElementById("evi-" + evi);
+    if (!btn) return;
+    btn.classList.remove("found", "eliminated");
+    if (foundEvidence.has(evi)) {
+      btn.classList.add("found");
+    } else if (eliminatedEvidence.has(evi)) {
+      btn.classList.add("eliminated");
     }
   });
-});
-
-// === RELIGHT FLAME (requires lighter) ===
-function relightNearbyCandle() {
-  if (!playerInventory.includes("Lighter")) return;
-  const nearby = flameMeshes.find(f =>
-    !f.lit && BABYLON.Vector3.Distance(f.mesh.position, playerMesh.position) < 2
-  );
-  if (nearby) {
-    nearby.mesh.isVisible = true;
-    nearby.lit = true;
-    console.log("🕯️ Candle re-lit");
-  }
 }
 
-// Bind to key press (e.g. L to relight)
-scene.onKeyboardObservable.add(kb => {
-  if (kb.type === BABYLON.KeyboardEventTypes.KEYUP && kb.event.key === "l") {
-    relightNearbyCandle();
-  }
-});
-</script>
-
-<script>
-// === IR CAMERA / ORB VISIBILITY ===
-let orbEntities = [];
-let usingCamera = false;
-
-function spawnGhostOrbs(roomName) {
-  for (let i = 0; i < 5; i++) {
-    const orb = BABYLON.MeshBuilder.CreateSphere("orb", { diameter: 0.1 }, scene);
-    orb.position = roomMeshes[roomName].getAbsolutePosition().add(new BABYLON.Vector3(
-      Math.random() * 4 - 2,
-      1.5 + Math.random(),
-      Math.random() * 4 - 2
-    ));
-    orb.material = new BABYLON.StandardMaterial("orbMat", scene);
-    orb.material.emissiveColor = new BABYLON.Color3(0.5, 0.5, 1);
-    orb.visibility = 0;
-    orbEntities.push({ mesh: orb, room: roomName });
-  }
-}
-
-// Spawn mimic orbs at ghost room on init
-scene.onReadyObservable.add(() => {
-  if (currentGhost.name === "Mimic") {
-    spawnGhostOrbs(ghostRoom); // fake orbs
-  } else if (currentGhost.evidence.includes("Orbs")) {
-    spawnGhostOrbs(ghostRoom);
-  }
-}
-
-// === IR CAMERA VISIBILITY TOGGLE ===
-scene.onBeforeRenderObservable.add(() => {
-  const holdingCamera = usingCamera || playerInventory.includes("Camera");
-  orbEntities.forEach(orb => {
-    const inRoom = getCurrentRoomName() === orb.room;
-    orb.mesh.visibility = holdingCamera && inRoom ? 1 : 0;
+function updateGhostSuggestions() {
+  const matches = ghostProfiles.filter(g => {
+    return Array.from(foundEvidence).every(evi => g.evidence.includes(evi)) &&
+           Array.from(eliminatedEvidence).every(evi => !g.evidence.includes(evi));
   });
-});
 
-// === Toggle IR Camera View ===
-document.addEventListener("keydown", e => {
-  if (e.key === "c") {
-    usingCamera = !usingCamera;
-    console.log(usingCamera ? "📷 IR Camera activated" : "📷 IR Camera off");
-  }
-});
+  const container = document.getElementById("ghost-suggestions");
+  if (!container) return;
+
+  container.innerHTML = "";
+  matches.forEach(g => {
+    const div = document.createElement("div");
+    div.className = "ghost-match";
+    div.textContent = g.name;
+    container.appendChild(div);
+  });
+}
 </script>
+</body>
+</html>
