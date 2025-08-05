@@ -1,235 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Phasma‑Phoney 3D</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
-  
-  <!-- Babylon.js CDN -->
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylon.glTF2FileLoader.min.js"></script>
-  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-
-  <!-- Styling -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phasma-Phoney 3D</title>
   <style>
     html, body {
       margin: 0;
       padding: 0;
-      width: 100vw;
-      height: 100vh;
       overflow: hidden;
+      font-family: Arial, sans-serif;
       background-color: black;
-      font-family: monospace, sans-serif;
-      color: white;
     }
-
     #renderCanvas {
-      width: 100vw;
-      height: 100vh;
+      width: 100%;
+      height: 100%;
       display: block;
-      touch-action: none;
     }
-
-    #hud {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 10;
-      background: rgba(0, 0, 0, 0.5);
-      padding: 8px;
-      border-radius: 6px;
-      font-size: 14px;
-    }
-
-    #van-monitor {
+    #fade-screen {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100vw;
-      height: 100vh;
+      width: 100%;
+      height: 100%;
       background: black;
-      color: lime;
-      font-family: monospace;
-      font-size: 18px;
-      padding: 20px;
-      display: none;
-      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 10;
+      transition: opacity 1s;
     }
-
-    #nosignal {
-      display: none;
+    .hud {
       position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 320px;
-      height: auto;
-      transform: translate(-50%, -50%);
-      z-index: 9999;
-    }
-
-    #notebookUI, #guessModal {
+      top: 10px;
+      left: 10px;
+      color: white;
       z-index: 20;
-      position: absolute;
-      background: rgba(0,0,0,0.85);
-      border: 1px solid #555;
-      border-radius: 8px;
-      padding: 10px;
-      display: none;
-      color: #fff;
+      font-size: 14px;
     }
-
-    .hidden { display: none; }
-	
-	#evidence-buttons button {
-  margin: 4px;
-  padding: 8px 12px;
-  font-family: monospace;
-}
-
-.found {
-  background-color: #0f0;
-  color: black;
-}
-
-.eliminated {
-  background-color: #900;
-  color: white;
-  text-decoration: line-through;
-}
-
-#ghost-suggestions {
-  margin-top: 10px;
-  padding: 5px;
-  border-top: 1px solid #666;
-}
-.ghost-match {
-  padding: 4px;
-  font-weight: bold;
-  color: #fff;
-}
-
+    #notebookUI, #guess-panel {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      display: none;
+      z-index: 20;
+    }
+    #evidence-panel button {
+      margin: 2px;
+    }
+    .found {
+      background-color: green;
+      color: white;
+    }
+    .eliminated {
+      background-color: red;
+      color: white;
+    }
   </style>
-</head>
 
+  <!-- Babylon.js Core -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <!-- Babylon GUI for UI elements if needed -->
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+</head>
 <body>
-  <!-- Babylon.js render canvas -->
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Fallback NO SIGNAL image -->
-  <img src="nosignal.gif" id="nosignal" alt="No Signal">
+  <!-- Fade to Black Overlay -->
+  <div id="fade-screen"></div>
 
-<!-- === HUD OVERLAY === -->
-<div id="hud" style="position: absolute; top: 10px; left: 10px; color: white; font-family: monospace; font-size: 14px; background: rgba(0,0,0,0.5); padding: 8px; border-radius: 6px; z-index: 100;">
-  <div>Room: <span id="room-label">Van</span></div>
-  <div>Sanity: <span id="sanity-label">100%</span></div>
-  <div>Weather: <span id="weather-label">Clear</span></div>
-</div>
-  <!-- Notebook Button -->
-  <button id="notebookBtn" style="position:fixed;bottom:10px;left:10px;z-index:1000;">📓 Notebook</button>
-
-  <!-- Ghost Guess Button -->
-  <button id="guessGhostBtn" style="position:fixed;bottom:10px;right:10px;z-index:1000;">👻 Guess Ghost</button>
-<!-- Other UI containers -->
-<div id="van-monitor"></div>
-<div id="guessModal"></div>
-<div id="notebookUI" style="
-  display: none;
-  position: fixed;
-  top: 10%;
-  left: 10%;
-  width: 80%;
-  height: 70%;
-  background: rgba(0,0,0,0.9);
-  color: white;
-  z-index: 1001;
-  padding: 20px;
-  overflow-y: auto;
-">
-  <h2>Evidence Notebook</h2>
-  <div id="evidenceButtons">
-    <button class="evidence-btn" id="evi-EMF" data-evidence="EMF">EMF</button>
-    <button class="evidence-btn" id="evi-Spirit Box" data-evidence="Spirit Box">Spirit Box</button>
-    <button class="evidence-btn" id="evi-Orbs" data-evidence="Orbs">Orbs</button>
-    <button class="evidence-btn" id="evi-Fingerprints" data-evidence="Fingerprints">Fingerprints</button>
-    <button class="evidence-btn" id="evi-Freezing" data-evidence="Freezing">Freezing Temps</button>
-    <button class="evidence-btn" id="evi-Writing" data-evidence="Writing">Ghost Writing</button>
-    <button class="evidence-btn" id="evi-D.O.T.S" data-evidence="D.O.T.S">D.O.T.S</button>
+  <!-- HUD -->
+  <div class="hud">
+    <div><strong>Room:</strong> <span id="room-label">---</span></div>
+    <div><strong>Sanity:</strong> <span id="sanity-label">100%</span></div>
+    <div><strong>Weather:</strong> <span id="weather-label">---</span></div>
+    <button id="notebookBtn">Notebook</button>
+    <button id="guessGhostBtn">Guess Ghost</button>
   </div>
-</div>
-<div id="ghost-suggestions">
-  <!-- Matching ghosts shown here -->
-</div>
-<!-- === GUESS PANEL === -->
-<div id="guess-panel" style="position: absolute; bottom: 60px; left: 10px; width: 300px; background: rgba(20,20,20,0.95); padding: 10px; border-radius: 6px; color: white; font-family: monospace; display: none; z-index: 200;">
-  <h3>Ghost Guess</h3>
-  <select id="ghost-select" style="width: 100%; margin-bottom: 8px;">
-    <option disabled selected>Select Ghost</option>
-    <!-- Filled dynamically -->
-  </select>
-  <button onclick="submitGuess()">Submit Guess</button>
-</div>
 
+  <!-- Notebook Panel -->
+  <div id="notebookUI">
+    <h3>Evidence</h3>
+    <div id="evidence-panel">
+      <button id="evi-EMF">EMF</button>
+      <button id="evi-Spirit Box">Spirit Box</button>
+      <button id="evi-Fingerprints">Fingerprints</button>
+      <button id="evi-Orbs">Orbs</button>
+      <button id="evi-Writing">Writing</button>
+      <button id="evi-Freezing">Freezing</button>
+      <button id="evi-D.O.T.S">D.O.T.S</button>
+    </div>
+    <h4>Ghost Suggestions</h4>
+    <div id="ghost-suggestions"></div>
+  </div>
+
+  <!-- Ghost Guess Panel -->
+  <div id="guess-panel">
+    <label for="ghost-select">Who is the ghost?</label>
+    <select id="ghost-select"></select>
+    <button onclick="submitGuess()">Submit</button>
+  </div>
 <script>
-  let canvas = document.getElementById("renderCanvas");
-  let engine = new BABYLON.Engine(canvas, true);
-  let scene, camera, player, house, shadowGenerator;
-
-  async function createScene() {
-    scene = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color3.Black();
-    scene.ambientColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-    scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-    scene.fogDensity = 0.01;
-    scene.fogColor = new BABYLON.Color3(0, 0, 0);
-
-    const light = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), scene);
-    light.intensity = 0.5;
-
-    const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
-    dirLight.position = new BABYLON.Vector3(10, 20, 10);
-    dirLight.intensity = 0.8;
-
-    shadowGenerator = new BABYLON.ShadowGenerator(1024, dirLight);
-    shadowGenerator.useBlurExponentialShadowMap = true;
-    shadowGenerator.blurKernel = 32;
-
-    try {
-      await BABYLON.SceneLoader.AppendAsync("", "Abandoned_House.glb", scene);
-      house = scene.meshes.find(m => m.name.includes("House") || m.name.includes("Root"));
-      if (house) {
-        house.receiveShadows = true;
-        house.getChildMeshes().forEach(m => {
-          m.receiveShadows = true;
-          shadowGenerator.addShadowCaster(m);
-        });
-      }
-    } catch (err) {
-      console.error("❌ Error loading Abandoned_House.glb:", err);
-      alert("Failed to load house model.");
-    }
-
-    camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, -5), scene);
-    camera.attachControl(canvas, true);
-    camera.inertia = 0.1;
-    camera.speed = 0.25;
-    camera.angularSensibility = 3000;
-
-  
-document.querySelectorAll(".evidence-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const evi = btn.dataset.evidence;
-    if (foundEvidence.has(evi)) {
-      foundEvidence.delete(evi);
-    } else {
-      foundEvidence.add(evi);
-      eliminatedEvidence.delete(evi);
-    }
-    updateEvidenceUI();
-    updateGhostSuggestions();
-  });
-});
-
 // === GHOST PROFILES ===
 const ghostProfiles = [
   { name: "Spirit", evidence: ["EMF", "Spirit Box", "Writing"], behavior: {} },
@@ -264,37 +138,30 @@ let mimicTarget = null;
 let mimicCounter = 30000 + Math.random() * 30000;
 let lastMimicChange = performance.now();
 
-// === HELPER ===
+// === EVIDENCE TRACKING ===
+const allEvidence = ["EMF", "Spirit Box", "Fingerprints", "Orbs", "Writing", "Freezing", "D.O.T.S"];
+let foundEvidence = new Set();
+let eliminatedEvidence = new Set();
+
+// === HELPER: Current Ghost ===
 function getCurrentGhost() {
   return (activeGhost.name === "The Mimic" && mimicTarget) ? mimicTarget : activeGhost;
 }
-
-// === GHOST DROPDOWN UI ===
-function populateGhostDropdown() {
-  const select = document.getElementById("ghost-select");
-  ghostProfiles.forEach(g => {
-    const opt = document.createElement("option");
-    opt.value = g.name;
-    opt.textContent = g.name;
-    select.appendChild(opt);
-  });
-}
-
-// === TOGGLE UI ===
-document.getElementById("notebookBtn").addEventListener("click", toggleNotebook);
-document.getElementById("guessGhostBtn").addEventListener("click", toggleGuess);
-
-// === NOTEBOOK + GUESS ===
+</script>
+<script>
+// === NOTEBOOK TOGGLE ===
 function toggleNotebook() {
   const el = document.getElementById('notebookUI');
   el.style.display = (el.style.display === 'none') ? 'block' : 'none';
 }
 
+// === GHOST GUESS PANEL TOGGLE ===
 function toggleGuess() {
   const el = document.getElementById('guess-panel');
   el.style.display = (el.style.display === 'none') ? 'block' : 'none';
 }
 
+// === GHOST GUESS SUBMISSION ===
 function submitGuess() {
   const guess = document.getElementById("ghost-select").value;
   if (!guess) return;
@@ -313,8 +180,29 @@ function submitGuess() {
   }, 1200);
 }
 
-// === GHOST BEHAVIOR ===
-function updateGhostBehavior(playerRoom, currentTurn, sanity) {
+// === GHOST DROPDOWN POPULATION ===
+function populateGhostDropdown() {
+  const select = document.getElementById("ghost-select");
+  ghostProfiles.forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g.name;
+    opt.textContent = g.name;
+    select.appendChild(opt);
+  });
+}
+
+// === HOOK TO BUTTONS ===
+document.getElementById("notebookBtn").addEventListener("click", toggleNotebook);
+document.getElementById("guessGhostBtn").addEventListener("click", toggleGuess);
+document.getElementById("submitGuessBtn").addEventListener("click", submitGuess);
+</script>
+<script>
+// === GHOST BEHAVIOR ENGINE ===
+function getCurrentGhost() {
+  return (activeGhost.name === "The Mimic" && mimicTarget) ? mimicTarget : activeGhost;
+}
+
+function updateGhostBehavior(playerRoomMesh, sanity) {
   const ghost = getCurrentGhost();
 
   // === Mimic Behavior Swapping ===
@@ -328,93 +216,88 @@ function updateGhostBehavior(playerRoom, currentTurn, sanity) {
     }
   }
 
-  if (ghost.behavior.noWander) return;
-  if (ghost.behavior.turnsOffLights && roomHasLight(playerRoom)) maybeTurnOffLight(playerRoom);
-  if (ghost.name === "Shade" && isPlayerInRoom(playerRoom)) return;
-
-  if (ghost.behavior.flameHunter) {
-    const litCandles = countLitCandlesNearPlayer?.() || countLitFlames();
-    if (litCandles >= 3 || wasRelitCandleLitWithin(20)) {
-      extinguishFlame();
-      triggerHunt();
-    }
-  }
-
+  // === Yurei Lock After Smudge ===
   if (ghost.name === "Yurei" && smudgeTurnsRemaining > 0) {
     smudgeTurnsRemaining--;
     return;
   }
 
-  if (Math.random() < 0.2 && ghostCanRoam()) changeGhostRoom();
+  // === Onryo Flame Trigger ===
+  if (ghost.behavior.flameHunter) {
+    const flames = countLitFlames();
+    if (flames >= 3 || wasRelitCandleLitWithin(20)) {
+      extinguishFlame();
+      triggerHunt();
+    }
+  }
+
+  // === Mare Turns Off Light ===
+  if (ghost.behavior.turnsOffLights && roomHasLight(playerRoomMesh)) {
+    maybeTurnOffLight(playerRoomMesh);
+  }
+
+  // === Shade Doesn't Hunt When Player Is Present ===
+  if (ghost.name === "Shade" && isPlayerInRoom(playerRoomMesh)) return;
+
+  // === Roaming Logic (not Goryo) ===
+  if (ghostCanRoam() && Math.random() < 0.2) changeGhostRoom();
+
+  // === Hunt Chance Triggered by Sanity
   if (sanity < 50 && Math.random() < 0.1) triggerHunt();
 }
 
-// === BABYLON SETUP ===
+function ghostCanRoam() {
+  return !activeGhost.behavior.noWander;
+}
+</script>
+<script>
+// === BABYLON SCENE SETUP ===
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
-let scene;
+let scene, currentCamera;
 
+// === Scene Creation ===
 async function createScene() {
   scene = new BABYLON.Scene(engine);
-  // ... rest of scene setup
-  camera = new BABYLON.FreeCamera("freeCam", new BABYLON.Vector3(0, 2, -6), scene);
-  camera.attachControl(canvas, true);
+  scene.clearColor = new BABYLON.Color3(0, 0, 0);
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0, -0.1, 0);
+
+  // === Lighting ===
+  const light = new BABYLON.HemisphericLight("ambientLight", new BABYLON.Vector3(0, 1, 0), scene);
+  light.intensity = 0.6;
+
+  // === Camera Fallback ===
+  const cam = new BABYLON.FreeCamera("debugCam", new BABYLON.Vector3(0, 2, -6), scene);
+  cam.attachControl(canvas, true);
+  currentCamera = cam;
+  scene.activeCamera = cam;
+
+  // === Load Environment Placeholder ===
+  // Use SceneLoader.Append or ImportMesh to load your house/environment here
+  // Example:
+  // BABYLON.SceneLoader.Append("models/", "Abandoned_House.glb", scene, function () {
+  //   console.log("House model loaded");
+  // });
+
+  return scene;
 }
+</script>
+<script>
+// === PLAYER + CAMERA SETUP ===
+let fpCamera, tpCamera;
+let cameraMode = "first";
 
-createScene().then(() => {
-  startGame(scene); // ✅ Defined elsewhere
-  engine.runRenderLoop(() => scene.render());
-});
-
-window.addEventListener("resize", () => engine.resize());
-
-// === KEYBINDS ===
-window.addEventListener("keydown", (e) => {
-  switch (e.key) {
-    case "f": if (heldItem?.name === "Flashlight") toggleFlashlight(heldItem); break;
-    case "c": if (heldItem?.name === "Candle") toggleCandle(heldItem); break;
-    case "e": if (heldItem?.name === "Camera") toggleCameraView(); break;
-    case "x": dropHeldItem(); break;
-    case "v": playSpiritBox(); break;
-  }
-});
-// === HUD Updates ===
-function updateHUD(room, sanity, weather) {
-  document.getElementById("room-label").innerText = room || "???";
-  document.getElementById("sanity-label").innerText = sanity + "%";
-  document.getElementById("weather-label").innerText = weather || "???";
-
-}
-	// === Screen Fade ===
-function fadeScreen(toBlack = true, duration = 1000) {
-  const screen = document.getElementById("fade-screen");
-  screen.style.transition = `opacity ${duration / 1000}s`;
-  screen.style.opacity = toBlack ? "1" : "0";
-}
-
-// === Ambient Weather Audio ===
-let ambientSound;
-
-function setAmbientWeatherSound(weather = "rain") {
-  if (ambientSound) ambientSound.stop();
-
-  const file = weather === "rain" ? "rainstorm.mp3" : "clearWeather.mp3";
-  ambientSound = new BABYLON.Sound("ambient", `sounds/${file}`, scene, null, {
-    loop: true,
-    autoplay: true,
-    volume: 0.4
-  });
-}
-
-function setupPlayerAndCamera(scene, canvas) {
-  // === CAMERA SETUP ===
+function setupPlayerAndCameras(scene, canvas) {
+  // === First-Person Camera ===
   fpCamera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(0, 1.8, -10), scene);
-  fpCamera.attachControl(canvas, true);
   fpCamera.applyGravity = true;
   fpCamera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
   fpCamera.checkCollisions = true;
   fpCamera.speed = 0.25;
+  fpCamera.attachControl(canvas, true);
 
+  // === Third-Person Camera ===
   tpCamera = new BABYLON.FollowCamera("tpCamera", new BABYLON.Vector3(0, 5, -10), scene);
   tpCamera.lockedTarget = fpCamera;
   tpCamera.radius = 6;
@@ -423,12 +306,12 @@ function setupPlayerAndCamera(scene, canvas) {
   tpCamera.cameraAcceleration = 0.05;
   tpCamera.maxCameraSpeed = 10;
 
-  let cameraMode = "first"; // ✅ Declare camera mode
+  // === Default to First-Person ===
   currentCamera = fpCamera;
   scene.activeCamera = currentCamera;
   currentCamera.attachControl(canvas, true);
 
-  // === MOVEMENT HANDLING ===
+  // === Input Map for Movement ===
   const inputMap = {};
   scene.actionManager = new BABYLON.ActionManager(scene);
   scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
@@ -440,6 +323,7 @@ function setupPlayerAndCamera(scene, canvas) {
     evt => inputMap[evt.sourceEvent.key.toLowerCase()] = false
   ));
 
+  // === Movement Logic ===
   scene.onBeforeRenderObservable.add(() => {
     let direction = new BABYLON.Vector3.Zero();
     const forward = currentCamera.getDirection(BABYLON.Axis.Z);
@@ -453,12 +337,12 @@ function setupPlayerAndCamera(scene, canvas) {
     direction.y = 0;
     direction.normalize();
     direction.scaleInPlace(currentCamera.speed);
-    currentCamera.cameraDirection.addInPlace(direction); // ✅ still works, or refactor to physics-based movement
+    currentCamera.cameraDirection.addInPlace(direction);
   });
 
-  // === CAMERA SWITCH KEY ===
-  window.addEventListener('keydown', e => {
-    if (e.key === 'v') {
+  // === Camera Mode Toggle (V Key) ===
+  window.addEventListener("keydown", e => {
+    if (e.key === "v") {
       currentCamera.detachControl(canvas);
       cameraMode = (cameraMode === "first") ? "third" : "first";
       currentCamera = (cameraMode === "first") ? fpCamera : tpCamera;
@@ -466,57 +350,109 @@ function setupPlayerAndCamera(scene, canvas) {
       currentCamera.attachControl(canvas, true);
     }
   });
-
-
-function countLitFlames() {
-  return scene.meshes.filter(m => m.name.includes("Candle") && m.metadata?.isLit).length;
 }
-function maybeTriggerGhostSound(roomMesh) {
-  const chance = 0.15; // adjustable
-  if (Math.random() < chance) {
-    const ghostSounds = ["ghostLaugh", "radio", "objectSlam", "whisper"];
-    const soundName = ghostSounds[Math.floor(Math.random() * ghostSounds.length)];
-    const pos = roomMesh.getAbsolutePosition().add(BABYLON.Vector3.Random().scaleInPlace(2));
-    playSound(soundName, pos, { volume: 0.8 });
+</script>
+<script>
+// === ITEM INTERACTION LOGIC ===
+let heldItems = ["Flashlight", "Spirit Box", "Camera"];
+let currentHeldIndex = 0;
+
+function cycleHeldItem() {
+  currentHeldIndex = (currentHeldIndex + 1) % heldItems.length;
+  updateHUDInventory();
+}
+
+function getHeldItem() {
+  return heldItems[currentHeldIndex];
+}
+
+function updateHUDInventory() {
+  const slot = document.getElementById("hud-item-slot");
+  slot.innerText = getHeldItem();
+}
+
+// === Flashlight Toggle ===
+let flashlightMesh = null;
+let flashlightOn = false;
+
+function toggleFlashlight() {
+  flashlightOn = !flashlightOn;
+  if (flashlightMesh) {
+    flashlightMesh.setEnabled(flashlightOn);
   }
 }
-function playCandleIgnite() {
-  playSound("candleIgnite", null, { volume: 0.5 });
+
+// === Candle System ===
+function toggleCandle(candleMesh) {
+  const isLit = candleMesh.metadata?.isLit;
+  if (isLit) {
+    candleMesh.metadata.isLit = false;
+    candleMesh.getChildMeshes().forEach(m => m.isVisible = false);
+    playSound("candleExtinguish", candleMesh.position);
+  } else {
+    candleMesh.metadata.isLit = true;
+    candleMesh.getChildMeshes().forEach(m => m.isVisible = true);
+    playSound("candleIgnite", candleMesh.position);
+  }
 }
 
+// === Spirit Box ===
+let spiritBoxActive = false;
 
-function wasRelitCandleLitWithin(seconds) {
-  // Track relit timestamp in your candle logic
-  return false;
+function toggleSpiritBox() {
+  spiritBoxActive = !spiritBoxActive;
+  if (spiritBoxActive) {
+    playSound("radioStatic", null, { volume: 0.5, loop: true, name: "spiritBox" });
+  } else {
+    stopSound("spiritBox");
+  }
 }
 
-function extinguishFlame() {
-  // Modify candle object here
+// === IR Camera View ===
+let usingCamera = false;
+
+function toggleCameraView() {
+  usingCamera = !usingCamera;
+  document.getElementById("camera-overlay").style.display = usingCamera ? "block" : "none";
 }
 
-function maybeTurnOffLight(room) {
-  // Switch room light off
-}
-
-function roomHasLight(room) {
-  // Check light in mesh
-  return true;
-}
-
-function ghostCanRoam() {
-  return !activeGhost.behavior.noWander;
-}
-
-function changeGhostRoom() {
-  // Move ghost to adjacent mesh room
-}
-// === Evidence Tracking System ===
-const allEvidence = ["EMF", "Spirit Box", "Fingerprints", "Orbs", "Writing", "Freezing", "D.O.T.S"];
+// === Item Use Dispatcher ===
+window.addEventListener("keydown", e => {
+  if (e.key === "e") {
+    const item = getHeldItem();
+    if (item === "Flashlight") {
+      toggleFlashlight();
+    } else if (item === "Spirit Box") {
+      toggleSpiritBox();
+    } else if (item === "Camera") {
+      toggleCameraView();
+    }
+  } else if (e.key === "q") {
+    cycleHeldItem();
+  }
+});
+</script>
+<script>
+// === EVIDENCE SYSTEM ===
+const allEvidence = [
+  "EMF", "Spirit Box", "Fingerprints", "Orbs", "Writing", "Freezing", "D.O.T.S"
+];
 
 let foundEvidence = new Set();
 let eliminatedEvidence = new Set();
-	
-function toggleEliminated(evi) {
+
+function toggleFoundEvidence(evi) {
+  if (foundEvidence.has(evi)) {
+    foundEvidence.delete(evi);
+  } else {
+    foundEvidence.add(evi);
+    eliminatedEvidence.delete(evi);
+  }
+  updateEvidenceUI();
+  updateGhostSuggestions();
+}
+
+function toggleEliminatedEvidence(evi) {
   if (eliminatedEvidence.has(evi)) {
     eliminatedEvidence.delete(evi);
   } else {
@@ -542,8 +478,9 @@ function updateEvidenceUI() {
 
 function updateGhostSuggestions() {
   const matches = ghostProfiles.filter(g => {
-    return Array.from(foundEvidence).every(evi => g.evidence.includes(evi)) &&
-           Array.from(eliminatedEvidence).every(evi => !g.evidence.includes(evi));
+    const hasAllFound = Array.from(foundEvidence).every(e => g.evidence.includes(e));
+    const hasNoneEliminated = Array.from(eliminatedEvidence).every(e => !g.evidence.includes(e));
+    return hasAllFound && hasNoneEliminated;
   });
 
   const container = document.getElementById("ghost-suggestions");
@@ -552,10 +489,111 @@ function updateGhostSuggestions() {
   container.innerHTML = "";
   matches.forEach(g => {
     const div = document.createElement("div");
-    div.className = "";
+    div.className = "ghost-suggestion";
     div.textContent = g.name;
     container.appendChild(div);
   });
-}</script>
+}
+</script>
+<script>
+// === HUD UPDATE ===
+function updateHUD(room, sanity, weather) {
+  document.getElementById("room-label").innerText = room || "???";
+  document.getElementById("sanity-label").innerText = sanity + "%";
+  document.getElementById("weather-label").innerText = weather || "???";
+}
+
+// === SCREEN FADE EFFECT ===
+function fadeScreen(toBlack = true, duration = 1000) {
+  const screen = document.getElementById("fade-screen");
+  if (!screen) return;
+  screen.style.transition = `opacity ${duration / 1000}s`;
+  screen.style.opacity = toBlack ? "1" : "0";
+}
+
+// === AMBIENT WEATHER AUDIO ===
+let ambientSound;
+
+function setAmbientWeatherSound(weather = "rain") {
+  if (ambientSound) ambientSound.stop();
+  const file = weather === "rain" ? "rainstorm.mp3" : "clearWeather.mp3";
+  ambientSound = new BABYLON.Sound("ambient", `sounds/${file}`, scene, null, {
+    loop: true,
+    autoplay: true,
+    volume: 0.4
+  });
+}
+
+// === GENERIC SOUND PLAYBACK ===
+function playSound(name, position = null, options = {}) {
+  const path = `sounds/${name}.mp3`;
+  const sound = new BABYLON.Sound(name, path, scene, null, {
+    spatialSound: !!position,
+    autoplay: true,
+    volume: options.volume || 1,
+    loop: false,
+  });
+  if (position) sound.setPosition(position);
+}
+
+// === GHOST ROOM SOUND EVENT ===
+function maybeTriggerGhostSound(roomMesh) {
+  const chance = 0.15;
+  if (Math.random() < chance) {
+    const ghostSounds = ["ghostLaugh", "radio", "objectSlam", "whisper"];
+    const soundName = ghostSounds[Math.floor(Math.random() * ghostSounds.length)];
+    const pos = roomMesh.getAbsolutePosition().add(BABYLON.Vector3.Random().scaleInPlace(2));
+    playSound(soundName, pos, { volume: 0.8 });
+  }
+}
+
+// === CANDLE IGNITE SOUND ===
+function playCandleIgnite() {
+  playSound("candleIgnite", null, { volume: 0.5 });
+}
+
+// === FLAME/ROOM HELPERS ===
+function countLitFlames() {
+  return scene.meshes.filter(m => m.name.includes("Candle") && m.metadata?.isLit).length;
+}
+
+function wasRelitCandleLitWithin(seconds) {
+  // Stub — extend this if you're tracking timestamps on candle relights
+  return false;
+}
+
+function extinguishFlame() {
+  // Stub — logic for extinguishing in-game candle
+}
+
+function maybeTurnOffLight(room) {
+  // Stub — logic for turning off mesh room light
+}
+
+function roomHasLight(room) {
+  // Stub — logic to detect light source in room
+  return true;
+}
+</script>
+<script>
+// === RENDER LOOP ===
+engine.runRenderLoop(() => {
+  if (scene && scene.activeCamera) {
+    scene.render();
+  }
+});
+
+// === RESIZE HANDLER ===
+window.addEventListener("resize", () => {
+  engine.resize();
+});
+
+// === STARTUP CALL ===
+window.addEventListener("DOMContentLoaded", async () => {
+  await createScene();
+  engine.resize();
+});
+</script>
+
 </body>
 </html>
