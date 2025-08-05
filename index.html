@@ -230,33 +230,46 @@ document.querySelectorAll(".evidence-btn").forEach(btn => {
   });
 });
 
+// === GHOST PROFILES ===
 const ghostProfiles = [
-  { name: "Spirit", evidence: ["EMF Reader", "Spirit Box", "Ghost Writing"] },
-  { name: "Wraith", evidence: ["EMF Reader", "Spirit Box", "D.O.T.S Projector"] },
-  { name: "Phantom", evidence: ["Spirit Box", "Fingerprints", "D.O.T.S Projector"] },
-  { name: "Poltergeist", evidence: ["Spirit Box", "Fingerprints", "Ghost Writing"] },
-  { name: "Banshee", evidence: ["Fingerprints", "Orbs", "D.O.T.S Projector"] },
-  { name: "Jinn", evidence: ["EMF Reader", "Fingerprints", "Freezing Temps"] },
-  { name: "Mare", evidence: ["Spirit Box", "Ghost Writing", "Orbs"] },
-  { name: "Revenant", evidence: ["Ghost Writing", "Orbs", "Freezing Temps"] },
-  { name: "Shade", evidence: ["EMF Reader", "Ghost Writing", "Freezing Temps"] },
-  { name: "Demon", evidence: ["Fingerprints", "Ghost Writing", "Freezing Temps"] },
-  { name: "Yurei", evidence: ["Orbs", "Freezing Temps", "D.O.T.S Projector"] },
-  { name: "Oni", evidence: ["EMF Reader", "Freezing Temps", "D.O.T.S Projector"] },
-  { name: "Yokai", evidence: ["Spirit Box", "Orbs", "D.O.T.S Projector"] },
-  { name: "Hantu", evidence: ["Fingerprints", "Orbs", "Freezing Temps"] },
-  { name: "Goryo", evidence: ["EMF Reader", "Fingerprints", "D.O.T.S Projector"] },
-  { name: "Myling", evidence: ["EMF Reader", "Fingerprints", "Ghost Writing"] },
-  { name: "Onryo", evidence: ["Spirit Box", "Orbs", "Freezing Temps"] },
-  { name: "The Twins", evidence: ["EMF Reader", "Spirit Box", "Freezing Temps"] },
-  { name: "Raiju", evidence: ["EMF Reader", "Orbs", "D.O.T.S Projector"] },
-  { name: "Obake", evidence: ["EMF Reader", "Fingerprints", "Orbs"] },
-  { name: "The Mimic", evidence: ["Spirit Box", "Fingerprints", "Freezing Temps"] }, // Fake Orbs handled via logic
-  { name: "Moroi", evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"] },
-  { name: "Deogen", evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S Projector"] },
-  { name: "Thaye", evidence: ["Ghost Writing", "Orbs", "D.O.T.S Projector"] },
-  { name: "Succubus", evidence: ["Spirit Box", "Ghost Writing", "Fingerprints"] }
+  { name: "Spirit", evidence: ["EMF", "Spirit Box", "Writing"], behavior: {} },
+  { name: "Wraith", evidence: ["EMF", "Spirit Box", "D.O.T.S"], behavior: {} },
+  { name: "Phantom", evidence: ["Spirit Box", "Fingerprints", "D.O.T.S"], behavior: {} },
+  { name: "Poltergeist", evidence: ["Spirit Box", "Fingerprints", "Writing"], behavior: {} },
+  { name: "Banshee", evidence: ["Orbs", "Fingerprints", "D.O.T.S"], behavior: {} },
+  { name: "Jinn", evidence: ["EMF", "Freezing", "Fingerprints"], behavior: {} },
+  { name: "Mare", evidence: ["Spirit Box", "Orbs", "Writing"], behavior: { turnsOffLights: true } },
+  { name: "Revenant", evidence: ["Orbs", "Freezing", "Writing"], behavior: {} },
+  { name: "Shade", evidence: ["EMF", "Freezing", "Writing"], behavior: {} },
+  { name: "Demon", evidence: ["Freezing", "Writing", "Fingerprints"], behavior: {} },
+  { name: "Yurei", evidence: ["Orbs", "Freezing", "D.O.T.S"], behavior: { smudgeLock: true } },
+  { name: "Oni", evidence: ["EMF", "Freezing", "D.O.T.S"], behavior: {} },
+  { name: "Hantu", evidence: ["Freezing", "Fingerprints", "Orbs"], behavior: {} },
+  { name: "Goryo", evidence: ["EMF", "Fingerprints", "D.O.T.S"], behavior: { noWander: true } },
+  { name: "Myling", evidence: ["EMF", "Writing", "Fingerprints"], behavior: {} },
+  { name: "Onryo", evidence: ["Spirit Box", "Freezing", "Orbs"], behavior: { flameHunter: true } },
+  { name: "Twins", evidence: ["EMF", "Freezing", "Spirit Box"], behavior: {} },
+  { name: "Raiju", evidence: ["EMF", "Orbs", "D.O.T.S"], behavior: {} },
+  { name: "Obake", evidence: ["EMF", "Fingerprints", "Orbs"], behavior: {} },
+  { name: "The Mimic", evidence: ["Spirit Box", "Fingerprints", "Freezing"], behavior: { mimic: true } },
+  { name: "Moroi", evidence: ["Spirit Box", "Freezing", "Writing"], behavior: {} },
+  { name: "Deogen", evidence: ["Spirit Box", "Writing", "D.O.T.S"], behavior: {} },
+  { name: "Thaye", evidence: ["Orbs", "Writing", "D.O.T.S"], behavior: {} },
+  { name: "Succubus", evidence: ["Spirit Box", "Writing", "Orbs"], behavior: {} }
 ];
+
+// === GAME STATE ===
+let activeGhost = ghostProfiles[Math.floor(Math.random() * ghostProfiles.length)];
+let mimicTarget = null;
+let mimicCounter = 30000 + Math.random() * 30000;
+let lastMimicChange = performance.now();
+
+// === HELPER ===
+function getCurrentGhost() {
+  return (activeGhost.name === "The Mimic" && mimicTarget) ? mimicTarget : activeGhost;
+}
+
+// === GHOST DROPDOWN UI ===
 function populateGhostDropdown() {
   const select = document.getElementById("ghost-select");
   ghostProfiles.forEach(g => {
@@ -267,21 +280,95 @@ function populateGhostDropdown() {
   });
 }
 
-    // ✅ Start game logic (define this function elsewhere)
-   
+// === TOGGLE UI ===
+document.getElementById("notebookBtn").addEventListener("click", toggleNotebook);
+document.getElementById("guessGhostBtn").addEventListener("click", toggleGuess);
+
+// === NOTEBOOK + GUESS ===
+function toggleNotebook() {
+  const el = document.getElementById('notebookUI');
+  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
+
+function toggleGuess() {
+  const el = document.getElementById('guess-panel');
+  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
+
+function submitGuess() {
+  const guess = document.getElementById("ghost-select").value;
+  if (!guess) return;
+
+  const actual = activeGhost.name;
+  const result = (guess === actual);
+  const message = result
+    ? `✅ Correct! The ghost was indeed ${actual}.`
+    : `❌ Wrong! It was actually ${actual}.`;
+
+  document.getElementById("guess-panel").style.display = "none";
+  fadeScreen(true, 1000);
+  setTimeout(() => {
+    alert(message);
+    location.reload();
+  }, 1200);
+}
+
+// === GHOST BEHAVIOR ===
+function updateGhostBehavior(playerRoom, currentTurn, sanity) {
+  const ghost = getCurrentGhost();
+
+  // === Mimic Behavior Swapping ===
+  if (activeGhost.name === "The Mimic") {
+    const now = performance.now();
+    if (now - lastMimicChange > mimicCounter) {
+      const candidates = ghostProfiles.filter(g => g.name !== "The Mimic");
+      mimicTarget = candidates[Math.floor(Math.random() * candidates.length)];
+      mimicCounter = 30000 + Math.random() * 30000;
+      lastMimicChange = now;
+    }
   }
 
-  // === CALL CREATE SCENE + START RENDER LOOP ===
-  createScene();
- startGame(scene);
-  engine.runRenderLoop(() => {
-    if (scene) scene.render();
-  });
+  if (ghost.behavior.noWander) return;
+  if (ghost.behavior.turnsOffLights && roomHasLight(playerRoom)) maybeTurnOffLight(playerRoom);
+  if (ghost.name === "Shade" && isPlayerInRoom(playerRoom)) return;
 
-  window.addEventListener("resize", () => {
-    engine.resize();
-  });
+  if (ghost.behavior.flameHunter) {
+    const litCandles = countLitCandlesNearPlayer?.() || countLitFlames();
+    if (litCandles >= 3 || wasRelitCandleLitWithin(20)) {
+      extinguishFlame();
+      triggerHunt();
+    }
+  }
 
+  if (ghost.name === "Yurei" && smudgeTurnsRemaining > 0) {
+    smudgeTurnsRemaining--;
+    return;
+  }
+
+  if (Math.random() < 0.2 && ghostCanRoam()) changeGhostRoom();
+  if (sanity < 50 && Math.random() < 0.1) triggerHunt();
+}
+
+// === BABYLON SETUP ===
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+let scene;
+
+async function createScene() {
+  scene = new BABYLON.Scene(engine);
+  // ... rest of scene setup
+  camera = new BABYLON.FreeCamera("freeCam", new BABYLON.Vector3(0, 2, -6), scene);
+  camera.attachControl(canvas, true);
+}
+
+createScene().then(() => {
+  startGame(scene); // ✅ Defined elsewhere
+  engine.runRenderLoop(() => scene.render());
+});
+
+window.addEventListener("resize", () => engine.resize());
+
+// === KEYBINDS ===
 window.addEventListener("keydown", (e) => {
   switch (e.key) {
     case "f": if (heldItem?.name === "Flashlight") toggleFlashlight(heldItem); break;
@@ -291,129 +378,12 @@ window.addEventListener("keydown", (e) => {
     case "v": playSpiritBox(); break;
   }
 });
-
-    camera = new BABYLON.FreeCamera("freeCam", new BABYLON.Vector3(0, 2, -6), scene);
-    camera.attachControl(canvas, true);
-  
-
-  createScene().then(() => engine.runRenderLoop(() => scene.render()));
-  window.addEventListener("resize", () => engine.resize());
-
-// === Ghost Setup ===
-const activeGhost = ghostProfiles[Math.floor(Math.random() * ghostProfiles.length)];
-let mimicTarget = null;
-let mimicCounter = 0;
-function updateGhostBehavior(playerRoom, currentTurn, sanity) {
-  // === Goryo Logic (does not roam)
-  if (activeGhost.behavior.noWander) return;
-
-  // === Mimic Logic: swaps behavior every 3–6 turns
-  if (activeGhost.name === "The Mimic") {
-    mimicCounter--;
-    if (mimicCounter <= 0) {
-      const otherGhosts = ghostProfiles.filter(g => g.name !== "The Mimic");
-      mimicTarget = otherGhosts[Math.floor(Math.random() * otherGhosts.length)];
-      mimicCounter = 3 + Math.floor(Math.random() * 4); // 3–6 turns
-    }
-  }
-
-  // === Onryo Logic: hunts if too many candles or recently relit
-  if (activeGhost.behavior.flameHunter) {
-    const litCandles = countLitCandlesNearPlayer?.() || countLitFlames(); // fallback to total
-    if (litCandles >= 3) triggerHunt();
-
-    if (wasRelitCandleLitWithin(20)) {
-      extinguishFlame(); // or extinguishCandle(candle)
-      triggerHunt();
-    }
-  }
-
-  // === Mare Logic: turns off lights in player's room
-  if (activeGhost.behavior.turnsOffLights && roomHasLight(playerRoom)) {
-    maybeTurnOffLight(playerRoom);
-  }
-
-  // === Shade Logic: never interacts when player is in room
-  if (activeGhost.name === "Shade" && isPlayerInRoom(playerRoom)) return;
-
-  // === Yurei Smudge Lock
-  if (activeGhost.name === "Yurei" && smudgeTurnsRemaining > 0) {
-    smudgeTurnsRemaining--;
-    return;
-  }
-
-  // === Ghost Roaming
-  if (Math.random() < 0.2 && ghostCanRoam()) {
-    changeGhostRoom();
-  }
-
-  // === Hunt Chance (general)
-  if (sanity < 50 && Math.random() < 0.1) {
-    triggerHunt();
-  }
-
-
-  // Roaming chance
-  if (Math.random() < 0.2 && ghostCanRoam()) {
-    changeGhostRoom();
-  }
-
-  // Hunt chance if sanity low
-  if (sanity < 50 && Math.random() < 0.1) {
-    triggerHunt();
-  }
-}
-// === Evidence System ===
-const evidenceCollected = [];
-
-function toggleNotebook() {
-  const el = document.getElementById('notebookUI'); // ✅ FIXED ID
-  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
-}
-
-function toggleGuess() {
-  const el = document.getElementById('guess-panel');
-  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
-}
-
-function toggleEvidence(type) {
-  const idx = evidenceCollected.indexOf(type);
-  if (idx === -1) {
-    evidenceCollected.push(type);
-  } else {
-    evidenceCollected.splice(idx, 1);
-  }
-  console.log("Evidence:", evidenceCollected);
-}
-
-
-function submitGuess() {
-  const guess = document.getElementById("ghost-select").value;
-  if (!guess) return;
-
-  // Lock input
-  document.getElementById("guess-panel").style.display = "none";
-
-  const result = (guess === activeGhost.name);
-  const message = result
-    ? `✅ Correct! The ghost was indeed ${activeGhost.name}.`
-    : `❌ Wrong! It was actually ${activeGhost.name}.`;
-
-  fadeScreen(true, 1000);
-  setTimeout(() => {
-    alert(message); // Optional — replace with custom modal UI if preferred
-    // Optionally reload or show Restart
-    location.reload();
-  }, 1200);
-}
-
 // === HUD Updates ===
 function updateHUD(room, sanity, weather) {
   document.getElementById("room-label").innerText = room || "???";
   document.getElementById("sanity-label").innerText = sanity + "%";
   document.getElementById("weather-label").innerText = weather || "???";
-  document.getElementById("notebookBtn").addEventListener("click", toggleNotebook);
-  document.getElementById("guessGhostBtn").addEventListener("click", toggleGuess);
+
 }
 	// === Screen Fade ===
 function fadeScreen(toBlack = true, duration = 1000) {
