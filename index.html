@@ -251,6 +251,30 @@ function ghostCanRoam() {
 }
 </script>
 <script>
+// === GLOBAL ITEM SPAWN FUNCTION ===
+function spawnInitialItems(scene) {
+  console.log("Spawning initial items...");
+  // Example: simple flashlight as sphere
+  const flashlight = BABYLON.MeshBuilder.CreateSphere("flashlight", { diameter: 0.2 }, scene);
+  flashlight.position = new BABYLON.Vector3(0, 1, 0);
+}
+
+// === PLAYER SETUP FALLBACK ===
+function setupPlayerAndCameras(scene) {
+  const camera = new BABYLON.UniversalCamera("playerCamera", new BABYLON.Vector3(0, 1.6, -5), scene);
+  camera.attachControl(canvas, true);
+  camera.applyGravity = true;
+  camera.ellipsoid = new BABYLON.Vector3(1, 1, 1);
+  camera.checkCollisions = true;
+
+  const light = new BABYLON.PointLight("playerLight", new BABYLON.Vector3(0, 1.8, -5), scene);
+  light.intensity = 0.9;
+  light.parent = camera;
+
+  scene.activeCamera = camera;
+  currentCamera = camera;
+}
+
 // === BABYLON SCENE SETUP ===
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
@@ -259,41 +283,34 @@ let scene, currentCamera;
 // === Scene Creation ===
 async function createScene() {
   scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color3(0, 0, 0);
+  scene.clearColor = new BABYLON.Color3.Black();
   scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0, -0.1, 0);
+  scene.gravity = new BABYLON.Vector3(0, -0.2, 0);
 
-  // === Lighting ===
-  const light = new BABYLON.HemisphericLight("ambientLight", new BABYLON.Vector3(0, 1, 0), scene);
-  light.intensity = 0.6;
+  // Ambient light (scene-wide)
+  const ambient = new BABYLON.HemisphericLight("ambientLight", new BABYLON.Vector3(0, 1, 0), scene);
+  ambient.intensity = 0.5;
 
-  // === Default Camera ===
-  const cam = new BABYLON.FreeCamera("debugCam", new BABYLON.Vector3(0, 2, -6), scene);
-  cam.attachControl(canvas, true);
-  currentCamera = cam;
-  scene.activeCamera = cam;
-
-  // === Load Environment (GLB) ===
+  // Load house model
   BABYLON.SceneLoader.Append("models/", "Abandoned_House.glb", scene, function () {
-    console.log("House model loaded");
-    // Call setup functions here
-    setupPlayerAndCameras(scene, canvas);
+    console.log("House model loaded.");
     spawnInitialItems(scene);
+    setupPlayerAndCameras(scene);
   }, null, function (scene, message) {
     console.error("Failed to load house model:", message);
+    // Fallback plane if loading fails
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 20, height: 20 }, scene);
+    const mat = new BABYLON.StandardMaterial("fallbackMat", scene);
+    mat.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+    ground.material = mat;
 
-    // === Fallback geometry so scene isn't empty ===
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 10, height: 10 }, scene);
-    const box = BABYLON.MeshBuilder.CreateBox("box", { size: 2 }, scene);
-    box.position.y = 1;
-
-    setupPlayerAndCameras(scene, canvas);
-    spawnInitialItems(scene);
+    setupPlayerAndCameras(scene);
   });
 
   return scene;
 }
 </script>
+
 
 <script>
 // === PLAYER + CAMERA SETUP ===
@@ -335,35 +352,51 @@ function setupPlayerAndCameras(scene, canvas) {
     evt => inputMap[evt.sourceEvent.key.toLowerCase()] = false
   ));
 
-  // === Movement Logic ===
+<script>
+// === MOVEMENT LOGIC ===
+let inputMap = {};
+
+function setupControls(scene) {
+  scene.actionManager = new BABYLON.ActionManager(scene);
+
+  scene.onKeyboardObservable.add((kbInfo) => {
+    const key = kbInfo.event.key.toLowerCase();
+    if (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN) {
+      inputMap[key] = true;
+    } else if (kbInfo.type === BABYLON.KeyboardEventTypes.KEYUP) {
+      inputMap[key] = false;
+    }
+  });
+
   scene.onBeforeRenderObservable.add(() => {
-    let direction = new BABYLON.Vector3.Zero();
+    if (!currentCamera) return;
+
+    const speed = 0.1;
     const forward = currentCamera.getDirection(BABYLON.Axis.Z);
     const right = currentCamera.getDirection(BABYLON.Axis.X);
 
-    if (inputMap["w"]) direction.addInPlace(forward);
-    if (inputMap["s"]) direction.subtractInPlace(forward);
-    if (inputMap["a"]) direction.subtractInPlace(right);
-    if (inputMap["d"]) direction.addInPlace(right);
-
-    direction.y = 0;
-    direction.normalize();
-    direction.scaleInPlace(currentCamera.speed);
-    currentCamera.cameraDirection.addInPlace(direction);
-  });
-
-  // === Camera Mode Toggle (V Key) ===
-  window.addEventListener("keydown", e => {
-    if (e.key === "v") {
-      currentCamera.detachControl(canvas);
-      cameraMode = (cameraMode === "first") ? "third" : "first";
-      currentCamera = (cameraMode === "first") ? fpCamera : tpCamera;
-      scene.activeCamera = currentCamera;
-      currentCamera.attachControl(canvas, true);
-    }
+    if (inputMap["w"]) currentCamera.position.addInPlace(forward.scale(speed));
+    if (inputMap["s"]) currentCamera.position.addInPlace(forward.scale(-speed));
+    if (inputMap["a"]) currentCamera.position.addInPlace(right.scale(-speed));
+    if (inputMap["d"]) currentCamera.position.addInPlace(right.scale(speed));
   });
 }
+
+// === TOGGLE CAMERA VIEW ===
+function toggleCameraView() {
+  if (!scene) return;
+
+  if (scene.activeCamera === currentCamera) {
+    const thirdPerson = new BABYLON.ArcRotateCamera("thirdPersonCam", Math.PI / 2, Math.PI / 2.5, 5, currentCamera.position, scene);
+    thirdPerson.attachControl(canvas, true);
+    scene.activeCamera = thirdPerson;
+  } else {
+    scene.activeCamera = currentCamera;
+    currentCamera.attachControl(canvas, true);
+  }
+}
 </script>
+
 <script>
 // === ITEM INTERACTION LOGIC ===
 let heldItems = ["Flashlight", "Spirit Box", "Camera"];
