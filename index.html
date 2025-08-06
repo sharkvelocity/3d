@@ -250,23 +250,24 @@ function ghostCanRoam() {
 }
 </script>
 <script>
+<script>
 // === GLOBAL STATE ===
 let scene, engine, currentCamera;
 let fpCamera, tpCamera;
 let cameraMode = "first";
 const canvas = document.getElementById("renderCanvas");
 
-// === PLAYER CAMERA SETUP ===
+// === SETUP CAMERAS ===
 function setupPlayerAndCameras(scene, canvas) {
-  // First-person
-  fpCamera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(0, 1.8, -10), scene);
+  // First-person Camera — start near house entrance
+  fpCamera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(2, 1.8, 4), scene);
   fpCamera.applyGravity = true;
   fpCamera.checkCollisions = true;
   fpCamera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
   fpCamera.speed = 0.15;
   fpCamera.attachControl(canvas, true);
 
-  // Third-person
+  // Third-person Camera
   tpCamera = new BABYLON.FollowCamera("tpCamera", fpCamera.position.clone().add(new BABYLON.Vector3(0, 5, -10)), scene);
   tpCamera.lockedTarget = fpCamera;
   tpCamera.radius = 6;
@@ -275,140 +276,57 @@ function setupPlayerAndCameras(scene, canvas) {
   tpCamera.cameraAcceleration = 0.05;
   tpCamera.maxCameraSpeed = 10;
 
+  // Set default active camera
   currentCamera = fpCamera;
   scene.activeCamera = currentCamera;
-}
 
-// === ITEM INTERACTIONS ===
-let heldItems = ["Flashlight", "Spirit Box", "Camera"];
-let currentHeldIndex = 0;
+  // Attach control to current camera
+  currentCamera.attachControl(canvas, true);
 
-function getHeldItem() {
-  return heldItems[currentHeldIndex];
-}
-function cycleHeldItem() {
-  currentHeldIndex = (currentHeldIndex + 1) % heldItems.length;
-  updateHUDInventory();
-}
-function updateHUDInventory() {
-  const slot = document.getElementById("hud-item-slot");
-  if (slot) slot.innerText = getHeldItem();
-}
+  // Optional: Log camera position on click to help debug spawn points
+  scene.onPointerDown = () => {
+    console.log("Camera position:", fpCamera.position);
+  };
 
-let flashlightMesh = null, flashlightOn = false;
-function toggleFlashlight() {
-  flashlightOn = !flashlightOn;
-  if (flashlightMesh) flashlightMesh.setEnabled(flashlightOn);
-}
-
-let spiritBoxActive = false;
-function toggleSpiritBox() {
-  spiritBoxActive = !spiritBoxActive;
-  if (spiritBoxActive) {
-    playSound("radioStatic", null, { volume: 0.5, loop: true, name: "spiritBox" });
-  } else {
-    stopSound("spiritBox");
+  // Call control setup
+  if (typeof setupControls === "function") {
+    setupControls(scene);
   }
 }
 
-let usingCamera = false;
-function toggleCameraView() {
-  usingCamera = !usingCamera;
-  const overlay = document.getElementById("camera-overlay");
-  if (overlay) overlay.style.display = usingCamera ? "block" : "none";
-}
-
-function toggleCandle(candleMesh) {
-  const isLit = candleMesh.metadata?.isLit;
-  candleMesh.metadata.isLit = !isLit;
-  candleMesh.getChildMeshes().forEach(m => m.isVisible = !isLit);
-  playSound(isLit ? "candleExtinguish" : "candleIgnite", candleMesh.position);
-}
-
-// === ITEM KEY HANDLER ===
-window.addEventListener("keydown", e => {
-  if (e.key === "e") {
-    const item = getHeldItem();
-    if (item === "Flashlight") toggleFlashlight();
-    else if (item === "Spirit Box") toggleSpiritBox();
-    else if (item === "Camera") toggleCameraView();
-  } else if (e.key === "q") {
-    cycleHeldItem();
-  }
-});
-
-// === SOUND HELPERS ===
-let ambientSound;
-function setAmbientWeatherSound(weather = "rain") {
-  if (ambientSound) ambientSound.stop();
-  const file = weather === "rain" ? "rainstorm.mp3" : "clearWeather.mp3";
-  ambientSound = new BABYLON.Sound("ambient", `sounds/${file}`, scene, null, {
-    loop: true, autoplay: true, volume: 0.4
-  });
-}
-function playSound(name, position = null, options = {}) {
-  const sound = new BABYLON.Sound(name, `sounds/${name}.mp3`, scene, null, {
-    spatialSound: !!position,
-    autoplay: true,
-    loop: options.loop || false,
-    volume: options.volume || 1
-  });
-  if (position) sound.setPosition(position);
-}
-function stopSound(name) {
-  const sound = scene.soundTracks?.flatMap(track => track.soundCollection).find(s => s.name === name);
-  if (sound) sound.stop();
-}
-</script>
-
-<script>
-// === ENGINE, SCENE & MODEL LOADING ===
+// === RENDER LOOP & SCENE INIT ===
 engine = new BABYLON.Engine(canvas, true);
-
 engine.runRenderLoop(() => {
   if (scene && scene.activeCamera) scene.render();
 });
-
 window.addEventListener("resize", () => engine.resize());
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // Create scene
   scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color3.Black();
   scene.collisionsEnabled = true;
   scene.gravity = new BABYLON.Vector3(0, -0.2, 0);
 
+  // Add ambient light
   const light = new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0, 1, 0), scene);
   light.intensity = 0.5;
 
-  try {
-    await BABYLON.SceneLoader.AppendAsync("models/", "Abandoned_House.glb", scene);
-    console.log("House model loaded");
+  // Load house model
+  await BABYLON.SceneLoader.AppendAsync("models/", "Abandoned_House.glb", scene);
+  scene.meshes.forEach(mesh => {
+    mesh.checkCollisions = true;
+    mesh.isPickable = true;
+    mesh.freezeWorldMatrix();
+    if (mesh.name.toLowerCase().includes("floor") || mesh.name.toLowerCase().includes("ground")) {
+      console.log("Floor mesh:", mesh.name);
+    }
+  });
 
-    // Fix collisions for ALL meshes
-function applyCollisionToAll(mesh) {
-  mesh.checkCollisions = true;
-  mesh.isPickable = true;
-  if (mesh.getChildMeshes) {
-    mesh.getChildMeshes().forEach(child => {
-      applyCollisionToAll(child);
-    });
-  }
-}
-
-// After loading:
-scene.meshes.forEach(mesh => {
-  applyCollisionToAll(mesh);
-});
-
-
-    // Optional: Log mesh names to confirm
-    scene.meshes.forEach(m => console.log("Mesh:", m.name));
-
-  } catch (err) {
-    console.error("Failed to load house model:", err);
-  }
-
+  // Setup player + cameras AFTER model is loaded
   setupPlayerAndCameras(scene, canvas);
+
+  // Final canvas resize
   engine.resize();
 });
 </script>
