@@ -4,270 +4,198 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Phasma-Phoney 3D</title>
+
+  <!-- Babylon.js Core -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet" />
+
+  <!-- Style -->
   <style>
     html, body {
       margin: 0;
       padding: 0;
       overflow: hidden;
-      font-family: Arial, sans-serif;
-      background-color: black;
+      height: 100%;
+      background: black;
+      font-family: 'Orbitron', sans-serif;
     }
+
     #renderCanvas {
       width: 100%;
       height: 100%;
       display: block;
     }
+
     #fade-screen {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
       background: black;
       opacity: 0;
       pointer-events: none;
-      z-index: 10;
       transition: opacity 1s;
+      z-index: 100;
     }
-    .hud {
+
+    #camera-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.6) url('images/camera_overlay.png') center/cover no-repeat;
+      display: none;
+      z-index: 101;
+      pointer-events: none;
+    }
+
+    #hud {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      color: white;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      z-index: 102;
+      pointer-events: none;
+    }
+
+    #hud .label-group {
+      display: flex;
+      gap: 20px;
+    }
+
+    #hud-item-slot {
+      font-weight: bold;
+      border: 1px solid white;
+      padding: 5px 10px;
+      background: rgba(0,0,0,0.5);
+    }
+
+    #ghost-suggestions {
       position: absolute;
       top: 10px;
-      left: 10px;
-      color: white;
-      z-index: 20;
-      font-size: 14px;
-    }
-    #notebookUI, #guess-panel {
-      position: absolute;
-      bottom: 10px;
       right: 10px;
-      background: rgba(0,0,0,0.8);
-      color: white;
+      background: rgba(0,0,0,0.7);
       padding: 10px;
-      border-radius: 6px;
-      display: none;
-      z-index: 20;
+      max-width: 200px;
+      z-index: 102;
+      color: white;
+      font-size: 12px;
     }
-    #evidence-panel button {
-      margin: 2px;
+
+    .ghost-suggestion {
+      margin-bottom: 5px;
     }
+
     .found {
-      background-color: green;
-      color: white;
+      background-color: green !important;
     }
+
     .eliminated {
-      background-color: red;
-      color: white;
+      background-color: red !important;
     }
   </style>
-
- <script src="cdn/babylon.js"></script>
-<script src="cdn/babylon.loaders.js"></script>
-<script src="cdn/babylon.gui.js"></script>
 </head>
 <body>
+  <!-- Render Target -->
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Fade to Black Overlay -->
+  <!-- Black Screen Fade -->
   <div id="fade-screen"></div>
 
-  <!-- HUD -->
-  <div class="hud">
-    <div><strong>Room:</strong> <span id="room-label">---</span></div>
-    <div><strong>Sanity:</strong> <span id="sanity-label">100%</span></div>
-    <div><strong>Weather:</strong> <span id="weather-label">---</span></div>
-    <button id="notebookBtn">Notebook</button>
-    <button id="guessGhostBtn">Guess Ghost</button>
-  </div>
+  <!-- Camera Overlay (for IR view) -->
+  <div id="camera-overlay"></div>
 
-  <!-- Notebook Panel -->
-  <div id="notebookUI">
-    <h3>Evidence</h3>
-    <div id="evidence-panel">
-      <button id="evi-EMF">EMF</button>
-      <button id="evi-Spirit Box">Spirit Box</button>
-      <button id="evi-Fingerprints">Fingerprints</button>
-      <button id="evi-Orbs">Orbs</button>
-      <button id="evi-Writing">Writing</button>
-      <button id="evi-Freezing">Freezing</button>
-      <button id="evi-D.O.T.S">D.O.T.S</button>
+  <!-- HUD Display -->
+  <div id="hud">
+    <div class="label-group">
+      <div>Room: <span id="room-label">???</span></div>
+      <div>Sanity: <span id="sanity-label">100%</span></div>
+      <div>Weather: <span id="weather-label">???</span></div>
     </div>
-    <h4>Ghost Suggestions</h4>
-    <div id="ghost-suggestions"></div>
+    <div id="hud-item-slot">Flashlight</div>
   </div>
 
-  <!-- Ghost Guess Panel -->
-  <div id="guess-panel">
-    <label for="ghost-select">Who is the ghost?</label>
-    <select id="ghost-select"></select>
-    <button onclick="submitGuess()">Submit</button>
-  </div>
+  <!-- Evidence Suggestion Panel -->
+  <div id="ghost-suggestions"></div>
 <script>
-// === GHOST PROFILES ===
-const ghostProfiles = [
-  { name: "Spirit", evidence: ["EMF", "Spirit Box", "Writing"], behavior: {} },
-  { name: "Wraith", evidence: ["EMF", "Spirit Box", "D.O.T.S"], behavior: {} },
-  { name: "Phantom", evidence: ["Spirit Box", "Fingerprints", "D.O.T.S"], behavior: {} },
-  { name: "Poltergeist", evidence: ["Spirit Box", "Fingerprints", "Writing"], behavior: {} },
-  { name: "Banshee", evidence: ["Orbs", "Fingerprints", "D.O.T.S"], behavior: {} },
-  { name: "Jinn", evidence: ["EMF", "Freezing", "Fingerprints"], behavior: {} },
-  { name: "Mare", evidence: ["Spirit Box", "Orbs", "Writing"], behavior: { turnsOffLights: true } },
-  { name: "Revenant", evidence: ["Orbs", "Freezing", "Writing"], behavior: {} },
-  { name: "Shade", evidence: ["EMF", "Freezing", "Writing"], behavior: {} },
-  { name: "Demon", evidence: ["Freezing", "Writing", "Fingerprints"], behavior: {} },
-  { name: "Yurei", evidence: ["Orbs", "Freezing", "D.O.T.S"], behavior: { smudgeLock: true } },
-  { name: "Oni", evidence: ["EMF", "Freezing", "D.O.T.S"], behavior: {} },
-  { name: "Hantu", evidence: ["Freezing", "Fingerprints", "Orbs"], behavior: {} },
-  { name: "Goryo", evidence: ["EMF", "Fingerprints", "D.O.T.S"], behavior: { noWander: true } },
-  { name: "Myling", evidence: ["EMF", "Writing", "Fingerprints"], behavior: {} },
-  { name: "Onryo", evidence: ["Spirit Box", "Freezing", "Orbs"], behavior: { flameHunter: true } },
-  { name: "Twins", evidence: ["EMF", "Freezing", "Spirit Box"], behavior: {} },
-  { name: "Raiju", evidence: ["EMF", "Orbs", "D.O.T.S"], behavior: {} },
-  { name: "Obake", evidence: ["EMF", "Fingerprints", "Orbs"], behavior: {} },
-  { name: "The Mimic", evidence: ["Spirit Box", "Fingerprints", "Freezing"], behavior: { mimic: true } },
-  { name: "Moroi", evidence: ["Spirit Box", "Freezing", "Writing"], behavior: {} },
-  { name: "Deogen", evidence: ["Spirit Box", "Writing", "D.O.T.S"], behavior: {} },
-  { name: "Thaye", evidence: ["Orbs", "Writing", "D.O.T.S"], behavior: {} },
-  { name: "Succubus", evidence: ["Spirit Box", "Writing", "Orbs"], behavior: {} }
-];
+// === GLOBAL VARIABLES & CONSTANTS ===
+let scene, engine, currentCamera;
+let fpCamera, tpCamera;
+let cameraMode = "first";
 
-// === GAME STATE ===
-let activeGhost = ghostProfiles[Math.floor(Math.random() * ghostProfiles.length)];
-let mimicTarget = null;
-let mimicCounter = 30000 + Math.random() * 30000;
-let lastMimicChange = performance.now();
+const canvas = document.getElementById("renderCanvas");
 
-// === EVIDENCE TRACKING ===
+// Evidence tracking
 const allEvidence = ["EMF", "Spirit Box", "Fingerprints", "Orbs", "Writing", "Freezing", "D.O.T.S"];
 let foundEvidence = new Set();
 let eliminatedEvidence = new Set();
 
-// === HELPER: Current Ghost ===
-function getCurrentGhost() {
-  return (activeGhost.name === "The Mimic" && mimicTarget) ? mimicTarget : activeGhost;
-}
+// Inventory
+let heldItems = ["Flashlight", "Spirit Box", "Camera"];
+let currentHeldIndex = 0;
+
+// Sound
+let ambientSound;
+let spiritBoxSound = null;
+let flashlightMesh = null;
+let flashlightOn = false;
+let spiritBoxActive = false;
+let usingCamera = false;
 </script>
 <script>
-// === NOTEBOOK TOGGLE ===
-function toggleNotebook() {
-  const el = document.getElementById('notebookUI');
-  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
-}
+// === SCENE & MODEL LOAD ===
+window.addEventListener("DOMContentLoaded", async () => {
+  engine = new BABYLON.Engine(canvas, true);
+  scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color3.Black();
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0, -0.2, 0);
 
-// === GHOST GUESS PANEL TOGGLE ===
-function toggleGuess() {
-  const el = document.getElementById('guess-panel');
-  el.style.display = (el.style.display === 'none') ? 'block' : 'none';
-}
+  // Ambient light
+  const ambient = new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0, 1, 0), scene);
+  ambient.intensity = 0.5;
 
-// === GHOST GUESS SUBMISSION ===
-function submitGuess() {
-  const guess = document.getElementById("ghost-select").value;
-  if (!guess) return;
-
-  const actual = activeGhost.name;
-  const result = (guess === actual);
-  const message = result
-    ? `✅ Correct! The ghost was indeed ${actual}.`
-    : `❌ Wrong! It was actually ${actual}.`;
-
-  document.getElementById("guess-panel").style.display = "none";
-  fadeScreen(true, 1000);
-  setTimeout(() => {
-    alert(message);
-    location.reload();
-  }, 1200);
-}
-
-// === GHOST DROPDOWN POPULATION ===
-function populateGhostDropdown() {
-  const select = document.getElementById("ghost-select");
-  ghostProfiles.forEach(g => {
-    const opt = document.createElement("option");
-    opt.value = g.name;
-    opt.textContent = g.name;
-    select.appendChild(opt);
+  // Load haunted house model
+  await BABYLON.SceneLoader.AppendAsync("models/", "Abandoned_House.glb", scene);
+  scene.meshes.forEach(mesh => {
+    mesh.checkCollisions = true;
+    mesh.isPickable = true;
+    mesh.freezeWorldMatrix(); // Boost performance
   });
-}
 
-// === HOOK TO BUTTONS ===
-document.getElementById("notebookBtn").addEventListener("click", toggleNotebook);
-document.getElementById("guessGhostBtn").addEventListener("click", toggleGuess);
-document.getElementById("submitGuessBtn").addEventListener("click", submitGuess);
+  setupPlayerAndCameras(scene, canvas);
+  engine.runRenderLoop(() => {
+    if (scene && scene.activeCamera) scene.render();
+  });
+
+  window.addEventListener("resize", () => engine.resize());
+});
 </script>
 <script>
-// === GHOST BEHAVIOR ENGINE ===
-function getCurrentGhost() {
-  return (activeGhost.name === "The Mimic" && mimicTarget) ? mimicTarget : activeGhost;
-}
-
-function updateGhostBehavior(playerRoomMesh, sanity) {
-  const ghost = getCurrentGhost();
-
-  // === Mimic Behavior Swapping ===
-  if (activeGhost.name === "The Mimic") {
-    const now = performance.now();
-    if (now - lastMimicChange > mimicCounter) {
-      const candidates = ghostProfiles.filter(g => g.name !== "The Mimic");
-      mimicTarget = candidates[Math.floor(Math.random() * candidates.length)];
-      mimicCounter = 30000 + Math.random() * 30000;
-      lastMimicChange = now;
-    }
-  }
-
-  // === Yurei Lock After Smudge ===
-  if (ghost.name === "Yurei" && smudgeTurnsRemaining > 0) {
-    smudgeTurnsRemaining--;
-    return;
-  }
-
-  // === Onryo Flame Trigger ===
-  if (ghost.behavior.flameHunter) {
-    const flames = countLitFlames();
-    if (flames >= 3 || wasRelitCandleLitWithin(20)) {
-      extinguishFlame();
-      triggerHunt();
-    }
-  }
-
-  // === Mare Turns Off Light ===
-  if (ghost.behavior.turnsOffLights && roomHasLight(playerRoomMesh)) {
-    maybeTurnOffLight(playerRoomMesh);
-  }
-
-  // === Shade Doesn't Hunt When Player Is Present ===
-  if (ghost.name === "Shade" && isPlayerInRoom(playerRoomMesh)) return;
-
-  // === Roaming Logic (not Goryo) ===
-  if (ghostCanRoam() && Math.random() < 0.2) changeGhostRoom();
-
-  // === Hunt Chance Triggered by Sanity
-  if (sanity < 50 && Math.random() < 0.1) triggerHunt();
-}
-
-function ghostCanRoam() {
-  return !activeGhost.behavior.noWander;
-}
-</script>
-<script>
-<script>
-// === GLOBAL STATE ===
-let scene, engine, currentCamera;
-let fpCamera, tpCamera;
+// === CAMERA SETUP & SWITCHING ===
+let fpCamera, tpCamera, currentCamera;
 let cameraMode = "first";
-const canvas = document.getElementById("renderCanvas");
 
-// === SETUP CAMERAS ===
 function setupPlayerAndCameras(scene, canvas) {
-  // First-person Camera — start near house entrance
-  fpCamera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(2, 1.8, 4), scene);
+  // === First-Person Camera ===
+  fpCamera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(0, 1.8, -2), scene);
   fpCamera.applyGravity = true;
   fpCamera.checkCollisions = true;
   fpCamera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
   fpCamera.speed = 0.15;
   fpCamera.attachControl(canvas, true);
 
-  // Third-person Camera
+  // === Third-Person Camera ===
   tpCamera = new BABYLON.FollowCamera("tpCamera", fpCamera.position.clone().add(new BABYLON.Vector3(0, 5, -10)), scene);
   tpCamera.lockedTarget = fpCamera;
   tpCamera.radius = 6;
@@ -276,61 +204,777 @@ function setupPlayerAndCameras(scene, canvas) {
   tpCamera.cameraAcceleration = 0.05;
   tpCamera.maxCameraSpeed = 10;
 
-  // Set default active camera
+  // Set default camera
   currentCamera = fpCamera;
   scene.activeCamera = currentCamera;
-
-  // Attach control to current camera
   currentCamera.attachControl(canvas, true);
-
-  // Optional: Log camera position on click to help debug spawn points
-  scene.onPointerDown = () => {
-    console.log("Camera position:", fpCamera.position);
-  };
-
-  // Call control setup
-  if (typeof setupControls === "function") {
-    setupControls(scene);
-  }
 }
 
-// === RENDER LOOP & SCENE INIT ===
-engine = new BABYLON.Engine(canvas, true);
-engine.runRenderLoop(() => {
-  if (scene && scene.activeCamera) scene.render();
-});
-window.addEventListener("resize", () => engine.resize());
+function toggleCameraView() {
+  if (!scene) return;
 
-window.addEventListener("DOMContentLoaded", async () => {
-  // Create scene
-  scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color3.Black();
-  scene.collisionsEnabled = true;
+  if (scene.activeCamera === fpCamera) {
+    scene.activeCamera.detachControl(canvas);
+    scene.activeCamera = tpCamera;
+    scene.activeCamera.attachControl(canvas, true);
+  } else {
+    scene.activeCamera.detachControl(canvas);
+    scene.activeCamera = fpCamera;
+    scene.activeCamera.attachControl(canvas, true);
+  }
+}
+</script>
+<script>
+// === PLAYER SETUP & MOVEMENT ===
+function setupControls(scene) {
   scene.gravity = new BABYLON.Vector3(0, -0.2, 0);
+  scene.collisionsEnabled = true;
 
-  // Add ambient light
-  const light = new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0, 1, 0), scene);
-  light.intensity = 0.5;
-
-  // Load house model
-  await BABYLON.SceneLoader.AppendAsync("models/", "Abandoned_House.glb", scene);
+  // Make all meshes collide unless excluded
   scene.meshes.forEach(mesh => {
-    mesh.checkCollisions = true;
-    mesh.isPickable = true;
-    mesh.freezeWorldMatrix();
-    if (mesh.name.toLowerCase().includes("floor") || mesh.name.toLowerCase().includes("ground")) {
-      console.log("Floor mesh:", mesh.name);
+    if (mesh.name !== "player" && !mesh.name.includes("NoCollision")) {
+      mesh.checkCollisions = true;
     }
   });
 
-  // Setup player + cameras AFTER model is loaded
-  setupPlayerAndCameras(scene, canvas);
+  // Key controls
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "v") toggleCameraView(); // V to switch views
+    if (e.key === "q") cycleHeldItem();    // Q to cycle items
+    if (e.key === "e") {
+      const item = getHeldItem();
+      if (item === "Flashlight") toggleFlashlight();
+      if (item === "Spirit Box") toggleSpiritBox();
+      if (item === "Camera") toggleCameraView();
+    }
+  });
+}
+</script>
+<script>
+// === INVENTORY & ITEM HANDLING ===
+let heldItems = ["Flashlight", "Spirit Box", "Camera"];
+let currentHeldIndex = 0;
 
-  // Final canvas resize
-  engine.resize();
+function getHeldItem() {
+  return heldItems[currentHeldIndex];
+}
+
+function cycleHeldItem() {
+  currentHeldIndex = (currentHeldIndex + 1) % heldItems.length;
+  updateHUDInventory();
+}
+
+function updateHUDInventory() {
+  const slot = document.getElementById("hud-item-slot");
+  if (slot) slot.innerText = getHeldItem();
+}
+
+// === FLASHLIGHT LOGIC ===
+let flashlightMesh = null;
+let flashlightOn = false;
+
+function toggleFlashlight() {
+  flashlightOn = !flashlightOn;
+  if (flashlightMesh) {
+    flashlightMesh.setEnabled(flashlightOn);
+  }
+}
+
+// === SPIRIT BOX LOGIC ===
+let spiritBoxSound = null;
+let spiritBoxActive = false;
+
+function toggleSpiritBox() {
+  spiritBoxActive = !spiritBoxActive;
+  if (spiritBoxActive) {
+    spiritBoxSound = new BABYLON.Sound("spiritBox", "sounds/radioStatic.mp3", scene, null, {
+      loop: true,
+      autoplay: true,
+      volume: 0.5
+    });
+  } else if (spiritBoxSound) {
+    spiritBoxSound.stop();
+    spiritBoxSound.dispose();
+    spiritBoxSound = null;
+  }
+}
+
+// === IR CAMERA VIEW ===
+let usingCamera = false;
+function toggleCameraView() {
+  usingCamera = !usingCamera;
+  const overlay = document.getElementById("camera-overlay");
+  if (overlay) overlay.style.display = usingCamera ? "block" : "none";
+}
+
+// === CANDLE TOGGLE LOGIC ===
+function toggleCandle(candleMesh) {
+  const isLit = candleMesh.metadata?.isLit;
+  if (isLit) {
+    candleMesh.metadata.isLit = false;
+    candleMesh.getChildMeshes().forEach(m => m.isVisible = false);
+    playSound("candleExtinguish", candleMesh.position);
+  } else {
+    candleMesh.metadata = { ...candleMesh.metadata, isLit: true };
+    candleMesh.getChildMeshes().forEach(m => m.isVisible = true);
+    playSound("candleIgnite", candleMesh.position);
+  }
+}
+</script>
+<script>
+// === EVIDENCE SYSTEM ===
+const allEvidence = [
+  "EMF Level 5", "Spirit Box", "Ghost Writing", "Freezing Temps",
+  "Ghost Orbs", "DOTS Projector", "Fingerprints"
+];
+
+let foundEvidence = [];
+let eliminatedEvidence = [];
+
+function toggleEvidence(type, evidence) {
+  if (type === "found") {
+    const index = foundEvidence.indexOf(evidence);
+    if (index >= 0) {
+      foundEvidence.splice(index, 1);
+    } else {
+      if (!eliminatedEvidence.includes(evidence)) foundEvidence.push(evidence);
+    }
+  } else if (type === "eliminated") {
+    const index = eliminatedEvidence.indexOf(evidence);
+    if (index >= 0) {
+      eliminatedEvidence.splice(index, 1);
+    } else {
+      if (!foundEvidence.includes(evidence)) eliminatedEvidence.push(evidence);
+    }
+  }
+  updateEvidenceUI();
+  updateGhostSuggestions();
+}
+
+function updateEvidenceUI() {
+  allEvidence.forEach(e => {
+    const foundBtn = document.querySelector(`[data-evidence="${e}"][data-type="found"]`);
+    const eliminatedBtn = document.querySelector(`[data-evidence="${e}"][data-type="eliminated"]`);
+
+    if (foundBtn) foundBtn.classList.toggle("active", foundEvidence.includes(e));
+    if (eliminatedBtn) eliminatedBtn.classList.toggle("active", eliminatedEvidence.includes(e));
+  });
+}
+
+function updateGhostSuggestions() {
+  const possible = ghostProfiles.filter(g => {
+    const ev = g.evidence;
+    return foundEvidence.every(e => ev.includes(e)) &&
+           eliminatedEvidence.every(e => !ev.includes(e));
+  });
+
+  const suggestionDiv = document.getElementById("ghost-suggestions");
+  if (suggestionDiv) {
+    suggestionDiv.innerHTML = possible.map(g => `<div>${g.name}</div>`).join("");
+  }
+}
+</script>
+<script>
+// === GHOST AI & BEHAVIOR ===
+let ghostEntity, ghostProfile, ghostRoom = null;
+let lastRoamTime = 0;
+let lastMimicChange = 0;
+let currentMimicTarget = null;
+let huntCooldown = 0;
+
+function setupGhostAI() {
+  ghostProfile = pickRandomGhost();
+  if (ghostProfile.name === "The Mimic") {
+    currentMimicTarget = pickRandomGhost("The Mimic");
+  }
+  assignGhostRoom();
+  spawnGhostMesh();
+}
+
+function pickRandomGhost(excludeName = null) {
+  const options = ghostProfiles.filter(g => g.name !== excludeName);
+  return options[Math.floor(Math.random() * options.length)];
+}
+
+function assignGhostRoom() {
+  const rooms = Object.keys(roomZones);
+  ghostRoom = rooms[Math.floor(Math.random() * rooms.length)];
+  state.ghostRoom = ghostRoom;
+}
+
+function spawnGhostMesh() {
+  ghostEntity = BABYLON.MeshBuilder.CreateSphere("ghost", { diameter: 1 }, scene);
+  ghostEntity.material = new BABYLON.StandardMaterial("ghostMat", scene);
+  ghostEntity.material.alpha = 0.4;
+  ghostEntity.isVisible = false;
+}
+
+function updateGhostAI(deltaTime) {
+  if (!ghostProfile || !ghostRoom) return;
+
+  // === Mimic Target Swap Every 30–60 Seconds ===
+  if (ghostProfile.name === "The Mimic") {
+    const now = performance.now();
+    if (now - lastMimicChange > 30000 + Math.random() * 30000) {
+      currentMimicTarget = pickRandomGhost("The Mimic");
+      lastMimicChange = now;
+    }
+  }
+
+  // === Ghost Roaming Logic (except Goryo) ===
+  const now = performance.now();
+  if (now - lastRoamTime > 20000 + Math.random() * 15000) {
+    if (ghostProfile.name !== "Goryo") {
+      const rooms = Object.keys(roomZones);
+      ghostRoom = rooms[Math.floor(Math.random() * rooms.length)];
+      state.ghostRoom = ghostRoom;
+    }
+    lastRoamTime = now;
+  }
+
+  // === Hunting Logic ===
+  if (huntCooldown > 0) {
+    huntCooldown -= deltaTime;
+  } else if (state.sanity < 25 && Math.random() < getHuntChance()) {
+    startHunt();
+    huntCooldown = getHuntCooldown(); // seconds
+  }
+}
+
+function getHuntChance() {
+  switch (ghostProfile.aggression || "average") {
+    case "high": return 0.03;
+    case "low": return 0.01;
+    default: return 0.02;
+  }
+}
+
+function getHuntCooldown() {
+  switch (ghostProfile.name) {
+    case "Demon": return 10;
+    case "Revenant": return 20;
+    default: return 30;
+  }
+}
+
+function startHunt() {
+  fadeScreenRed();
+  playHeartbeat();
+  ghostEntity.position = player.position.clone();
+  ghostEntity.isVisible = true;
+
+  // Check crucifix defense
+  if (playerHasItem("Crucifix") && isInGhostRoom()) {
+    useItem("Crucifix");
+    logToGame("The crucifix burned in your hand. The hunt was prevented.");
+    ghostEntity.isVisible = false;
+    return;
+  }
+
+  // Check smudge stick defense
+  if (playerHasItem("Smudge Stick")) {
+    useItem("Smudge Stick");
+    logToGame("The smudge stick drove the ghost away temporarily.");
+    ghostEntity.isVisible = false;
+    return;
+  }
+
+  // You die
+  logToGame("You were caught by the ghost...");
+  fadeToBlack();
+  stopGame();
+}
+
+function isInGhostRoom() {
+  return state.room === state.ghostRoom;
+}
+</script>
+<script>
+// === UI FUNCTIONS & HUD UPDATES ===
+
+function updateHUD() {
+  document.getElementById("room-label").innerText = `Room: ${state.room || "Unknown"}`;
+  document.getElementById("sanity-label").innerText = `Sanity: ${Math.round(state.sanity)}%`;
+  document.getElementById("weather-label").innerText = `Weather: ${state.weather || "?"}`;
+}
+
+function fadeScreenRed() {
+  const overlay = document.getElementById("screen-fade");
+  overlay.style.background = "rgba(255, 0, 0, 0.3)";
+  overlay.style.display = "block";
+  setTimeout(() => { overlay.style.display = "none"; }, 2000);
+}
+
+function fadeToBlack() {
+  const overlay = document.getElementById("screen-fade");
+  overlay.style.background = "black";
+  overlay.style.display = "block";
+}
+
+function showCameraOverlay(on = true) {
+  const overlay = document.getElementById("camera-overlay");
+  overlay.style.display = on ? "block" : "none";
+}
+</script>
+<script>
+// === SOUND SYSTEM ===
+
+const sounds = {
+  ambient: new Audio("sounds/ambient.mp3"),
+  radio: new Audio("sounds/Radio.mp3"),
+  spiritBox: new Audio("sounds/spiritbox.mp3"),
+  ghostWhisper: new Audio("sounds/whisper.mp3"),
+  heartbeat: new Audio("sounds/heartbeat.mp3"),
+};
+
+function playAmbientLoop() {
+  sounds.ambient.loop = true;
+  sounds.ambient.volume = 0.3;
+  sounds.ambient.play().catch(() => {});
+}
+
+function triggerRadioEvent() {
+  if (state.currentGhost.name === "Shade" && state.room === state.ghostRoom) return;
+  const chance = (state.room === state.ghostRoom) ? 0.7 : 0.2;
+  if (Math.random() < chance) {
+    sounds.radio.currentTime = 0;
+    sounds.radio.play().catch(() => {});
+  }
+}
+
+function playSpiritBox() {
+  sounds.spiritBox.currentTime = 0;
+  sounds.spiritBox.play().catch(() => {});
+}
+
+function playGhostWhisper() {
+  sounds.ghostWhisper.currentTime = 0;
+  sounds.ghostWhisper.play().catch(() => {});
+}
+
+function playHeartbeat() {
+  sounds.heartbeat.loop = true;
+  sounds.heartbeat.volume = 0.6;
+  sounds.heartbeat.play().catch(() => {});
+}
+
+function stopHeartbeat() {
+  sounds.heartbeat.pause();
+  sounds.heartbeat.currentTime = 0;
+}
+</script>
+<script>
+// === RENDER LOOP & DOM INIT ===
+
+let engine;
+
+window.addEventListener("DOMContentLoaded", () => {
+  const canvas = document.getElementById("renderCanvas");
+  engine = new BABYLON.Engine(canvas, true);
+
+  createScene(canvas).then(scene => {
+    engine.runRenderLoop(() => {
+      scene.render();
+      if (player && player.position && scene.activeCamera) {
+        scene.activeCamera.setTarget(player.position);
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      engine.resize();
+    });
+
+    playAmbientLoop();
+    initHUD();
+    updateHUD();
+    fadeFromBlack();
+  });
 });
 </script>
+<script>
+// === GHOST PROFILES ===
 
+const ghostProfiles = {
+  Spirit: {
+    evidence: ["EMF 5", "Spirit Box", "Ghost Writing"],
+    behavior: { huntCooldown: 25 }
+  },
+  Wraith: {
+    evidence: ["EMF 5", "Spirit Box", "D.O.T.S Projector"],
+    behavior: { floats: true, huntCooldown: 20 }
+  },
+  Phantom: {
+    evidence: ["Spirit Box", "Fingerprints", "D.O.T.S Projector"],
+    behavior: { drainsSanityOnView: true }
+  },
+  Poltergeist: {
+    evidence: ["Spirit Box", "Fingerprints", "Ghost Writing"],
+    behavior: { throwsObjects: true }
+  },
+  Banshee: {
+    evidence: ["Fingerprints", "Ghost Orb", "D.O.T.S Projector"],
+    behavior: { targetsOnePlayer: true }
+  },
+  Jinn: {
+    evidence: ["EMF 5", "Fingerprints", "Freezing Temps"],
+    behavior: { fastWhenUnseen: true }
+  },
+  Mare: {
+    evidence: ["Spirit Box", "Ghost Orb", "Ghost Writing"],
+    behavior: { hatesLight: true }
+  },
+  Revenant: {
+    evidence: ["Ghost Orb", "Ghost Writing", "Freezing Temps"],
+    behavior: { superFastWhenSeen: true }
+  },
+  Shade: {
+    evidence: ["EMF 5", "Ghost Writing", "Freezing Temps"],
+    behavior: { shy: true }
+  },
+  Demon: {
+    evidence: ["Fingerprints", "Ghost Writing", "Freezing Temps"],
+    behavior: { frequentHunts: true, huntCooldown: 10 }
+  },
+  Yurei: {
+    evidence: ["Ghost Orb", "Freezing Temps", "D.O.T.S Projector"],
+    behavior: { smudgeLockTurns: 5 }
+  },
+  Oni: {
+    evidence: ["EMF 5", "Freezing Temps", "D.O.T.S Projector"],
+    behavior: { visibleOften: true }
+  },
+  Hantu: {
+    evidence: ["Fingerprints", "Ghost Orb", "Freezing Temps"],
+    behavior: { fasterInCold: true }
+  },
+  Goryo: {
+    evidence: ["EMF 5", "Fingerprints", "D.O.T.S Projector"],
+    behavior: { neverChangesRoom: true }
+  },
+  Myling: {
+    evidence: ["EMF 5", "Fingerprints", "Ghost Writing"],
+    behavior: { quieterSteps: true }
+  },
+  Onryo: {
+    evidence: ["Spirit Box", "Ghost Orb", "Freezing Temps"],
+    behavior: { attacksNearFire: true }
+  },
+  Twins: {
+    evidence: ["EMF 5", "Spirit Box", "Freezing Temps"],
+    behavior: { twinInteractions: true }
+  },
+  Raiju: {
+    evidence: ["EMF 5", "Ghost Orb", "D.O.T.S Projector"],
+    behavior: { speedsUpNearElectronics: true }
+  },
+  Obake: {
+    evidence: ["EMF 5", "Fingerprints", "Ghost Orb"],
+    behavior: { rareFingerprint: true }
+  },
+  TheMimic: {
+    evidence: ["Spirit Box", "Fingerprints", "Freezing Temps"],
+    behavior: { showsFakeOrbs: true, mimicryInterval: 30 }
+  },
+  Moroi: {
+    evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"],
+    behavior: { cursesSanityDrain: true }
+  },
+  Deogen: {
+    evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S Projector"],
+    behavior: { alwaysKnowsLocation: true }
+  },
+  Thaye: {
+    evidence: ["Ghost Orb", "Ghost Writing", "D.O.T.S Projector"],
+    behavior: { agesOverTime: true }
+  },
+  Yokai: {
+    evidence: ["Spirit Box", "Ghost Orb", "D.O.T.S Projector"],
+    behavior: { huntsWhenTalkedNear: true }
+  },
+  Succubus: {
+    evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S Projector"],
+    behavior: { charmsPlayer: true, drainsSanityFaster: true }
+  }
+};
+</script>
+<script>
+// === UTILITY FUNCTIONS & SCENE TOOLS ===
 
+// Get distance between two vectors
+function distance(a, b) {
+  return BABYLON.Vector3.Distance(a, b);
+}
+
+// Check if two meshes are within a given radius
+function isNear(mesh1, mesh2, radius = 3) {
+  return distance(mesh1.position, mesh2.position) <= radius;
+}
+
+// Get random float between min and max
+function randomFloat(min, max) {
+  return Math.random() * (max - min) + min;
+}
+
+// Get random integer between min and max
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Choose random element from array
+function randomFromArray(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Get the room name from a mesh (if tagged)
+function getRoomFromMesh(mesh) {
+  return mesh && mesh.metadata && mesh.metadata.roomName ? mesh.metadata.roomName : null;
+}
+
+// Fade screen to black then back in
+function fadeScreen(duration = 1500) {
+  const fade = document.getElementById("fade-screen");
+  fade.style.transition = `opacity ${duration / 1000}s`;
+  fade.style.opacity = 1;
+  setTimeout(() => {
+    fade.style.opacity = 0;
+  }, duration);
+}
+
+// Clamp a value between min and max
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+// Check if a mesh has collision (basic proxy)
+function meshHasCollider(mesh) {
+  return mesh.checkCollisions === true;
+}
+
+// Format evidence string into short tag
+function formatEvidence(evidence) {
+  return evidence.replace("Projector", "").replace("Temps", "Temp").replace(" ", "");
+}
+
+// Converts a mesh name into simplified room tag
+function normalizeRoomName(name) {
+  return name.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+// Line of sight check (simple raycast)
+function hasLineOfSight(fromMesh, toMesh, scene) {
+  const direction = toMesh.position.subtract(fromMesh.position).normalize();
+  const length = distance(fromMesh.position, toMesh.position);
+  const ray = new BABYLON.Ray(fromMesh.position, direction, length);
+  const hit = scene.pickWithRay(ray);
+  return hit && hit.pickedMesh === toMesh;
+}
+</script>
+<script>
+// === NOTEBOOK & SETTINGS PANEL LOGIC ===
+
+const notebookBtn = document.getElementById("notebookBtn");
+const notebookPanel = document.getElementById("notebook");
+const closeNotebookBtn = document.getElementById("closeNotebookBtn");
+const evidenceList = document.getElementById("evidence-list");
+const ghostSuggestionList = document.getElementById("ghost-suggestions");
+const guessSelect = document.getElementById("ghost-select");
+const guessBtn = document.getElementById("submit-guess");
+const gameOverlay = document.getElementById("game-overlay");
+
+// Toggle notebook visibility
+notebookBtn.addEventListener("click", () => {
+  notebookPanel.style.display = "block";
+  updateNotebook();
+});
+closeNotebookBtn.addEventListener("click", () => {
+  notebookPanel.style.display = "none";
+});
+
+// Render current evidence list and suggestions
+function updateNotebook() {
+  evidenceList.innerHTML = "";
+  ghostSuggestionList.innerHTML = "";
+
+  allEvidenceTypes.forEach(ev => {
+    const row = document.createElement("div");
+    row.className = "evidence-row";
+    const name = document.createElement("span");
+    name.textContent = ev;
+
+    const found = document.createElement("input");
+    found.type = "checkbox";
+    found.checked = foundEvidence.includes(ev);
+    found.addEventListener("change", () => {
+      toggleEvidence(ev, "found");
+      updateNotebook();
+    });
+
+    const eliminated = document.createElement("input");
+    eliminated.type = "checkbox";
+    eliminated.checked = eliminatedEvidence.includes(ev);
+    eliminated.addEventListener("change", () => {
+      toggleEvidence(ev, "eliminated");
+      updateNotebook();
+    });
+
+    row.appendChild(name);
+    row.appendChild(found);
+    row.appendChild(eliminated);
+    evidenceList.appendChild(row);
+  });
+
+  const suggestions = getGhostSuggestions();
+  ghostSuggestionList.textContent = suggestions.join(", ") || "None";
+
+  guessSelect.innerHTML = `<option value="">-- Select Ghost --</option>`;
+  suggestions.forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g;
+    opt.textContent = g;
+    guessSelect.appendChild(opt);
+  });
+}
+
+// Handle ghost guessing
+guessBtn.addEventListener("click", () => {
+  const guess = guessSelect.value;
+  if (guess) {
+    checkGhostGuess(guess);
+    notebookPanel.style.display = "none";
+  }
+});
+</script>
+<script>
+// === ROOM DETECTION VIA MESH ZONES ===
+
+// Returns the room name based on mesh name prefix or bounding zone
+function getRoomFromPosition(position) {
+  const meshes = scene.meshes;
+  for (let i = 0; i < meshes.length; i++) {
+    const mesh = meshes[i];
+    if (mesh.name.startsWith("Room") && mesh.getBoundingInfo().boundingBox.containsPoint(position)) {
+      return mesh.name;
+    }
+  }
+  return "Outside";
+}
+
+// Updates player's current room name and HUD
+function updatePlayerRoom() {
+  const room = getRoomFromPosition(player.position);
+  currentRoom = room;
+  updateHUD();
+}
+
+// Gets ghost's current room
+function getGhostRoom() {
+  return ghostEntity ? getRoomFromPosition(ghostEntity.position) : "Unknown";
+}
+
+// Used to determine if player and ghost are in same space
+function isPlayerInGhostRoom() {
+  return currentRoom === getGhostRoom();
+}
+</script>
+<script>
+// === PART 17: HUNT TRIGGER VISUALS & DEATH LOGIC ===
+
+let huntActive = false;
+let huntStartTime = 0;
+let huntCooldown = 15000;
+let huntOverlay, heartbeatSound, deathScreen;
+
+function setupHuntOverlay() {
+  huntOverlay = document.createElement("div");
+  huntOverlay.id = "hunt-overlay";
+  huntOverlay.style.cssText = `
+    position: absolute; top:0; left:0; width:100%; height:100%;
+    background: rgba(255,0,0,0.2); pointer-events:none; display:none;
+    z-index: 9999;
+  `;
+  document.body.appendChild(huntOverlay);
+
+  deathScreen = document.createElement("div");
+  deathScreen.id = "death-screen";
+  deathScreen.innerText = "YOU DIED";
+  deathScreen.style.cssText = `
+    position: absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    font-size: 5em; color: white; background: black; padding: 20px;
+    z-index: 10000; display: none;
+  `;
+  document.body.appendChild(deathScreen);
+}
+
+function triggerHunt() {
+  if (huntActive || Date.now() - huntStartTime < huntCooldown) return;
+  huntActive = true;
+  huntStartTime = Date.now();
+  huntOverlay.style.display = "block";
+  heartbeatSound?.play();
+
+  setTimeout(() => {
+    if (isPlayerInGhostRoom()) {
+      deathScreen.style.display = "block";
+    }
+    huntOverlay.style.display = "none";
+    huntActive = false;
+  }, 5000);
+}
+
+function attemptHuntTrigger() {
+  const threshold = 20;
+  if (playerSanity < threshold && Math.random() < 0.1) {
+    triggerHunt();
+  }
+}
+</script>
+<script>
+// === PART 18: VOICE UI, CAMERA OVERLAY, AND FADE CONTROLS ===
+
+// === ADA Voice Toggle ===
+let voiceEnabled = true;
+const synth = window.speechSynthesis;
+function speak(text) {
+  if (!voiceEnabled) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.pitch = 1.0;
+  utter.rate = 1.0;
+  utter.voice = synth.getVoices().find(v => v.name.includes("Female") || v.name.includes("Jenny")) || synth.getVoices()[0];
+  synth.speak(utter);
+}
+
+function toggleVoice() {
+  voiceEnabled = !voiceEnabled;
+  speak(`Voice ${voiceEnabled ? "enabled" : "disabled"}`);
+}
+
+// === IR Camera Overlay ===
+const cameraOverlay = document.createElement("div");
+cameraOverlay.id = "camera-overlay";
+cameraOverlay.style.cssText = `
+  position:absolute; top:0; left:0; width:100%; height:100%;
+  background:rgba(255,255,255,0.05);
+  pointer-events:none; display:none;
+  z-index: 9000;
+`;
+document.body.appendChild(cameraOverlay);
+
+function toggleCameraOverlay(show) {
+  cameraOverlay.style.display = show ? "block" : "none";
+}
+
+// === Screen Fade ===
+function fadeScreen(color = "black", duration = 1000) {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = `
+    position:absolute;top:0;left:0;width:100%;height:100%;
+    background:${color};z-index:9999;pointer-events:none;opacity:0;
+    transition:opacity ${duration / 1000}s;
+  `;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => (overlay.style.opacity = 1));
+  setTimeout(() => overlay.remove(), duration);
+}
+</script>
 </body>
 </html>
