@@ -250,83 +250,24 @@ function ghostCanRoam() {
 }
 </script>
 <script>
-// === GLOBAL ITEM SPAWN FUNCTION ===
-function spawnInitialItems(scene) {
-  console.log("Spawning initial items...");
-  // Example: simple flashlight as sphere
-  const flashlight = BABYLON.MeshBuilder.CreateSphere("flashlight", { diameter: 0.2 }, scene);
-  flashlight.position = new BABYLON.Vector3(0, 1, 0);
-}
-
-// === PLAYER SETUP FALLBACK ===
-function setupPlayerAndCameras(scene) {
-  const camera = new BABYLON.UniversalCamera("playerCamera", new BABYLON.Vector3(0, 1.6, -5), scene);
-  camera.attachControl(canvas, true);
-  camera.applyGravity = true;
-  camera.ellipsoid = new BABYLON.Vector3(1, 1, 1);
-  camera.checkCollisions = true;
-
-  const light = new BABYLON.PointLight("playerLight", new BABYLON.Vector3(0, 1.8, -5), scene);
-  light.intensity = 0.9;
-  light.parent = camera;
-
-  scene.activeCamera = camera;
-  currentCamera = camera;
-}
-
-// === BABYLON SCENE SETUP ===
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
-let scene, currentCamera;
-
-// === Scene Creation ===
-async function createScene() {
-  scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color3.Black();
-  scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0, -0.2, 0);
-
-  // Ambient light (scene-wide)
-  const ambient = new BABYLON.HemisphericLight("ambientLight", new BABYLON.Vector3(0, 1, 0), scene);
-  ambient.intensity = 0.5;
-
-  // Load house model
-  BABYLON.SceneLoader.Append("models/", "Abandoned_House.glb", scene, function () {
-    console.log("House model loaded.");
-    spawnInitialItems(scene);
-    setupPlayerAndCameras(scene);
-  }, null, function (scene, message) {
-    console.error("Failed to load house model:", message);
-    // Fallback plane if loading fails
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 20, height: 20 }, scene);
-    const mat = new BABYLON.StandardMaterial("fallbackMat", scene);
-    mat.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.3);
-    ground.material = mat;
-
-    setupPlayerAndCameras(scene);
-  });
-
-  return scene;
-}
-</script>
-
-
-<script>
-// === PLAYER + CAMERA SETUP ===
+// === GLOBAL STATE ===
+let scene, engine, currentCamera;
 let fpCamera, tpCamera;
 let cameraMode = "first";
+const canvas = document.getElementById("renderCanvas");
 
+// === PLAYER CAMERA SETUP ===
 function setupPlayerAndCameras(scene, canvas) {
-  // === First-Person Camera ===
+  // First-person
   fpCamera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(0, 1.8, -10), scene);
   fpCamera.applyGravity = true;
-  fpCamera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
   fpCamera.checkCollisions = true;
-  fpCamera.speed = 0.25;
+  fpCamera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
+  fpCamera.speed = 0.15;
   fpCamera.attachControl(canvas, true);
 
-  // === Third-Person Camera ===
-  tpCamera = new BABYLON.FollowCamera("tpCamera", new BABYLON.Vector3(0, 5, -10), scene);
+  // Third-person
+  tpCamera = new BABYLON.FollowCamera("tpCamera", fpCamera.position.clone().add(new BABYLON.Vector3(0, 5, -10)), scene);
   tpCamera.lockedTarget = fpCamera;
   tpCamera.radius = 6;
   tpCamera.heightOffset = 3;
@@ -334,115 +275,33 @@ function setupPlayerAndCameras(scene, canvas) {
   tpCamera.cameraAcceleration = 0.05;
   tpCamera.maxCameraSpeed = 10;
 
-  // === Default to First-Person ===
   currentCamera = fpCamera;
   scene.activeCamera = currentCamera;
-  currentCamera.attachControl(canvas, true);
-
-  // === Input Map for Movement ===
-  const inputMap = {};
-  scene.actionManager = new BABYLON.ActionManager(scene);
-  scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
-    BABYLON.ActionManager.OnKeyDownTrigger,
-    evt => inputMap[evt.sourceEvent.key.toLowerCase()] = true
-  ));
-  scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
-    BABYLON.ActionManager.OnKeyUpTrigger,
-    evt => inputMap[evt.sourceEvent.key.toLowerCase()] = false
-  ));
-
-<script>
-// === MOVEMENT LOGIC ===
-let inputMap = {};
-
-function setupControls(scene) {
-  scene.actionManager = new BABYLON.ActionManager(scene);
-
-  scene.onKeyboardObservable.add((kbInfo) => {
-    const key = kbInfo.event.key.toLowerCase();
-    if (kbInfo.type === BABYLON.KeyboardEventTypes.KEYDOWN) {
-      inputMap[key] = true;
-    } else if (kbInfo.type === BABYLON.KeyboardEventTypes.KEYUP) {
-      inputMap[key] = false;
-    }
-  });
-
-  scene.onBeforeRenderObservable.add(() => {
-    if (!currentCamera) return;
-
-    const speed = 0.1;
-    const forward = currentCamera.getDirection(BABYLON.Axis.Z);
-    const right = currentCamera.getDirection(BABYLON.Axis.X);
-
-    if (inputMap["w"]) currentCamera.position.addInPlace(forward.scale(speed));
-    if (inputMap["s"]) currentCamera.position.addInPlace(forward.scale(-speed));
-    if (inputMap["a"]) currentCamera.position.addInPlace(right.scale(-speed));
-    if (inputMap["d"]) currentCamera.position.addInPlace(right.scale(speed));
-  });
 }
 
-// === TOGGLE CAMERA VIEW ===
-function toggleCameraView() {
-  if (!scene) return;
-
-  if (scene.activeCamera === currentCamera) {
-    const thirdPerson = new BABYLON.ArcRotateCamera("thirdPersonCam", Math.PI / 2, Math.PI / 2.5, 5, currentCamera.position, scene);
-    thirdPerson.attachControl(canvas, true);
-    scene.activeCamera = thirdPerson;
-  } else {
-    scene.activeCamera = currentCamera;
-    currentCamera.attachControl(canvas, true);
-  }
-}
-</script>
-
-<script>
-// === ITEM INTERACTION LOGIC ===
+// === ITEM INTERACTIONS ===
 let heldItems = ["Flashlight", "Spirit Box", "Camera"];
 let currentHeldIndex = 0;
-
-function cycleHeldItem() {
-  currentHeldIndex = (currentHeldIndex + 1) % heldItems.length;
-  updateHUDInventory();
-}
 
 function getHeldItem() {
   return heldItems[currentHeldIndex];
 }
-
+function cycleHeldItem() {
+  currentHeldIndex = (currentHeldIndex + 1) % heldItems.length;
+  updateHUDInventory();
+}
 function updateHUDInventory() {
   const slot = document.getElementById("hud-item-slot");
-  slot.innerText = getHeldItem();
+  if (slot) slot.innerText = getHeldItem();
 }
 
-// === Flashlight Toggle ===
-let flashlightMesh = null;
-let flashlightOn = false;
-
+let flashlightMesh = null, flashlightOn = false;
 function toggleFlashlight() {
   flashlightOn = !flashlightOn;
-  if (flashlightMesh) {
-    flashlightMesh.setEnabled(flashlightOn);
-  }
+  if (flashlightMesh) flashlightMesh.setEnabled(flashlightOn);
 }
 
-// === Candle System ===
-function toggleCandle(candleMesh) {
-  const isLit = candleMesh.metadata?.isLit;
-  if (isLit) {
-    candleMesh.metadata.isLit = false;
-    candleMesh.getChildMeshes().forEach(m => m.isVisible = false);
-    playSound("candleExtinguish", candleMesh.position);
-  } else {
-    candleMesh.metadata.isLit = true;
-    candleMesh.getChildMeshes().forEach(m => m.isVisible = true);
-    playSound("candleIgnite", candleMesh.position);
-  }
-}
-
-// === Spirit Box ===
 let spiritBoxActive = false;
-
 function toggleSpiritBox() {
   spiritBoxActive = !spiritBoxActive;
   if (spiritBoxActive) {
@@ -452,192 +311,91 @@ function toggleSpiritBox() {
   }
 }
 
-// === IR Camera View ===
 let usingCamera = false;
-
 function toggleCameraView() {
   usingCamera = !usingCamera;
-  document.getElementById("camera-overlay").style.display = usingCamera ? "block" : "none";
+  const overlay = document.getElementById("camera-overlay");
+  if (overlay) overlay.style.display = usingCamera ? "block" : "none";
 }
 
-// === Item Use Dispatcher ===
+function toggleCandle(candleMesh) {
+  const isLit = candleMesh.metadata?.isLit;
+  candleMesh.metadata.isLit = !isLit;
+  candleMesh.getChildMeshes().forEach(m => m.isVisible = !isLit);
+  playSound(isLit ? "candleExtinguish" : "candleIgnite", candleMesh.position);
+}
+
+// === ITEM KEY HANDLER ===
 window.addEventListener("keydown", e => {
   if (e.key === "e") {
     const item = getHeldItem();
-    if (item === "Flashlight") {
-      toggleFlashlight();
-    } else if (item === "Spirit Box") {
-      toggleSpiritBox();
-    } else if (item === "Camera") {
-      toggleCameraView();
-    }
+    if (item === "Flashlight") toggleFlashlight();
+    else if (item === "Spirit Box") toggleSpiritBox();
+    else if (item === "Camera") toggleCameraView();
   } else if (e.key === "q") {
     cycleHeldItem();
   }
 });
-</script>
-<script>
-// === EVIDENCE SYSTEM ===
-const allEvidence = [
-  "EMF", "Spirit Box", "Fingerprints", "Orbs", "Writing", "Freezing", "D.O.T.S"
-];
 
-let foundEvidence = new Set();
-let eliminatedEvidence = new Set();
-
-function toggleFoundEvidence(evi) {
-  if (foundEvidence.has(evi)) {
-    foundEvidence.delete(evi);
-  } else {
-    foundEvidence.add(evi);
-    eliminatedEvidence.delete(evi);
-  }
-  updateEvidenceUI();
-  updateGhostSuggestions();
-}
-
-function toggleEliminatedEvidence(evi) {
-  if (eliminatedEvidence.has(evi)) {
-    eliminatedEvidence.delete(evi);
-  } else {
-    eliminatedEvidence.add(evi);
-    foundEvidence.delete(evi);
-  }
-  updateEvidenceUI();
-  updateGhostSuggestions();
-}
-
-function updateEvidenceUI() {
-  allEvidence.forEach(evi => {
-    const btn = document.getElementById("evi-" + evi);
-    if (!btn) return;
-    btn.classList.remove("found", "eliminated");
-    if (foundEvidence.has(evi)) {
-      btn.classList.add("found");
-    } else if (eliminatedEvidence.has(evi)) {
-      btn.classList.add("eliminated");
-    }
-  });
-}
-
-function updateGhostSuggestions() {
-  const matches = ghostProfiles.filter(g => {
-    const hasAllFound = Array.from(foundEvidence).every(e => g.evidence.includes(e));
-    const hasNoneEliminated = Array.from(eliminatedEvidence).every(e => !g.evidence.includes(e));
-    return hasAllFound && hasNoneEliminated;
-  });
-
-  const container = document.getElementById("ghost-suggestions");
-  if (!container) return;
-
-  container.innerHTML = "";
-  matches.forEach(g => {
-    const div = document.createElement("div");
-    div.className = "ghost-suggestion";
-    div.textContent = g.name;
-    container.appendChild(div);
-  });
-}
-</script>
-
-<script>
-// === HUD UPDATE ===
-function updateHUD(room, sanity, weather) {
-  document.getElementById("room-label").innerText = room || "???";
-  document.getElementById("sanity-label").innerText = sanity + "%";
-  document.getElementById("weather-label").innerText = weather || "???";
-}
-
-// === SCREEN FADE EFFECT ===
-function fadeScreen(toBlack = true, duration = 1000) {
-  const screen = document.getElementById("fade-screen");
-  if (!screen) return;
-  screen.style.transition = `opacity ${duration / 1000}s`;
-  screen.style.opacity = toBlack ? "1" : "0";
-}
-
-// === AMBIENT WEATHER AUDIO ===
+// === SOUND HELPERS ===
 let ambientSound;
-
 function setAmbientWeatherSound(weather = "rain") {
   if (ambientSound) ambientSound.stop();
   const file = weather === "rain" ? "rainstorm.mp3" : "clearWeather.mp3";
   ambientSound = new BABYLON.Sound("ambient", `sounds/${file}`, scene, null, {
-    loop: true,
-    autoplay: true,
-    volume: 0.4
+    loop: true, autoplay: true, volume: 0.4
   });
 }
-
-// === GENERIC SOUND PLAYBACK ===
 function playSound(name, position = null, options = {}) {
-  const path = `sounds/${name}.mp3`;
-  const sound = new BABYLON.Sound(name, path, scene, null, {
+  const sound = new BABYLON.Sound(name, `sounds/${name}.mp3`, scene, null, {
     spatialSound: !!position,
     autoplay: true,
-    volume: options.volume || 1,
-    loop: false,
+    loop: options.loop || false,
+    volume: options.volume || 1
   });
   if (position) sound.setPosition(position);
 }
-
-// === GHOST ROOM SOUND EVENT ===
-function maybeTriggerGhostSound(roomMesh) {
-  const chance = 0.15;
-  if (Math.random() < chance) {
-    const ghostSounds = ["ghostLaugh", "radio", "objectSlam", "whisper"];
-    const soundName = ghostSounds[Math.floor(Math.random() * ghostSounds.length)];
-    const pos = roomMesh.getAbsolutePosition().add(BABYLON.Vector3.Random().scaleInPlace(2));
-    playSound(soundName, pos, { volume: 0.8 });
-  }
-}
-
-// === CANDLE IGNITE SOUND ===
-function playCandleIgnite() {
-  playSound("candleIgnite", null, { volume: 0.5 });
-}
-
-// === FLAME/ROOM HELPERS ===
-function countLitFlames() {
-  return scene.meshes.filter(m => m.name.includes("Candle") && m.metadata?.isLit).length;
-}
-
-function wasRelitCandleLitWithin(seconds) {
-  // Stub — extend this if you're tracking timestamps on candle relights
-  return false;
-}
-
-function extinguishFlame() {
-  // Stub — logic for extinguishing in-game candle
-}
-
-function maybeTurnOffLight(room) {
-  // Stub — logic for turning off mesh room light
-}
-
-function roomHasLight(room) {
-  // Stub — logic to detect light source in room
-  return true;
+function stopSound(name) {
+  const sound = scene.soundTracks?.flatMap(track => track.soundCollection).find(s => s.name === name);
+  if (sound) sound.stop();
 }
 </script>
 
 <script>
-// === RENDER LOOP ===
+// === ENGINE, SCENE & MODEL LOADING ===
+engine = new BABYLON.Engine(canvas, true);
+
 engine.runRenderLoop(() => {
-  if (scene && scene.activeCamera) {
-    scene.render();
-  }
+  if (scene && scene.activeCamera) scene.render();
 });
 
-// === RESIZE HANDLER ===
-window.addEventListener("resize", () => {
-  engine.resize();
-});
+window.addEventListener("resize", () => engine.resize());
 
-// === STARTUP CALL ===
 window.addEventListener("DOMContentLoaded", async () => {
-  await createScene();
-  setupPlayerAndCameras(scene, canvas); // ← Critical init
+  scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color3.Black();
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0, -0.2, 0);
+
+  const light = new BABYLON.HemisphericLight("ambient", new BABYLON.Vector3(0, 1, 0), scene);
+  light.intensity = 0.5;
+
+  try {
+    await BABYLON.SceneLoader.AppendAsync("models/", "Abandoned_House.glb", scene);
+    console.log("House model loaded");
+
+    scene.meshes.forEach(mesh => {
+      if (mesh.name && mesh.name !== "__root__") {
+        mesh.checkCollisions = true;
+        mesh.isPickable = true;
+        mesh.freezeWorldMatrix();
+      }
+    });
+  } catch (err) {
+    console.error("Failed to load house model:", err);
+  }
+
+  setupPlayerAndCameras(scene, canvas);
   engine.resize();
 });
 </script>
