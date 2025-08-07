@@ -5,9 +5,10 @@
   <title>Phasma-Phoney 3D</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!-- Babylon CDN -->
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-  <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+ <script src="/cdn/babylon.js"></script>
+<script src="/cdn/babylonjs.loaders.min.js"></script>
+<script src="/cdn/babylonjs.materials.min.js"></script>
+
   <style>
     html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background-color: black; }
     canvas { width: 100%; height: 100%; display: block; touch-action: none; }
@@ -42,7 +43,7 @@
   </style>
 </head>
 <body>
-  <div id="loadingScreen">Booting Phasma‑Phoney...</div>
+  <div id="loadingScreen">initializing...</div>
   <canvas id="renderCanvas"></canvas>
   <div id="hud">Room: -- | Temp: -- | Sanity: 100%</div>
   <div id="coords">X: 0, Z: 0</div>
@@ -118,7 +119,7 @@ light.intensity = 0.8;
 /* ================================
    PART 4: LOAD HAUNTED HOUSE GLB
 ================================== */
-BABYLON.SceneLoader.AppendAsync("/models/", "Abandoned_House.glb", scene).then(() => {
+BABYLON.SceneLoader.AppendAsync("https://sharkvelocity.github.io/cdn/models/", "Abandoned_House.glb", scene).then(() => {
   scene.meshes.forEach(mesh => {
     mesh.checkCollisions = true;
     mesh.isPickable = true;
@@ -129,157 +130,190 @@ BABYLON.SceneLoader.AppendAsync("/models/", "Abandoned_House.glb", scene).then((
 });
 </script>
 <script>
+<script>
 /* ================================
-   PART 5: SETUP CAMERA & CONTROLS
+   PART 5: CAMERA & CONTROLS
 ================================== */
 function setupCameraAndPlayer() {
   camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(0, 2, 0), scene);
   camera.attachControl(canvas, true);
-  camera.speed = 1.6;
-  camera.inertia = 0.1;
-  camera.angularSensibility = 5000;
+  camera.speed = 0.5;
+  camera.ellipsoid = new BABYLON.Vector3(1, 1, 1);
   camera.applyGravity = true;
-  camera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
   camera.checkCollisions = true;
-
-  scene.gravity = new BABYLON.Vector3(0, -0.25, 0);
-  scene.collisionsEnabled = true;
   camera.keysUp.push(87);    // W
   camera.keysDown.push(83);  // S
   camera.keysLeft.push(65);  // A
   camera.keysRight.push(68); // D
-
-  window.addEventListener("keydown", e => {
-    if (e.code === "ShiftLeft") camera.speed = 3;
-  });
-  window.addEventListener("keyup", e => {
-    if (e.code === "ShiftLeft") camera.speed = 1.6;
-  });
-
-  createPlayerMesh();
+  scene.activeCamera = camera;
+  setupPlayerMesh();
 }
 
 /* ================================
-   PART 6: SETUP PLAYER MESH
+   PART 6: PLAYER MESH
 ================================== */
-function createPlayerMesh() {
-  playerMesh = BABYLON.MeshBuilder.CreateBox("player", {height: 3, width: 1, depth: 1}, scene);
+function setupPlayerMesh() {
+  playerMesh = BABYLON.MeshBuilder.CreateBox("player", { size: 1 }, scene);
   playerMesh.isVisible = false;
   playerMesh.checkCollisions = true;
-  playerMesh.ellipsoid = new BABYLON.Vector3(0.5, 1.5, 0.5);
-  playerMesh.position = new BABYLON.Vector3(0, 2, 0);
-  playerMesh.parent = camera;
+  playerMesh.position = camera.position.clone();
+  camera.parent = playerMesh;
+
+  scene.registerBeforeRender(() => {
+    if (camera && playerMesh) {
+      playerMesh.position = camera.position.clone();
+    }
+  });
 }
 
 /* ================================
-   PART 7: INVENTORY + UI ELEMENTS
+   PART 7: INVENTORY + UI
 ================================== */
-let inventorySlots = 3;
-let notebookOpen = false;
-inventory = ["Camera", "Spirit Box", "EMF Reader"];
-const lighter = "Lighter";
-const notebookBtn = document.createElement("button");
-notebookBtn.innerText = "📖";
-notebookBtn.style.position = "absolute";
-notebookBtn.style.bottom = "10px";
-notebookBtn.style.right = "10px";
-notebookBtn.style.zIndex = "50";
-notebookBtn.onclick = () => {
-  notebookOpen = !notebookOpen;
-  alert("Notebook toggled! (Insert actual UI here)");
+function addToInventory(item) {
+  if (inventory.length < 3 && !inventory.includes(item)) {
+    inventory.push(item);
+    updateInventoryUI();
+  }
+}
+function removeFromInventory(item) {
+  inventory = inventory.filter(i => i !== item);
+  updateInventoryUI();
+}
+function updateInventoryUI() {
+  document.getElementById("slot1").textContent = inventory[0] || "";
+  document.getElementById("slot2").textContent = inventory[1] || "";
+  document.getElementById("slot3").textContent = inventory[2] || "";
+}
+document.getElementById("notebookBtn").onclick = () => {
+  document.getElementById("notebook").classList.toggle("show");
 };
-document.body.appendChild(notebookBtn);
 
 /* ================================
-   PART 8: DEBUG TOOLS & FLY MODE
+   PART 8: DEBUG TOOLS
 ================================== */
-let flyMode = false;
-window.addEventListener("keydown", e => {
+let debugFly = false;
+window.addEventListener("keydown", (e) => {
   if (e.key === "`") {
-    flyMode = !flyMode;
-    camera.applyGravity = !flyMode;
-    camera.checkCollisions = !flyMode;
-    console.log("Fly mode:", flyMode ? "ON" : "OFF");
+    debugFly = !debugFly;
+    camera.applyGravity = !debugFly;
+    camera.checkCollisions = !debugFly;
+  }
+});
+const coordsDisplay = document.createElement("div");
+coordsDisplay.style.position = "absolute";
+coordsDisplay.style.top = "5px";
+coordsDisplay.style.left = "5px";
+coordsDisplay.style.color = "white";
+coordsDisplay.style.fontSize = "14px";
+coordsDisplay.style.zIndex = "99";
+document.body.appendChild(coordsDisplay);
+scene.onBeforeRenderObservable.add(() => {
+  if (camera) {
+    coordsDisplay.textContent = `X: ${camera.position.x.toFixed(2)} | Z: ${camera.position.z.toFixed(2)}`;
   }
 });
 
-// Coordinate display
-scene.registerBeforeRender(() => {
-  const pos = camera.position;
-  document.getElementById("coords").innerText = `X: ${pos.x.toFixed(1)}, Z: ${pos.z.toFixed(1)}`;
-});
-</script>
+/* ================================
+   PART 9: ROOM DETECTION + HUD
+================================== */
+function updateRoom() {
+  for (let roomName in roomZones) {
+    const box = roomZones[roomName];
+    if (box.intersectsPoint(playerMesh.position)) {
+      currentRoom = roomName;
+      break;
+    } else {
+      currentRoom = "Hallway";
+    }
+  }
+  document.getElementById("roomName").textContent = currentRoom;
+  document.getElementById("sanityValue").textContent = `${Math.floor(sanity)}%`;
+  document.getElementById("tempValue").textContent = `${currentTemperature}°C`;
+}
+
+/* ================================
+   PART 10: GHOST SPAWN + VISIBILITY
+================================== */
+function spawnGhost() {
+  const ghostModel = ghostModelOptions[Math.floor(Math.random() * ghostModelOptions.length)];
+  BABYLON.SceneLoader.ImportMeshAsync("", "/models/", ghostModel, scene).then((result) => {
+    ghostMesh = result.meshes[0];
+    ghostMesh.position = new BABYLON.Vector3(0, 0, 10);
+    ghostMesh.setEnabled(false);
+  });
+}
+function updateGhostVisibility() {
+  if (!ghostProfile || !ghostMesh || isDead) return;
+
+  const now = Date.now();
+  let visible = false;
+
+  if (ghostProfile.name === "Phantom") {
+    visible = Math.random() < 0.25;
+  } else if (ghostProfile.name === "Oni") {
+    visible = Math.random() < 0.85;
+  } else {
+    visible = Math.random() < 0.65;
+  }
+
+  ghostMesh.setEnabled(visible);
+  ghostVisible = visible;
+}
+
 <script>
 /* ================================
-   PART 9: HUD & ROOM DETECTION
+   PART 11: GHOST AI - WANDERING & CHASING
 ================================== */
-function detectRoom() {
-  let foundRoom = "Unknown";
-  for (let mesh of scene.meshes) {
-    if (mesh.name.startsWith("Room") && mesh.getBoundingInfo().boundingBox.intersectsPoint(camera.position)) {
-      foundRoom = mesh.name;
-      break;
-    }
+function updateGhostBehavior() {
+  if (!ghostMesh || isDead) return;
+
+  let now = Date.now();
+
+  // Mimic behavior swap
+  if (ghostProfile.name === "The Mimic" && now > ghostNextMimicTime) {
+    mimicProfile = getRandomGhostProfile("The Mimic");
+    ghostNextMimicTime = now + Math.random() * 60000 + 30000;
   }
-  document.getElementById("room").innerText = `Room: ${foundRoom}`;
-}
 
-/* ================================
-   PART 10: GHOST SPAWNING & VISIBILITY
-================================== */
-let ghostMesh, ghostModelID = 1, blinkVisible = false, lastBlink = 0;
+  // Ghost logic override by profile
+  let activeProfile = ghostProfile.name === "The Mimic" ? mimicProfile : ghostProfile;
 
-function spawnGhost() {
-  ghostMesh = BABYLON.MeshBuilder.CreateBox("ghost", {size: 1}, scene);
-  ghostMesh.position = new BABYLON.Vector3(5, 1, 5);
-  ghostMesh.material = new BABYLON.StandardMaterial("ghostMat", scene);
-  ghostMesh.material.diffuseColor = new BABYLON.Color3(1, 1, 1);
-  ghostMesh.isVisible = false;
-
-  ghostModelID = Math.floor(Math.random() * 3) + 1; // ghost1, ghost2, ghost3
-  ghostProfile = pickRandomGhost();
-}
-
-/* ================================
-   PART 11: GHOST AI – WANDER → CHASE
-================================== */
-let ghostState = "wandering";
-let ghostTarget = null;
-let ghostWaypoint = null;
-let ghostSpeed = 1.7;
-
-function updateGhostAI() {
-  const playerPos = camera.position;
-  const ghostPos = ghostMesh.position;
-  const dist = BABYLON.Vector3.Distance(playerPos, ghostPos);
-  const direction = playerPos.subtract(ghostPos).normalize();
+  if (isHunting) return;
 
   if (ghostState === "wandering") {
-    if (dist < 10 && hasLineOfSight(ghostPos, playerPos)) {
+    if (now - lastGhostRoam > 6000) {
+      let roamX = Math.random() * 20 - 10;
+      let roamZ = Math.random() * 20 - 10;
+      ghostMesh.moveWithCollisions(new BABYLON.Vector3(roamX, 0, roamZ));
+      lastGhostRoam = now;
+    }
+
+    if (canSeePlayer()) {
       ghostState = "chasing";
-      ghostWaypoint = playerPos.clone();
-    } else {
-      wanderGhost();
+      ghostTarget = playerMesh.position.clone();
     }
   } else if (ghostState === "chasing") {
-    ghostMesh.moveWithCollisions(direction.scale(ghostSpeed / 60));
-    if (dist < 1.5) {
-      ghostWaypoint = playerPos.clone(); // Refresh waypoint
-    } else if (!hasLineOfSight(ghostPos, playerPos)) {
+    if (canSeePlayer()) {
+      ghostTarget = playerMesh.position.clone();
+      ghostLastSeenPlayerTime = now;
+    }
+
+    let direction = ghostTarget.subtract(ghostMesh.position).normalize();
+    ghostMesh.moveWithCollisions(direction.scale(ghostSpeed * 0.1));
+
+    if (now - ghostLastSeenPlayerTime > 8000) {
       ghostState = "searching";
     }
   } else if (ghostState === "searching") {
-    // Try ghostWaypoint
-    const toWaypoint = ghostWaypoint.subtract(ghostPos);
-    ghostMesh.moveWithCollisions(toWaypoint.normalize().scale(ghostSpeed / 60));
-    if (BABYLON.Vector3.Distance(ghostMesh.position, ghostWaypoint) < 1) {
+    ghostMesh.moveWithCollisions(new BABYLON.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize().scale(ghostSpeed * 0.05));
+    if (now - ghostLastSeenPlayerTime > 15000) {
       ghostState = "wandering";
     }
   }
 }
 
 /* ================================
-   PART 12: GHOST PROFILES + RULES
+   PART 12: GHOST PROFILES + SPECIAL RULES
 ================================== */
 const ghostProfiles = {
   "Spirit": {
@@ -444,8 +478,7 @@ function hasLineOfSight(start, end) {
   const hit = scene.pickWithRay(ray, mesh => mesh.name !== "player" && !mesh.isPickable === false);
   return !hit.hit;
 }
-</script>
-<script>
+
 /* ================================
    PART 13: HUNT LOGIC & SANITY SYSTEM
 ================================== */
