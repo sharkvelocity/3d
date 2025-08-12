@@ -2,995 +2,290 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Phasma-Phoney 3D</title>
-  <link rel="icon" href="favicon.ico" />
+  <link rel="icon" href="favicon.ico"/>
 
-  <!-- Babylon.js Core + Loaders + GUI -->
-<script src="cdn/babylon.js"></script>
-<script src="cdn/babylonjs.loaders.min.js"></script>
-<script src="cdn/babylon.gui.min.js"></script>
-<script src="cdn/babylon.inspector.bundle.js"></script>
-<script src="cdn/babylonjs.materials.min.js"></script>
+  <!-- Babylon core (local) -->
+  <script src="cdn/babylon.js"></script>
+  <script src="cdn/loaders/babylon.glTF2FileLoader.js"></script>
+  <script src="cdn/gui/babylon.gui.min.js"></script>
+  <script src="cdn/inspector/babylon.inspector.bundle.js"></script>
+  <script src="cdn/materialsLibrary/babylonjs.materials.js"></script>
 
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet"/>
 
-  <!-- Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet" />
-
-  <!-- Pointer lock support
-  <script>  document.addEventListener("click", () => {
-      const canvas = document.getElementById("renderCanvas");
-      if (canvas && !document.pointerLockElement) {
-        canvas.requestPointerLock();
-      }
-    });
-  </script> -->
-
-  <!-- Styles -->
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      background: black;
-      font-family: sans-serif;
-    }
-    canvas {
-      width: 100%;
-      height: 100%;
-      touch-action: none;
-      display: block;
-    }
+    :root { --pad: 10px; }
+    html, body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; }
+    canvas { width:100%; height:100%; display:block; touch-action:none; }
     #hud {
-      position: absolute;
-      top: 0;
-      left: 0;
-      color: white;
-      font-size: 14px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.3);
-      pointer-events: none;
-      z-index: 5;
+      position:absolute; top:0; left:0; padding:var(--pad);
+      background:rgba(0,0,0,0.35); z-index:5; font-size:13px; line-height:1.4;
+      pointer-events:none;
     }
     #inventory, #notebook, #evidencePanel {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      background: rgba(0, 0, 0, 0.5);
-      color: white;
-      padding: 10px;
-      border-radius: 6px;
-      z-index: 10;
+      position:absolute; left:var(--pad); bottom:var(--pad);
+      background:rgba(0,0,0,0.55); padding:var(--pad); border-radius:8px; z-index:10;
     }
+    #notebook { bottom: calc(60px + var(--pad)); }
+    #evidencePanel { left:auto; right:var(--pad); }
     #ghostGuessButton {
-      position: absolute;
-      bottom: 10px;
-      right: 10px;
-      z-index: 10;
-      padding: 10px 20px;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid white;
-      color: white;
-      cursor: pointer;
-      border-radius: 5px;
+      position:absolute; right:var(--pad); bottom:var(--pad);
+      padding:8px 14px; border:1px solid #fff; background:rgba(255,255,255,0.08);
+      color:#fff; border-radius:6px; cursor:pointer; z-index:10;
     }
-    .hidden {
-      display: none !important;
-    }
-    .highlight {
-      background: rgba(255, 255, 255, 0.2);
-    }
+    .hidden { display:none !important; }
+    .btn { cursor:pointer; margin:4px; padding:6px 10px; border:1px solid #999; background:rgba(255,255,255,0.06); border-radius:6px; color:#fff; }
+    .btn.selected { border-color:#0ff; box-shadow: 0 0 0 1px #0ff inset; }
+    #debugLabel { position:absolute; top:6px; right:10px; color:#0f0; font-size:12px; z-index:9; }
   </style>
 </head>
 <body>
-  <!-- Babylon Canvas -->
   <canvas id="renderCanvas"></canvas>
 
-  <!-- HUD Overlay -->
+  <!-- HUD -->
   <div id="hud">
-    <div>Room: <span id="roomName">Unknown</span></div>
+    <div>Room: <span id="roomName">Outside</span></div>
     <div>Sanity: <span id="sanityDisplay">100%</span></div>
     <div>Weather: <span id="weatherDisplay">Clear</span></div>
-    <div>X: <span id="debugX">0</span>, Z: <span id="debugZ">0</span></div>
+    <div>Pos: X <span id="debugX">0</span>, Z <span id="debugZ">0</span></div>
   </div>
 
   <!-- Inventory -->
   <div id="inventory">
-    <strong>Inventory:</strong>
+    <strong>Inventory</strong>
     <div id="inventoryItems"></div>
   </div>
 
   <!-- Notebook -->
   <div id="notebook" class="hidden">
-    <strong>Notebook:</strong>
+    <strong>Notebook</strong>
     <div id="evidenceList"></div>
-    <div id="ghostSuggestion"></div>
+    <div id="ghostSuggestion" style="margin-top:6px; opacity:.85;"></div>
   </div>
 
   <!-- Evidence Panel -->
   <div id="evidencePanel" class="hidden">
-    <strong>Select Evidence:</strong>
-    <div id="evidenceOptions"></div>
+    <strong>Select Evidence</strong>
+    <div id="evidenceOptions" style="margin-top:6px;"></div>
   </div>
 
-  <!-- Ghost Guess -->
   <button id="ghostGuessButton">Guess Ghost</button>
-<script type="module">
-  import * as BABYLON from "https://cdn.babylonjs.com/babylon.js";
+  <div id="debugLabel"></div>
 
-  let canvas, engine, scene;
-  let player, ghost, ghostMesh;
-  let ghostType, ghostModelID;
-  let ghostSpawnPoint = new BABYLON.Vector3(0, 0, 0);
-  let playerSpawnPoint = new BABYLON.Vector3(0, 0, 0);
-  let activeRoom = "Unknown";
-  let sanity = 100;
-  let inventory = ["Lighter"];
-  let fullLoadout = [];
-  let currentWeather = "Clear";
-  let isHunting = false;
-  let canFly = false;
+  <script>
+    // === Engine / Scene ===
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
+    const scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
-  const GHOST_MODELS = ["ghost1", "ghost2", "ghost3"];
-  const allItems = [
-    "EMF Reader",
-    "Spirit Box",
-    "Thermometer",
-    "Ghost Writing Book",
-    "Camera",
-    "Crucifix",
-    "Smudge Stick",
-    "Candle",
-    "Salt",
-    "UV Flashlight",
-    "Photo Camera",
-    "Parabolic Mic"
-  ];
+    // === Lighting ===
+    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+    hemi.intensity = 0.55;
 
-  const evidenceList = ["EMF5", "Spirit Box", "Freezing Temps", "Ghost Writing", "Fingerprints", "Ghost Orbs", "DOTS"];
-  const selectedEvidence = new Set();
-  const eliminatedGhosts = new Set();
-  let activeGhostProfile = {};
-  let ghostCooldowns = {};
-  let smudgeTimers = {};
+    // === Camera ===
+    const camera = new BABYLON.UniversalCamera("fpCam", new BABYLON.Vector3(0, 1.75, -5), scene);
+    camera.attachControl(canvas, true);
+    camera.speed = 0.5;
+    camera.angularSensibility = 2400;
 
-  const ghostEvents = [];
-  const meshRooms = {};
-  const audioFiles = {
-    ambient: "audio/ambient.mp3",
-    heartbeat: "audio/heartbeat.mp3",
-    whisper: "audio/whisper.mp3",
-    radio: "audio/Radio.mp3"
-  };
+    // === Simple player collider ===
+    const player = BABYLON.MeshBuilder.CreateBox("playerCollider", { width:0.8, height:1.8, depth:0.8 }, scene);
+    player.isVisible = false;
+    player.position.set(0, 0.9, -5);
+    camera.parent = player;
 
-  let lightOn = false;
-  let lighterLit = false;
-  let sprinting = false;
-  let flyMode = false;
-  let ghostCanSeePlayer = false;
-  let ghostCanKill = false;
-
-  let cameraToggleCooldown = 0;
-  let lastGhostChange = 0;
-  let mimicMimicTimer = 0;
-  canvas = document.getElementById("renderCanvas");
-  engine = new BABYLON.Engine(canvas, true);
-
-  scene = new BABYLON.Scene(engine);
-  scene.clearColor = new BABYLON.Color3.Black();
-
-  // Lighting
-  const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
-  light.intensity = 0.6;
-
-  // Load House Model
-  BABYLON.SceneLoader.AppendAsync("models/", "Abandoned_House.glb", scene).then(() => {
-    scene.meshes.forEach(mesh => {
-      mesh.checkCollisions = true;
-      mesh.isPickable = true;
-      mesh.freezeWorldMatrix();
-    });
-    console.log("House model loaded");
-  });
-
-  // Ground plane for reference (optional)
-  const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 100, height: 100 }, scene);
-  ground.position.y = 0;
-  ground.checkCollisions = true;
-  let activeCamera;
-  let firstPersonCam, thirdPersonCam;
-
-  function setupCameras() {
-    // First-person camera
-    firstPersonCam = new BABYLON.UniversalCamera("fpCam", playerSpawnPoint.clone(), scene);
-    firstPersonCam.attachControl(canvas, true);
-    firstPersonCam.speed = 1.5;
-    firstPersonCam.inertia = 0.7;
-
-    // Third-person follow camera
-    thirdPersonCam = new BABYLON.ArcRotateCamera(
-      "tpCam", BABYLON.Tools.ToRadians(90), BABYLON.Tools.ToRadians(75), 6,
-      playerSpawnPoint.clone(), scene
-    );
-    thirdPersonCam.attachControl(canvas, true);
-    thirdPersonCam.lowerRadiusLimit = 3;
-    thirdPersonCam.upperRadiusLimit = 10;
-    thirdPersonCam.checkCollisions = false;
-    thirdPersonCam.inertia = 0.5;
-
-    // Set default
-    activeCamera = firstPersonCam;
-    scene.activeCamera = activeCamera;
-  }
-
-  function toggleCamera() {
-    if (activeCamera === firstPersonCam) {
-      activeCamera.detachControl(canvas);
-      activeCamera = thirdPersonCam;
-    } else {
-      activeCamera.detachControl(canvas);
-      activeCamera = firstPersonCam;
-    }
-    scene.activeCamera = activeCamera;
-    activeCamera.attachControl(canvas, true);
-  }
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() === "v") toggleCamera();
-  });
-  function createPlayer() {
-    player = BABYLON.MeshBuilder.CreateCapsule("player", { height: 2 }, scene);
-    player.position = playerSpawnPoint.clone();
-    player.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
-    player.checkCollisions = true;
-    player.applyGravity = true;
-
-    scene.gravity = new BABYLON.Vector3(0, -0.15, 0);
+    // collisions / gravity
     scene.collisionsEnabled = true;
+    player.checkCollisions = true;
+    scene.gravity = new BABYLON.Vector3(0, -0.4, 0);
+    camera.applyGravity = true;
+    camera.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
 
-    firstPersonCam.parent = player;
-    thirdPersonCam.lockedTarget = player;
+    // === Ground (in case the map isn’t ready yet) ===
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width:100, height:100 }, scene);
+    ground.checkCollisions = true;
+
+    // === Load Map (GLB) ===
+    BABYLON.SceneLoader.AppendAsync("assets/models/map/", "Abandoned_House.glb", scene).then(() => {
+      scene.meshes.forEach(m => { m.checkCollisions = true; m.isPickable = true; });
+      console.log("Map loaded");
+    }).catch(e => console.warn("Map load error:", e));
+
+    // === Ghost loader (GLB) ===
+    const GHOST_MODELS = [
+      "assets/models/ghosts/ghost1.glb",
+      "assets/models/ghosts/ghost2.glb",
+      "assets/models/ghosts/ghost3.glb",
+      "assets/models/ghosts/ghost4.glb"
+    ];
+
+    let ghostMesh = null;
+    async function loadRandomGhost() {
+      const pick = GHOST_MODELS[(Math.random() * GHOST_MODELS.length) | 0];
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "", pick, scene);
+      // Try to find a non-empty root
+      ghostMesh = res.meshes.find(m => m.getTotalVertices() > 0) || res.meshes[0];
+      ghostMesh.position.copyFromFloats(2, 1.6, 2);
+      ghostMesh.setEnabled(false); // hidden until events
+      ghostMesh.isPickable = false;
+      console.log("Ghost loaded:", pick);
+    }
+    loadRandomGhost();
+
+    // === Audio (local assets) ===
+    let ambientSound = null;
+    let whisperSound = null;
+    function loadSounds() {
+      ambientSound = new BABYLON.Sound("ambient", "assets/audio/ambient.mp3", scene, null, { loop:true, autoplay:true, volume:0.35 });
+      whisperSound = new BABYLON.Sound("whisper", "assets/audio/whisper.mp3", scene, null, { loop:false, autoplay:false, volume:0.9 });
+    }
+    loadSounds();
+
+    // === Movement (WASD + shift) ===
+    const input = { w:false, a:false, s:false, d:false, shift:false };
+    window.addEventListener("keydown", e => { if (e.repeat) return; const k=e.key.toLowerCase(); if (k in input) input[k]=true; if (e.key==="Shift") input.shift = true; });
+    window.addEventListener("keyup", e => { const k=e.key.toLowerCase(); if (k in input) input[k]=false; if (e.key==="Shift") input.shift = false; });
 
     scene.onBeforeRenderObservable.add(() => {
-      updatePlayerMovement();
-      updateDebugCoordinates();
-    });
-  }
+      const dt = engine.getDeltaTime() / 1000;
+      const base = input.shift ? 3.2 : 1.8;
 
-  function updatePlayerMovement() {
-    let inputMap = {};
-    scene.actionManager = new BABYLON.ActionManager(scene);
-    scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
-      BABYLON.ActionManager.OnKeyDownTrigger,
-      (e) => inputMap[e.sourceEvent.key] = true
-    ));
-    scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
-      BABYLON.ActionManager.OnKeyUpTrigger,
-      (e) => inputMap[e.sourceEvent.key] = false
-    ));
+      // local axes
+      const forward = camera.getDirection(BABYLON.Axis.Z);
+      const right = camera.getDirection(BABYLON.Axis.X);
 
-    let moveSpeed = 0.1;
-    let sprintSpeed = 0.2;
-
-    scene.onBeforeRenderObservable.add(() => {
-      let fwd = firstPersonCam.getDirection(BABYLON.Axis.Z).scale(1);
-      let right = firstPersonCam.getDirection(BABYLON.Axis.X).scale(1);
-      let direction = BABYLON.Vector3.Zero();
-
-      if (inputMap["w"]) direction.addInPlace(fwd);
-      if (inputMap["s"]) direction.subtractInPlace(fwd);
-      if (inputMap["a"]) direction.subtractInPlace(right);
-      if (inputMap["d"]) direction.addInPlace(right);
-
-      direction.normalize();
-
-      let speed = inputMap["Shift"] ? sprintSpeed : moveSpeed;
-      player.moveWithCollisions(direction.scale(speed));
-    });
-  }
-  function setupInventoryOverlay() {
-    const invDiv = document.getElementById("inventoryItems");
-    invDiv.innerHTML = "";
-
-    allItems.forEach(item => {
-      const btn = document.createElement("button");
-      btn.textContent = item;
-      btn.onclick = () => toggleInventoryItem(item);
-      invDiv.appendChild(btn);
-    });
-  }
-
-  function toggleInventoryItem(item) {
-    if (inventory.includes(item)) {
-      inventory = inventory.filter(i => i !== item);
-    } else {
-      const limitedItems = inventory.filter(i => i !== "Lighter");
-      if (limitedItems.length >= 3) {
-        alert("Max 3 items allowed.");
-        return;
+      let move = BABYLON.Vector3.Zero();
+      if (input.w) move.addInPlace(forward);
+      if (input.s) move.subtractInPlace(forward);
+      if (input.a) move.subtractInPlace(right);
+      if (input.d) move.addInPlace(right);
+      if (move.lengthSquared() > 0) {
+        move.normalize();
+        move.y = 0; // keep grounded
+        player.moveWithCollisions(move.scale(base * dt));
       }
-      inventory.push(item);
-    }
-    renderInventoryUI();
-  }
 
-  function renderInventoryUI() {
-    const invDiv = document.getElementById("inventoryItems");
-    [...invDiv.children].forEach(btn => {
-      if (inventory.includes(btn.textContent)) {
-        btn.classList.add("selected");
-      } else {
-        btn.classList.remove("selected");
-      }
+      // HUD coords
+      document.getElementById("debugX").textContent = player.position.x.toFixed(2);
+      document.getElementById("debugZ").textContent = player.position.z.toFixed(2);
+      document.getElementById("debugLabel").textContent = `X:${player.position.x.toFixed(2)} Z:${player.position.z.toFixed(2)}`;
     });
-  }
 
-  function confirmLoadout() {
-    if (inventory.filter(i => i !== "Lighter").length === 0) {
-      alert("Select at least 1 item.");
-      return;
+    // === HUD / Sanity tick ===
+    let sanity = 100;
+    let currentRoom = "Outside";
+    function updateHUD() {
+      document.getElementById("roomName").textContent = currentRoom;
+      document.getElementById("sanityDisplay").textContent = `${Math.max(0, Math.round(sanity))}%`;
+      document.getElementById("weatherDisplay").textContent = "Clear";
     }
-    document.getElementById("inventory").classList.add("hidden");
-  }
-
-  function setupNotebookUI() {
-    const panel = document.getElementById("evidencePanel");
-    evidenceList.forEach(ev => {
-      const btn = document.createElement("button");
-      btn.textContent = ev;
-      btn.onclick = () => {
-        if (selectedEvidence.has(ev)) {
-          selectedEvidence.delete(ev);
-        } else {
-          selectedEvidence.add(ev);
-        }
-        btn.classList.toggle("selected");
-        suggestGhosts();
-      };
-      panel.appendChild(btn);
-    });
-  }
-
-  function suggestGhosts() {
-    const matches = ghostProfiles.filter(g =>
-      [...selectedEvidence].every(e => g.evidence.includes(e))
-    );
-
-    const resultBox = document.getElementById("ghostGuess");
-    resultBox.innerHTML = matches.length
-      ? "Possible ghosts: " + matches.map(g => g.name).join(", ")
-      : "No matches.";
-  }
-
-  function toggleNotebook() {
-    const nb = document.getElementById("notebook");
-    nb.classList.toggle("hidden");
-  }
-
-  function confirmGhostGuess() {
-    const guess = prompt("What ghost do you think it is?");
-    if (guess?.toLowerCase() === ghostProfile.name.toLowerCase()) {
-      alert("Correct! You identified the ghost.");
-    } else {
-      alert(`Wrong. It was a ${ghostProfile.name}.`);
-    }
-  }
-
-  document.getElementById("notebookBtn").onclick = toggleNotebook;
-  document.getElementById("guessBtn").onclick = confirmGhostGuess;
-  let currentRoom = "Outside";
-
-  function detectRoom() {
-    let foundRoom = "Outside";
-    scene.meshes.forEach(mesh => {
-      if (mesh.name.startsWith("Room")) {
-        const bounds = mesh.getBoundingInfo().boundingBox;
-        if (bounds.containsPoint(player.position)) {
-          foundRoom = mesh.name;
-        }
-      }
-    });
-    currentRoom = foundRoom;
-    updateHUD();
-  }
-
-  scene.registerBeforeRender(() => {
-    detectRoom();
-  });
-  function updateHUD() {
-    document.getElementById("roomName").textContent = currentRoom.replace("Room_", "").toUpperCase();
-    document.getElementById("sanityVal").textContent = Math.floor(sanity) + "%";
-    document.getElementById("weatherStatus").textContent = weather;
-  }
-
-  function toggleIR() {
-    isIRMode = !isIRMode;
-    document.getElementById("irToggle").classList.toggle("active", isIRMode);
-    // IR visual logic would go here
-  }
-
-  function toggleFlashlight() {
-    isFlashlightOn = !isFlashlightOn;
-    document.getElementById("flashToggle").classList.toggle("active", isFlashlightOn);
-    // Actual flashlight intensity toggle logic goes here
-  }
-
-  document.getElementById("irToggle").onclick = toggleIR;
-  document.getElementById("flashToggle").onclick = toggleFlashlight;
-  const ghostModels = ["ghost1.babylon", "ghost2.babylon", "ghost3.babylon"];
-  ghostMesh = null;
-  let ghostModelName = "";
-
-  async function loadRandomGhostModel() {
-    const index = Math.floor(Math.random() * ghostModels.length);
-    ghostModelName = ghostModels[index];
-
-    const result = await BABYLON.SceneLoader.ImportMeshAsync(
-      "",
-      "./models/",
-      ghostModelName,
-      scene
-    );
-
-    ghostMesh = result.meshes[0];
-    ghostMesh.position = new BABYLON.Vector3(0, 1.5, 0);
-    ghostMesh.setEnabled(false); // ghost starts hidden
-    ghostMesh.checkCollisions = false;
-    ghostMesh.isPickable = false;
-  }
-
-  function shapeshiftGhost() {
-    if (!ghostMesh || !ghostProfile) return;
-    if (["Mimic", "Obake"].includes(ghostProfile.name)) {
-      const newModel = ghostModels[Math.floor(Math.random() * ghostModels.length)];
-      if (newModel !== ghostModelName) {
-        ghostModelName = newModel;
-        ghostMesh.dispose();
-        loadRandomGhostModel(); // reload new appearance
-      }
-    }
-  }
-  const ghostProfiles = [
-    {
-      name: "Spirit",
-      evidence: ["EMF 5", "Spirit Box", "Ghost Writing"],
-      traits: { speed: "normal", personality: "neutral" }
-    },
-    {
-      name: "Wraith",
-      evidence: ["EMF 5", "D.O.T.S", "Spirit Box"],
-      traits: { speed: "fast", personality: "aggressive" }
-    },
-    {
-      name: "Phantom",
-      evidence: ["Spirit Box", "Fingerprints", "D.O.T.S"],
-      traits: { blinkSlow: true }
-    },
-    {
-      name: "Poltergeist",
-      evidence: ["Spirit Box", "Ghost Writing", "Fingerprints"],
-      traits: { throws: true }
-    },
-    {
-      name: "Banshee",
-      evidence: ["Orbs", "D.O.T.S", "Fingerprints"],
-      traits: { stalksTarget: true }
-    },
-    {
-      name: "Jinn",
-      evidence: ["EMF 5", "Freezing Temps", "Fingerprints"],
-      traits: { fastLOS: true, powerDependent: true }
-    },
-    {
-      name: "Mare",
-      evidence: ["Spirit Box", "Ghost Writing", "Orbs"],
-      traits: { hatesLight: true }
-    },
-    {
-      name: "Revenant",
-      evidence: ["Freezing Temps", "Ghost Writing", "Orbs"],
-      traits: { slowIdle: true, fastChase: true }
-    },
-    {
-      name: "Shade",
-      evidence: ["EMF 5", "Ghost Writing", "Freezing Temps"],
-      traits: { shy: true, noEventInRoom: true }
-    },
-    {
-      name: "Demon",
-      evidence: ["Freezing Temps", "Ghost Writing", "Fingerprints"],
-      traits: { huntsEarly: true }
-    },
-    {
-      name: "Yurei",
-      evidence: ["Orbs", "Freezing Temps", "D.O.T.S"],
-      traits: { trapAfterSmudge: true }
-    },
-    {
-      name: "Oni",
-      evidence: ["EMF 5", "D.O.T.S", "Freezing Temps"],
-      traits: { blinksLess: true }
-    },
-    {
-      name: "Yokai",
-      evidence: ["Spirit Box", "Orbs", "D.O.T.S"],
-      traits: { rangeReduced: true }
-    },
-    {
-      name: "Hantu",
-      evidence: ["Freezing Temps", "Orbs", "Fingerprints"],
-      traits: { breathVisible: true, speedVariesWithTemp: true }
-    },
-    {
-      name: "Goryo",
-      evidence: ["EMF 5", "D.O.T.S", "Fingerprints"],
-      traits: { neverLeavesRoom: true }
-    },
-    {
-      name: "Myling",
-      evidence: ["EMF 5", "Ghost Writing", "Fingerprints"],
-      traits: { footstepsLate: true }
-    },
-    {
-      name: "Onryo",
-      evidence: ["Spirit Box", "Freezing Temps", "Orbs"],
-      traits: { fireSensitive: true }
-    },
-    {
-      name: "The Twins",
-      evidence: ["EMF 5", "Spirit Box", "Freezing Temps"],
-      traits: { dualRoaming: true, fastSlowSplit: true }
-    },
-    {
-      name: "Raiju",
-      evidence: ["EMF 5", "Orbs", "D.O.T.S"],
-      traits: { electronicsSpeed: true }
-    },
-    {
-      name: "Obake",
-      evidence: ["EMF 5", "Orbs", "Fingerprints"],
-      traits: { shapeshift: true }
-    },
-    {
-      name: "The Mimic",
-      evidence: ["Spirit Box", "Freezing Temps", "Fingerprints"],
-      traits: { mimics: true, alwaysOrbsFake: true }
-    },
-    {
-      name: "Moroi",
-      evidence: ["Spirit Box", "Ghost Writing", "Freezing Temps"],
-      traits: { speedBySanity: true, longSmudgeStun: true }
-    },
-    {
-      name: "Deogen",
-      evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S"],
-      traits: { alwaysKnowsLocation: true }
-    },
-    {
-      name: "Thaye",
-      evidence: ["Ghost Writing", "D.O.T.S", "Orbs"],
-      traits: { speedDecay: true }
-    },
-    {
-      name: "Succubus",
-      evidence: ["Ghost Writing", "D.O.T.S", "Spirit Box"],
-      traits: { sanityDrainFast: true, seductiveLure: true }
-    }
-  ];
-  let ghostProfile = null;
-  let ghostRoom = "Room_Living";
-  let lastMimicTime = 0;
-
-  function chooseRandomGhost() {
-    ghostProfile = ghostProfiles[Math.floor(Math.random() * ghostProfiles.length)];
-    console.log("Chosen ghost:", ghostProfile.name);
-  }
-
-  function updateGhostBehavior() {
-    if (!ghostProfile) return;
-
-    if (ghostProfile.name === "The Mimic") {
-      const now = performance.now();
-      if (now - lastMimicTime > 60000) {
-        const nonMimic = ghostProfiles.filter(g => g.name !== "The Mimic");
-        const mimicTarget = nonMimic[Math.floor(Math.random() * nonMimic.length)];
-        ghostProfile.traits = { ...mimicTarget.traits };
-        lastMimicTime = now;
-      }
-    }
-
-    if (ghostProfile.name === "Goryo") return; // Goryo doesn't move rooms
-
-    // Roaming logic
-    if (Math.random() < 0.01) {
-      const rooms = scene.meshes.filter(m => m.name.startsWith("Room_"));
-      const pick = rooms[Math.floor(Math.random() * rooms.length)];
-      if (pick?.name) ghostRoom = pick.name;
-    }
-  }
-
-  setInterval(updateGhostBehavior, 5000);
-isHunting = false;
-let huntStartTime = 0;
-let huntDuration = 30000; // default 30s
-let huntCooldown = 90000;
-let lastHuntTime = 0;
-
-function startHunt() {
-  if (isHunting || Date.now() - lastHuntTime < huntCooldown) return;
-  if (!ghostProfile || sanity > 50) return;
-
-  // Certain ghosts can hunt early
-  if (sanity > 20 && !["Demon", "Yurei", "Thaye"].includes(ghostProfile.name)) return;
-
-  // Shade can't hunt in same room
-  if (ghostProfile.name === "Shade" && currentRoom === ghostRoom) return;
-
-  isHunting = true;
-  huntStartTime = Date.now();
-  lastHuntTime = Date.now();
-  ghostMesh.setEnabled(true);
-  ghostMesh.position = getNearbySpawnPoint(); // choose near player or ghost room
-  playHuntVisualsAndAudio();
-}
-
-function endHunt() {
-  isHunting = false;
-  ghostMesh.setEnabled(false);
-  stopHuntVisualsAndAudio();
-}
-
-function updateHunt() {
-  if (!isHunting) return;
-
-  const now = Date.now();
-  if (now - huntStartTime > huntDuration) {
-    endHunt();
-    return;
-  }
-
-  if (checkLineOfSight(player, ghostMesh)) {
-    if (playerIsCrouching && behindCover()) return;
-    if (!hasCrucifixProtection()) {
-      killPlayer();
-    } else {
-      useCrucifix();
-      endHunt();
-    }
-  }
-}
-
-function checkLineOfSight(player, ghost) {
-  const direction = ghost.position.subtract(player.position).normalize();
-  const ray = new BABYLON.Ray(ghost.position, direction, 30);
-  const hit = scene.pickWithRay(ray, m => m.name === "playerCollider");
-  return hit.hit;
-}
-
-function killPlayer() {
-  console.log("Player was killed.");
-  endHunt();
-  // trigger death screen / game over here
-}
-
-scene.onBeforeRenderObservable.add(() => {
-  updateHunt();
-});
-function getGhostSpeed() {
-  if (!ghostProfile) return 1.7;
-
-  let baseSpeed = 1.7;
-
-  const dist = BABYLON.Vector3.Distance(player.position, ghostMesh.position);
-
-  switch (ghostProfile.name) {
-    case "Revenant":
-      return checkLineOfSight(ghostMesh, player) ? 3.0 : 1.0;
-    case "Moroi":
-      return 1.6 + ((100 - sanity) / 100) * 2.1; // up to ~3.7
-    case "Thaye":
-      return getThayeSpeedTier();
-    case "Jinn":
-      if (checkLineOfSight(ghostMesh, player) && dist > 3) return 2.5;
-      break;
-    case "Raiju":
-      if (isNearElectronics()) return 2.5;
-      break;
-    case "Hantu":
-      return getTemperatureBasedSpeed();
-    case "Deogen":
-      return dist < 2 ? 0.5 : 3.0;
-    case "The Twins":
-      return Math.random() < 0.5 ? 1.45 : 1.95;
-  }
-
-  if (checkLineOfSight(ghostMesh, player)) {
-    baseSpeed *= 1.15;
-  }
-
-  return baseSpeed;
-}
-
-let thayeDecayTier = 0;
-let thayeDecayStart = Date.now();
-
-function getThayeSpeedTier() {
-  const tierDuration = 60000; // 1 min per tier
-  const elapsed = Date.now() - thayeDecayStart;
-  const tier = Math.min(10, Math.floor(elapsed / tierDuration));
-  return 1.7 * (1 - tier * 0.08); // drops up to 80%
-}
-let ambientSound, huntSound, whisperSound;
-
-function loadSounds(scene) {
-  ambientSound = new BABYLON.Sound("ambient", "/audio/ambient.mp3", scene, null, {
-    loop: true,
-    autoplay: true,
-    volume: 0.4
-  });
-
-  huntSound = new BABYLON.Sound("heartbeat", "/audio/heartbeat.mp3", scene, null, {
-    loop: true,
-    autoplay: false,
-    volume: 0.8
-  });
-
-  whisperSound = new BABYLON.Sound("whisper", "/audio/whisper.mp3", scene, null, {
-    loop: false,
-    autoplay: false,
-    volume: 1.0
-  });
-}
-
-function playHuntVisualsAndAudio() {
-  document.body.classList.add("red-flicker");
-  huntSound.play();
-}
-
-function stopHuntVisualsAndAudio() {
-  document.body.classList.remove("red-flicker");
-  huntSound.stop();
-}
-
-function playSpiritBoxResponse() {
-  new BABYLON.Sound("spiritBox", "/audio/spiritbox.mp3", scene, null, {
-    autoplay: true,
-    volume: 1
-  });
-}
-
-function playRandomInteractionSound() {
-  const sounds = ["door.mp3", "throw.mp3", "radio.mp3"];
-  const pick = sounds[Math.floor(Math.random() * sounds.length)];
-  new BABYLON.Sound("event", `/audio/${pick}`, scene, null, { autoplay: true, volume: 1 });
-}
-function triggerGhostInteraction() {
-  if (!ghostProfile || isHunting) return;
-  const inSameRoom = currentRoom === ghostRoom;
-  const now = Date.now();
-
-  // Shade never interacts when player is in room
-  if (ghostProfile.name === "Shade" && inSameRoom) return;
-
-  const roll = Math.random();
-
-  if (roll < 0.05) {
-    // 5% chance of throw event
-    playRandomInteractionSound();
-    console.log("Ghost threw something.");
-  } else if (roll < 0.10) {
-    // 5% chance of door touch
-    playRandomInteractionSound();
-    console.log("Ghost touched a door.");
-  } else if (roll < (inSameRoom ? 0.25 : 0.05)) {
-    // Radio more likely in ghost room
-    if (ghostProfile.name !== "Shade") {
-      new BABYLON.Sound("radio", "/audio/radio.mp3", scene, null, { autoplay: true });
-      console.log("Radio turned on.");
-    }
-  }
-}
-
-// Call every 15–30 seconds
-setInterval(() => {
-  triggerGhostInteraction();
-}, Math.random() * 15000 + 15000);
-let lastBlink = 0;
-let blinkInterval = 2000;
-let blinkVisible = false;
-
-function updateGhostVisibility() {
-  if (!ghostProfile || !ghostMesh || !isHunting) {
-    ghostMesh.setEnabled(false);
-    return;
-  }
-
-  const now = Date.now();
-  const timeSince = now - lastBlink;
-
-  // Deogen: always visible
-  if (ghostProfile.name === "Deogen") {
-    ghostMesh.setEnabled(true);
-    return;
-  }
-
-  // Oni: less blinking
-  const interval = ghostProfile.name === "Oni" ? 4000 : 2000;
-
-  if (timeSince > interval) {
-    blinkVisible = !blinkVisible;
-    ghostMesh.setEnabled(blinkVisible);
-    lastBlink = now;
-  }
-}
-
-scene.onBeforeRenderObservable.add(() => {
-  updateGhostVisibility();
-});
-let smudgeCooldownEnd = 0;
-let crucifixPlaced = null;
-let flamesExtinguished = 0;
-
-function useSmudgeStick() {
-  if (isHunting) {
-    ghostMesh.setEnabled(false);
-    isHunting = false;
-    lastHuntTime = Date.now();
-
-    const duration = ghostProfile.name === "Moroi" ? 7500 : 5000;
-    console.log(`Ghost stunned for ${duration}ms`);
-    setTimeout(() => {
-      ghostMesh.setEnabled(true);
-    }, duration);
-  } else {
-    let delay = 90000;
-    if (ghostProfile.name === "Spirit") delay = 180000;
-    if (ghostProfile.name === "Demon") delay = 60000;
-
-    smudgeCooldownEnd = Date.now() + delay;
-    console.log(`${ghostProfile.name} can't hunt for ${delay / 1000}s`);
-  }
-}
-
-function canGhostHuntNow() {
-  return Date.now() > smudgeCooldownEnd;
-}
-
-function hasCrucifixProtection() {
-  const dist = BABYLON.Vector3.Distance(player.position, ghostMesh.position);
-  const holding = playerInventory.includes("Crucifix");
-  const onGround = crucifixPlaced && dist < 3;
-
-  return holding || onGround;
-}
-
-function useCrucifix() {
-  if (playerInventory.includes("Crucifix")) {
-    playerInventory = playerInventory.filter(i => i !== "Crucifix");
-  } else {
-    crucifixPlaced = null;
-  }
-  console.log("Crucifix used to stop hunt.");
-}
-
-function dropCrucifixAt(position) {
-  crucifixPlaced = position.clone();
-}
-
-function extinguishFlame() {
-  flamesExtinguished++;
-  if (ghostProfile.name === "Onryo" && flamesExtinguished >= 3) {
-    startHunt();
-    flamesExtinguished = 0;
-  }
-}
-sanity = 100;
-let lastSanityTick = Date.now();
-
-function updateSanity() {
-  const now = Date.now();
-  const elapsed = now - lastSanityTick;
-
-  if (elapsed >= 5000) {
-    lastSanityTick = now;
-
-    // Base passive decay
-    let decay = 1 + Math.random(); // ~1–2% every 5 seconds
-
-    // Additional decay if near ghost
-    const distToGhost = ghostMesh ? BABYLON.Vector3.Distance(player.position, ghostMesh.position) : 999;
-    if (isHunting && distToGhost < 6) {
-      decay += 3;
-    }
-
-    // Ghost-specific sanity effects
-    if (ghostProfile.name === "Yurei") {
-      decay *= 1.2; // stronger sanity drain
-    } else if (ghostProfile.name === "Thaye") {
-      decay *= 0.8; // weak drain after aging
-    }
-
-    sanity -= decay;
-    sanity = Math.max(0, sanity);
     updateHUD();
 
-    if (sanity <= 0 && !isHunting) {
-      startHunt();
+    setInterval(() => {
+      sanity = Math.max(0, sanity - (Math.random()*1.2 + 0.6)); // ~0.6–1.8 per tick
+      updateHUD();
+    }, 5000);
+
+    // === Very simple room detection placeholder ===
+    function detectRoom() {
+      // You can replace this by bounding boxes of meshes named Room_*
+      currentRoom = (player.position.z > 0) ? "Entrance" : "Outside";
     }
-  }
-}
+    scene.onBeforeRenderObservable.add(detectRoom);
 
-// Call continuously
-scene.onBeforeRenderObservable.add(updateSanity);
-flyMode = false;
-let debugLabel = document.createElement("div");
-debugLabel.id = "debug-label";
-debugLabel.style.position = "absolute";
-debugLabel.style.top = "5px";
-debugLabel.style.right = "10px";
-debugLabel.style.color = "#0f0";
-debugLabel.style.fontSize = "14px";
-debugLabel.style.zIndex = "999";
-document.body.appendChild(debugLabel);
+    // === Inventory & Evidence UI ===
+    const allItems = ["EMF Reader","Spirit Box","Thermometer","Ghost Writing Book","Camera","Crucifix","Smudge Stick","Candle","Salt","UV Flashlight","Photo Camera","Parabolic Mic"];
+    let inventory = ["Lighter"];
 
-scene.onBeforeRenderObservable.add(() => {
-  const pos = player.position;
-  debugLabel.innerText = `X: ${pos.x.toFixed(2)} Y: ${pos.z.toFixed(2)}${flyMode ? " (FLY MODE)" : ""}`;
-});
-
-window.addEventListener("keydown", (e) => {
-  if (e.key === "`") {
-    flyMode = !flyMode;
-    player.physicsImpostor.dispose();
-
-    if (flyMode) {
-      player.physicsImpostor = null;
-    } else {
-      player.physicsImpostor = new BABYLON.PhysicsImpostor(player, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 1, restitution: 0 }, scene);
+    function setupInventoryOverlay() {
+      const container = document.getElementById("inventoryItems");
+      container.innerHTML = "";
+      allItems.forEach(name => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = name;
+        b.onclick = () => {
+          if (inventory.includes(name)) {
+            inventory = inventory.filter(i => i !== name);
+          } else {
+            const limited = inventory.filter(i => i !== "Lighter");
+            if (limited.length >= 3) return alert("Max 3 items (besides Lighter).");
+            inventory.push(name);
+          }
+          // toggle style
+          b.classList.toggle("selected", inventory.includes(name));
+        };
+        container.appendChild(b);
+      });
     }
-  }
-});
+    setupInventoryOverlay();
 
-// Override movement to support fly mode
-scene.onBeforeRenderObservable.add(() => {
-  if (!flyMode) return;
+    const evidenceList = ["EMF5","Spirit Box","Freezing Temps","Ghost Writing","Fingerprints","Ghost Orbs","DOTS"];
+    const selectedEvidence = new Set();
 
-  const delta = engine.getDeltaTime() / 1000;
-  const moveSpeed = 5;
-  const dir = getCameraForwardVector();
-  const input = getActiveInput(); // helper you already have
+    function setupNotebookUI() {
+      const opts = document.getElementById("evidenceOptions");
+      const list = document.getElementById("evidenceList");
+      opts.innerHTML = "";
+      list.innerHTML = "";
 
-  if (input.forward) player.position.addInPlace(dir.scale(moveSpeed * delta));
-  if (input.backward) player.position.addInPlace(dir.scale(-moveSpeed * delta));
-  if (input.left) player.position.addInPlace(dir.cross(BABYLON.Axis.Y).scale(-moveSpeed * delta));
-  if (input.right) player.position.addInPlace(dir.cross(BABYLON.Axis.Y).scale(moveSpeed * delta));
-});
-window.addEventListener("DOMContentLoaded", async () => {
-  const canvas = document.getElementById("renderCanvas");
-  engine = new BABYLON.Engine(canvas, true);
-  scene = new BABYLON.Scene(engine);
+      evidenceList.forEach(ev => {
+        const b = document.createElement("button");
+        b.className = "btn";
+        b.textContent = ev;
+        b.onclick = () => {
+          if (selectedEvidence.has(ev)) selectedEvidence.delete(ev);
+          else selectedEvidence.add(ev);
+          b.classList.toggle("selected", selectedEvidence.has(ev));
+          suggestGhosts();
+        };
+        opts.appendChild(b);
+      });
+    }
+    setupNotebookUI();
 
-  await setupScene();      // Part 4
-  setupCamera();           // Part 5
- await setupPlayer();           // Part 6
-  setupInventoryUI();      // Part 7
-  setupNotebook();         // Part 8
-  setupHUD();              // Part 10
- await loadGhost();             // Part 11
- await registerGhostAI();       // Part 13
-  setupRoomDetection();    // Part 9
- await setupSoundSystem();      // Part 16
+    // Tiny ghost db (aligns with your text DB)
+    const ghostDB = [
+      { name:"Spirit", evidence:["EMF5","Spirit Box","Ghost Writing"] },
+      { name:"Wraith", evidence:["EMF5","DOTS","Spirit Box"] },
+      { name:"Phantom", evidence:["Spirit Box","Fingerprints","DOTS"] },
+      { name:"Poltergeist", evidence:["Spirit Box","Ghost Writing","Fingerprints"] },
+      { name:"Banshee", evidence:["Fingerprints","DOTS","Ghost Orbs"] },
+      { name:"Shade", evidence:["EMF5","Ghost Writing","Freezing Temps"] },
+      { name:"Revenant", evidence:["Freezing Temps","Ghost Writing","Ghost Orbs"] },
+      { name:"Yurei", evidence:["Freezing Temps","Ghost Orbs","DOTS"] },
+      { name:"Oni", evidence:["EMF5","DOTS","Freezing Temps"] }
+    ];
 
-  engine.runRenderLoop(() => {
-    scene.render();
-  });
+    function suggestGhosts() {
+      const matches = ghostDB.filter(g =>
+        [...selectedEvidence].every(e => g.evidence.includes(e))
+      );
+      document.getElementById("ghostSuggestion").textContent =
+        matches.length ? `Possible: ${matches.map(m=>m.name).join(", ")}` : "No matches yet.";
+    }
 
-  window.addEventListener("resize", () => {
-    engine.resize();
-  });
+    // Toggle notebook with N
+    window.addEventListener("keydown", (e) => {
+      if (e.key.toLowerCase() === "n") {
+        document.getElementById("notebook").classList.toggle("hidden");
+        document.getElementById("evidencePanel").classList.toggle("hidden");
+      }
+    });
 
-  console.log("Initialized");
-});
+    // Guess ghost
+    document.getElementById("ghostGuessButton").addEventListener("click", () => {
+      const guess = prompt("Guess the ghost (e.g., Spirit, Wraith, Shade):");
+      if (!guess) return;
+      alert(`You guessed: ${guess}. (Hook up to your round resolution when ready.)`);
+    });
+
+    // Render loop
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
   </script>
 </body>
 </html>
