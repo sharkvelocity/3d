@@ -1,70 +1,131 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Phasma-Phoney 3D</title>
 <link rel="icon" href="favicon.ico"/>
 
-<!-- Babylon: use local CDN folder per your repo map -->
+<!-- Babylon core + loaders + gui + inspector + materials (local CDN per repo map) -->
 <script src="cdn/babylon.js"></script>
-<script src="cdn/loaders/babylon.glTFFileLoader.js"></script>
-<script src="cdn/loaders/babylonjs.loaders.min.js"></script>
+<script src="cdn/loaders/babylon.glTF2FileLoader.min.js"></script>
 <script src="cdn/gui/babylon.gui.min.js"></script>
 <script src="cdn/inspector/babylon.inspector.bundle.js"></script>
 <script src="cdn/materialsLibrary/babylonjs.materials.min.js"></script>
 
+<!-- RecastJS (local) for navmesh -->
+<script src="cdn/recast.js"></script>
+
+<!-- Fonts (optional) -->
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet"/>
+
 <style>
-  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  #renderCanvas{width:100%;height:100%;touch-action:none;display:block}
+  :root {
+    --ui-bg: rgba(0,0,0,.55);
+    --ui-border: rgba(255,255,255,.2);
+    --ui-text: #e9eef7;
+    --accent: #68d5ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #000; color: var(--ui-text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Orbitron", sans-serif;
+    overflow: hidden;
+  }
+  #renderCanvas { width: 100%; height: 100%; display: block; touch-action: none; }
 
   /* HUD */
-  #hud{position:absolute;left:10px;top:10px;color:#fff;z-index:5;
-       background:rgba(0,0,0,.35);padding:8px 10px;border-radius:8px;font-size:13px}
-  #hud .row{margin:2px 0}
+  #hud {
+    position: absolute; top: 8px; left: 8px; z-index: 5;
+    background: var(--ui-bg); border: 1px solid var(--ui-border);
+    border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.4;
+    pointer-events: none; min-width: 220px;
+  }
+  #hud .row { display: flex; gap: 8px; justify-content: space-between; }
+  #hud .label { opacity: .7; }
+  #hud .value { color: #fff; }
 
   /* Panels */
-  .panel{position:absolute;left:10px;bottom:10px;z-index:6;background:rgba(0,0,0,.45);
-         color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:8px}
-  .hidden{display:none !important}
-  .btn{cursor:pointer;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);
-       color:#fff;border-radius:8px;padding:6px 10px;margin:3px 2px;font-size:12px}
-  .btn.active{background:rgba(0,200,255,.18);border-color:#7dd3fc}
-  .group{display:flex;flex-wrap:wrap;gap:6px}
-  #inventory{max-width:360px}
-  #evidencePanel{left:auto;right:10px}
-  #ghostGuessPanel{right:10px;bottom:10px}
+  .panel {
+    position: absolute; z-index: 10; background: var(--ui-bg);
+    border: 1px solid var(--ui-border); border-radius: 10px; padding: 10px;
+    backdrop-filter: blur(2px);
+  }
+  .hidden { display: none !important; }
 
-  /* Mobile controls */
-  #touchLeft,#touchRight{position:absolute;bottom:18px;width:44vw;max-width:420px;height:44vw;max-height:420px;z-index:7}
-  #touchLeft{left:10px}
-  #touchRight{right:10px}
-  .stick{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.25);
-         background:radial-gradient(circle at 50% 50%, rgba(255,255,255,.08), rgba(255,255,255,.02));}
-  .nub{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-       width:34%;height:34%;border-radius:50%;background:rgba(255,255,255,.18);
-       border:1px solid rgba(255,255,255,.35);}
+  #inventory { bottom: 10px; left: 10px; }
+  #notebook { bottom: 10px; left: 10px; transform: translateY(-135%); min-width: 260px; }
+  #evidencePanel { bottom: 10px; left: 10px; transform: translateY(-70%); min-width: 260px; }
 
-  /* Dev modal & panel */
-  .dev-modal.hidden{display:none}
-  .dev-modal{position:fixed;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.55);z-index:1000}
-  .dev-modal-card{width:min(92vw,360px);background:#0b0b0c;color:#fff;border:1px solid rgba(255,255,255,.12);
-    border-radius:10px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
-  .dev-modal-card h3{margin:0 0 6px 0;font:600 18px/1.2 system-ui}
-  .dev-modal-card p{margin:0 0 10px 0;opacity:.85}
-  #devPwdInput{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:#121215;color:#fff}
-  .dev-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
-  .dev-modal-actions button{padding:8px 12px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.18);
-    background:rgba(255,255,255,.09);color:#fff}
+  .btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--ui-border);
+    color: var(--ui-text); padding: 6px 10px; border-radius: 8px;
+    cursor: pointer; margin: 3px 4px 0 0; font-size: 12px;
+  }
+  .btn:hover { border-color: rgba(255,255,255,0.35); }
+  .btn.active { outline: 1px solid var(--accent); }
 
-  #devPanelRight.hidden{display:none}
-  #devPanelRight{position:absolute;right:10px;top:10px;z-index:999;width:240px;background:rgba(0,0,0,.45);
-    border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:10px;color:#fff;backdrop-filter:blur(6px)}
-  #devPanelRight .dev-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-  #devPanelRight .dev-head button{border:none;background:transparent;color:#fff;cursor:pointer}
-  #devMiniReadout.hidden{display:none}
-  #devMiniReadout{margin-top:10px;font-size:12px;white-space:pre;background:rgba(0,0,0,.35);
-    border:1px dashed rgba(255,255,255,.2);padding:8px;border-radius:8px}
+  #ghostGuessButton {
+    position: absolute; bottom: 10px; right: 10px; z-index: 10;
+  }
+
+  /* Dev Mode */
+  #devHint {
+    position: absolute; top: 8px; right: 8px; z-index: 6;
+    font-size: 11px; opacity: .5; pointer-events: none;
+  }
+  #devPanelRight {
+    position: absolute; right: 10px; top: 52px; z-index: 20; width: 260px;
+    background: var(--ui-bg); border: 1px solid var(--ui-border);
+    border-radius: 10px; padding: 10px; display: none;
+  }
+  #devPanelRight .title { font-weight: 600; margin-bottom: 6px; color: #fff; }
+  #devPanelRight .dev-group { margin-bottom: 10px; }
+  #devPanelRight .desc { font-size: 11px; opacity: .75; margin-top: 6px; }
+  #devUnlockOverlay {
+    position: absolute; inset: 0; background: rgba(0,0,0,.65);
+    display: none; z-index: 30; align-items: center; justify-content: center;
+  }
+  #devUnlockBox {
+    background: #0e1116; border: 1px solid var(--ui-border);
+    padding: 16px; border-radius: 10px; width: min(92%, 360px);
+  }
+  #devUnlockBox input {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--ui-border);
+    background: rgba(255,255,255,.05); color: #fff; margin-top: 8px;
+  }
+
+  /* Ghost Guess modal */
+  #ghostModal {
+    position: absolute; inset: 0; background: rgba(0,0,0,.6); display: none; z-index: 25;
+    align-items: center; justify-content: center;
+  }
+  #ghostModal .box {
+    background: #0e1116; border: 1px solid var(--ui-border);
+    padding: 12px; border-radius: 10px; width: min(92%, 480px);
+  }
+  #ghostGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
+
+  /* Mobile touch controls */
+  #touchLeft, #touchRight {
+    position: absolute; bottom: 12px; z-index: 12; opacity: .75;
+    width: 46vw; height: 34vh; max-width: 420px; max-height: 320px;
+    touch-action: none; border-radius: 12px; border: 1px dashed rgba(255,255,255,.15);
+    display: none; /* only show on mobile */
+  }
+  #touchLeft { left: 8px; }
+  #touchRight { right: 8px; }
+  @media (hover:none) and (pointer:coarse) {
+    #touchLeft, #touchRight { display: block; }
+  }
+
+  /* Dev pins */
+  .dev-pin {
+    position: absolute; width: 10px; height: 10px; border-radius: 50%;
+    background: #68d5ff; box-shadow: 0 0 10px #68d5ff; pointer-events: none;
+  }
 </style>
 </head>
 <body>
@@ -72,485 +133,566 @@
 
 <!-- HUD -->
 <div id="hud">
-  <div class="row">Room: <span id="roomName">Loading…</span></div>
-  <div class="row">Sanity: <span id="sanityDisplay">100%</span></div>
-  <div class="row">Weather: <span id="weatherDisplay">Clear</span></div>
-  <div class="row">Pos: <span id="coordDisplay">X 0.00 Z 0.00</span></div>
+  <div class="row"><span class="label">Room</span><span class="value" id="roomName">Outside</span></div>
+  <div class="row"><span class="label">Sanity</span><span class="value" id="sanityDisplay">100%</span></div>
+  <div class="row"><span class="label">Weather</span><span class="value" id="weatherDisplay">Clear</span></div>
+  <div class="row"><span class="label">X/Z</span><span class="value"><span id="debugX">0.00</span> / <span id="debugZ">0.00</span></span></div>
 </div>
 
-<!-- Inventory -->
+<div id="devHint">Hold X+Y+Z 3s for Dev Mode</div>
+
+<!-- Inventory (kept minimal for now) -->
 <div id="inventory" class="panel">
-  <div><strong>Inventory</strong></div>
-  <div id="inventoryItems" class="group"></div>
+  <strong>Inventory</strong><br/>
+  <div id="inventoryItems"></div>
 </div>
 
-<!-- Evidence -->
+<!-- Notebook / Evidence -->
+<div id="notebook" class="panel hidden">
+  <strong>Notebook</strong>
+  <div id="evidenceList"></div>
+  <div id="ghostSuggestion" style="margin-top:6px; font-size:12px; opacity:.8;"></div>
+</div>
+
 <div id="evidencePanel" class="panel hidden">
-  <div><strong>Select Evidence</strong></div>
-  <div id="evidenceOptions" class="group"></div>
+  <strong>Select Evidence</strong>
+  <div id="evidenceOptions"></div>
 </div>
 
-<!-- Ghost Guess (button based) -->
-<div id="ghostGuessPanel" class="panel hidden">
-  <div><strong>Guess Ghost</strong></div>
-  <div id="ghostButtonGrid" class="group" style="max-width:420px"></div>
-  <div id="guessResult" style="margin-top:6px;opacity:.9"></div>
+<!-- Ghost Guess -->
+<button id="ghostGuessButton" class="btn">Guess Ghost</button>
+
+<!-- Ghost Guess Modal -->
+<div id="ghostModal">
+  <div class="box">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <strong>Select the ghost</strong>
+      <button id="ghostModalClose" class="btn">Close</button>
+    </div>
+    <div id="ghostGrid"></div>
+  </div>
 </div>
 
-<!-- Mobile touch pads -->
-<div id="touchLeft"><div class="stick"></div><div class="nub" id="nubLeft"></div></div>
-<div id="touchRight"><div class="stick"></div><div class="nub" id="nubRight"></div></div>
-
-<!-- DEV modal + panel -->
-<div id="devPwdModal" class="dev-modal hidden" aria-hidden="true">
-  <div class="dev-modal-card">
-    <h3>Developer Mode</h3>
-    <p>Hold X+Y+Z for 3s to open. Enter password:</p>
-    <input id="devPwdInput" type="password" placeholder="Password" autocomplete="off"/>
-    <div class="dev-modal-actions">
-      <button id="devPwdCancel">Cancel</button>
-      <button id="devPwdOK">Unlock</button>
+<!-- Dev Mode Unlock -->
+<div id="devUnlockOverlay">
+  <div id="devUnlockBox">
+    <div style="font-weight:600;margin-bottom:6px;">Enter Developer Password</div>
+    <div style="font-size:12px;opacity:.8;">(Hold X+Y+Z 3 seconds to summon this. Default: <em>devmode</em>)</div>
+    <input id="devPwd" type="password" placeholder="password"/>
+    <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+      <button id="devCancel" class="btn">Cancel</button>
+      <button id="devSubmit" class="btn">Unlock</button>
     </div>
   </div>
 </div>
-<div id="devPanelRight" class="hidden">
-  <div class="dev-head">
-    <span>DEV</span>
-    <button id="devCloseBtn" title="Disable Dev">✕</button>
+
+<!-- Dev Panel (right) -->
+<div id="devPanelRight">
+  <div class="title">Developer Panel</div>
+  <div class="dev-group">
+    <button id="btnToggleLocation" class="btn dev-toggle">Location</button>
+    <button id="btnFly" class="btn dev-toggle">Fly</button>
+    <button id="btnShowGhost" class="btn dev-toggle">Show Ghost</button>
+    <button id="btnPin" class="btn">Pin Location</button>
+    <button id="btnDevLog" class="btn">Create Dev Log</button>
+    <div class="desc">Toggles apply immediately while Dev Mode is active.</div>
   </div>
   <div class="dev-group">
-    <button id="btnToggleCoords" class="btn dev-toggle">Location</button>
-    <button id="btnToggleFly" class="btn dev-toggle">Fly</button>
-    <button id="btnShowGhost" class="btn dev-toggle">Show Ghost</button>
-    <button id="btnPinLocation" class="btn">Pin Location</button>
-    <button id="btnCreateDevLog" class="btn">Create Dev Log</button>
+    <button id="btnToggleNavMesh" class="btn dev-toggle">Show NavMesh</button>
+    <button id="btnRampTool" class="btn">Ramp Tool</button>
+    <button id="btnShowColliders" class="btn dev-toggle">Show Colliders</button>
+    <button id="btnExportColliders" class="btn">Export Colliders</button>
+    <label class="btn">Import Colliders
+      <input id="inputImportColliders" type="file" accept="application/json" style="display:none">
+    </label>
+    <button id="btnBuildNavMesh" class="btn">Rebuild NavMesh</button>
   </div>
-  <div id="devMiniReadout" class="hidden"></div>
 </div>
 
+<!-- Mobile touch areas -->
+<div id="touchLeft"></div>
+<div id="touchRight"></div>
+
 <script>
-/* ========= Core globals ========= */
+/* =========================
+   Core scene boot
+========================= */
 let canvas, engine, scene;
-let player, fpCam, tpCam, activeCamera;
-let isHover = false; // fly/hover mode
-let currentRoom = "Outside";
+let firstPersonCam, thirdPersonCam, activeCamera;
+let player;
+let flyMode = false;
+let devMode = false;
+let showLocation = false;
+
+const START_POS = { x: 31.47, y: 1.6, z: 0.0 }; // van spot facing the house
+const GRAVITY = new BABYLON.Vector3(0, -0.9, 0); // strong enough; no fall damage logic needed
+
+// HUD elts
+const hudRoom = document.getElementById("roomName");
+const hudSanity = document.getElementById("sanityDisplay");
+const hudWeather = document.getElementById("weatherDisplay");
+const hudX = document.getElementById("debugX");
+const hudZ = document.getElementById("debugZ");
+
+// Dev unlock handling
+let xyzDownTimer = null;
+const KEY_HELD_MS = 3000;
+const pressed = new Set();
+
+const devOverlay = document.getElementById("devUnlockOverlay");
+const devPwd = document.getElementById("devPwd");
+const devCancel = document.getElementById("devCancel");
+const devSubmit = document.getElementById("devSubmit");
+const devPanel = document.getElementById("devPanelRight");
+
+// Dev panel buttons
+const btnToggleLocation = document.getElementById("btnToggleLocation");
+const btnFly = document.getElementById("btnFly");
+const btnShowGhost = document.getElementById("btnShowGhost");
+const btnPin = document.getElementById("btnPin");
+const btnDevLog = document.getElementById("btnDevLog");
+
+// Nav/Ramp tool buttons (wired later)
+const btnToggleNavMesh   = document.getElementById("btnToggleNavMesh");
+const btnRampTool        = document.getElementById("btnRampTool");
+const btnShowColliders   = document.getElementById("btnShowColliders");
+const btnExportColliders = document.getElementById("btnExportColliders");
+const inputImportColliders = document.getElementById("inputImportColliders");
+const btnBuildNavMesh    = document.getElementById("btnBuildNavMesh");
+
+// Ghost guess modal
+const ghostGuessBtn = document.getElementById("ghostGuessButton");
+const ghostModal = document.getElementById("ghostModal");
+const ghostModalClose = document.getElementById("ghostModalClose");
+const ghostGrid = document.getElementById("ghostGrid");
+
+// Mobile touch
+const touchLeft = document.getElementById("touchLeft");
+const touchRight = document.getElementById("touchRight");
+
+// Simple game state
 let sanity = 100;
 let weather = "Clear";
-let ghostMesh = null;
-let ghostProfile = null;
-let devReadyPatched = false;
+let currentRoom = "Outside";
 
-const VAN_SPAWN = new BABYLON.Vector3(31.47, 0.5, 0.0); // your van spot
-const HOUSE_PATH = "assets/models/map/Abandoned_House.glb"; // repo layout
-const AUDIO_BASE = "assets/audio/";
-const GHOST_MODELS = [
-  "assets/models/ghosts/ghost1.glb",
-  "assets/models/ghosts/ghost2.glb",
-  "assets/models/ghosts/ghost3.glb",
-  "assets/models/ghosts/ghost4.glb",
+// Ghost catalog (names only for guess UI)
+const ghostProfiles = [
+  "Spirit","Wraith","Phantom","Poltergeist","Banshee","Jinn","Mare","Revenant","Shade",
+  "Demon","Yurei","Oni","Yokai","Hantu","Goryo","Myling","Onryo","The Twins","Raiju",
+  "Obake","The Mimic","Moroi","Deogen","Thaye","Succubus"
 ];
+let actualGhost = "Shade"; // placeholder – wire to your picker/AI later
 
-/* ========= UI refs ========= */
-const roomNameEl = document.getElementById("roomName");
-const sanityEl   = document.getElementById("sanityDisplay");
-const weatherEl  = document.getElementById("weatherDisplay");
-const coordEl    = document.getElementById("coordDisplay");
-
-const inventoryDiv = document.getElementById("inventoryItems");
-const evidencePanel = document.getElementById("evidencePanel");
-const evidenceOptions = document.getElementById("evidenceOptions");
-const ghostGuessPanel = document.getElementById("ghostGuessPanel");
-const ghostButtonGrid = document.getElementById("ghostButtonGrid");
-const guessResult = document.getElementById("guessResult");
-
-/* ========= Simple inventory & evidence ========= */
-const ALL_ITEMS = [
-  "EMF Reader","Spirit Box","Thermometer","Ghost Writing Book",
-  "Photo Camera","Video Camera","UV Flashlight","Crucifix","Smudge Stick","Candle","Salt"
-];
-let inventory = ["Lighter"]; // free slot
-function renderInventoryUI(){
-  inventoryDiv.innerHTML = "";
-  ALL_ITEMS.forEach(name=>{
-    const b = document.createElement("button");
-    b.className = "btn";
-    b.textContent = name;
-    if (inventory.includes(name)) b.classList.add("active");
-    b.onclick = ()=>{
-      if (inventory.includes(name)) {
-        if (name==="Lighter") return;
-        inventory = inventory.filter(i=>i!==name);
-      } else {
-        const limited = inventory.filter(i=>i!=="Lighter");
-        if (limited.length>=3) { alert("Max 3 items (Lighter is free)."); return; }
-        inventory.push(name);
-      }
-      renderInventoryUI();
-    };
-    inventoryDiv.appendChild(b);
-  });
-}
-
-const EVIDENCE = ["EMF5","Spirit Box","Freezing Temps","Ghost Writing","Fingerprints","Ghost Orbs","DOTS"];
-const selectedEvidence = new Set();
-function setupEvidenceUI(){
-  evidencePanel.classList.remove("hidden");
-  EVIDENCE.forEach(ev=>{
-    const b=document.createElement("button");
-    b.className="btn";
-    b.textContent=ev;
-    b.onclick=()=>{
-      if (selectedEvidence.has(ev)) { selectedEvidence.delete(ev); b.classList.remove("active"); }
-      else { selectedEvidence.add(ev); b.classList.add("active"); }
-      suggestGhosts();
-    };
-    evidenceOptions.appendChild(b);
-  });
-}
-
-/* ========= Ghost list + guess buttons ========= */
-const GHOSTS = [
-  {name:"Spirit", ev:["EMF5","Spirit Box","Ghost Writing"]},
-  {name:"Wraith", ev:["EMF5","DOTS","Spirit Box"]},
-  {name:"Phantom", ev:["Spirit Box","Fingerprints","DOTS"]},
-  {name:"Poltergeist", ev:["Spirit Box","Ghost Writing","Fingerprints"]},
-  {name:"Banshee", ev:["Ghost Orbs","DOTS","Fingerprints"]},
-  {name:"Jinn", ev:["EMF5","Freezing Temps","Fingerprints"]},
-  {name:"Mare", ev:["Spirit Box","Ghost Writing","Ghost Orbs"]},
-  {name:"Revenant", ev:["Freezing Temps","Ghost Writing","Ghost Orbs"]},
-  {name:"Shade", ev:["EMF5","Ghost Writing","Freezing Temps"]},
-  {name:"Demon", ev:["Freezing Temps","Ghost Writing","Fingerprints"]},
-  {name:"Yurei", ev:["Ghost Orbs","Freezing Temps","DOTS"]},
-  {name:"Oni", ev:["EMF5","DOTS","Freezing Temps"]},
-  {name:"Yokai", ev:["Spirit Box","Ghost Orbs","DOTS"]},
-  {name:"Hantu", ev:["Freezing Temps","Ghost Orbs","Fingerprints"]},
-  {name:"Goryo", ev:["EMF5","DOTS","Fingerprints"]},
-  {name:"Myling", ev:["EMF5","Ghost Writing","Fingerprints"]},
-  {name:"Onryo", ev:["Spirit Box","Freezing Temps","Ghost Orbs"]},
-  {name:"The Twins", ev:["EMF5","Spirit Box","Freezing Temps"]},
-  {name:"Raiju", ev:["EMF5","Ghost Orbs","DOTS"]},
-  {name:"Obake", ev:["EMF5","Ghost Orbs","Fingerprints"]},
-  {name:"The Mimic", ev:["Spirit Box","Freezing Temps","Fingerprints"]},
-  {name:"Moroi", ev:["Spirit Box","Ghost Writing","Freezing Temps"]},
-  {name:"Deogen", ev:["Spirit Box","Ghost Writing","DOTS"]},
-  {name:"Thaye", ev:["Ghost Writing","DOTS","Ghost Orbs"]},
-];
-function setupGhostGuessUI(){
-  ghostGuessPanel.classList.remove("hidden");
-  ghostButtonGrid.innerHTML = "";
-  GHOSTS.forEach(g=>{
-    const b=document.createElement("button");
-    b.className="btn";
-    b.textContent=g.name;
-    b.onclick=()=> {
-      if (!ghostProfile) { guessResult.textContent = `You guessed ${g.name}. (No target chosen yet.)`; return; }
-      guessResult.textContent = (g.name===ghostProfile.name) ? `✅ Correct! It was ${g.name}.`
-                                                             : `❌ Nope. It was ${ghostProfile.name}.`;
-    };
-    ghostButtonGrid.appendChild(b);
-  });
-}
-function suggestGhosts(){
-  const picks = GHOSTS.filter(g=>[...selectedEvidence].every(ev=>g.ev.includes(ev)));
-  guessResult.textContent = picks.length ? `Matches: ${picks.map(g=>g.name).join(", ")}`
-                                         : `No matches with current evidence.`;
-}
-
-/* ========= Babylon setup ========= */
-function setupEngine(){
+window.addEventListener("DOMContentLoaded", async () => {
   canvas = document.getElementById("renderCanvas");
-  engine = new BABYLON.Engine(canvas,true,{preserveDrawingBuffer:true, stencil:true});
+  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
   scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0,0,0,1);
   scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0, -0.15, 0);
+  scene.gravity = GRAVITY;
+
+  // Lighting
   const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-  hemi.intensity = 0.7;
-}
+  hemi.intensity = 0.55;
 
-function setupCameras(){
-  fpCam = new BABYLON.UniversalCamera("fpCam", VAN_SPAWN.clone(), scene);
-  fpCam.attachControl(canvas, true);
-  fpCam.speed = 1.8;
-  fpCam.inertia = 0.6;
-  fpCam.minZ = 0.05;
-
-  tpCam = new BABYLON.ArcRotateCamera("tpCam", BABYLON.Tools.ToRadians(90), BABYLON.Tools.ToRadians(75), 6, VAN_SPAWN.clone(), scene);
-  tpCam.attachControl(canvas, true);
-  tpCam.lowerRadiusLimit = 3; tpCam.upperRadiusLimit=12;
-
-  activeCamera = fpCam; scene.activeCamera = fpCam;
-
-  window.addEventListener("keydown", e=>{
-    if (e.key.toLowerCase()==="v") {
-      activeCamera.detachControl(canvas);
-      activeCamera = (activeCamera===fpCam) ? tpCam : fpCam;
-      scene.activeCamera = activeCamera;
-      activeCamera.attachControl(canvas,true);
-    }
-  });
-}
-
-function setupPlayer(){
-  player = BABYLON.MeshBuilder.CreateCapsule("playerCol",{height:1.8, radius:0.35}, scene);
-  player.isVisible=false;
-  player.position = VAN_SPAWN.clone();
-  player.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
-  player.checkCollisions = true;
-  fpCam.parent = player;
-  tpCam.lockedTarget = player;
-}
-
-async function loadMapAndCenter(){
-  try{
-    const res = await BABYLON.SceneLoader.AppendAsync("", HOUSE_PATH, scene);
-    // Center whole map at origin by shifting root meshes’ bounding center to (0,0,0)
-    const bbox = scene.getWorldExtends();
-    const center = bbox.min.add(bbox.max).scale(0.5);
-    const offset = center.scale(-1);
-    scene.meshes.forEach(m=>{
-      if (m.parent==null) m.position.addInPlace(offset);
-    });
-    // Reposition player to van again (relative)
-    player.position.copyFrom(VAN_SPAWN);
-  }catch(err){
-    console.error("Map load error:", err);
-  }
-}
-
-async function loadGhostModel(){
-  const pick = GHOST_MODELS[Math.floor(Math.random()*GHOST_MODELS.length)];
-  const res = await BABYLON.SceneLoader.ImportMeshAsync("", "", pick, scene);
-  ghostMesh = res.meshes.find(m=>m.name && !m.name.startsWith("__"));
-  if (!ghostMesh) ghostMesh = res.meshes[0];
-  ghostMesh.setEnabled(false);
-  ghostMesh.isPickable = false;
-  ghostMesh.position = new BABYLON.Vector3(0,1.5,0);
-}
-
-function chooseRandomGhost(){
-  ghostProfile = GHOSTS[Math.floor(Math.random()*GHOSTS.length)];
-}
-
-function setupLoop(){
-  scene.onBeforeRenderObservable.add(()=>{
-    // update HUD coords
-    if (player) coordEl.textContent = `X ${player.position.x.toFixed(2)}  Z ${player.position.z.toFixed(2)}`;
-    // sanity passive decay lite
-    sanity = Math.max(0, sanity - engine.getDeltaTime()*0.0008);
-    sanityEl.textContent = `${Math.floor(sanity)}%`;
-  });
-
-  engine.runRenderLoop(()=>scene.render());
-  window.addEventListener("resize", ()=>engine.resize());
-}
-
-/* ========= Movement: keyboard + mobile ========= */
-const keys = {};
-window.addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
-window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
-
-function setHoverMode(on){
-  isHover = !!on;
-  if (player){
-    player.checkCollisions = !isHover;
-  }
-  scene.gravity = isHover ? new BABYLON.Vector3(0,0,0) : new BABYLON.Vector3(0,-0.15,0);
-}
-
-function updateMovement(){
-  const dt = engine.getDeltaTime()/1000;
-  const moveSpeed = (keys["shift"]?3.2:1.8) * (isHover?2.0:1.0);
-  const cam = fpCam; // movement is aligned to FP camera
-  const fwd = cam.getDirection(BABYLON.Axis.Z);
-  const right = cam.getDirection(BABYLON.Axis.X);
-  let dir = new BABYLON.Vector3.Zero();
-
-  if (keys["w"]) dir.addInPlace(fwd);
-  if (keys["s"]) dir.subtractInPlace(fwd);
-  if (keys["a"]) dir.subtractInPlace(right);
-  if (keys["d"]) dir.addInPlace(right);
-
-  if (isHover){
-    if (keys[" "]) dir.y += 1;
-    if (keys["control"]) dir.y -= 1;
-    player.position.addInPlace(dir.normalize().scale(moveSpeed*dt*6));
-  } else {
-    dir.y = 0;
-    if (dir.lengthSquared()>0) {
-      player.moveWithCollisions(dir.normalize().scale(moveSpeed*dt));
-    }
-  }
-}
-scene && scene.onBeforeRenderObservable.add(updateMovement);
-
-/* ========= Touch controls ========= */
-const tl = document.getElementById("touchLeft");
-const tr = document.getElementById("touchRight");
-const nubL = document.getElementById("nubLeft");
-const nubR = document.getElementById("nubRight");
-let ltouch=null, rtouch=null, ldx=0, ldy=0, rdx=0, rdy=0;
-
-function bindStick(el,which){
-  const rect = ()=>el.getBoundingClientRect();
-  const center = ()=>({x:rect().left+rect().width/2,y:rect().top+rect().height/2});
-  const maxR = ()=>rect().width*0.5;
-
-  el.addEventListener("touchstart",e=>{
-    for(const t of e.changedTouches){
-      if (which==="L" && ltouch==null){ ltouch=t.identifier; break; }
-      if (which==="R" && rtouch==null){ rtouch=t.identifier; break; }
-    }
-  },{passive:false});
-
-  el.addEventListener("touchmove",e=>{
-    for(const t of e.changedTouches){
-      if (which==="L" && t.identifier===ltouch){
-        const c=center(); const dx=t.clientX-c.x; const dy=t.clientY-c.y;
-        const r = Math.min(maxR(), Math.hypot(dx,dy)); const ang=Math.atan2(dy,dx);
-        const nx = Math.cos(ang)*r, ny=Math.sin(ang)*r;
-        ldx = nx/maxR(); ldy = ny/maxR();
-        nubL.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-        e.preventDefault();
-      }
-      if (which==="R" && t.identifier===rtouch){
-        const c=center(); const dx=t.clientX-c.x; const dy=t.clientY-c.y;
-        const r = Math.min(maxR(), Math.hypot(dx,dy)); const ang=Math.atan2(dy,dx);
-        const nx = Math.cos(ang)*r, ny=Math.sin(ang)*r;
-        rdx = nx/maxR(); rdy = ny/maxR();
-        nubR.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-        e.preventDefault();
-      }
-    }
-  },{passive:false});
-
-  el.addEventListener("touchend",e=>{
-    for(const t of e.changedTouches){
-      if (which==="L" && t.identifier===ltouch){
-        ltouch=null; ldx=0; ldy=0; nubL.style.transform="translate(-50%,-50%)";
-      }
-      if (which==="R" && t.identifier===rtouch){
-        rtouch=null; rdx=0; rdy=0; nubR.style.transform="translate(-50%,-50%)";
-      }
-    }
-  },{passive:false});
-}
-bindStick(tl,"L"); bindStick(tr,"R");
-
-// apply touch to movement/look
-scene && scene.onBeforeRenderObservable.add(()=>{
-  if (!player || !fpCam) return;
-  // movement from left stick
-  if (Math.abs(ldx)+Math.abs(ldy)>0.01){
-    const moveDir = new BABYLON.Vector3(ldx,0,ldy);
-    // convert screen-space to camera space
-    const camForward = fpCam.getDirection(BABYLON.Axis.Z); camForward.y=0; camForward.normalize();
-    const camRight   = fpCam.getDirection(BABYLON.Axis.X); camRight.y=0; camRight.normalize();
-    const worldDir = camRight.scale(moveDir.x).add(camForward.scale(moveDir.z));
-    if (isHover) player.position.addInPlace(worldDir.scale(0.15));
-    else player.moveWithCollisions(worldDir.normalize().scale(0.08));
-  }
-  // look from right stick
-  if (Math.abs(rdx)+Math.abs(rdy)>0.01){
-    fpCam.rotation.y += rdx*0.03;
-    const newAlpha = tpCam.alpha - rdx*0.03;
-    tpCam.alpha = newAlpha;
-    fpCam.rotation.x += rdy*0.02;
-    fpCam.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, fpCam.rotation.x));
-  }
-});
-
-/* ========= Room detection (AABB contains) ========= */
-function setupRoomDetection(){
-  scene.registerBeforeRender(()=>{
-    let found="Outside";
-    for (const m of scene.meshes){
-      if (!m.name) continue;
-      if (m.name.toLowerCase().startsWith("room")){
-        const bb = m.getBoundingInfo().boundingBox;
-        if (bb.containsPoint(player.position)) { found=m.name; break; }
-      }
-    }
-    currentRoom = found;
-    roomNameEl.textContent = found.replace(/^room[_-]?/i,"");
-  });
-}
-
-/* ========= Dev Console (XYZ for 3s) ========= */
-let devMode=false, devShowCoords=false, devShowGhost=false;
-const DEV_PASSWORD="devmode", HOLD_MS=3000;
-const keysHeld=new Set(); let holdTimer=null;
-
-const devPanel = document.getElementById("devPanelRight");
-const devMini = document.getElementById("devMiniReadout");
-const devPwdModal = document.getElementById("devPwdModal");
-const devPwdInput = document.getElementById("devPwdInput");
-document.getElementById("devPwdCancel").onclick=()=>togglePwd(false);
-document.getElementById("devPwdOK").onclick=()=>{ if(devPwdInput.value===DEV_PASSWORD){ togglePwd(false); setDev(true);} else {devPwdInput.value=""; devPwdInput.placeholder="Wrong password";} };
-document.getElementById("devCloseBtn").onclick=()=>setDev(false);
-document.getElementById("btnToggleCoords").onclick=()=>{ devShowCoords=!devShowCoords; this.event.target.classList.toggle("active",devShowCoords); devMini.classList.toggle("hidden",!(devMode&&devShowCoords)); };
-document.getElementById("btnToggleFly").onclick=()=>{ setHoverMode(!isHover); this.event.target.classList.toggle("active",isHover); };
-document.getElementById("btnShowGhost").onclick=()=>{
-  devShowGhost=!devShowGhost; this.event.target.classList.toggle("active",devShowGhost);
-  if (ghostMesh) ghostMesh.setEnabled(devShowGhost);
-};
-document.getElementById("btnPinLocation").onclick=()=>{
-  if (!scene||!player) return;
-  const s= BABYLON.MeshBuilder.CreateSphere("devPin",{diameter:0.25},scene);
-  s.position = player.position.clone();
-  s.renderOutline=true; s.outlineWidth=0.02; s.outlineColor=new BABYLON.Color3(0.2,0.8,1);
-};
-document.getElementById("btnCreateDevLog").onclick=()=>downloadDevLog();
-
-function togglePwd(on){
-  devPwdModal.classList.toggle("hidden",!on);
-  devPwdModal.setAttribute("aria-hidden", on?"false":"true");
-  if (on){ devPwdInput.value=""; setTimeout(()=>devPwdInput.focus(),0); }
-}
-function setDev(on){
-  devMode=!!on; devPanel.classList.toggle("hidden",!devMode);
-  devMini.classList.toggle("hidden", !(devMode&&devShowCoords));
-}
-window.addEventListener("keydown",(e)=>{
-  const k=e.key?.toLowerCase(); if(!k) return;
-  if(["x","y","z"].includes(k)){ keysHeld.add(k); if(["x","y","z"].every(x=>keysHeld.has(x)) && !holdTimer){ holdTimer=setTimeout(()=>{ holdTimer=null; togglePwd(true); }, HOLD_MS);} }
-});
-window.addEventListener("keyup",(e)=>{
-  const k=e.key?.toLowerCase(); if(!k) return;
-  if(["x","y","z"].includes(k)){ keysHeld.delete(k); if(holdTimer){ clearTimeout(holdTimer); holdTimer=null; } }
-});
-scene && scene.onBeforeRenderObservable.add(()=>{
-  if(devMode&&devShowCoords&&player){
-    devMini.textContent = `POS X:${player.position.x.toFixed(2)} Y:${player.position.y.toFixed(2)} Z:${player.position.z.toFixed(2)}\nROOM ${currentRoom}`;
-  }
-});
-function downloadDevLog(){
-  const lines=[
-    `Dev Log ${new Date().toISOString()}`,
-    `Pos: ${player?player.position.toString():"(none)"}`,
-    `Room: ${currentRoom}`,
-    `Ghost: ${ghostProfile?.name||"(none)"}`,
-    `Hover: ${isHover}`,
-  ].join("\n");
-  const blob = new Blob([lines],{type:"text/plain;charset=utf-8"});
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = `devlog_${Date.now()}.txt`; a.click(); a.remove();
-}
-
-/* ========= Init ========= */
-(async function main(){
-  setupEngine();
+  // Cameras
   setupCameras();
-  setupPlayer();
-  renderInventoryUI();
-  setupEvidenceUI();
-  setupGhostGuessUI();
-  await loadMapAndCenter();
-  await loadGhostModel();
-  chooseRandomGhost();
-  setupRoomDetection();
-  setupLoop();
-})();
+
+  // Player collider
+  createPlayer();
+
+  // Load map (house centered at origin)
+  await BABYLON.SceneLoader.AppendAsync("./assets/models/map/", "Abandoned_House.glb", scene);
+  // (Optional) freeze static meshes for perf:
+  scene.meshes.forEach(m => { m.checkCollisions = true; m.isPickable = true; });
+
+  // Position player at van
+  player.position.set(START_POS.x, START_POS.y, START_POS.z);
+
+  // Basic ground (optional safety plane if needed)
+  const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 400, height: 400 }, scene);
+  ground.position.y = 0;
+  ground.checkCollisions = true;
+
+  // Keyboard: camera toggle
+  window.addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "v") toggleCamera(); });
+
+  // HUD updater
+  scene.onBeforeRenderObservable.add(() => {
+    hudX.textContent = player.position.x.toFixed(2);
+    hudZ.textContent = player.position.z.toFixed(2);
+    hudSanity.textContent = Math.max(0, Math.floor(sanity)) + "%";
+    hudWeather.textContent = weather;
+  });
+
+  // Dev unlock watcher
+  setupDevUnlock();
+
+  // Ghost Guess UI
+  wireGhostGuess();
+
+  // Touch controls
+  setupTouchControls();
+
+  // Dev panel actions
+  wireDevPanelBasics();
+
+  // Navmesh + ramp tool (full feature block appended below)
+  initCollidersAndNavTool();
+
+  engine.runRenderLoop(()=> scene.render());
+  window.addEventListener("resize", ()=> engine.resize());
+});
+
+/* ---------- Cameras ---------- */
+function setupCameras(){
+  firstPersonCam = new BABYLON.UniversalCamera("fpCam", new BABYLON.Vector3(START_POS.x, START_POS.y, START_POS.z), scene);
+  firstPersonCam.minZ = 0.1;
+  firstPersonCam.speed = 1.6;
+  firstPersonCam.inertia = 0.7;
+
+  thirdPersonCam = new BABYLON.ArcRotateCamera(
+    "tpCam",
+    BABYLON.Tools.ToRadians(90),
+    BABYLON.Tools.ToRadians(75),
+    6,
+    new BABYLON.Vector3(START_POS.x, START_POS.y, START_POS.z),
+    scene
+  );
+  thirdPersonCam.lowerRadiusLimit = 3;
+  thirdPersonCam.upperRadiusLimit = 12;
+  thirdPersonCam.inertia = 0.5;
+
+  activeCamera = firstPersonCam;
+  scene.activeCamera = activeCamera;
+  activeCamera.attachControl(canvas, true);
+}
+
+function toggleCamera(){
+  activeCamera.detachControl();
+  activeCamera = (activeCamera === firstPersonCam) ? thirdPersonCam : firstPersonCam;
+  scene.activeCamera = activeCamera;
+  activeCamera.attachControl(canvas, true);
+}
+
+/* ---------- Player ---------- */
+function createPlayer(){
+  player = BABYLON.MeshBuilder.CreateCapsule("playerCollider", { height: 1.8, radius: 0.45 }, scene);
+  player.isVisible = false;
+  player.checkCollisions = true;
+  player.ellipsoid = new BABYLON.Vector3(0.45, 0.9, 0.45);
+  player.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
+  firstPersonCam.parent = player;
+  thirdPersonCam.lockedTarget = player;
+
+  // Basic WASD movement
+  const input = {};
+  scene.actionManager = new BABYLON.ActionManager(scene);
+  scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, (e)=> input[e.sourceEvent.key.toLowerCase()] = true));
+  scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, (e)=> input[e.sourceEvent.key.toLowerCase()] = false));
+
+  scene.onBeforeRenderObservable.add(() => {
+    const dt = engine.getDeltaTime() / 1000;
+    let move = new BABYLON.Vector3(0,0,0);
+    const cam = firstPersonCam; // movement basis
+    const fwd = cam.getDirection(BABYLON.Axis.Z); fwd.y = 0; fwd.normalize();
+    const right = cam.getDirection(BABYLON.Axis.X); right.y = 0; right.normalize();
+
+    const speed = input["shift"] ? 3.2 : 1.6;
+    if (input["w"]) move.addInPlace(fwd);
+    if (input["s"]) move.subtractInPlace(fwd);
+    if (input["a"]) move.subtractInPlace(right);
+    if (input["d"]) move.addInPlace(right);
+    if (flyMode) {
+      if (input[" "]) move.y += 1;           // up
+      if (input["control"]) move.y -= 1;     // down
+    }
+
+    if (move.lengthSquared() > 0) {
+      move.normalize();
+      const step = move.scale(speed * (flyMode ? 2.0 : 1.0));
+      if (flyMode) {
+        player.position.addInPlace(step.scale(dt * 7));
+      } else {
+        player.moveWithCollisions(step.scale(dt * 7));
+      }
+    }
+  });
+}
+
+/* ---------- Dev Unlock ---------- */
+function setupDevUnlock(){
+  window.addEventListener("keydown", e=>{
+    pressed.add(e.key.toLowerCase());
+    if (pressed.has("x") && pressed.has("y") && pressed.has("z") && !xyzDownTimer){
+      xyzDownTimer = setTimeout(()=> {
+        devOverlay.style.display = "flex";
+        devPwd.value = "";
+      }, KEY_HELD_MS);
+    }
+  });
+  window.addEventListener("keyup", e=>{
+    pressed.delete(e.key.toLowerCase());
+    if (xyzDownTimer && !(pressed.has("x") && pressed.has("y") && pressed.has("z"))){
+      clearTimeout(xyzDownTimer); xyzDownTimer = null;
+    }
+  });
+
+  devCancel.onclick = ()=> { devOverlay.style.display = "none"; };
+  devSubmit.onclick = ()=>{
+    if ((devPwd.value || "").toLowerCase() === "devmode"){
+      devMode = true; devOverlay.style.display = "none";
+      devPanel.style.display = "block";
+    } else {
+      alert("Wrong password.");
+    }
+  };
+}
+
+/* ---------- Dev Panel Basics ---------- */
+function wireDevPanelBasics(){
+  btnToggleLocation.onclick = ()=>{
+    showLocation = !showLocation;
+    btnToggleLocation.classList.toggle("active", showLocation);
+    document.getElementById("hud").style.display = showLocation ? "block" : "block"; // HUD always on; button is for XY overlay
+  };
+  btnFly.onclick = ()=>{
+    flyMode = !flyMode;
+    btnFly.classList.toggle("active", flyMode);
+    scene.gravity = flyMode ? new BABYLON.Vector3(0,0,0) : GRAVITY;
+  };
+  btnShowGhost.onclick = ()=>{
+    btnShowGhost.classList.toggle("active");
+    // hook up to your ghost mesh visibility here when ready
+    console.log("Show Ghost toggled (stub).");
+  };
+  btnPin.onclick = ()=>{
+    // Create a screen-space pin at current player location (dev-only visual)
+    const pin = document.createElement("div"); pin.className = "dev-pin";
+    document.body.appendChild(pin);
+    // just park it near HUD for now; later: project world->screen
+    pin.style.top = "48px"; pin.style.right = "12px";
+    setTimeout(()=> pin.remove(), 6000);
+  };
+  btnDevLog.onclick = ()=>{
+    const payload = {
+      when: new Date().toISOString(),
+      engineInfo: engine.getGlInfo ? engine.getGlInfo() : {},
+      assets: "Assets loading report would go here if wired.",
+      player: { x: player.position.x, y: player.position.y, z: player.position.z }
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `devlog_${Date.now()}.json`; a.click(); a.remove();
+  };
+}
+
+/* ---------- Ghost Guess UI ---------- */
+function wireGhostGuess(){
+  ghostGuessBtn.onclick = ()=>{
+    ghostModal.style.display = "flex";
+    renderGhostGrid();
+  };
+  ghostModalClose.onclick = ()=> ghostModal.style.display = "none";
+}
+function renderGhostGrid(){
+  ghostGrid.innerHTML = "";
+  ghostProfiles.forEach(name=>{
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = name;
+    b.onclick = ()=>{
+      ghostModal.style.display = "none";
+      if (name.toLowerCase() === (actualGhost||"").toLowerCase()){
+        alert(`Correct — it was a ${name}.`);
+      } else {
+        alert(`Incorrect — answer was ${actualGhost}.`);
+      }
+    };
+    ghostGrid.appendChild(b);
+  });
+}
+
+/* ---------- Touch Controls (mobile) ---------- */
+function setupTouchControls(){
+  // Left area = virtual joystick
+  let lActive=false, lx=0, ly=0, lStart=null;
+  touchLeft.addEventListener("pointerdown", e=>{ lActive=true; lStart={x:e.clientX,y:e.clientY}; touchLeft.setPointerCapture(e.pointerId); });
+  touchLeft.addEventListener("pointermove", e=>{
+    if(!lActive||!lStart) return;
+    lx = (e.clientX - lStart.x)/80; ly = (e.clientY - lStart.y)/80;
+  });
+  const stopL = e=>{ lActive=false; lStart=null; lx=ly=0; };
+  touchLeft.addEventListener("pointerup", stopL); touchLeft.addEventListener("pointercancel", stopL);
+
+  // Right area = look
+  let rActive=false, rx=0, ry=0, rLast=null;
+  touchRight.addEventListener("pointerdown", e=>{ rActive=true; rLast={x:e.clientX,y:e.clientY}; touchRight.setPointerCapture(e.pointerId); });
+  touchRight.addEventListener("pointermove", e=>{
+    if(!rActive||!rLast) return;
+    const dx = (e.clientX - rLast.x) * 0.0025;
+    const dy = (e.clientY - rLast.y) * 0.0025;
+    rLast = {x:e.clientX,y:e.clientY};
+    if (activeCamera===firstPersonCam){
+      firstPersonCam.rotation.y += dx;
+      firstPersonCam.rotation.x = BABYLON.Scalar.Clamp(firstPersonCam.rotation.x + dy, -Math.PI/2, Math.PI/2);
+    } else {
+      thirdPersonCam.alpha -= dx*2;
+      thirdPersonCam.beta = BABYLON.Scalar.Clamp(thirdPersonCam.beta + dy*2, 0.2, Math.PI/2);
+    }
+  });
+  const stopR = e=>{ rActive=false; rLast=null; };
+  touchRight.addEventListener("pointerup", stopR); touchRight.addEventListener("pointercancel", stopR);
+
+  // Apply left joystick to player each frame
+  scene.onBeforeRenderObservable.add(()=>{
+    if (!lActive) return;
+    const cam = firstPersonCam;
+    const fwd = cam.getDirection(BABYLON.Axis.Z); fwd.y=0; fwd.normalize();
+    const right = cam.getDirection(BABYLON.Axis.X); right.y=0; right.normalize();
+    const vec = right.scale(lx).add(fwd.scale(-ly)); // joystick usual y inverted
+    if (vec.lengthSquared()>0){
+      vec.normalize();
+      const step = vec.scale(1.3);
+      if (flyMode) player.position.addInPlace(step.scale(engine.getDeltaTime()/1000*7));
+      else player.moveWithCollisions(step.scale(engine.getDeltaTime()/1000*7));
+    }
+  });
+}
+
+/* =========================================================
+   Navmesh + Ramp Tool (colliders persist/export/import)
+   ========================================================= */
+let navPlugin = null, navDebugMesh = null;
+const NAV_PARAMS = {
+  cs: 0.12, ch: 0.12, walkableSlopeAngle: 45,
+  walkableHeight: 1.8, walkableClimb: 0.45, walkableRadius: 0.35,
+  maxEdgeLen: 12, maxSimplificationError: 1.3, minRegionArea: 4, mergeRegionArea: 20,
+  maxVertsPerPoly: 6, detailSampleDist: 6, detailSampleMaxError: 1
+};
+let devShowNav=false, devShowCols=false;
+let colliderDefs=[], colliderMeshes=[];
+const COLLIDER_STORE_KEY="pp3d_colliders_v1";
+let rampToolActive=false, rampFirstPoint=null;
+let pointerObs=null;
+
+// buttons already grabbed above
+
+function v3ToObj(v){ return {x:+v.x,y:+v.y,z:+v.z}; }
+function objToV3(o){ return new BABYLON.Vector3(o.x,o.y,o.z); }
+
+function createRampMesh(def){
+  const p1 = objToV3(def.p1), p2 = objToV3(def.p2);
+  const up = def.height ?? 0.5, width = def.width ?? 1.4, thick = def.thickness ?? 0.2;
+  const dirXZ = new BABYLON.Vector3(p2.x-p1.x,0,p2.z-p1.z);
+  const flatLen = Math.max(0.001, dirXZ.length());
+  const yaw = Math.atan2(dirXZ.x, dirXZ.z);
+  const tilt = -Math.atan2(up, flatLen);
+  const center = new BABYLON.Vector3((p1.x+p2.x)/2, (p1.y+p2.y)/2 + up/2, (p1.z+p2.z)/2);
+
+  const box = BABYLON.MeshBuilder.CreateBox("devRamp", { width, height: thick, depth: flatLen }, scene);
+  box.position.copyFrom(center);
+  box.rotation.y = yaw; box.rotation.x = tilt;
+  box.checkCollisions = true; box.isPickable = false;
+  box.visibility = devShowCols ? 0.25 : 0.0;
+  box.renderOutline = devShowCols; box.outlineColor = new BABYLON.Color3(0.2,0.8,1); box.outlineWidth = 0.02;
+  colliderMeshes.push(box);
+  return box;
+}
+function clearColliderMeshes(){ colliderMeshes.forEach(m=>m.dispose()); colliderMeshes.length=0; }
+function rebuildAllColliders(){ clearColliderMeshes(); colliderDefs.forEach(def=>createRampMesh(def)); }
+function exportColliders(){
+  const blob = new Blob([JSON.stringify(colliderDefs,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download=`colliders_${Date.now()}.json`; a.click(); a.remove();
+}
+function importCollidersFromFile(file){
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const arr=JSON.parse(r.result); if(Array.isArray(arr)){ colliderDefs=arr; localStorage.setItem(COLLIDER_STORE_KEY,JSON.stringify(colliderDefs)); rebuildAllColliders(); }
+    }catch(e){ console.error("Bad colliders JSON", e); }
+  };
+  r.readAsText(file);
+}
+
+function enableRampTool(on){
+  rampToolActive = !!on;
+  btnRampTool.classList.toggle("active", rampToolActive);
+  if (pointerObs){ scene.onPointerObservable.remove(pointerObs); pointerObs=null; rampFirstPoint=null; }
+  if (!rampToolActive) return;
+
+  pointerObs = scene.onPointerObservable.add((pi)=>{
+    if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+    const pick = scene.pick(scene.pointerX, scene.pointerY, m=>m && m.isPickable!==false);
+    if (!pick?.hit) return;
+    if (!rampFirstPoint){
+      rampFirstPoint = pick.pickedPoint.clone();
+      const s = BABYLON.MeshBuilder.CreateSphere("rampP1",{diameter:0.2},scene);
+      s.position.copyFrom(rampFirstPoint);
+      const mat = new BABYLON.StandardMaterial("p1mat", scene); mat.emissiveColor = new BABYLON.Color3(0.2,0.8,1);
+      s.material = mat; s.isPickable=false; setTimeout(()=>s.dispose(),900);
+    } else {
+      const p2 = pick.pickedPoint.clone();
+      const def = { type:"ramp", p1:v3ToObj(rampFirstPoint), p2:v3ToObj(p2), height:0.5, width:1.4, thickness:0.2 };
+      colliderDefs.push(def);
+      localStorage.setItem(COLLIDER_STORE_KEY, JSON.stringify(colliderDefs));
+      createRampMesh(def);
+      rampFirstPoint = null;
+      const h = prompt("Ramp rise (meters)?", "0.5");
+      if (h!==null){ def.height = Math.max(0, parseFloat(h)||0.5); rebuildAllColliders(); localStorage.setItem(COLLIDER_STORE_KEY, JSON.stringify(colliderDefs)); }
+    }
+  });
+}
+
+async function ensureNav(){ if (!navPlugin && window.Recast) navPlugin = new BABYLON.RecastJSPlugin(); }
+async function buildNavMesh(show=false){
+  await ensureNav(); if (!navPlugin) { console.warn("RecastJS not available"); return; }
+  const sources = scene.meshes.filter(m=> m && m.isEnabled() && !m.isDisposed());
+  try{
+    navPlugin.createNavMesh(sources, NAV_PARAMS);
+    if (navDebugMesh){ navDebugMesh.dispose(); navDebugMesh=null; }
+    if (show){
+      navDebugMesh = navPlugin.createDebugNavMesh(scene);
+      navDebugMesh.position.y += 0.02; navDebugMesh.isPickable=false;
+    }
+  }catch(e){ console.error("Nav build failed", e); }
+}
+function toggleNavDebug(on){
+  devShowNav = !!on; btnToggleNavMesh.classList.toggle("active", devShowNav);
+  if (!navPlugin) return;
+  if (devShowNav){
+    if (!navDebugMesh) navDebugMesh = navPlugin.createDebugNavMesh(scene);
+    navDebugMesh.setEnabled(true); navDebugMesh.position.y = 0.02;
+  } else if (navDebugMesh){ navDebugMesh.setEnabled(false); }
+}
+
+function initCollidersAndNavTool(){
+  // Wire buttons
+  btnRampTool?.addEventListener("click", ()=> enableRampTool(!rampToolActive));
+  btnShowColliders?.addEventListener("click", ()=>{
+    devShowCols = !devShowCols; btnShowColliders.classList.toggle("active", devShowCols);
+    colliderMeshes.forEach(m=>{ m.visibility = devShowCols ? 0.25 : 0.0; m.renderOutline = devShowCols; });
+  });
+  btnExportColliders?.addEventListener("click", exportColliders);
+  inputImportColliders?.addEventListener("change", e=>{
+    const f=e.target.files?.[0]; if(f) importCollidersFromFile(f); inputImportColliders.value="";
+  });
+  btnBuildNavMesh?.addEventListener("click", ()=> buildNavMesh(devShowNav));
+  btnToggleNavMesh?.addEventListener("click", ()=> toggleNavDebug(!devShowNav));
+
+  // Restore colliders & initial hidden nav build after scene is ready
+  const init = setInterval(async ()=>{
+    if (!scene || scene.meshes.length===0) return;
+    clearInterval(init);
+    try{
+      const saved = localStorage.getItem(COLLIDER_STORE_KEY);
+      if (saved){ colliderDefs = JSON.parse(saved)||[]; rebuildAllColliders(); }
+    }catch(e){}
+    buildNavMesh(false);
+  }, 250);
+}
 </script>
 </body>
 </html>
