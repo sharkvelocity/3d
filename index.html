@@ -2,541 +2,554 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <title>Phasma-Phoney 3D</title>
-<link rel="icon" href="favicon.ico" />
+<link rel="icon" href="favicon.ico"/>
 
-<!-- Local Babylon libs -->
-<script src="./cdn/babylon.js"></script>
-<script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-<script src="./cdn/gui/babylon.gui.min.js"></script>
-<script src="./cdn/materialsLibrary/babylonjs.materials.min.js"></script>
-<script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+<!-- Babylon: use local CDN folder per your repo map -->
+<script src="cdn/babylon.js"></script>
+<script src="cdn/loaders/babylon.glTFFileLoader.js"></script>
+<script src="cdn/loaders/babylonjs.loaders.min.js"></script>
+<script src="cdn/gui/babylon.gui.min.js"></script>
+<script src="cdn/inspector/babylon.inspector.bundle.js"></script>
+<script src="cdn/materialsLibrary/babylonjs.materials.min.js"></script>
 
 <style>
-  :root { --panel: rgba(0,0,0,.55); --text:#fff; --muted:#b7c1d1; }
-  html,body { margin:0; height:100%; background:#000; color:var(--text); font-family: system-ui, Arial, sans-serif; touch-action:none; }
-  #renderCanvas { width:100%; height:100%; display:block; touch-action:none; }
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  #renderCanvas{width:100%;height:100%;touch-action:none;display:block}
 
-  .hud { position:fixed; top:10px; left:10px; background:var(--panel); padding:8px 10px; border-radius:8px; font-size:13px; z-index:10; }
-  .row { display:flex; gap:10px; align-items:center; }
-  .k { color:var(--muted); }
-  .pan { position:fixed; background:var(--panel); border-radius:10px; padding:10px; z-index:20; backdrop-filter: blur(2px); }
-  #inventory { left:10px; bottom:10px; }
-  #notebook { left:10px; bottom:120px; max-width:320px; }
-  #evidencePanel { right:10px; bottom:10px; max-width:380px; }
-  .title { font-weight:700; margin-bottom:6px; }
-  .grid { display:grid; grid-template-columns: repeat(2,minmax(120px,1fr)); gap:6px; }
-  .btn { background: rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.25);
-         padding:6px 8px; border-radius:6px; cursor:pointer; font-size:13px; }
-  .btn:hover { background: rgba(255,255,255,.18); }
-  .btn.sel { outline:2px solid #5cf; }
-  #ghostGuessButton { position:fixed; right:10px; bottom:120px; z-index:20; }
+  /* HUD */
+  #hud{position:absolute;left:10px;top:10px;color:#fff;z-index:5;
+       background:rgba(0,0,0,.35);padding:8px 10px;border-radius:8px;font-size:13px}
+  #hud .row{margin:2px 0}
 
-  .hidden { display:none !important; }
+  /* Panels */
+  .panel{position:absolute;left:10px;bottom:10px;z-index:6;background:rgba(0,0,0,.45);
+         color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:8px}
+  .hidden{display:none !important}
+  .btn{cursor:pointer;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);
+       color:#fff;border-radius:8px;padding:6px 10px;margin:3px 2px;font-size:12px}
+  .btn.active{background:rgba(0,200,255,.18);border-color:#7dd3fc}
+  .group{display:flex;flex-wrap:wrap;gap:6px}
+  #inventory{max-width:360px}
+  #evidencePanel{left:auto;right:10px}
+  #ghostGuessPanel{right:10px;bottom:10px}
 
-  #ghostPicker { position:fixed; inset:0; display:none; place-items:center; background: rgba(0,0,0,.6); z-index:30; }
-  #ghostPicker .box { background:#0e1218; border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:16px; width:min(720px,92vw); max-height:80vh; overflow:auto; }
-  #ghostPicker .ggrid { display:grid; grid-template-columns: repeat(3, minmax(180px,1fr)); gap:8px; }
-  .mini { font-size:12px; color:#b9c6d0; }
-  #hint { position:fixed; left:50%; transform:translateX(-50%); bottom:10px; padding:6px 10px; background:var(--panel); border-radius:8px; font-size:12px; z-index:8; }
+  /* Mobile controls */
+  #touchLeft,#touchRight{position:absolute;bottom:18px;width:44vw;max-width:420px;height:44vw;max-height:420px;z-index:7}
+  #touchLeft{left:10px}
+  #touchRight{right:10px}
+  .stick{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,255,255,.25);
+         background:radial-gradient(circle at 50% 50%, rgba(255,255,255,.08), rgba(255,255,255,.02));}
+  .nub{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+       width:34%;height:34%;border-radius:50%;background:rgba(255,255,255,.18);
+       border:1px solid rgba(255,255,255,.35);}
 
-  /* Mobile twin-stick */
-  #mobileUI { position:fixed; inset:0; pointer-events:none; z-index:40; }
-  .stick { position:absolute; width:140px; height:140px; border-radius:50%; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.2); pointer-events:auto; }
-  .nub { position:absolute; left:50%; top:50%; width:64px; height:64px; transform:translate(-50%,-50%); border-radius:50%; background:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.35); }
-  #stickL { left:16px; bottom:16px; }
-  #stickR { right:16px; bottom:16px; }
-  .mButtons { position:absolute; right:16px; bottom:176px; display:flex; flex-direction:column; gap:8px; pointer-events:auto; }
-  .mBtn { background: rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.3); border-radius:10px; padding:8px 10px; font-size:13px; }
-  @media (hover:none) and (pointer:coarse){
-    #hint{ bottom:160px; }
-  }
+  /* Dev modal & panel */
+  .dev-modal.hidden{display:none}
+  .dev-modal{position:fixed;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.55);z-index:1000}
+  .dev-modal-card{width:min(92vw,360px);background:#0b0b0c;color:#fff;border:1px solid rgba(255,255,255,.12);
+    border-radius:10px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .dev-modal-card h3{margin:0 0 6px 0;font:600 18px/1.2 system-ui}
+  .dev-modal-card p{margin:0 0 10px 0;opacity:.85}
+  #devPwdInput{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:#121215;color:#fff}
+  .dev-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+  .dev-modal-actions button{padding:8px 12px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,.18);
+    background:rgba(255,255,255,.09);color:#fff}
+
+  #devPanelRight.hidden{display:none}
+  #devPanelRight{position:absolute;right:10px;top:10px;z-index:999;width:240px;background:rgba(0,0,0,.45);
+    border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:10px;color:#fff;backdrop-filter:blur(6px)}
+  #devPanelRight .dev-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  #devPanelRight .dev-head button{border:none;background:transparent;color:#fff;cursor:pointer}
+  #devMiniReadout.hidden{display:none}
+  #devMiniReadout{margin-top:10px;font-size:12px;white-space:pre;background:rgba(0,0,0,.35);
+    border:1px dashed rgba(255,255,255,.2);padding:8px;border-radius:8px}
 </style>
 </head>
 <body>
 <canvas id="renderCanvas"></canvas>
 
 <!-- HUD -->
-<div class="hud" id="hud">
-  <div class="row"><span class="k">Room:</span> <span id="roomName">Outside</span></div>
-  <div class="row"><span class="k">Sanity:</span> <span id="sanityDisplay">100%</span></div>
-  <div class="row"><span class="k">Weather:</span> <span id="weatherDisplay">Clear</span></div>
-  <div class="row"><span class="k">X/Z:</span> <span id="coords">0 / 0</span></div>
+<div id="hud">
+  <div class="row">Room: <span id="roomName">Loading…</span></div>
+  <div class="row">Sanity: <span id="sanityDisplay">100%</span></div>
+  <div class="row">Weather: <span id="weatherDisplay">Clear</span></div>
+  <div class="row">Pos: <span id="coordDisplay">X 0.00 Z 0.00</span></div>
 </div>
 
 <!-- Inventory -->
-<div class="pan" id="inventory">
-  <div class="title">Inventory (Lighter + 3)</div>
-  <div class="grid" id="inventoryItems"></div>
-  <div class="row" style="margin-top:6px; gap:6px;">
-    <button class="btn" id="confirmLoadout">Confirm Loadout</button>
-    <span class="mini">N: Notebook • E: Evidence • V: Camera</span>
-  </div>
+<div id="inventory" class="panel">
+  <div><strong>Inventory</strong></div>
+  <div id="inventoryItems" class="group"></div>
 </div>
 
-<!-- Notebook -->
-<div class="pan hidden" id="notebook">
-  <div class="title">Notebook</div>
-  <div id="evidenceList" class="mini">No evidence yet.</div>
-  <div id="ghostSuggestion" class="mini" style="margin-top:6px;">Possible ghosts: —</div>
+<!-- Evidence -->
+<div id="evidencePanel" class="panel hidden">
+  <div><strong>Select Evidence</strong></div>
+  <div id="evidenceOptions" class="group"></div>
 </div>
 
-<!-- Evidence Panel -->
-<div class="pan hidden" id="evidencePanel">
-  <div class="title">Select Evidence</div>
-  <div id="evidenceOptions" class="grid"></div>
+<!-- Ghost Guess (button based) -->
+<div id="ghostGuessPanel" class="panel hidden">
+  <div><strong>Guess Ghost</strong></div>
+  <div id="ghostButtonGrid" class="group" style="max-width:420px"></div>
+  <div id="guessResult" style="margin-top:6px;opacity:.9"></div>
 </div>
 
-<!-- Guess Button -->
-<button id="ghostGuessButton" class="btn">Guess Ghost</button>
+<!-- Mobile touch pads -->
+<div id="touchLeft"><div class="stick"></div><div class="nub" id="nubLeft"></div></div>
+<div id="touchRight"><div class="stick"></div><div class="nub" id="nubRight"></div></div>
 
-<!-- Ghost Picker Modal -->
-<div id="ghostPicker">
-  <div class="box">
-    <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-      <div class="title">Choose the Ghost</div>
-      <button class="btn" id="closePicker">Close</button>
+<!-- DEV modal + panel -->
+<div id="devPwdModal" class="dev-modal hidden" aria-hidden="true">
+  <div class="dev-modal-card">
+    <h3>Developer Mode</h3>
+    <p>Hold X+Y+Z for 3s to open. Enter password:</p>
+    <input id="devPwdInput" type="password" placeholder="Password" autocomplete="off"/>
+    <div class="dev-modal-actions">
+      <button id="devPwdCancel">Cancel</button>
+      <button id="devPwdOK">Unlock</button>
     </div>
-    <div id="ghostGrid" class="ggrid"></div>
   </div>
 </div>
-
-<div id="hint">WASD to move • Mouse to look • Shift to sprint • V switch camera • N notebook • E evidence</div>
-
-<!-- Mobile twin-stick UI -->
-<div id="mobileUI">
-  <div id="stickL" class="stick"><div class="nub" id="nubL"></div></div>
-  <div id="stickR" class="stick"><div class="nub" id="nubR"></div></div>
-  <div class="mButtons">
-    <button class="mBtn" id="btnSprint">Sprint</button>
-    <button class="mBtn" id="btnNotebook">Notebook</button>
-    <button class="mBtn" id="btnEvidence">Evidence</button>
+<div id="devPanelRight" class="hidden">
+  <div class="dev-head">
+    <span>DEV</span>
+    <button id="devCloseBtn" title="Disable Dev">✕</button>
   </div>
+  <div class="dev-group">
+    <button id="btnToggleCoords" class="btn dev-toggle">Location</button>
+    <button id="btnToggleFly" class="btn dev-toggle">Fly</button>
+    <button id="btnShowGhost" class="btn dev-toggle">Show Ghost</button>
+    <button id="btnPinLocation" class="btn">Pin Location</button>
+    <button id="btnCreateDevLog" class="btn">Create Dev Log</button>
+  </div>
+  <div id="devMiniReadout" class="hidden"></div>
 </div>
 
 <script>
-(() => {
-  // ---------- Core ----------
-  const canvas = document.getElementById("renderCanvas");
-  const engine = new BABYLON.Engine(canvas, true);
-  const scene  = new BABYLON.Scene(engine);
+/* ========= Core globals ========= */
+let canvas, engine, scene;
+let player, fpCam, tpCam, activeCamera;
+let isHover = false; // fly/hover mode
+let currentRoom = "Outside";
+let sanity = 100;
+let weather = "Clear";
+let ghostMesh = null;
+let ghostProfile = null;
+let devReadyPatched = false;
+
+const VAN_SPAWN = new BABYLON.Vector3(31.47, 0.5, 0.0); // your van spot
+const HOUSE_PATH = "assets/models/map/Abandoned_House.glb"; // repo layout
+const AUDIO_BASE = "assets/audio/";
+const GHOST_MODELS = [
+  "assets/models/ghosts/ghost1.glb",
+  "assets/models/ghosts/ghost2.glb",
+  "assets/models/ghosts/ghost3.glb",
+  "assets/models/ghosts/ghost4.glb",
+];
+
+/* ========= UI refs ========= */
+const roomNameEl = document.getElementById("roomName");
+const sanityEl   = document.getElementById("sanityDisplay");
+const weatherEl  = document.getElementById("weatherDisplay");
+const coordEl    = document.getElementById("coordDisplay");
+
+const inventoryDiv = document.getElementById("inventoryItems");
+const evidencePanel = document.getElementById("evidencePanel");
+const evidenceOptions = document.getElementById("evidenceOptions");
+const ghostGuessPanel = document.getElementById("ghostGuessPanel");
+const ghostButtonGrid = document.getElementById("ghostButtonGrid");
+const guessResult = document.getElementById("guessResult");
+
+/* ========= Simple inventory & evidence ========= */
+const ALL_ITEMS = [
+  "EMF Reader","Spirit Box","Thermometer","Ghost Writing Book",
+  "Photo Camera","Video Camera","UV Flashlight","Crucifix","Smudge Stick","Candle","Salt"
+];
+let inventory = ["Lighter"]; // free slot
+function renderInventoryUI(){
+  inventoryDiv.innerHTML = "";
+  ALL_ITEMS.forEach(name=>{
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = name;
+    if (inventory.includes(name)) b.classList.add("active");
+    b.onclick = ()=>{
+      if (inventory.includes(name)) {
+        if (name==="Lighter") return;
+        inventory = inventory.filter(i=>i!==name);
+      } else {
+        const limited = inventory.filter(i=>i!=="Lighter");
+        if (limited.length>=3) { alert("Max 3 items (Lighter is free)."); return; }
+        inventory.push(name);
+      }
+      renderInventoryUI();
+    };
+    inventoryDiv.appendChild(b);
+  });
+}
+
+const EVIDENCE = ["EMF5","Spirit Box","Freezing Temps","Ghost Writing","Fingerprints","Ghost Orbs","DOTS"];
+const selectedEvidence = new Set();
+function setupEvidenceUI(){
+  evidencePanel.classList.remove("hidden");
+  EVIDENCE.forEach(ev=>{
+    const b=document.createElement("button");
+    b.className="btn";
+    b.textContent=ev;
+    b.onclick=()=>{
+      if (selectedEvidence.has(ev)) { selectedEvidence.delete(ev); b.classList.remove("active"); }
+      else { selectedEvidence.add(ev); b.classList.add("active"); }
+      suggestGhosts();
+    };
+    evidenceOptions.appendChild(b);
+  });
+}
+
+/* ========= Ghost list + guess buttons ========= */
+const GHOSTS = [
+  {name:"Spirit", ev:["EMF5","Spirit Box","Ghost Writing"]},
+  {name:"Wraith", ev:["EMF5","DOTS","Spirit Box"]},
+  {name:"Phantom", ev:["Spirit Box","Fingerprints","DOTS"]},
+  {name:"Poltergeist", ev:["Spirit Box","Ghost Writing","Fingerprints"]},
+  {name:"Banshee", ev:["Ghost Orbs","DOTS","Fingerprints"]},
+  {name:"Jinn", ev:["EMF5","Freezing Temps","Fingerprints"]},
+  {name:"Mare", ev:["Spirit Box","Ghost Writing","Ghost Orbs"]},
+  {name:"Revenant", ev:["Freezing Temps","Ghost Writing","Ghost Orbs"]},
+  {name:"Shade", ev:["EMF5","Ghost Writing","Freezing Temps"]},
+  {name:"Demon", ev:["Freezing Temps","Ghost Writing","Fingerprints"]},
+  {name:"Yurei", ev:["Ghost Orbs","Freezing Temps","DOTS"]},
+  {name:"Oni", ev:["EMF5","DOTS","Freezing Temps"]},
+  {name:"Yokai", ev:["Spirit Box","Ghost Orbs","DOTS"]},
+  {name:"Hantu", ev:["Freezing Temps","Ghost Orbs","Fingerprints"]},
+  {name:"Goryo", ev:["EMF5","DOTS","Fingerprints"]},
+  {name:"Myling", ev:["EMF5","Ghost Writing","Fingerprints"]},
+  {name:"Onryo", ev:["Spirit Box","Freezing Temps","Ghost Orbs"]},
+  {name:"The Twins", ev:["EMF5","Spirit Box","Freezing Temps"]},
+  {name:"Raiju", ev:["EMF5","Ghost Orbs","DOTS"]},
+  {name:"Obake", ev:["EMF5","Ghost Orbs","Fingerprints"]},
+  {name:"The Mimic", ev:["Spirit Box","Freezing Temps","Fingerprints"]},
+  {name:"Moroi", ev:["Spirit Box","Ghost Writing","Freezing Temps"]},
+  {name:"Deogen", ev:["Spirit Box","Ghost Writing","DOTS"]},
+  {name:"Thaye", ev:["Ghost Writing","DOTS","Ghost Orbs"]},
+];
+function setupGhostGuessUI(){
+  ghostGuessPanel.classList.remove("hidden");
+  ghostButtonGrid.innerHTML = "";
+  GHOSTS.forEach(g=>{
+    const b=document.createElement("button");
+    b.className="btn";
+    b.textContent=g.name;
+    b.onclick=()=> {
+      if (!ghostProfile) { guessResult.textContent = `You guessed ${g.name}. (No target chosen yet.)`; return; }
+      guessResult.textContent = (g.name===ghostProfile.name) ? `✅ Correct! It was ${g.name}.`
+                                                             : `❌ Nope. It was ${ghostProfile.name}.`;
+    };
+    ghostButtonGrid.appendChild(b);
+  });
+}
+function suggestGhosts(){
+  const picks = GHOSTS.filter(g=>[...selectedEvidence].every(ev=>g.ev.includes(ev)));
+  guessResult.textContent = picks.length ? `Matches: ${picks.map(g=>g.name).join(", ")}`
+                                         : `No matches with current evidence.`;
+}
+
+/* ========= Babylon setup ========= */
+function setupEngine(){
+  canvas = document.getElementById("renderCanvas");
+  engine = new BABYLON.Engine(canvas,true,{preserveDrawingBuffer:true, stencil:true});
+  scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0,0,0,1);
-  scene.gravity = new BABYLON.Vector3(0, -0.3, 0);
   scene.collisionsEnabled = true;
-
-  const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.25, 1, 0.2), scene);
+  scene.gravity = new BABYLON.Vector3(0, -0.15, 0);
+  const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemi.intensity = 0.7;
+}
 
-  // Cameras
-  const fpCam = new BABYLON.UniversalCamera("fp", new BABYLON.Vector3(0, 1.75, -6), scene);
-  fpCam.minZ = 0.05; fpCam.speed = 1.6; fpCam.inertia = 0.75;
+function setupCameras(){
+  fpCam = new BABYLON.UniversalCamera("fpCam", VAN_SPAWN.clone(), scene);
   fpCam.attachControl(canvas, true);
-  const tpCam = new BABYLON.ArcRotateCamera("tp",
-    BABYLON.Tools.ToRadians(90), BABYLON.Tools.ToRadians(75), 6,
-    new BABYLON.Vector3(0,1,0), scene
-  );
-  tpCam.lowerRadiusLimit = 3; tpCam.upperRadiusLimit = 10;
-  let activeCam = fpCam; scene.activeCamera = fpCam;
+  fpCam.speed = 1.8;
+  fpCam.inertia = 0.6;
+  fpCam.minZ = 0.05;
 
-  // Player collider
-  const player = BABYLON.MeshBuilder.CreateCapsule("playerCapsule",{height:1.8, radius:0.4},scene);
-  player.isVisible = false; player.checkCollisions = true;
-  player.ellipsoid = new BABYLON.Vector3(.4,.9,.4);
-  fpCam.parent = player; tpCam.lockedTarget = player;
+  tpCam = new BABYLON.ArcRotateCamera("tpCam", BABYLON.Tools.ToRadians(90), BABYLON.Tools.ToRadians(75), 6, VAN_SPAWN.clone(), scene);
+  tpCam.attachControl(canvas, true);
+  tpCam.lowerRadiusLimit = 3; tpCam.upperRadiusLimit=12;
 
-  // Flat ground fallback
-  const ground = BABYLON.MeshBuilder.CreateGround("g", {width:120, height:120}, scene);
-  ground.position.y = 0; ground.checkCollisions = true;
+  activeCamera = fpCam; scene.activeCamera = fpCam;
 
-  // ---------- HUD refs ----------
-  const hudRoom = document.getElementById("roomName");
-  const hudSan  = document.getElementById("sanityDisplay");
-  const hudWea  = document.getElementById("weatherDisplay");
-  const hudCrd  = document.getElementById("coords");
-  let sanity = 100, weather = "Clear";
-  hudWea.textContent = weather;
-
-  // ---------- Inventory ----------
-  const invRoot = document.getElementById("inventory");
-  const invItems = document.getElementById("inventoryItems");
-  const btnConfirmLoadout = document.getElementById("confirmLoadout");
-  const ALL_ITEMS = [
-    "EMF Reader","Spirit Box","Thermometer","Ghost Writing Book",
-    "Video Camera","Photo Camera","Crucifix","Smudge Stick",
-    "Candle","Salt","UV Flashlight","Parabolic Mic","Lighter"
-  ];
-  let inventory = ["Lighter"];
-  function renderInventoryUI() {
-    invItems.innerHTML = "";
-    ALL_ITEMS.forEach(item => {
-      const b = document.createElement("button");
-      b.className = "btn";
-      b.textContent = item;
-      if (inventory.includes(item)) b.classList.add("sel");
-      b.onclick = () => {
-        if (item === "Lighter") return;
-        const base = inventory.filter(i => i !== "Lighter");
-        if (inventory.includes(item)) {
-          inventory = inventory.filter(i => i !== item);
-        } else {
-          if (base.length >= 3) return alert("Max 3 items (Lighter is free).");
-          inventory.push(item);
-        }
-        renderInventoryUI();
-      };
-      invItems.appendChild(b);
-    });
-  }
-  renderInventoryUI();
-  btnConfirmLoadout.onclick = () => invRoot.classList.add("hidden");
-
-  // ---------- Notebook/Evidence ----------
-  const nbRoot = document.getElementById("notebook");
-  const evRoot = document.getElementById("evidencePanel");
-  const evList = document.getElementById("evidenceList");
-  const evOptions = document.getElementById("evidenceOptions");
-  const ghostSuggestion = document.getElementById("ghostSuggestion");
-
-  const EVIDENCE = ["EMF5","Spirit Box","Freezing Temps","Ghost Writing","Fingerprints","Ghost Orbs","DOTS"];
-  const selectedEvidence = new Set();
-
-  function renderEvidenceOptions() {
-    evOptions.innerHTML = "";
-    EVIDENCE.forEach(ev => {
-      const b = document.createElement("button");
-      b.className = "btn";
-      b.textContent = ev;
-      if (selectedEvidence.has(ev)) b.classList.add("sel");
-      b.onclick = () => {
-        if (selectedEvidence.has(ev)) selectedEvidence.delete(ev);
-        else selectedEvidence.add(ev);
-        b.classList.toggle("sel");
-        renderEvidenceList();
-        suggestGhosts();
-      };
-      evOptions.appendChild(b);
-    });
-  }
-  function renderEvidenceList() {
-    evList.textContent = [...selectedEvidence].length
-      ? "Evidence: " + [...selectedEvidence].join(", ")
-      : "No evidence yet.";
-  }
-  renderEvidenceOptions(); renderEvidenceList();
-
-  const GHOSTS = [
-    {name:"Spirit",      ev:["EMF5","Spirit Box","Ghost Writing"]},
-    {name:"Wraith",      ev:["EMF5","DOTS","Spirit Box"]},
-    {name:"Phantom",     ev:["Spirit Box","Fingerprints","DOTS"]},
-    {name:"Poltergeist", ev:["Spirit Box","Ghost Writing","Fingerprints"]},
-    {name:"Banshee",     ev:["Ghost Orbs","DOTS","Fingerprints"]},
-    {name:"Jinn",        ev:["EMF5","Freezing Temps","Fingerprints"]},
-    {name:"Mare",        ev:["Spirit Box","Ghost Writing","Ghost Orbs"]},
-    {name:"Revenant",    ev:["Freezing Temps","Ghost Writing","Ghost Orbs"]},
-    {name:"Shade",       ev:["EMF5","Ghost Writing","Freezing Temps"]},
-    {name:"Demon",       ev:["Freezing Temps","Ghost Writing","Fingerprints"]},
-    {name:"Yurei",       ev:["Ghost Orbs","Freezing Temps","DOTS"]},
-    {name:"Oni",         ev:["EMF5","DOTS","Freezing Temps"]},
-    {name:"Yokai",       ev:["Spirit Box","Ghost Orbs","DOTS"]},
-    {name:"Hantu",       ev:["Freezing Temps","Ghost Orbs","Fingerprints"]},
-    {name:"Goryo",       ev:["EMF5","DOTS","Fingerprints"]},
-    {name:"Myling",      ev:["EMF5","Ghost Writing","Fingerprints"]},
-    {name:"Onryo",       ev:["Spirit Box","Freezing Temps","Ghost Orbs"]},
-    {name:"The Twins",   ev:["EMF5","Spirit Box","Freezing Temps"]},
-    {name:"Raiju",       ev:["EMF5","Ghost Orbs","DOTS"]},
-    {name:"Obake",       ev:["EMF5","Ghost Orbs","Fingerprints"]},
-    {name:"The Mimic",   ev:["Spirit Box","Freezing Temps","Fingerprints"]},
-    {name:"Moroi",       ev:["Spirit Box","Ghost Writing","Freezing Temps"]},
-    {name:"Deogen",      ev:["Spirit Box","Ghost Writing","DOTS"]},
-    {name:"Thaye",       ev:["Ghost Writing","DOTS","Ghost Orbs"]}
-  ];
-  function suggestGhosts() {
-    const have = [...selectedEvidence];
-    const matches = GHOSTS.filter(g => have.every(e => g.ev.includes(e)));
-    ghostSuggestion.textContent = matches.length
-      ? "Possible ghosts: " + matches.map(g=>g.name).join(", ")
-      : "Possible ghosts: —";
-  }
-
-  // ---------- Guess Picker ----------
-  const btnGuess = document.getElementById("ghostGuessButton");
-  const picker = document.getElementById("ghostPicker");
-  const pickerClose = document.getElementById("closePicker");
-  const ghostGrid = document.getElementById("ghostGrid");
-  function openGhostPicker() {
-    ghostGrid.innerHTML = "";
-    GHOSTS.forEach(g => {
-      const b = document.createElement("button");
-      b.className = "btn";
-      b.textContent = g.name + " • " + g.ev.join(", ");
-      b.onclick = () => { alert("You guessed: " + g.name); picker.style.display = "none"; };
-      ghostGrid.appendChild(b);
-    });
-    picker.style.display = "grid";
-  }
-  btnGuess.onclick = openGhostPicker;
-  pickerClose.onclick = () => picker.style.display = "none";
-
-  // ---------- Load house and recenter to (0,0,0) ----------
-  const HOUSE_PATH = "./assets/models/map/Abandoned_House.glb";
-  (async function loadAndCenterHouse(){
-    // remember pre-load meshes
-    const pre = new Set(scene.meshes);
-    try {
-      await BABYLON.SceneLoader.AppendAsync("", HOUSE_PATH, scene);
-    } catch (e) {
-      console.warn("Failed to load house:", e);
-      player.position.set(0,1,-8);
-      return;
-    }
-
-    // gather newly added meshes
-    const newMeshes = scene.meshes.filter(m => !pre.has(m));
-    newMeshes.forEach(m => { m.checkCollisions = true; m.isPickable = true; });
-
-    // compute combined bounds center in world space
-    let min = new BABYLON.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
-    let max = new BABYLON.Vector3(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
-    newMeshes.forEach(m => {
-      if (!m.getBoundingInfo) return;
-      const bb = m.getBoundingInfo().boundingBox;
-      min = BABYLON.Vector3.Minimize(min, bb.minimumWorld);
-      max = BABYLON.Vector3.Maximize(max, bb.maximumWorld);
-    });
-    const center = min.add(max).scale(0.5);
-
-    // parent all new meshes under a root and shift to origin
-    const houseRoot = new BABYLON.TransformNode("houseRoot", scene);
-    newMeshes.forEach(m => { m.setParent(houseRoot); });
-    houseRoot.position = houseRoot.position.subtract(center); // move so center -> (0,0,0)
-
-    // spawn at van if present (after recentering)
-    const findNode = (name) => scene.getTransformNodeByName(name) || scene.getMeshByName(name);
-    const van = findNode("VanSpawn") || findNode("Van") || findNode("Spawn") || null;
-    if (van) {
-      const p = van.getAbsolutePosition();
-      player.position.copyFrom(p.add(new BABYLON.Vector3(0, 0.2, 0)));
-    } else {
-      // fallback spawn just outside centered house
-      player.position.set(0, 1.0, -8);
-    }
-
-    // face forward
-    fpCam.setTarget(player.position.add(new BABYLON.Vector3(0,1,2)));
-  })();
-
-  // ---------- Audio (local) ----------
-  let ambientSound=null;
-  function loadAudio() {
-    ambientSound = new BABYLON.Sound("ambient", "./assets/audio/ambient.mp3", scene, null,
-      { loop:true, autoplay:true, volume:0.35 }
-    );
-  }
-  loadAudio();
-
-  // ---------- Movement (desktop) ----------
-  const keys = { w:false,a:false,s:false,d:false, shift:false };
-  addEventListener("keydown", (e) => {
-    const k=e.key.toLowerCase();
-    if (["w","a","s","d"].includes(k)) keys[k]=true;
-    if (e.key==="Shift") keys.shift = true;
-    if (k==="n") nbRoot.classList.toggle("hidden");
-    if (k==="e") evRoot.classList.toggle("hidden");
-    if (k==="v") {
-      if (scene.activeCamera === fpCam) { fpCam.detachControl(canvas); scene.activeCamera = tpCam; tpCam.attachControl(canvas,true); }
-      else { tpCam.detachControl(canvas); scene.activeCamera = fpCam; fpCam.attachControl(canvas,true); }
+  window.addEventListener("keydown", e=>{
+    if (e.key.toLowerCase()==="v") {
+      activeCamera.detachControl(canvas);
+      activeCamera = (activeCamera===fpCam) ? tpCam : fpCam;
+      scene.activeCamera = activeCamera;
+      activeCamera.attachControl(canvas,true);
     }
   });
-  addEventListener("keyup", (e) => {
-    const k=e.key.toLowerCase();
-    if (["w","a","s","d"].includes(k)) keys[k]=false;
-    if (e.key==="Shift") keys.shift=false;
+}
+
+function setupPlayer(){
+  player = BABYLON.MeshBuilder.CreateCapsule("playerCol",{height:1.8, radius:0.35}, scene);
+  player.isVisible=false;
+  player.position = VAN_SPAWN.clone();
+  player.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
+  player.checkCollisions = true;
+  fpCam.parent = player;
+  tpCam.lockedTarget = player;
+}
+
+async function loadMapAndCenter(){
+  try{
+    const res = await BABYLON.SceneLoader.AppendAsync("", HOUSE_PATH, scene);
+    // Center whole map at origin by shifting root meshes’ bounding center to (0,0,0)
+    const bbox = scene.getWorldExtends();
+    const center = bbox.min.add(bbox.max).scale(0.5);
+    const offset = center.scale(-1);
+    scene.meshes.forEach(m=>{
+      if (m.parent==null) m.position.addInPlace(offset);
+    });
+    // Reposition player to van again (relative)
+    player.position.copyFrom(VAN_SPAWN);
+  }catch(err){
+    console.error("Map load error:", err);
+  }
+}
+
+async function loadGhostModel(){
+  const pick = GHOST_MODELS[Math.floor(Math.random()*GHOST_MODELS.length)];
+  const res = await BABYLON.SceneLoader.ImportMeshAsync("", "", pick, scene);
+  ghostMesh = res.meshes.find(m=>m.name && !m.name.startsWith("__"));
+  if (!ghostMesh) ghostMesh = res.meshes[0];
+  ghostMesh.setEnabled(false);
+  ghostMesh.isPickable = false;
+  ghostMesh.position = new BABYLON.Vector3(0,1.5,0);
+}
+
+function chooseRandomGhost(){
+  ghostProfile = GHOSTS[Math.floor(Math.random()*GHOSTS.length)];
+}
+
+function setupLoop(){
+  scene.onBeforeRenderObservable.add(()=>{
+    // update HUD coords
+    if (player) coordEl.textContent = `X ${player.position.x.toFixed(2)}  Z ${player.position.z.toFixed(2)}`;
+    // sanity passive decay lite
+    sanity = Math.max(0, sanity - engine.getDeltaTime()*0.0008);
+    sanityEl.textContent = `${Math.floor(sanity)}%`;
   });
 
-  // ---------- Mobile twin-stick ----------
-  const stickL = document.getElementById("stickL");
-  const stickR = document.getElementById("stickR");
-  const nubL = document.getElementById("nubL");
-  const nubR = document.getElementById("nubR");
-  const btnSprint = document.getElementById("btnSprint");
-  const btnNotebook = document.getElementById("btnNotebook");
-  const btnEvidence = document.getElementById("btnEvidence");
+  engine.runRenderLoop(()=>scene.render());
+  window.addEventListener("resize", ()=>engine.resize());
+}
 
-  let moveVec = new BABYLON.Vector2(0,0);   // x=right, y=forward
-  let lookVec = new BABYLON.Vector2(0,0);   // x=turn,  y=pitch
-  let sprintMobile = false;
+/* ========= Movement: keyboard + mobile ========= */
+const keys = {};
+window.addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
 
-  function makeStick(stickEl, nubEl, onChange){
-    const rect = () => stickEl.getBoundingClientRect();
-    const maxR = 56; // max nub offset
-    let activeId = null;
+function setHoverMode(on){
+  isHover = !!on;
+  if (player){
+    player.checkCollisions = !isHover;
+  }
+  scene.gravity = isHover ? new BABYLON.Vector3(0,0,0) : new BABYLON.Vector3(0,-0.15,0);
+}
 
-    function setNub(dx, dy){
-      const len = Math.hypot(dx,dy);
-      const cl = len>maxR ? maxR/len : 1;
-      const nx = dx*cl, ny = dy*cl;
-      nubEl.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-      onChange(nx/maxR, ny/maxR);
+function updateMovement(){
+  const dt = engine.getDeltaTime()/1000;
+  const moveSpeed = (keys["shift"]?3.2:1.8) * (isHover?2.0:1.0);
+  const cam = fpCam; // movement is aligned to FP camera
+  const fwd = cam.getDirection(BABYLON.Axis.Z);
+  const right = cam.getDirection(BABYLON.Axis.X);
+  let dir = new BABYLON.Vector3.Zero();
+
+  if (keys["w"]) dir.addInPlace(fwd);
+  if (keys["s"]) dir.subtractInPlace(fwd);
+  if (keys["a"]) dir.subtractInPlace(right);
+  if (keys["d"]) dir.addInPlace(right);
+
+  if (isHover){
+    if (keys[" "]) dir.y += 1;
+    if (keys["control"]) dir.y -= 1;
+    player.position.addInPlace(dir.normalize().scale(moveSpeed*dt*6));
+  } else {
+    dir.y = 0;
+    if (dir.lengthSquared()>0) {
+      player.moveWithCollisions(dir.normalize().scale(moveSpeed*dt));
     }
-    function reset(){
-      activeId=null; nubEl.style.transform = "translate(-50%,-50%)";
-      onChange(0,0);
+  }
+}
+scene && scene.onBeforeRenderObservable.add(updateMovement);
+
+/* ========= Touch controls ========= */
+const tl = document.getElementById("touchLeft");
+const tr = document.getElementById("touchRight");
+const nubL = document.getElementById("nubLeft");
+const nubR = document.getElementById("nubRight");
+let ltouch=null, rtouch=null, ldx=0, ldy=0, rdx=0, rdy=0;
+
+function bindStick(el,which){
+  const rect = ()=>el.getBoundingClientRect();
+  const center = ()=>({x:rect().left+rect().width/2,y:rect().top+rect().height/2});
+  const maxR = ()=>rect().width*0.5;
+
+  el.addEventListener("touchstart",e=>{
+    for(const t of e.changedTouches){
+      if (which==="L" && ltouch==null){ ltouch=t.identifier; break; }
+      if (which==="R" && rtouch==null){ rtouch=t.identifier; break; }
     }
-    stickEl.addEventListener("touchstart",(e)=>{
-      if (activeId!==null) return;
-      const t = e.changedTouches[0]; activeId = t.identifier;
-      const r = rect();
-      setNub(t.clientX - (r.left+r.width/2), t.clientY - (r.top+r.height/2));
-    }, {passive:false});
-    stickEl.addEventListener("touchmove",(e)=>{
-      if (activeId===null) return;
-      for (const t of e.changedTouches){
-        if (t.identifier!==activeId) continue;
-        const r = rect();
-        setNub(t.clientX - (r.left+r.width/2), t.clientY - (r.top+r.height/2));
+  },{passive:false});
+
+  el.addEventListener("touchmove",e=>{
+    for(const t of e.changedTouches){
+      if (which==="L" && t.identifier===ltouch){
+        const c=center(); const dx=t.clientX-c.x; const dy=t.clientY-c.y;
+        const r = Math.min(maxR(), Math.hypot(dx,dy)); const ang=Math.atan2(dy,dx);
+        const nx = Math.cos(ang)*r, ny=Math.sin(ang)*r;
+        ldx = nx/maxR(); ldy = ny/maxR();
+        nubL.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
         e.preventDefault();
       }
-    }, {passive:false});
-    stickEl.addEventListener("touchend",(e)=>{
-      for (const t of e.changedTouches){ if (t.identifier===activeId) reset(); }
-    });
-    stickEl.addEventListener("touchcancel",()=> reset());
-  }
-
-  makeStick(stickL, nubL, (nx,ny)=>{ // ny positive is down; invert for forward
-    moveVec.x = nx;
-    moveVec.y = -ny;
-  });
-  makeStick(stickR, nubR, (nx,ny)=>{
-    lookVec.x = nx;
-    lookVec.y = ny;
-  });
-
-  btnSprint.addEventListener("touchstart", ()=> { sprintMobile=true; }, {passive:true});
-  btnSprint.addEventListener("touchend",   ()=> { sprintMobile=false; }, {passive:true});
-  btnNotebook.addEventListener("touchend", ()=> nbRoot.classList.toggle("hidden"), {passive:true});
-  btnEvidence.addEventListener("touchend", ()=> evRoot.classList.toggle("hidden"), {passive:true});
-
-  // ---------- Per-frame update ----------
-  scene.registerBeforeRender(() => {
-    // Desktop move input + mobile move vector blended
-    const speedBase = (keys.shift || sprintMobile) ? 0.18 : 0.1;
-
-    // Combine desktop WASD into a vector
-    let dv = new BABYLON.Vector2(
-      (keys.d?1:0) - (keys.a?1:0),
-      (keys.w?1:0) - (keys.s?1:0)
-    );
-    // Add mobile joystick
-    dv.x += moveVec.x;
-    dv.y += moveVec.y;
-
-    // Limit length
-    const len = Math.hypot(dv.x,dv.y);
-    if (len>1) { dv.x/=len; dv.y/=len; }
-
-    const fwd = fpCam.getDirection(BABYLON.Axis.Z);
-    const right= fpCam.getDirection(BABYLON.Axis.X);
-    let dir = right.scale(dv.x).add(fwd.scale(dv.y));
-    if (dir.lengthSquared()>0) dir.normalize();
-    player.moveWithCollisions(dir.scale(speedBase));
-
-    // Mobile look (right stick) — adjust camera rotation
-    if (Math.abs(lookVec.x) > 0.001 || Math.abs(lookVec.y) > 0.001) {
-      const yawSpeed = 0.03, pitchSpeed = 0.02;
-      fpCam.rotation.y += -lookVec.x * yawSpeed;
-      fpCam.rotation.x +=  lookVec.y * pitchSpeed;
-      fpCam.rotation.x = Math.max(-Math.PI/2+0.05, Math.min(Math.PI/2-0.05, fpCam.rotation.x));
+      if (which==="R" && t.identifier===rtouch){
+        const c=center(); const dx=t.clientX-c.x; const dy=t.clientY-c.y;
+        const r = Math.min(maxR(), Math.hypot(dx,dy)); const ang=Math.atan2(dy,dx);
+        const nx = Math.cos(ang)*r, ny=Math.sin(ang)*r;
+        rdx = nx/maxR(); rdy = ny/maxR();
+        nubR.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+        e.preventDefault();
+      }
     }
+  },{passive:false});
 
-    // room + coords
-    hudRoom.textContent = detectRoomName(player.position);
-    hudCrd.textContent = `${player.position.x.toFixed(2)} / ${player.position.z.toFixed(2)}`;
-  });
+  el.addEventListener("touchend",e=>{
+    for(const t of e.changedTouches){
+      if (which==="L" && t.identifier===ltouch){
+        ltouch=null; ldx=0; ldy=0; nubL.style.transform="translate(-50%,-50%)";
+      }
+      if (which==="R" && t.identifier===rtouch){
+        rtouch=null; rdx=0; rdy=0; nubR.style.transform="translate(-50%,-50%)";
+      }
+    }
+  },{passive:false});
+}
+bindStick(tl,"L"); bindStick(tr,"R");
 
-  // Simple nearest-room detection by name prefix "Room"
-  function detectRoomName(pos) {
-    let best = { d: 3.5, n: "Outside" };
-    for (const m of scene.meshes) {
+// apply touch to movement/look
+scene && scene.onBeforeRenderObservable.add(()=>{
+  if (!player || !fpCam) return;
+  // movement from left stick
+  if (Math.abs(ldx)+Math.abs(ldy)>0.01){
+    const moveDir = new BABYLON.Vector3(ldx,0,ldy);
+    // convert screen-space to camera space
+    const camForward = fpCam.getDirection(BABYLON.Axis.Z); camForward.y=0; camForward.normalize();
+    const camRight   = fpCam.getDirection(BABYLON.Axis.X); camRight.y=0; camRight.normalize();
+    const worldDir = camRight.scale(moveDir.x).add(camForward.scale(moveDir.z));
+    if (isHover) player.position.addInPlace(worldDir.scale(0.15));
+    else player.moveWithCollisions(worldDir.normalize().scale(0.08));
+  }
+  // look from right stick
+  if (Math.abs(rdx)+Math.abs(rdy)>0.01){
+    fpCam.rotation.y += rdx*0.03;
+    const newAlpha = tpCam.alpha - rdx*0.03;
+    tpCam.alpha = newAlpha;
+    fpCam.rotation.x += rdy*0.02;
+    fpCam.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, fpCam.rotation.x));
+  }
+});
+
+/* ========= Room detection (AABB contains) ========= */
+function setupRoomDetection(){
+  scene.registerBeforeRender(()=>{
+    let found="Outside";
+    for (const m of scene.meshes){
       if (!m.name) continue;
-      if (!/^Room[_\s-]?/i.test(m.name)) continue;
-      const d = BABYLON.Vector3.Distance(pos, m.getAbsolutePosition());
-      if (d < best.d) best = { d, n: m.name.replace(/^Room[_\s-]?/i,"").replace(/_/g," ") };
+      if (m.name.toLowerCase().startsWith("room")){
+        const bb = m.getBoundingInfo().boundingBox;
+        if (bb.containsPoint(player.position)) { found=m.name; break; }
+      }
     }
-    return best.n;
+    currentRoom = found;
+    roomNameEl.textContent = found.replace(/^room[_-]?/i,"");
+  });
+}
+
+/* ========= Dev Console (XYZ for 3s) ========= */
+let devMode=false, devShowCoords=false, devShowGhost=false;
+const DEV_PASSWORD="devmode", HOLD_MS=3000;
+const keysHeld=new Set(); let holdTimer=null;
+
+const devPanel = document.getElementById("devPanelRight");
+const devMini = document.getElementById("devMiniReadout");
+const devPwdModal = document.getElementById("devPwdModal");
+const devPwdInput = document.getElementById("devPwdInput");
+document.getElementById("devPwdCancel").onclick=()=>togglePwd(false);
+document.getElementById("devPwdOK").onclick=()=>{ if(devPwdInput.value===DEV_PASSWORD){ togglePwd(false); setDev(true);} else {devPwdInput.value=""; devPwdInput.placeholder="Wrong password";} };
+document.getElementById("devCloseBtn").onclick=()=>setDev(false);
+document.getElementById("btnToggleCoords").onclick=()=>{ devShowCoords=!devShowCoords; this.event.target.classList.toggle("active",devShowCoords); devMini.classList.toggle("hidden",!(devMode&&devShowCoords)); };
+document.getElementById("btnToggleFly").onclick=()=>{ setHoverMode(!isHover); this.event.target.classList.toggle("active",isHover); };
+document.getElementById("btnShowGhost").onclick=()=>{
+  devShowGhost=!devShowGhost; this.event.target.classList.toggle("active",devShowGhost);
+  if (ghostMesh) ghostMesh.setEnabled(devShowGhost);
+};
+document.getElementById("btnPinLocation").onclick=()=>{
+  if (!scene||!player) return;
+  const s= BABYLON.MeshBuilder.CreateSphere("devPin",{diameter:0.25},scene);
+  s.position = player.position.clone();
+  s.renderOutline=true; s.outlineWidth=0.02; s.outlineColor=new BABYLON.Color3(0.2,0.8,1);
+};
+document.getElementById("btnCreateDevLog").onclick=()=>downloadDevLog();
+
+function togglePwd(on){
+  devPwdModal.classList.toggle("hidden",!on);
+  devPwdModal.setAttribute("aria-hidden", on?"false":"true");
+  if (on){ devPwdInput.value=""; setTimeout(()=>devPwdInput.focus(),0); }
+}
+function setDev(on){
+  devMode=!!on; devPanel.classList.toggle("hidden",!devMode);
+  devMini.classList.toggle("hidden", !(devMode&&devShowCoords));
+}
+window.addEventListener("keydown",(e)=>{
+  const k=e.key?.toLowerCase(); if(!k) return;
+  if(["x","y","z"].includes(k)){ keysHeld.add(k); if(["x","y","z"].every(x=>keysHeld.has(x)) && !holdTimer){ holdTimer=setTimeout(()=>{ holdTimer=null; togglePwd(true); }, HOLD_MS);} }
+});
+window.addEventListener("keyup",(e)=>{
+  const k=e.key?.toLowerCase(); if(!k) return;
+  if(["x","y","z"].includes(k)){ keysHeld.delete(k); if(holdTimer){ clearTimeout(holdTimer); holdTimer=null; } }
+});
+scene && scene.onBeforeRenderObservable.add(()=>{
+  if(devMode&&devShowCoords&&player){
+    devMini.textContent = `POS X:${player.position.x.toFixed(2)} Y:${player.position.y.toFixed(2)} Z:${player.position.z.toFixed(2)}\nROOM ${currentRoom}`;
   }
+});
+function downloadDevLog(){
+  const lines=[
+    `Dev Log ${new Date().toISOString()}`,
+    `Pos: ${player?player.position.toString():"(none)"}`,
+    `Room: ${currentRoom}`,
+    `Ghost: ${ghostProfile?.name||"(none)"}`,
+    `Hover: ${isHover}`,
+  ].join("\n");
+  const blob = new Blob([lines],{type:"text/plain;charset=utf-8"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `devlog_${Date.now()}.txt`; a.click(); a.remove();
+}
 
-  // sanity tick
-  setInterval(() => {
-    const drain = 0.6 + Math.random()*0.8;
-    sanity = Math.max(0, sanity - drain);
-    hudSan.textContent = `${Math.floor(sanity)}%`;
-  }, 5000);
-
-  // Evidence UI & picker
-  (function initEvidence(){
-    const evOptions = document.getElementById("evidenceOptions");
-    evOptions.innerHTML = "";
-    EVIDENCE.forEach(ev => {
-      const b = document.createElement("button");
-      b.className="btn"; b.textContent=ev;
-      b.onclick = () => {
-        if (selectedEvidence.has(ev)) selectedEvidence.delete(ev);
-        else selectedEvidence.add(ev);
-        b.classList.toggle("sel");
-        renderEvidenceList();
-        suggestGhosts();
-      };
-      evOptions.appendChild(b);
-    });
-  })();
-
-  // Ghost modal
-  document.getElementById("ghostGuessButton").onclick = () => {
-    const grid = document.getElementById("ghostGrid");
-    grid.innerHTML = "";
-    GHOSTS.forEach(g => {
-      const b = document.createElement("button");
-      b.className="btn";
-      b.textContent = g.name + " • " + g.ev.join(", ");
-      b.onclick = () => { alert("You guessed: " + g.name); document.getElementById("ghostPicker").style.display="none"; };
-      grid.appendChild(b);
-    });
-    document.getElementById("ghostPicker").style.display = "grid";
-  };
-  document.getElementById("closePicker").onclick = () => document.getElementById("ghostPicker").style.display = "none";
-
-  // Inventory UI
-  (function initInventory(){
-    const invItems = document.getElementById("inventoryItems");
-    invItems.innerHTML = "";
-    ALL_ITEMS.forEach(item => {
-      const b = document.createElement("button");
-      b.className = "btn";
-      b.textContent = item;
-      if (inventory.includes(item)) b.classList.add("sel");
-      b.onclick = () => {
-        if (item==="Lighter") return;
-        const base = inventory.filter(i => i!=="Lighter");
-        if (inventory.includes(item)) inventory = inventory.filter(i => i!==item);
-        else {
-          if (base.length>=3) return alert("Max 3 items (Lighter is free).");
-          inventory.push(item);
-        }
-        // refresh
-        document.getElementById("inventoryItems").querySelectorAll(".btn").forEach(btn=>{
-          if (btn.textContent===item) btn.classList.toggle("sel");
-        });
-      };
-      invItems.appendChild(b);
-    });
-    document.getElementById("confirmLoadout").onclick = () => document.getElementById("inventory").classList.add("hidden");
-  })();
-
-  // run loop
-  engine.runRenderLoop(() => scene.render());
-  addEventListener("resize", () => engine.resize());
+/* ========= Init ========= */
+(async function main(){
+  setupEngine();
+  setupCameras();
+  setupPlayer();
+  renderInventoryUI();
+  setupEvidenceUI();
+  setupGhostGuessUI();
+  await loadMapAndCenter();
+  await loadGhostModel();
+  chooseRandomGhost();
+  setupRoomDetection();
+  setupLoop();
 })();
 </script>
 </body>
