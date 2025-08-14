@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <link rel="icon" href="favicon.ico" />
 
-  <!-- BabylonJS local CDN (kept per your repo layout) -->
+  <!-- Local BabylonJS from ./cdn (per your repo map) -->
   <script src="cdn/babylon.js"></script>
   <script src="cdn/babylonjs.loaders.min.js"></script>
   <script src="cdn/babylon.gui.min.js"></script>
@@ -18,7 +18,7 @@
     html,body { margin:0; height:100%; background:#000; color:#fff; font-family: system-ui, sans-serif; }
     #renderCanvas { width:100%; height:100%; display:block; touch-action:none; }
 
-    /* HUD (no XY here anymore) */
+    /* HUD (no XY here) */
     #hud {
       position:fixed; top:10px; left:10px; z-index:5;
       background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:8px 10px;
@@ -122,7 +122,7 @@
     </div>
   </div>
 
-  <!-- Dev readouts (includes XY here, NOT in HUD) -->
+  <!-- Dev readouts (shown only when dev + toggled) -->
   <div id="devReadout">
     <div>Pos: <span id="devPos">x0 y0 z0</span></div>
     <div>Cam: <span id="devCam">-</span></div>
@@ -142,13 +142,40 @@
 
 <script>
 (() => {
+  // === PATHS (kept in sync with your repo map) ===
+  const PATHS = {
+    mapGLB:        "./assets/models/map/Abandoned_House.glb",
+    ghostsDir:     "./assets/models/ghosts/",
+    ghostModels:   ["ghost1.glb","ghost2.glb","ghost3.glb"],
+    itemsDirFBX:   "./assets/models/items/", // FBX not supported by Babylon; log warning.
+    audio: {
+      ambient:       "./assets/audio/ambient.mp3",
+      clearWeather:  "./assets/audio/clearWeather.mp3",
+      doorCreak1:    "./assets/audio/doorCreak1.mp3",
+      doorCreak2:    "./assets/audio/doorCreak2.mp3",
+      doorSlam1:     "./assets/audio/doorSlam1.mp3",
+      doorSlam2:     "./assets/audio/doorSlam2.mp3",
+      gameKilled:    "./assets/audio/gameKilled.mp3",
+      ghostLaugh:    "./assets/audio/ghostLaugh.mp3",
+      ghostWriting1: "./assets/audio/GhostWriting1.mp3",
+      musicBox:      "./assets/audio/music_box_play.mp3",
+      notebookOpen:  "./assets/audio/notebook_open.mp3",
+      radio:         "./assets/audio/Radio.mp3",
+      rainstorm:     "./assets/audio/rainstorm.mp3",
+      spiritBox:     "./assets/audio/spiritbox.mp3",
+      spiritStatic:  "./assets/audio/spiritBoxStatic.mp3",
+      tarotFlip:     "./assets/audio/tarot_card_flip.mp3",
+      whisper:       "./assets/audio/whisper.mp3"
+    }
+  };
+
   // === Engine/Scene bootstrap ===
   const canvas = document.getElementById('renderCanvas');
   const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
   const scene  = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
-  // Basic moon-ish light
+  // Lighting (cool lunar feel)
   const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemi.intensity = 0.6;
 
@@ -178,12 +205,12 @@
   }
   window.addEventListener('keydown', e => { if (e.key.toLowerCase()==='v') toggleCamera(); });
 
-  // Player collider
+  // Player anchor
   const player = new BABYLON.TransformNode("player", scene);
   player.position = START_POS.clone();
   activeCam.parent = player;
 
-  // Physics-like gravity (no actual physics plugin required)
+  // Physics-like gravity (simple)
   let gravityOn = true;
   const G = -0.15;
   let velY = 0;
@@ -203,8 +230,42 @@
     if (k in keys) keys[k] = false;
   });
 
+  // Mobile detection/controls
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  document.getElementById('mobileControls').style.display = isMobile ? 'block' : 'none';
+
+  let joyVec = { x:0, y:0 };
+  const joy = document.getElementById('joystick');
+  const stick= document.getElementById('stick');
+  let joyActive = false;
+
+  function handleJoy(e){
+    const rect = joy.getBoundingClientRect();
+    const cx = rect.left + rect.width/2;
+    const cy = rect.top + rect.height/2;
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - cx;
+    const y = (e.touches ? e.touches[0].clientY : e.clientY) - cy;
+    const r = rect.width/2 - 12;
+    const d = Math.hypot(x,y);
+    const nx = d>r ? (x/d)*r : x;
+    const ny = d>r ? (y/d)*r : y;
+    stick.style.transform = `translate(${nx}px, ${ny}px)`;
+    joyVec.x = nx/r; // right (+)
+    joyVec.y = -ny/r; // forward (+)
+  }
+  function joyReset(){ stick.style.transform = "translate(-50%,-50%)"; joyVec.x=0; joyVec.y=0; }
+
+  ['mousedown','touchstart'].forEach(ev => joy.addEventListener(ev,(e)=>{joyActive=true; handleJoy(e);}));
+  ['mousemove','touchmove' ].forEach(ev => window.addEventListener(ev,(e)=>{ if(joyActive) handleJoy(e); },{passive:false}));
+  ['mouseup','mouseleave','touchend','touchcancel'].forEach(ev => window.addEventListener(ev,()=>{joyActive=false; joyReset();}));
+
+  // Mobile buttons
+  document.getElementById('btnInteract').onclick = () => interact();
+  document.getElementById('btnDrop').onclick     = () => dropItem();
+  document.getElementById('btnPin').onclick      = () => pinLocation();
+  document.getElementById('btnTele').onclick     = () => teleportToPin();
+
   function movePlayer(delta){
-    // joystick + keys combine
     const forward = activeCam.getDirection(BABYLON.Axis.Z);
     const right   = activeCam.getDirection(BABYLON.Axis.X);
     forward.y = 0; right.y = 0; forward.normalize(); right.normalize();
@@ -228,25 +289,23 @@
     }
   }
 
-  // Prevent pointer-lock auto traps — we do not force it on click.
-  // (You can still hit F12 > pointer lock if you want while testing.)
-
-  // === Load house model (as per repo layout) ===
-  const ROOM_PREFIX = "Room_"; // optional naming to detect rooms
+  // === Load house model in correct repo path ===
+  const ROOM_PREFIX = "Room_";
   const meshRooms = {};
   BABYLON.SceneLoader.Append("./assets/models/map/", "Abandoned_House.glb", scene, () => {
+    // Freeze transforms + collisions
     scene.meshes.forEach(m => {
       m.checkCollisions = true;
       if (m.name.startsWith(ROOM_PREFIX)) meshRooms[m.name] = m;
+      // Door tagging example: set m.metadata = {door:true} in your DCC to make E toggle them.
     });
   });
 
-  // Ghost (placeholder visibility toggle)
+  // === Ghost (local models from ./assets/models/ghosts) ===
   let ghostMesh = null;
-  const ghostModels = ["ghost1.glb","ghost2.glb","ghost3.glb"];
   function loadGhost(){
-    const pick = ghostModels[Math.floor(Math.random()*ghostModels.length)];
-    BABYLON.SceneLoader.ImportMesh("", "./assets/models/ghosts/", pick, scene, (meshes) => {
+    const pick = PATHS.ghostModels[Math.floor(Math.random()*PATHS.ghostModels.length)];
+    BABYLON.SceneLoader.ImportMesh("", PATHS.ghostsDir, pick, scene, (meshes) => {
       ghostMesh = new BABYLON.TransformNode("ghost", scene);
       meshes.forEach(m => { m.parent = ghostMesh; m.isPickable = false; });
       ghostMesh.position = player.position.add(new BABYLON.Vector3(0,0,3));
@@ -255,7 +314,7 @@
   }
   function setGhostVisible(v){ if (ghostMesh) ghostMesh.setEnabled(v); }
 
-  // HUD updates (NO XY HERE)
+  // === HUD (NO XY here) ===
   let sanity = 100;
   let currentRoom = "Outside";
   function updateHUD(){
@@ -265,7 +324,7 @@
   }
   updateHUD();
 
-  // Room detection (AABB containsPoint, optional depending on your GLB naming)
+  // Room detection (AABB containsPoint)
   function detectRoom(){
     let found = "Outside";
     for (const name in meshRooms){
@@ -275,38 +334,33 @@
     currentRoom = found;
   }
 
-  // ========= Interact / Inventory-lite =========
+  // === Interact / Items (FBX note) ===
   function interact(){
-    // Hook for doors/items — raycast forward a couple meters
     const ray = new BABYLON.Ray(activeCam.globalPosition, activeCam.getDirection(BABYLON.Axis.Z), 2.2);
     const hit = scene.pickWithRay(ray, m => m.isPickable);
-    if (hit.hit){
-      // Simple toggle — you can tag door meshes with metadata to open/close etc.
-      // For now just log:
-      console.log("Interact with:", hit.pickedMesh?.name || "(unknown)");
+    if (!hit.hit) return;
+    const mesh = hit.pickedMesh;
+    if (mesh?.metadata?.door){
+      // toggle door open/close if your GLB exports that metadata
+      mesh.rotation.y += BABYLON.Tools.ToRadians(90);
+      Audio.play('doorCreak1');
+    } else {
+      console.log("Interact with:", mesh?.name || "(unknown)");
     }
   }
   function dropItem(){ console.log("Drop / place action (stub)"); }
 
-  // ========= Pins / Teleport =========
-  let lastPin = null;
-  function pinLocation(){
-    lastPin = player.position.clone();
-    spawnDevMarker(lastPin, "#66f");
-  }
-  function teleportToPin(){
-    if (!lastPin) return;
-    player.position.copyFrom(lastPin);
-  }
+  // FBX notice
+  console.warn("[Items] Your repo includes FBX models in ./assets/models/items/*.fbx. BabylonJS does not import FBX natively. Convert to GLB and place alongside to load here.");
 
-  // ========= Dev unlock (X+Y+Z for 3s, debounced) =========
+  // === Dev unlock (X+Y+Z for 3s → password 'devmode') ===
   let xyzDown = { x:false, y:false, z:false };
   let xyzTimer = null, unlockArmed = false, devUnlocked = false;
 
   function allXYZ(){ return xyzDown.x && xyzDown.y && xyzDown.z; }
   function setDevPanelVisible(v){
     document.getElementById('devPanel').style.display = v ? 'block' : 'none';
-    document.getElementById('devReadout').style.display = v && showLocation ? 'block' : (v ? 'none' : 'none');
+    document.getElementById('devReadout').style.display = (v && showLocation) ? 'block' : 'none';
   }
   function armUnlockTimer(){
     if (devUnlocked || unlockArmed || xyzTimer) return;
@@ -340,7 +394,7 @@
     disarmUnlockTimer();
   });
 
-  // ========= Dev panel controls =========
+  // === Dev panel toggles ===
   const devReadout = document.getElementById('devReadout');
   let showLocation = false;
   let flyMode = false;
@@ -366,7 +420,7 @@
   };
   document.getElementById('openInspector').onclick = () => scene.debugLayer.show({ overlay:true });
 
-  // ========= Barrier mapping / Nav nodes + export =========
+  // === Barrier mapping / Nav nodes + export ===
   const barrierPoints = [];
   const navNodes = [];
 
@@ -421,7 +475,7 @@
     downloadJSON({ navNodes }, "ghost_nav_nodes.json");
   };
 
-  // Click to drop points while in mode (does not lock movement)
+  // Click to drop points while in mode
   scene.onPointerObservable.add((info) => {
     if (info.type === BABYLON.PointerEventTypes.POINTERDOWN){
       if (barrierMode) addBarrierPoint();
@@ -442,49 +496,48 @@
     URL.revokeObjectURL(a.href);
   };
 
-  // ========= Mobile controls =========
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-  document.getElementById('mobileControls').style.display = isMobile ? 'block' : 'none';
+  // === Audio Manager (paths all local from ./assets/audio) ===
+  const Audio = {
+    _map: new Map(),
+    _ready: false,
+    init() {
+      this.load('ambient', PATHS.audio.ambient, { loop:true, volume:0.35, autoplay:true });
+      this.load('whisper', PATHS.audio.whisper, { volume:1.0 });
+      this.load('radio', PATHS.audio.radio, { volume:0.8 });
+      this.load('doorCreak1', PATHS.audio.doorCreak1, { volume:0.8 });
+      this.load('doorCreak2', PATHS.audio.doorCreak2, { volume:0.8 });
+      this.load('spiritBox', PATHS.audio.spiritBox, { volume:1.0 });
+      this.load('spiritStatic', PATHS.audio.spiritStatic, { volume:0.6 });
+      this._ready = true;
+    },
+    load(key, url, opts={}) {
+      const s = new BABYLON.Sound(key, url, scene, null, {
+        loop: !!opts.loop, autoplay: !!opts.autoplay, volume: opts.volume ?? 0.5
+      });
+      this._map.set(key, s);
+    },
+    play(key){ const s=this._map.get(key); if(s) s.play(); },
+    stop(key){ const s=this._map.get(key); if(s) s.stop(); }
+  };
 
-  let joyVec = { x:0, y:0 };
-  const joy = document.getElementById('joystick');
-  const stick= document.getElementById('stick');
-  let joyActive = false;
-
-  function handleJoy(e){
-    const rect = joy.getBoundingClientRect();
-    const cx = rect.left + rect.width/2;
-    const cy = rect.top + rect.height/2;
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - cx;
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - cy;
-    const r = rect.width/2 - 12;
-    const d = Math.hypot(x,y);
-    const nx = d>r ? (x/d)*r : x;
-    const ny = d>r ? (y/d)*r : y;
-    stick.style.transform = `translate(${nx}px, ${ny}px)`;
-    joyVec.x = nx/r; // right (+)
-    joyVec.y = -ny/r; // forward (+)
+  // === Pins / Teleport ===
+  let lastPin = null;
+  function pinLocation(){
+    lastPin = player.position.clone();
+    spawnDevMarker(lastPin, "#66f");
   }
-  function joyReset(){ stick.style.transform = "translate(-50%,-50%)"; joyVec.x=0; joyVec.y=0; }
+  function teleportToPin(){
+    if (!lastPin) return;
+    player.position.copyFrom(lastPin);
+  }
 
-  ['mousedown','touchstart'].forEach(ev => joy.addEventListener(ev,(e)=>{joyActive=true; handleJoy(e);}));
-  ['mousemove','touchmove' ].forEach(ev => window.addEventListener(ev,(e)=>{ if(joyActive) handleJoy(e); },{passive:false}));
-  ['mouseup','mouseleave','touchend','touchcancel'].forEach(ev => window.addEventListener(ev,()=>{joyActive=false; joyReset();}));
-
-  // Mobile buttons
-  document.getElementById('btnInteract').onclick = interact;
-  document.getElementById('btnDrop').onclick     = dropItem;
-  document.getElementById('btnPin').onclick      = pinLocation;
-  document.getElementById('btnTele').onclick     = teleportToPin;
-
-  // ========= Loop =========
+  // === Loop ===
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() / 1000;
     movePlayer(dt);
     detectRoom();
     updateHUD();
 
-    // Dev readout (shown only if dev + toggle)
     if (devUnlocked && showLocation){
       document.getElementById('devPos').textContent = `x${player.position.x.toFixed(2)} y${player.position.y.toFixed(2)} z${player.position.z.toFixed(2)}`;
       document.getElementById('devCam').textContent = activeCam.name;
@@ -494,8 +547,10 @@
 
   window.addEventListener('resize', ()=>engine.resize());
 
-  // Load ghost model once scene is up
+  // Boot
+  Audio.init();
   loadGhost();
+
 })();
 </script>
 </body>
