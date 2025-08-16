@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Phasma-Phoney — Web Build (Updated)</title>
+  <title>Phasma-Phoney — Web Build (Front Door & LOS)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; color:#0ff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; }
@@ -59,7 +59,7 @@
     #ghostDetail { white-space:pre-wrap; line-height:1.25; }
     #nbClose { position:sticky; top:0; margin-left:auto; }
 
-    /* Touch stick (hidden by default) */
+    /* Touch stick */
     #stick { position:fixed; left:16px; bottom:16px; width:120px; height:120px; border-radius:50%; border:1px solid #066; background:rgba(0,0,0,.3); display:none; z-index:26; }
     #stick .dot { position:absolute; width:48px; height:48px; border-radius:50%; border:1px solid #0ff; background:#001e1e; left:36px; top:36px; }
   </style>
@@ -216,7 +216,7 @@
       sanity:100, running:false, flyDev:false, god:false, uiLocked:false,
       inVan:false, weather:'Clear',
       house:null, floors:[], doors:[], skybox:null, skyMat:null,
-      boundary:[ // house polygon (inside = house)
+      boundary:[ // interior polygon (inside = house)
         new BABYLON.Vector3(18.404,-0.016,-96.040),
         new BABYLON.Vector3(57.205,-0.718,-94.031),
         new BABYLON.Vector3(62.145,-0.651,-105.142),
@@ -227,6 +227,79 @@
       spawnPointA:new BABYLON.Vector3(38.0,0.3,-98.0),
       lastGroundY:0, keys:{}, touch:{active:false,dx:0,dy:0}, useCooldown:false
     };
+
+    /***************
+     * FRONT DOOR (from your pins)
+     ***************/
+    const frontDoor = {
+      p1: new BABYLON.Vector3(28.866, 0.831, -117.498),
+      p2: new BABYLON.Vector3(28.000, 0.822, -117.489),
+      center: null,
+      yaw: 0,
+      len: 0,
+      open: true,
+      normalOut: null,   // 2D normal pointing OUTSIDE
+      blocker: null      // collision box for player when closed
+    };
+
+    function initFrontDoor(){
+      // geometry
+      const v = frontDoor.p2.subtract(frontDoor.p1);
+      frontDoor.len = v.length();
+      frontDoor.center = frontDoor.p1.add(frontDoor.p2).scale(0.5);
+      frontDoor.yaw = Math.atan2(v.x, v.z);
+
+      // normal candidates
+      const t = v.scale(1/frontDoor.len); // along segment
+      let n = new BABYLON.Vector2(-t.z, t.x); // rotate left
+      // choose outward by probing
+      const probe = new BABYLON.Vector3(frontDoor.center.x + n.x*0.6, frontDoor.center.y, frontDoor.center.z + n.y*0.6);
+      const outside = !pointInPolyXZ(probe.x, probe.z, game.boundary);
+      frontDoor.normalOut = outside ? n : new BABYLON.Vector2(-n.x, -n.y);
+
+      // blocker box (invisible wall toggled by open/closed)
+      const box = BABYLON.MeshBuilder.CreateBox("frontDoorBlocker", {
+        width: frontDoor.len + 0.06,
+        height: 2.2,
+        depth: 0.12
+      }, game.scene);
+      box.position = new BABYLON.Vector3(frontDoor.center.x, Math.max(frontDoor.p1.y, frontDoor.p2.y) + 1.1, frontDoor.center.z);
+      box.rotation.y = frontDoor.yaw;
+      box.isPickable = false;
+      box.checkCollisions = false; // start open
+      box.isVisible = false;
+      frontDoor.blocker = box;
+    }
+
+    function setFrontDoorOpen(isOpen){
+      frontDoor.open = !!isOpen;
+      if(frontDoor.blocker) frontDoor.blocker.checkCollisions = !frontDoor.open;
+      if(dev.enabled) dev.log(`Front Door: ${frontDoor.open?'OPEN':'CLOSED'}`);
+      toast(frontDoor.open?'Front door opened':'Front door closed');
+    }
+
+    // clamp ghost from crossing closed door threshold (logic-based)
+    function clampGhostAgainstFrontDoor(current, proposed){
+      if(frontDoor.open) return proposed;
+      // signed distance to plane: dot(nOut, p - center)
+      const n = frontDoor.normalOut;
+      const sCur = n.x*(current.x-frontDoor.center.x) + n.y*(current.z-frontDoor.center.z);
+      const sNew = n.x*(proposed.x-frontDoor.center.x) + n.y*(proposed.z-frontDoor.center.z);
+      // inside = s <= 0 ; outside = s > 0
+      if(sCur <= 0 && sNew > 0){
+        // find t where s(t) = -epsilon
+        const eps = -0.03;
+        const ds = sNew - sCur;
+        const t = ds!==0 ? (eps - sCur) / ds : 0;
+        if(t>=0 && t<=1){
+          const diff = proposed.subtract(current).scale(t);
+          return current.add(diff);
+        } else {
+          return current.clone();
+        }
+      }
+      return proposed;
+    }
 
     /***************
      * EVIDENCE & GHOSTS
@@ -308,7 +381,7 @@
     $('startBtn').onclick = async ()=>{ $('start').style.display='none'; await startGame(); };
 
     /***************
-     * INPUT (no mouse click to use items; F and E only)
+     * INPUT
      ***************/
     window.addEventListener('keydown', (e)=>{
       if(e.repeat) return;
@@ -319,7 +392,7 @@
         if(!dev.enabled && $('devPrompt').style.display!=='flex'){ $('devPrompt').style.display='flex'; }
         else if(dev.enabled){ $('devPanel').style.display = ($('devPanel').style.display==='flex'?'none':'flex'); }
       }
-      if(game.uiLocked) return; // notebook/dev opened
+      if(game.uiLocked) return;
 
       if(k>='1' && k<='5') selectSlot(parseInt(k)-1);
       if(k==='Shift') game.running = true;
@@ -331,10 +404,9 @@
     window.addEventListener('keyup', (e)=>{
       delete game.keys[e.key.toLowerCase()];
       if(e.key==='Shift') game.running=false;
-      if(e.key.toLowerCase()==='n') {/* no-op */}
     });
 
-    // Touch stick enable if touch
+    // Touch stick (optional)
     (function enableTouchStick(){
       const stick=$('stick'); const dot=stick.querySelector('.dot');
       if(!('ontouchstart' in window)) return;
@@ -370,7 +442,7 @@
 
     function vecStr(v){ return `x:${v.x.toFixed(3)} y:${v.y.toFixed(3)} z:${v.z.toFixed(3)}`; }
 
-    // Map flow
+    // Map flow (unchanged from last build)
     $('mapStart').onclick = ()=>{
       listen.mapActive = !listen.mapActive;
       $('mapStart').textContent = listen.mapActive ? 'Stop Map' : 'Start Map';
@@ -523,7 +595,7 @@
       const root = res.meshes[0]; root.name="GhostRoot";
       const pivot=new BABYLON.TransformNode("GhostPivot", scene); root.parent=pivot;
 
-      // Normalize height & orientation (keep root forward as +Z; we rotate pivot to face motion)
+      // Normalize height; forward = +Z (we rotate pivot to face motion)
       root.rotation = BABYLON.Vector3.Zero();
       root.refreshBoundingInfo();
       const size=root.getBoundingInfo().boundingBox.extendSizeWorld;
@@ -536,8 +608,8 @@
       if(res.animationGroups && res.animationGroups.length){ idle=res.animationGroups[0]||null; walk=res.animationGroups[1]||null; if(idle) idle.start(true); }
       game.ghostAnim={ idle, walk, state:'idle' };
 
-      // FOV lines mesh
       refreshFOVLines();
+
       // Choose a ghost type
       const names = Object.keys(ghostProfiles);
       game.currentGhostType = names[Math.floor(Math.random()*names.length)];
@@ -546,8 +618,7 @@
     function refreshFOVLines(){
       if(game.ghostFOVLines){ game.ghostFOVLines.dispose(); game.ghostFOVLines=null; }
       if(!dev.showFOV || !game.ghostPivot) return;
-      const len=8, ang=rad(60/2); // 60° FOV
-      const pivot=game.ghostPivot, y=1.4;
+      const len=8, ang=rad(60/2), y=1.4;
       const pts=[
         new BABYLON.Vector3(0,y,0),
         new BABYLON.Vector3( Math.sin(ang)*len, y, Math.cos(ang)*len ),
@@ -557,7 +628,7 @@
         new BABYLON.Vector3(0,y,len)
       ];
       const lines = BABYLON.MeshBuilder.CreateLines("ghostFOV",{points:pts},scene); lines.color = new BABYLON.Color3(0,1,1);
-      lines.parent=pivot; game.ghostFOVLines=lines;
+      lines.parent=game.ghostPivot; game.ghostFOVLines=lines;
     }
 
     async function spawnPhoenix(){
@@ -612,7 +683,7 @@
       if(game.vanZone.poly && game.vanZone.poly.length>=3) nearVan = pointInPolyXZ(game.playerCapsule.position.x, game.playerCapsule.position.z, game.vanZone.poly);
       else nearVan = (BABYLON.Vector3.Distance(game.playerCapsule.position, game.vanZone.center) <= game.vanZone.radius);
       if(nearVan){ storageBtn.click(); return; }
-      // Else try door
+      // Else try doors (and sync front door blocker if it's that door)
       tryToggleNearestDoor();
     }
 
@@ -641,47 +712,80 @@
      * DOORS
      ***************/
     function tryToggleNearestDoor(){
-      if(!game.doors.length) return;
-      const me=game.playerCapsule.position; let best=null, d2=3.5*3.5;
-      game.doors.forEach(d=>{ const p=d.getAbsolutePosition(); const dx=p.x-me.x,dy=p.y-me.y,dz=p.z-me.z; const t=dx*dx+dy*dy+dz*dz; if(t<d2 && d.isEnabled()){ best=d; d2=t; } });
-      if(!best){ toast('No door nearby.'); return; }
-      const md=best.metadata || (best.metadata={open:false, baseRotY:best.rotation?.y||0});
-      md.open=!md.open; best.rotation.y = md.baseRotY + (md.open ? rad(90) : 0); best.checkCollisions=!md.open;
-      toast(md.open?'Door opened':'Door closed');
+      const me=game.playerCapsule.position;
+
+      // Check for nearby front door center regardless of mesh names
+      const fdc = frontDoor.center;
+      const nearFD = BABYLON.Vector3.Distance(me, fdc) < 1.8;
+
+      let toggledFront = false;
+      let toggledMeshDoor = false;
+      let newState = null;
+
+      // Toggle mesh door first (if any)
+      if(game.doors.length){
+        let best=null, d2=3.5*3.5;
+        game.doors.forEach(d=>{ const p=d.getAbsolutePosition(); const dx=p.x-me.x,dy=p.y-me.y,dz=p.z-me.z; const t=dx*dx+dy*dy+dz*dz; if(t<d2 && d.isEnabled()){ best=d; d2=t; } });
+        if(best){
+          const md=best.metadata || (best.metadata={open:false, baseRotY:best.rotation?.y||0});
+          md.open=!md.open; best.rotation.y = md.baseRotY + (md.open ? rad(90) : 0); best.checkCollisions=!md.open;
+          toggledMeshDoor = true;
+          newState = md.open;
+          toast(md.open?'Door opened':'Door closed');
+
+          // If this mesh is the front door (position near center), sync blocker
+          const bp = best.getAbsolutePosition();
+          if(BABYLON.Vector3.Distance(bp, fdc) < 3.0){
+            setFrontDoorOpen(md.open);
+            toggledFront = true;
+          }
+        }
+      }
+
+      // If no mesh door was toggled and player is near our front door segment, toggle the virtual door
+      if(!toggledFront && nearFD){
+        setFrontDoorOpen(!frontDoor.open);
+        toggledFront = true;
+      }
+
+      if(!toggledMeshDoor && !toggledFront){
+        toast('No door nearby.');
+      }
     }
 
     /***************
      * ROOM / INSIDE CHECKS
      ***************/
     function playerInsideHouse(){ const p=game.playerCapsule.position; return pointInPolyXZ(p.x, p.z, game.boundary); }
-    function updateRoomName(){ const me=game.playerCapsule.position; const inVan = game.vanZone.poly? pointInPolyXZ(me.x, me.z, game.vanZone.poly) : (BABYLON.Vector3.Distance(me, game.vanZone.center) <= game.vanZone.radius); roomNameEl.textContent = inVan ? 'Van' : (playerInsideHouse()? 'House' : 'Outside'); }
+    function updateRoomName(){
+      const me=game.playerCapsule.position;
+      const inVan = game.vanZone.poly? pointInPolyXZ(me.x, me.z, game.vanZone.poly) : (BABYLON.Vector3.Distance(me, game.vanZone.center) <= game.vanZone.radius);
+      roomNameEl.textContent = inVan ? 'Van' : (playerInsideHouse()? 'House' : 'Outside');
+    }
 
     /***************
      * LOS / FOV
      ***************/
-    function ghostForward(){ // pivot forward (+Z rotated by pivot yaw)
-      const y=game.ghostPivot.rotation.y; return new BABYLON.Vector3(Math.sin(y),0,Math.cos(y));
-    }
+    function ghostForward(){ const y=game.ghostPivot.rotation.y; return new BABYLON.Vector3(Math.sin(y),0,Math.cos(y)); }
     function ghostCanSeePlayer(){
       if(!game.ghostPivot) return false;
-      if(game.currentGhostType==='deogen') return true; // special rule
+      if(game.currentGhostType==='deogen') return true;
 
       const gp=game.ghostPivot.position.add(new BABYLON.Vector3(0,1.4,0));
       const pp=game.camera.position.clone(); // player head
       const toPlayer=pp.subtract(gp); const dist=toPlayer.length();
-      if(dist>12) return false; // view distance
+      if(dist>12) return false;
       toPlayer.y=0;
       const forward=ghostForward();
-      const angle = Math.acos( clamp(BABYLON.Vector3.Dot(forward.normalize(), toPlayer.normalize()), -1, 1) ); // radians
-      if(angle > rad(60/2)) return false; // outside cone
+      const angle = Math.acos( clamp(BABYLON.Vector3.Dot(forward.normalize(), toPlayer.normalize()), -1, 1) );
+      if(angle > rad(60/2)) return false;
 
-      // Raycast: any hit closer than player => blocked
+      // Raycast occlusion
       const dir = pp.subtract(gp).normalize();
-      const ray = new BABYLON.Ray(gp, dir, dist);
-      const hit = scene.pickWithRay(ray, (m)=> m!==game.ghost && m!==game.ghostPivot && m.isPickable===true);
+      const hit = scene.pickWithRay(new BABYLON.Ray(gp, dir, dist), (m)=> m!==game.ghost && m!==game.ghostPivot && m.isPickable===true);
       if(hit && hit.pickedPoint){
         const hdist = BABYLON.Vector3.Distance(gp, hit.pickedPoint);
-        if(hdist < dist - 0.1) return false; // something blocks
+        if(hdist < dist - 0.1) return false;
       }
       return true;
     }
@@ -748,6 +852,7 @@
       setWeather(randomWeather());
       game.playerCapsule.position.copyFrom(game.spawnPointA);
       await loadHouse(); await loadItems(); await spawnGhost(); await spawnPhoenix();
+      initFrontDoor(); // <-- your pins wired up here
       syncCameraToCapsule();
       toast('Investigation started. WASD move • Shift run • C crouch • F use item • E interact • N notebook • ESC dev');
       let last=performance.now();
@@ -756,7 +861,7 @@
 
         // Movement
         movePlayer(dt);
-        // Snap -> camera sync (prevents "falling up")
+        // Snap -> camera sync
         snapToGround(); syncCameraToCapsule();
 
         // Ghost behavior (only active inside house)
@@ -764,18 +869,21 @@
           const inside = playerInsideHouse();
           let state='idle';
           if(inside){
-            // Simple track if has LOS, else idle-wander
             const me=game.playerCapsule.position; const gp=game.ghostPivot.position; const toMe=me.subtract(gp); toMe.y=0; const dist=toMe.length();
-
-            // Rotate pivot to face movement direction when moving
             const canSee = ghostCanSeePlayer();
+
             if(canSee && dist>2.5){
               const dir = toMe.normalize();
               const step = dir.scale(0.8 * dt);
-              game.ghostPivot.position.addInPlace(step);
-              // Face where we move: set pivot yaw to face +Z toward movement
+              let proposed = game.ghostPivot.position.add(step);
+
+              // Prevent crossing closed front door to outside
+              proposed = clampGhostAgainstFrontDoor(game.ghostPivot.position, proposed);
+
+              game.ghostPivot.position.copyFrom(proposed);
+              // Face motion (no backwards walk)
               const yaw = Math.atan2(dir.x, dir.z);
-              game.ghostPivot.rotation.y = yaw; // root is +Z forward
+              game.ghostPivot.rotation.y = yaw;
               setGhostAnim('walk'); state='chase';
             } else {
               setGhostAnim('idle'); state='idle';
