@@ -18,143 +18,77 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
 
+  <!-- Optional room names & zones (if present, used to populate devtools dropdown) -->
+  <script src="./rooms.js"></script>
+
   <style>
     html, body { margin: 0; height: 100%; width: 100%; background: #000; overflow: hidden; font-family: monospace; color: #0ff; }
     #renderCanvas { width: 100vw; height: 100vh; touch-action: none; display: block; background: #000; }
 
     /* Flash overlay for lightning */
-    #flash-overlay {
-      position: fixed; inset: 0; background:#fff; opacity:0; pointer-events:none; z-index: 10000; transition: opacity 120ms ease-out;
-    }
+    #flash-overlay { position: fixed; inset: 0; background:#fff; opacity:0; pointer-events:none; z-index: 10000; transition: opacity 120ms ease-out; }
 
     /* Title / Start Screen */
-    #title-screen {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.85);
-      display:flex; flex-direction:column; align-items:center; justify-content:center;
-      z-index: 9999;
-    }
+    #title-screen { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index: 9999; }
     #title-content { text-align:center; max-width: 90vw; }
     #title-logo { max-width: 60vw; max-height: 35vh; object-fit: contain; margin-bottom: 24px; }
-    #start-button {
-      padding: 14px 28px; font-size: 22px; cursor:pointer; border: 2px solid #0ff; color:#0ff; background:#111;
-      box-shadow: 0 0 14px rgba(0,255,255,0.25);
-    }
+    #start-button { padding: 14px 28px; font-size: 22px; cursor:pointer; border: 2px solid #0ff; color:#0ff; background:#111; box-shadow: 0 0 14px rgba(0,255,255,0.25); }
     #start-button:active { transform: translateY(1px); }
 
     /* HUD (top-left) */
-    #hud {
-      position: fixed; top: 10px; left: 10px; z-index: 6000;
-      background: rgba(0,0,0,0.5); border: 1px solid #066; padding: 8px 10px; border-radius: 6px; min-width: 240px;
-      display:flex; flex-direction: column; gap: 6px; pointer-events:none;
-    }
+    #hud { position: fixed; top: 10px; left: 10px; z-index: 6000; background: rgba(0,0,0,0.5); border: 1px solid #066; padding: 8px 10px; border-radius: 6px; min-width: 240px; display:flex; flex-direction: column; gap: 6px; pointer-events:none; }
     #hud .row { display:flex; gap: 10px; align-items: center; justify-content: space-between; }
     #hud .label { color:#9ff; }
     #hud .value { color:#0ff; font-weight: bold; }
-
-    /* Weather badge (top-left inside HUD) */
     #weather { font-size: 12px; color:#aff; opacity:0.9; }
 
     /* Inventory belt (bottom center) */
-    #belt {
-      position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
-      display:flex; gap: 12px; z-index: 6000; align-items: center;
-      background: rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius: 10px;
-    }
-    .slot {
-      width: 72px; height: 72px; display:flex; align-items:center; justify-content:center; border-radius: 8px;
-      border: 1px solid #0aa; background: rgba(0,20,20,0.6); position: relative; cursor:pointer;
-    }
-    .slot .key {
-      position: absolute; top: 2px; left: 4px; font-size: 11px; color:#9ff; opacity:0.9;
-    }
+    #belt { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display:flex; gap: 12px; z-index: 6000; align-items: center; background: rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius: 10px; }
+    .slot { width: 72px; height: 72px; display:flex; align-items:center; justify-content:center; border-radius: 8px; border: 1px solid #0aa; background: rgba(0,20,20,0.6); position: relative; cursor:pointer; }
+    .slot .key { position: absolute; top: 2px; left: 4px; font-size: 11px; color:#9ff; opacity:0.9; }
     .slot.active { outline: 2px solid #0ff; box-shadow: 0 0 12px rgba(0,255,255,0.45) inset; }
     .slot canvas, .slot img { max-width: 60px; max-height: 60px; image-rendering: crisp-edges; }
 
     /* On-screen controls (mobile) */
-    #touch-controls {
-      position: fixed; right: 12px; bottom: 12px; display: grid; grid-template-columns: repeat(2, 64px); gap: 8px; z-index: 6000;
-    }
+    #touch-controls { position: fixed; right: 12px; bottom: 12px; display: grid; grid-template-columns: repeat(2, 64px); gap: 8px; z-index: 6000; }
     .tbtn { width: 64px; height: 64px; border-radius: 50%; background: rgba(0,0,0,0.5); border:1px solid #066; color:#0ff; display:flex; align-items:center; justify-content:center; user-select:none; }
     .tbtn:active { transform: translateY(1px); }
 
-    /* Storage button (visible in van zone) */
-    #storage-button {
-      position: fixed; right: 12px; top: 12px; z-index: 6000; display:none;
-      padding: 10px 16px; border: 2px solid #0ff; color:#0ff; background:#111; border-radius: 8px; cursor:pointer;
-      box-shadow: 0 0 10px rgba(0,255,255,0.2);
-    }
+    /* Storage button */
+    #storage-button { position: fixed; right: 12px; top: 12px; z-index: 6000; display:none; padding: 10px 16px; border: 2px solid #0ff; color:#0ff; background:#111; border-radius: 8px; cursor:pointer; box-shadow: 0 0 10px rgba(0,255,255,0.2); }
 
     /* Storage modal */
-    #storage-modal {
-      display:none; position:fixed; inset:0; z-index: 9998; background: rgba(0,0,0,0.75);
-      align-items:center; justify-content:center;
-    }
-    #storage-card {
-      background: #0a0a0a; color:#0ff; border:1px solid #066; border-radius: 8px; width: min(740px, 92vw);
-      max-height: 86vh; overflow:auto; padding: 12px 14px;
-    }
+    #storage-modal { display:none; position:fixed; inset:0; z-index: 9998; background: rgba(0,0,0,0.75); align-items:center; justify-content:center; }
+    #storage-card { background: #0a0a0a; color:#0ff; border:1px solid #066; border-radius: 8px; width: min(740px, 92vw); max-height: 86vh; overflow:auto; padding: 12px 14px; }
     #storage-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }
 
     /* Notebook modal */
-    #notebook-modal {
-      display:none; position:fixed; inset:0; z-index: 9998; background: rgba(0,0,0,0.82);
-      align-items:center; justify-content:center;
-    }
-    #notebook-card {
-      background: #0b0b0b; color:#0ff; border:1px solid #066; border-radius: 10px; width: min(920px, 95vw);
-      max-height: 90vh; overflow:auto; padding: 14px 16px; box-shadow: 0 0 20px rgba(0,255,255,0.2);
-    }
+    #notebook-modal { display:none; position:fixed; inset:0; z-index: 9998; background: rgba(0,0,0,0.82); align-items:center; justify-content:center; }
+    #notebook-card { background: #0b0b0b; color:#0ff; border:1px solid #066; border-radius: 10px; width: min(920px, 95vw); max-height: 90vh; overflow:auto; padding: 14px 16px; box-shadow: 0 0 20px rgba(0,255,255,0.2); }
     #notebook-tabs { display:flex; gap:8px; margin-bottom: 8px; flex-wrap:wrap; }
-    .tab {
-      padding: 6px 10px; border:1px solid #066; color:#9ff; background:#111; border-radius:6px; cursor:pointer;
-    }
+    .tab { padding: 6px 10px; border:1px solid #066; color:#9ff; background:#111; border-radius:6px; cursor:pointer; }
     .tab.active { color:#0ff; border-color:#0ff; box-shadow: 0 0 10px rgba(0,255,255,0.2) inset; }
     .page { display:none; }
     .page.active { display:block; }
     .ev-row { display:flex; align-items:center; gap:8px; margin: 6px 0; }
     .ev-row input { transform: scale(1.3); }
 
-    /* Developer gate/panel */
-    #dev-gate, #dev-panel {
-      display:none; position:fixed; inset:0; z-index: 12000; background: rgba(0,0,0,0.8); align-items:center; justify-content:center;
-    }
-    .card {
-      background: #0a0a0a; color:#0ff; border: 1px solid #066; border-radius: 10px; padding: 14px; width: min(780px, 92vw);
-      max-height: 88vh; overflow:auto;
-    }
+    /* Dev gate/panel surfaces */
+    #dev-gate, #dev-panel { display:none; position:fixed; inset:0; z-index: 12000; background: rgba(0,0,0,0.8); align-items:center; justify-content:center; }
+    .card { background: #0a0a0a; color:#0ff; border: 1px solid #066; border-radius: 10px; padding: 14px; width: min(780px, 92vw); max-height: 88vh; overflow:auto; }
     #dev-panel .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin: 8px 0; }
-    #dev-log {
-      background: #000; border: 1px solid #033; min-height: 120px; padding: 8px; border-radius: 6px; color:#8ff; font-size: 12px;
-      white-space: pre-wrap;
-    }
+    #dev-log { background: #000; border: 1px solid #033; min-height: 120px; padding: 8px; border-radius: 6px; color:#8ff; font-size: 12px; white-space: pre-wrap; }
 
-    /* Right-hand item preview (small) */
-    #hand-preview {
-      position: fixed; right: 18px; bottom: 110px; width: 180px; height: 140px;
-      pointer-events: none; z-index: 5000; display:none;
-    }
+    /* Right-hand item preview */
+    #hand-preview { position: fixed; right: 18px; bottom: 110px; width: 180px; height: 140px; pointer-events: none; z-index: 5000; display:none; }
 
-    /* Camera overlay for "orbs" when holding video camera */
-    #camera-overlay {
-      position: fixed; inset: 0; z-index: 4000; display:none; pointer-events:none;
-      background: radial-gradient(transparent 70%, rgba(0,0,0,0.45));
-    }
-    #camera-rec {
-      position: absolute; top: 12px; left: 14px; color: #f44; font-size: 14px; letter-spacing: 1px;
-      text-shadow: 0 0 6px rgba(255,0,0,0.5);
-    }
-    #camera-orb {
-      position: absolute; width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.9); filter: blur(0.5px); display:none;
-      box-shadow: 0 0 10px rgba(255,255,255,0.8);
-    }
+    /* Camera overlay */
+    #camera-overlay { position: fixed; inset: 0; z-index: 4000; display:none; pointer-events:none; background: radial-gradient(transparent 70%, rgba(0,0,0,0.45)); }
+    #camera-rec { position: absolute; top: 12px; left: 14px; color: #f44; font-size: 14px; letter-spacing: 1px; text-shadow: 0 0 6px rgba(255,0,0,0.5); }
+    #camera-orb { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.9); filter: blur(0.5px); display:none; box-shadow: 0 0 10px rgba(255,255,255,0.8); }
 
     /* Toast */
-    #toast {
-      position: fixed; left: 50%; top: 16px; transform: translateX(-50%);
-      background: rgba(0,0,0,0.7); border: 1px solid #066; border-radius: 8px; padding: 8px 12px; color:#0ff; z-index: 10001;
-      display:none; max-width: 70vw; text-align:center;
-    }
+    #toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: rgba(0,0,0,0.7); border: 1px solid #066; border-radius: 8px; padding: 8px 12px; color:#0ff; z-index: 10001; display:none; max-width: 70vw; text-align:center; }
   </style>
 </head>
 
@@ -255,6 +189,28 @@
         <select id="devtools-room-select" style="flex:1;min-width:160px;">
           <option value="">Select room…</option>
         </select>
+        <button id="devtools-export-rooms" class="hud-btn" title="Download a rooms.generated.js skeleton">Export Rooms</button>
+      </div>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Player / Debug</legend>
+      <div class="row" style="gap:12px;align-items:center;">
+        <label style="flex:1;">Walk speed
+          <input id="devtools-walk" type="range" min="0.05" max="0.60" step="0.01" value="0.18" style="width:100%;">
+        </label>
+        <label style="flex:1;">Run speed
+          <input id="devtools-run" type="range" min="0.10" max="1.00" step="0.01" value="0.38" style="width:100%;">
+        </label>
+      </div>
+      <div class="row">
+        <label><input id="devtools-god" type="checkbox"> God mode</label>
+        <label><input id="devtools-fly" type="checkbox"> Fly (PageUp/PageDown)</label>
+      </div>
+      <div class="row">
+        <button id="devtools-teleport" class="hud-btn">Teleport to ghost</button>
+        <button id="devtools-inspector" class="hud-btn">Inspector</button>
+        <button id="devtools-ping" class="hud-btn">Ping XYZ</button>
       </div>
     </fieldset>
 
@@ -287,7 +243,7 @@
    =========================================================== */
 const canvas = document.getElementById('renderCanvas');
 let engine, scene, camera, light, skybox;
-let player = { sanity: 100, room: 'Van', speedWalk: 0.18, speedRun: 0.38, running: false, god: false };
+let player = { sanity: 100, room: 'Van', speedWalk: 0.12, speedRun: 0.28, running: false, god: false }; // slower defaults
 let controls = { forward: false, back: false, left: false, right: false };
 let allowFly = false; // only when dev flag set
 let houseRoot = null;
@@ -301,27 +257,23 @@ let dev = { enabled: false, gateOpen: false, log: [] };
 let activeItemSlot = 1;
 let inventory = { slots: {1:null,2:null,3:null,4:'Lighter',5:'Notebook'}, models: {}, icons: {} };
 let itemSceneContainer = null; // hand preview scene
-const devBus = new EventTarget(); // 🔸 Devtools event bus
-let __devGhostLogTimer = 0;       // 🔸 throttle for ghost logs
+const devBus = new EventTarget(); // devtools event bus
+let __devGhostLogTimer = 0;       // throttle for ghost logs
 
-const STORAGE_ITEMS = [
-  'EMF', 'Spirit Box', 'Thermometer', 'Crucifix', 'Salt', 'Smudge',
-  'Camera', 'UV Light', 'D.O.T.S', 'Ghost Writing Book', 'Motion Sensor'
-];
-const ITEM_MODEL_MAP = { // names in exploration_objects.glb
+const STORAGE_ITEMS = ['EMF','Spirit Box','Thermometer','Crucifix','Salt','Smudge','Camera','UV Light','D.O.T.S','Ghost Writing Book','Motion Sensor'];
+const ITEM_MODEL_MAP = {
   'EMF':'EMF_Detector_EMF_Detector_0',
   'Spirit Box':'Cone.001_Spirit_Box_0',
   'Thermometer':'Thermometer_Thermometer_0',
   'Camera':'Photo_Camera_Photo_Camera_0',
   'UV Light':'Flashlight_Flashlight_0',
-  'Flashlight':'Flashlight_Poquet_Flashlight_Poquet_0', // not a belt item now
+  'Flashlight':'Flashlight_Poquet_Flashlight_Poquet_0',
   'Thermal Camera':'Thermal_Camera_Thermal_Camera_0',
   'Voice Recorder':'Voice_Recorder_Voice_Recorder_0',
   'Ghost Writing Book':'(book-placeholder)',
   'D.O.T.S':'(dots-proj)',
   'Motion Sensor':'(motion-placeholder)'
 };
-// Ghost evidence set
 const EVIDENCE_TYPES = ["EMF Level 5","Spirit Box","Fingerprints","Ghost Writing","Freezing Temps","D.O.T.S","Orbs"];
 const GHOSTS = {
   spirit: ["Spirit Box","Ghost Writing","EMF Level 5"],
@@ -352,7 +304,7 @@ const GHOSTS = {
 };
 let discoveredEvidence = new Set();
 let currentGhostKey = null; // random at start
-let ghostPolygon = [ // outdoor barrier polygon (XZ)
+let ghostPolygon = [
   new BABYLON.Vector3(18.404, 0, -96.040),
   new BABYLON.Vector3(57.205, 0, -94.031),
   new BABYLON.Vector3(62.145, 0, -105.142),
@@ -369,10 +321,9 @@ function pickGroundHeightAt(x, z){
   const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 40, z), new BABYLON.Vector3(0,-1,0), 120);
   const hit = scene.pickWithRay(ray);
   if(hit.hit) return hit.pickedPoint.y;
-  return 1.2; // fallback
+  return 1.2;
 }
 function randomPointInPolygonXZ(poly){
-  // bounding box rejection then ray casting check
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
   poly.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
   for(let i=0;i<500;i++){
@@ -436,14 +387,14 @@ skybox.material = skyMat;
 skybox.isPickable = false;
 skybox.checkCollisions = false;
 
-// Weather init
+// Weather
 function setWeather(state){
   weather.state = state;
   document.getElementById('hud-weather').textContent = state;
   if(state === 'Rain'){
     if(!weather.rainPS){
       const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
-      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder small texture
+      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder
       ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
       ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
       ps.minSize = 0.05; ps.maxSize = 0.1;
@@ -464,17 +415,9 @@ function setWeather(state){
     weather.nextStrike = 0;
   }
 }
-function scheduleNextLightning(){
-  weather.lightningTimer = 0;
-  weather.nextStrike = 3 + Math.random()*10;
-}
-function lightningStrike(){
-  const overlay = document.getElementById('flash-overlay');
-  overlay.style.opacity = '0.6';
-  setTimeout(()=>overlay.style.opacity='0', 120);
-}
+function scheduleNextLightning(){ weather.lightningTimer = 0; weather.nextStrike = 3 + Math.random()*10; }
+function lightningStrike(){ const overlay = document.getElementById('flash-overlay'); overlay.style.opacity = '0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
 
-// Simple ambient audio (optional)
 const audio = {
   ambient: new Audio("./assets/audio/ambient.mp3"),
   rain: new Audio("./assets/audio/rainstorm.mp3"),
@@ -491,7 +434,6 @@ const audio = {
 };
 Object.values(audio).forEach(a=>{ if(a && a.loop !== undefined) a.loop = false; });
 
-// Play ambient
 function playWeatherAudio(){
   if(weather.state === 'Rain'){ audio.rain.loop = true; audio.rain.volume=0.35; audio.rain.play().catch(()=>{}); }
   else { audio.clear.loop = true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{}); }
@@ -505,34 +447,24 @@ async function loadMap(){
   const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
   houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
   result.meshes.forEach(m=>{
-    // General collision rules
-    m.checkCollisions = true;
-    m.isPickable = true;
-
-    // Disable collisions on thin or transparent decorative meshes
+    m.checkCollisions = true; m.isPickable = true;
     const bb = m.getBoundingInfo().boundingBox;
     const size = bb.maximum.subtract(bb.minimum);
     const thin = (size.y < 0.12) || (size.x < 0.12) || (size.z < 0.12);
     if(thin) m.checkCollisions = false;
-
     if(m.material && m.material.alpha && m.material.alpha < 0.9) m.checkCollisions = false;
-
-    // Doors by name
     if(/door/i.test(m.name)) doorMeshes.push(m);
   });
 
-  // Ensure a fallback ground under house in case
   const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width: 400, height: 400, subdivisions: 1 }, scene);
   fallbackGround.position.y = 0;
   fallbackGround.checkCollisions = true;
   fallbackGround.isPickable = false;
-  fallbackGround.visibility = 0; // invisible
+  fallbackGround.visibility = 0;
 
-  // Van spawn: camera placed already; adjust Y to exact ground
   const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
   camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
 
-  // Mark front/back doors clickable for interaction
   doorMeshes.forEach(door=>{
     door.actionManager = new BABYLON.ActionManager(scene);
     door.isPickable = true;
@@ -540,13 +472,12 @@ async function loadMap(){
 }
 
 /* ===========================================================
-   ITEMS: LOAD MODELS (exploration_objects.glb) + HAND PREVIEW
+   ITEMS
    =========================================================== */
 let itemsGlb = null;
 async function loadItems(){
   const res = await BABYLON.SceneLoader.LoadAssetContainerAsync("", "./assets/models/items/exploration_objects.glb", scene);
   itemsGlb = res;
-  // Pre-store meshes by name
   res.meshes.forEach(m=>{
     if(!m.name || m.name==="_root" || m.name== "__root__") return;
     inventory.models[m.name] = m;
@@ -557,15 +488,12 @@ async function loadItems(){
    GHOST MODEL / AI
    =========================================================== */
 async function loadGhost(){
-  // pick one of the ghost files randomly
   const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
   const pick = list[Math.floor(Math.random()*list.length)];
   const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
   ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-  ghost.mesh.checkCollisions = false; // ghost can pass through
-  ghost.mesh.isPickable = false;
+  ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
 
-  // Normalize orientation and scale (prevent giant)
   const bb = ghost.mesh.getHierarchyBoundingVectors(true);
   const height = bb.max.y - bb.min.y;
   const targetHeight = 1.9;
@@ -573,13 +501,12 @@ async function loadGhost(){
   ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
   ghost.mesh.rotation = new BABYLON.Vector3(0, 0, 0);
 
-  // Animations
   r.animationGroups.forEach(ag=>{
     if(/idle/i.test(ag.name)) ghost.anims.idle = ag;
     if(/walk/i.test(ag.name)||/run/i.test(ag.name)) ghost.anims.walk = ag;
   });
   if(ghost.anims.idle) ghost.anims.idle.start(true);
-  // spawn in polygon randomly
+
   const p = randomPointInPolygonXZ(ghostPolygon);
   const gy = pickGroundHeightAt(p.x, p.z);
   ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
@@ -587,24 +514,18 @@ async function loadGhost(){
 }
 
 /* ===========================================================
-   FLYING PHEONIX (sky)
+   FLYING PHEONIX
    =========================================================== */
 async function loadPhoenix(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", "pheonix.glb", scene);
     phoenix.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
     phoenix.mesh.isPickable = false; phoenix.mesh.checkCollisions = false;
-    // scale & elevate high in the sky
     phoenix.mesh.scaling = new BABYLON.Vector3(0.8,0.8,0.8);
     phoenix.mesh.position = new BABYLON.Vector3(0, 50, 0);
     phoenix.mesh.rotation = new BABYLON.Vector3(0,0,0);
-    // play any animation if exists
-    if(r.animationGroups && r.animationGroups.length){
-      r.animationGroups.forEach(ag=>ag.start(true));
-    }
-  }catch(e){
-    console.warn("Phoenix load failed:", e);
-  }
+    if(r.animationGroups && r.animationGroups.length){ r.animationGroups.forEach(ag=>ag.start(true)); }
+  }catch(e){ console.warn("Phoenix load failed:", e); }
 }
 function updatePhoenix(dt){
   if(!phoenix.mesh) return;
@@ -625,7 +546,6 @@ function updateHUD(){
   document.getElementById('hud-room').textContent = player.room;
 }
 function handleMovement(dt){
-  // base speed
   const speed = player.running ? player.speedRun : player.speedWalk;
   let move = new BABYLON.Vector3.Zero();
   if(controls.forward) move.z += 1;
@@ -634,7 +554,6 @@ function handleMovement(dt){
   if(controls.right)   move.x += 1;
   if(move.lengthSquared() > 0){
     move.normalize();
-    // Move in local camera frame
     const fwd = camera.getForwardRay().direction; fwd.y=0; fwd.normalize();
     const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
     const delta = fwd.scale(move.z).add(right.scale(move.x)).scale(speed);
@@ -647,9 +566,7 @@ function handleMovement(dt){
     if(keysDown["PageDown"]) camera.position.y -= 0.25;
   }
 
-  // Room detection (simple: use position)
   player.room = inVanZone(camera.position) ? "Van" : "Grounds";
-  // Storage button visibility
   document.getElementById('storage-button').style.display = (player.room==="Van") ? "block" : "none";
   updateHUD();
 }
@@ -659,7 +576,6 @@ function openDoorNearby(){
   if(pick.hit && pick.pickedMesh){
     const d = BABYLON.Vector3.Distance(pick.pickedPoint, camera.position);
     if(d < 3.0){
-      // rotate around Y by 90 degrees toggle
       const door = pick.pickedMesh;
       const open = !door.metadata?.open;
       const baseRot = door.metadata?.baseRot ?? door.rotation.y;
@@ -677,7 +593,7 @@ function openDoorNearby(){
 }
 
 /* ===========================================================
-   INVENTORY BELT / HAND PREVIEW / CAMERA OVERLAY
+   INVENTORY / PREVIEW / CAMERA OVERLAY
    =========================================================== */
 function rebuildBelt(){
   const belt = document.getElementById('belt');
@@ -699,18 +615,14 @@ function rebuildBelt(){
   }
   refreshHandPreview();
 }
-function selectSlot(n){
-  activeItemSlot = n;
-  rebuildBelt();
-  refreshCameraOverlay();
-}
+function selectSlot(n){ activeItemSlot = n; rebuildBelt(); refreshCameraOverlay(); }
 function refreshHandPreview(){
   const wrap = document.getElementById('hand-preview');
   wrap.innerHTML = '';
   const item = inventory.slots[activeItemSlot];
   if(!item || !itemsGlb) { wrap.style.display='none'; return; }
 
-  // Create a canvas for the preview engine
+  // create a canvas for the preview engine
   const c = document.createElement('canvas');
   c.width = 180; c.height = 140;
   c.style.width = '100%'; c.style.height = '100%';
@@ -726,14 +638,12 @@ function refreshHandPreview(){
   const hem = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), pvScene);
   hem.intensity = 1.2;
 
-  // clone mesh by name
   const meshName = ITEM_MODEL_MAP[item];
   let src = meshName && inventory.models[meshName];
   if(!src){ wrap.style.display='none'; pv.dispose(); return; }
 
   const clone = src.clone("pv-"+meshName, null, true);
   pvScene.addMesh(clone);
-  // orientation correction (items often sideways/upside-down)
   clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0);
   clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
   wrap.style.display='block';
@@ -744,37 +654,31 @@ function refreshHandPreview(){
 function refreshCameraOverlay(){
   const item = inventory.slots[activeItemSlot];
   const overlay = document.getElementById('camera-overlay');
-  if(item === 'Camera'){ overlay.style.display='block'; }
-  else overlay.style.display='none';
+  overlay.style.display = (item === 'Camera') ? 'block' : 'none';
 }
 
 /* ===========================================================
-   EVIDENCE & ITEMS — SIMPLE LOGIC
+   EVIDENCE & ITEMS
    =========================================================== */
 function logEvidence(type){
   if(!EVIDENCE_TYPES.includes(type)) return;
   if(!discoveredEvidence.has(type)){
     discoveredEvidence.add(type);
     toast(`Evidence: ${type}`, 1800);
-    // auto-check in notebook
     const cb = document.querySelector(`input[data-ev="${type}"]`);
     if(cb){ cb.checked = true; }
   }
-  // 🔸 Devtools evidence tap
   if (window.__onEvidenceLogged) {
     window.__onEvidenceLogged({ item: type, result: type, room: player.room, success: true });
   }
 }
 function useActiveItem(){
   const item = inventory.slots[activeItemSlot]; if(!item) return;
-  // Use rules:
   const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
   switch(item){
     case 'EMF':
-      if(dist < 5){
-        if(Math.random() < 0.5) logEvidence("EMF Level 5");
-        toast("EMF spikes!", 1000);
-      } else toast("EMF quiet.", 800);
+      if(dist < 5){ if(Math.random() < 0.5) logEvidence("EMF Level 5"); toast("EMF spikes!", 1000); }
+      else toast("EMF quiet.", 800);
       break;
     case 'Spirit Box':
       if(player.room!=='Van' && dist < 4){
@@ -791,38 +695,22 @@ function useActiveItem(){
       else toast("Nothing glows.", 900);
       break;
     case 'Ghost Writing Book':
-      audio.writing.play().catch(()=>{});
-      setTimeout(()=>{ logEvidence("Ghost Writing"); }, 1200);
-      toast("You place the book down...", 900);
+      audio.writing.play().catch(()=>{}); setTimeout(()=>{ logEvidence("Ghost Writing"); }, 1200); toast("You place the book down...", 900);
       break;
     case 'D.O.T.S':
       if(Math.random()<0.45){ logEvidence("D.O.T.S"); toast("Something flickers through your setup...", 1000); }
       else toast("Nothing passes through.", 900);
       break;
     case 'Camera':
-      showCameraOrb();
-      if(Math.random()<0.4){ logEvidence("Orbs"); }
+      showCameraOrb(); if(Math.random()<0.4){ logEvidence("Orbs"); }
       break;
-    case 'Smudge':
-      toast("Air thickens—and clears.", 900);
-      break;
-    case 'Crucifix':
-      toast("You hold the crucifix ready.", 900);
-      break;
-    case 'Salt':
-      toast("You sprinkle a thin line.", 900);
-      break;
-    case 'Motion Sensor':
-      toast("Sensor armed.", 800);
-      break;
-    case 'Lighter':
-      toast("Flame lit.", 700);
-      break;
-    case 'Notebook':
-      openNotebook(true);
-      break;
-    default:
-      toast(`${item}...`, 700);
+    case 'Smudge': toast("Air thickens—and clears.", 900); break;
+    case 'Crucifix': toast("You hold the crucifix ready.", 900); break;
+    case 'Salt': toast("You sprinkle a thin line.", 900); break;
+    case 'Motion Sensor': toast("Sensor armed.", 800); break;
+    case 'Lighter': toast("Flame lit.", 700); break;
+    case 'Notebook': openNotebook(true); break;
+    default: toast(`${item}...`, 700);
   }
 }
 function showCameraOrb(){
@@ -836,16 +724,11 @@ function showCameraOrb(){
 }
 
 /* ===========================================================
-   NOTEBOOK UI (Ghost list, Evidence checks, Guess)
+   NOTEBOOK
    =========================================================== */
-function openNotebook(force=false){
-  const nb = document.getElementById('notebook-modal');
-  nb.style.display='flex';
-  renderNotebook();
-}
+function openNotebook(force=false){ const nb = document.getElementById('notebook-modal'); nb.style.display='flex'; renderNotebook(); }
 function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
 function renderNotebook(){
-  // Tabs
   const tabs = Array.from(document.querySelectorAll('#notebook-tabs .tab'));
   const pages = { ghosts: document.getElementById('page-ghosts'), evidence: document.getElementById('page-evidence'), guess: document.getElementById('page-guess') };
   tabs.forEach(t=>{
@@ -857,7 +740,6 @@ function renderNotebook(){
     };
   });
 
-  // Ghosts
   const gPage = pages.ghosts; gPage.innerHTML = '';
   const gp = document.createElement('div');
   gp.innerHTML = '<div style="color:#9ff; margin-bottom: 6px;">Ghost Types & Required Evidence:</div>';
@@ -869,7 +751,6 @@ function renderNotebook(){
   });
   gPage.appendChild(gp);
 
-  // Evidence
   const ePage = pages.evidence; ePage.innerHTML = '';
   const ewrap = document.createElement('div');
   ewrap.innerHTML = '<div style="color:#9ff; margin-bottom: 6px;">Check what you have found:</div>';
@@ -885,7 +766,6 @@ function renderNotebook(){
   });
   ePage.appendChild(ewrap);
 
-  // Guess
   const gg = pages.guess; gg.innerHTML='';
   const glabel = document.createElement('div');
   glabel.style.color='#9ff'; glabel.textContent='Who do you think it is?';
@@ -907,7 +787,7 @@ function renderNotebook(){
 }
 
 /* ===========================================================
-   STORAGE UI
+   STORAGE
    =========================================================== */
 function openStorage(){
   const modal = document.getElementById('storage-modal');
@@ -938,7 +818,7 @@ function addToLoadout(item){
 function confirmLoadout(){ closeStorage(); }
 
 /* ===========================================================
-   DEVTOOLS (links #devtools-* panel to game)
+   DEVTOOLS
    =========================================================== */
 (function setupDevTools(){
   const $ = s => document.querySelector(s);
@@ -953,7 +833,17 @@ function confirmLoadout(){ closeStorage(); }
   const mapPinBtn   = $('#devtools-map-pin');
   const mapOkBtn    = $('#devtools-map-confirm');
   const roomSel     = $('#devtools-room-select');
+  const exportBtn   = $('#devtools-export-rooms');
   const logTa       = $('#devtools-log');
+
+  // Player/debug controls
+  const walkRange = $('#devtools-walk');
+  const runRange  = $('#devtools-run');
+  const chkGod    = $('#devtools-god');
+  const chkFly    = $('#devtools-fly');
+  const btnTp     = $('#devtools-teleport');
+  const btnPing   = $('#devtools-ping');
+  const btnInspect= $('#devtools-inspector');
 
   let xyzTicker = null;
   let mapping   = null; // {points:[]}
@@ -961,8 +851,7 @@ function confirmLoadout(){ closeStorage(); }
   function log(msg){
     if(!logTa) return;
     const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-    logTa.value += line;
-    logTa.scrollTop = logTa.scrollHeight;
+    logTa.value += line; logTa.scrollTop = logTa.scrollHeight;
     console.debug('%cDEV','color:#8af', msg);
   }
   function setEnabled(el,on){ if(!el) return; el.disabled=!on; el.style.opacity=on?'1':'0.6'; }
@@ -978,6 +867,15 @@ function confirmLoadout(){ closeStorage(); }
   // Start hidden until dev enabled
   if(toggleBtn) toggleBtn.style.display = 'none';
 
+  // Prefill rooms from rooms.js if present
+  try{
+    const raw = (window.ROOMS && Array.isArray(window.ROOMS)) ? window.ROOMS : [];
+    const names = raw.map(r => typeof r === 'string' ? r : (r?.name || 'Unnamed'));
+    if (roomSel && names.length){
+      roomSel.innerHTML = '<option value="">Select room…</option>' + names.map(n=>`<option>${n}</option>`).join('');
+    }
+  }catch{ /* ignore */ }
+
   // Toggle button shows/hides the panel
   toggleBtn?.addEventListener('click', ()=>{
     panel.style.display = (panel.style.display==='block') ? 'none' : 'block';
@@ -990,17 +888,14 @@ function confirmLoadout(){ closeStorage(); }
     enableBtn.textContent = on ? 'Disable Developer Listen' : 'Enable Developer Listen';
     log(on ? 'Developer Listen: ON' : 'Developer Listen: OFF');
 
-    // Ghost tracking
     if (chkGhost) {
       if (on && chkGhost.checked) devBus.addEventListener('ghost', ghostLogger);
       else                         devBus.removeEventListener('ghost', ghostLogger);
     }
-    // Evidence activity
     if (chkEv) {
       if (on && chkEv.checked) window.__onEvidenceLogged = (d)=> evidenceLogger(d);
       else                     window.__onEvidenceLogged = null;
     }
-    // XYZ tracker (player)
     if (chkXYZ) {
       if (on && chkXYZ.checked) startXYZ();
       else                      stopXYZ();
@@ -1021,12 +916,10 @@ function confirmLoadout(){ closeStorage(); }
   });
 
   // Map recorder
-  setEnabled(mapPinBtn,false);
-  setEnabled(mapOkBtn,false);
+  setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false);
   mapStartBtn?.addEventListener('click', ()=>{
     mapping = { points: [] };
-    setEnabled(mapPinBtn,true);
-    setEnabled(mapOkBtn,true);
+    setEnabled(mapPinBtn,true); setEnabled(mapOkBtn,true);
     log('Map recording started. Use “Pin”.');
   });
   mapPinBtn?.addEventListener('click', ()=>{
@@ -1037,31 +930,55 @@ function confirmLoadout(){ closeStorage(); }
   });
   mapOkBtn?.addEventListener('click', ()=>{
     if(!mapping) return;
-    const name = roomSel?.value?.trim() || 'Unnamed';
+    const name = roomSel?.value?.trim();
+    if(!name){ log('Select a room name before Confirm.'); return; }
     window.__mappedRooms = window.__mappedRooms || [];
     window.__mappedRooms.push({ name, points: mapping.points });
     log(`Map "${name}" saved (${mapping.points.length} pins).`);
-    mapping = null;
-    setEnabled(mapPinBtn,false);
-    setEnabled(mapOkBtn,false);
+    mapping = null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false);
   });
+
+  // Export mapped rooms to a rooms.generated.js skeleton
+  exportBtn?.addEventListener('click', ()=>{
+    const data = (window.__mappedRooms && window.__mappedRooms.length) ? window.__mappedRooms : [];
+    const pretty = JSON.stringify(data, null, 2);
+    const content =
+`// Auto-generated by Dev Tools — edit as needed.
+// You can rename this file to rooms.js and modify zones.
+export const ROOMS = [
+  // Example static room with a simple circular zone:
+  // { name: "Van", zone: { type: "circle", center: { x: 43.657, y: 2.0, z: -119.008 }, radius: 11 } },
+
+  // Recorded rooms with raw pins (you can convert pins → polygon or circle later):
+  // Each entry: { name, points:[{x,y,z}, ...] }
+  ...${pretty}
+];`;
+    const blob = new Blob([content], {type:'application/javascript'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'rooms.generated.js';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    log(`Exported ${data.length} room(s) to rooms.generated.js`);
+  });
+
+  // Player/debug controls
+  if (walkRange) walkRange.value = String(player.speedWalk);
+  if (runRange)  runRange.value  = String(player.speedRun);
+  walkRange?.addEventListener('input', e=>{ player.speedWalk = parseFloat(e.target.value); log(`Walk speed: ${player.speedWalk.toFixed(2)}`); });
+  runRange?.addEventListener('input', e=>{ player.speedRun = parseFloat(e.target.value); log(`Run speed: ${player.speedRun.toFixed(2)}`); });
+  chkGod?.addEventListener('change', e=>{ player.god = e.target.checked; log(`God mode: ${player.god}`); });
+  chkFly?.addEventListener('change', e=>{ allowFly = e.target.checked; log(`Fly enabled: ${allowFly}`); });
+  btnTp?.addEventListener('click', ()=>{ if (ghost.mesh) { camera.position = ghost.mesh.position.add(new BABYLON.Vector3(0,1.7,-2)); log('Teleported to ghost.'); } else log('No ghost mesh yet.'); });
+  btnPing?.addEventListener('click', ()=>{ const p = camera.position; log(`PING @ x:${p.x.toFixed(3)} y:${p.y.toFixed(3)} z:${p.z.toFixed(3)}`); });
+  btnInspect?.addEventListener('click', ()=>{ if (scene.debugLayer.isVisible()) scene.debugLayer.hide(); else scene.debugLayer.show({ embedMode: true }); });
 
   // Loggers
   function ghostLogger(e){
     const d = e?.detail || {};
     log(`Ghost: state=${d.state??'n/a'} room=${d.room??'n/a'} action=${d.action??'n/a'} speed=${typeof d.speed==='number'?d.speed.toFixed(2):'n/a'} hunt=${!!d.hunt}`);
   }
-  function evidenceLogger(d){
-    // d: { item, result, room, success }
-    log(`Evidence: ${d.item} -> ${d.result??'none'} in ${d.room??'unknown'} (${d.success?'ok':'fail'})`);
-  }
-  function startXYZ(){
-    stopXYZ();
-    xyzTicker = setInterval(()=>{
-      const p = camera?.position || {x:0,y:0,z:0};
-      log(`XYZ: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`);
-    }, 1000);
-  }
+  function evidenceLogger(d){ log(`Evidence: ${d.item} -> ${d.result??'none'} in ${d.room??'unknown'} (${d.success?'ok':'fail'})`); }
+  function startXYZ(){ stopXYZ(); xyzTicker = setInterval(()=>{ const p = camera?.position || {x:0,y:0,z:0}; log(`XYZ: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); }, 1000); }
   function stopXYZ(){ if(xyzTicker){ clearInterval(xyzTicker); xyzTicker=null; } }
 
   log('Devtools wired.');
@@ -1071,25 +988,19 @@ function confirmLoadout(){ closeStorage(); }
    STARTUP / EVENT BINDINGS
    =========================================================== */
 function initUI(){
-  // Start screen button
   document.getElementById('start-button').onclick = ()=>{
     document.getElementById('title-screen').style.display='none';
-    // Randomize weather
     const w = Math.random() < 0.5 ? 'Clear' : 'Rain';
-    setWeather(w);
-    playWeatherAudio();
-    // Random ghost type
+    setWeather(w); playWeatherAudio();
     const keys = Object.keys(GHOSTS);
     currentGhostKey = keys[Math.floor(Math.random()*keys.length)];
     toast(`Investigation started. Suspected: ???`, 1400);
   };
 
-  // Storage
   document.getElementById('storage-button').onclick = ()=> openStorage();
   document.getElementById('storage-close').onclick = ()=> closeStorage();
   document.getElementById('storage-confirm').onclick = ()=> confirmLoadout();
 
-  // Notebook
   document.getElementById('notebook-close').onclick = ()=> closeNotebook();
   Array.from(document.querySelectorAll('#notebook-tabs .tab')).forEach(t=>{
     t.onclick = ()=>{
@@ -1101,21 +1012,17 @@ function initUI(){
   });
 
   // Dev gate
-  document.getElementById('dev-yes').onclick = ()=> {
-    document.getElementById('dev-pass-wrap').style.display='block';
-  };
+  document.getElementById('dev-yes').onclick = ()=> { document.getElementById('dev-pass-wrap').style.display='block'; };
   document.getElementById('dev-no').onclick = ()=> closeDevGate();
   document.getElementById('dev-pass-submit').onclick = ()=>{
     const pw = (document.getElementById('dev-pass').value||'').trim();
-    if(pw === 'devmode'){
-      dev.enabled = true; closeDevGate(); DevTools.showToggle(); DevTools.open(); DevTools.log('Developer mode enabled.');
-    } else toast('Wrong password.', 900);
+    if(pw === 'devmode'){ dev.enabled = true; closeDevGate(); DevTools.showToggle(); DevTools.open(); DevTools.log('Developer mode enabled.'); }
+    else toast('Wrong password.', 900);
   };
 
-  // Belt
   rebuildBelt();
 
-  // Touch quick controls
+  // Touch controls
   const isTouch = 'ontouchstart' in window;
   document.getElementById('touch-controls').style.display = isTouch ? 'grid':'none';
   if(isTouch){
@@ -1152,10 +1059,14 @@ window.addEventListener('keydown', (e)=>{
   if(e.key==='4') selectSlot(4);
   if(e.key==='5') selectSlot(5);
 
-  // Use item: Q
   if(e.key==='q' || e.key==='Q') useActiveItem();
-  // Interact door: E
   if(e.key==='e' || e.key==='E') openDoorNearby();
+
+  // Live speed tweaks
+  if (e.key==='-' || e.key==='_') { player.speedWalk = Math.max(0.05, player.speedWalk - 0.02); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
+  if (e.key==='=' || e.key==='+') { player.speedWalk = Math.min(0.60, player.speedWalk + 0.02); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
+  if (e.key==='[') { player.speedRun = Math.max(0.08, player.speedRun - 0.02); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
+  if (e.key===']') { player.speedRun = Math.min(1.00, player.speedRun + 0.02); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
 
   // Dev gate (ESC)
   if(e.key==='Escape'){
@@ -1195,11 +1106,10 @@ function updateGhost(dt){
     if(ghost.anims.idle && !ghost.anims.idle.isPlaying){ if(ghost.anims.walk) ghost.anims.walk.stop(); ghost.anims.idle.start(true); }
   }
 
-  // Random whispers near player
   const pd = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
   if(pd < 6 && Math.random()<0.002){ audio.whisper.play().catch(()=>{}); }
 
-  // 🔸 Dev ghost event stream (1 Hz)
+  // Dev ghost event stream (1 Hz)
   __devGhostLogTimer += dt;
   if (__devGhostLogTimer > 1) {
     __devGhostLogTimer = 0;
@@ -1216,22 +1126,15 @@ scene.onBeforeRenderObservable.add(()=>{
   const dt = engine.getDeltaTime()/1000;
   handleMovement(dt);
 
-  // Weather lightning
   if(weather.state==='Rain'){
     weather.lightningTimer += dt;
-    if(weather.lightningTimer > weather.nextStrike){
-      lightningStrike();
-      scheduleNextLightning();
-    }
+    if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
   }
   updateGhost(dt);
   updatePhoenix(dt);
 });
 
-engine.runRenderLoop(()=>{
-  scene.render();
-});
-
+engine.runRenderLoop(()=>{ scene.render(); });
 window.addEventListener('resize', ()=>{ engine.resize(); });
 
 /* ===========================================================
