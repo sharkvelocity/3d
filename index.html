@@ -2,787 +2,723 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Prototype 3D</title>
+  <title>PhasmaPhoney</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="author" content="Shark-Blades" />
-  <meta name="description" content="Turn-based ghost hunting prototype (3D) with evidence, items, and developer tools." />
-  <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, Babylon.js, WebGL" />
+  <meta name="description" content="Turn-based/BabylonJS ghost hunting prototype" />
 
-  <!-- Babylon.js (local copies in /cdn) -->
+  <!-- Babylon core + loaders (use your local CDN copies) -->
+  <script src="./cdn/cannon.js"></script>
   <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/loaders/babylon.glTFFileLoader.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
-  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
 
   <style>
-    :root{
-      --cyan:#00F7F7;
-      --hud-bg:#000a;
-      --hud-panel:#0b0b0b;
-      --hud-border:#00ffff55;
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      background:#000; color:#0ff; font-family: monospace; overflow: hidden;
     }
-    html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;color:#cfe}
-    #renderCanvas{width:100vw;height:100vh;touch-action:none;display:block;background:#000}
-    /* Start screen */
-    #start-screen{
-      position:fixed;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999
+    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; }
+
+    /* Title screen */
+    #title {
+      position:fixed; inset:0; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; background:rgba(0,0,0,0.9);
+      z-index: 2000;
     }
-    #start-title{max-width:min(80vw,640px);opacity:.12;object-fit:contain;margin-bottom:24px}
-    #start-btn{
-      padding:14px 36px;border:2px solid #666;background:#111;color:#eee;font-size:20px;cursor:pointer;border-radius:6px
+    #title .logo {
+      width:min(80vw, 520px); height:min(40vh, 240px);
+      background:url("./logo.png") center/contain no-repeat;
+      opacity:.2; pointer-events:none; margin-bottom:24px;
     }
-    #start-btn:hover{border-color:#9cf;color:#fff}
-    /* Loadout */
-    #loadout{
-      position:fixed;inset:0;background:#000e;color:#0ff;display:none;z-index:9998;
-      align-items:center;justify-content:center;font-family:monospace
+    #title button {
+      font-family:inherit; font-size:22px; padding:12px 28px;
+      background:#111; color:#eee; border:2px solid #666; cursor:pointer;
     }
-    #loadout .panel{
-      width:min(900px,92vw);max-height:86vh;overflow:auto;background:#0a0a0a;border:1px solid var(--hud-border);border-radius:10px;padding:16px;box-shadow:0 0 32px #000
+    #title p { color:#9ff; opacity:.9; margin-top:14px; }
+
+    /* HUD: top-left */
+    #hud {
+      position:fixed; top:10px; left:10px; display:flex; flex-direction:column;
+      gap:6px; z-index:1000; pointer-events:none;
     }
-    /* HUD: top-left mini bar */
-    #hud{
-      position:fixed;left:12px;top:12px;background:var(--hud-bg);border:1px solid var(--hud-border);border-radius:8px;
-      padding:8px 10px;display:flex;gap:14px;align-items:center;font:13px/1.2 monospace;z-index:50
+    .chip {
+      background:rgba(0,0,0,0.6); border:1px solid #0ff; color:#0ff;
+      padding:6px 10px; border-radius:6px; width: fit-content;
+      pointer-events:auto;
     }
-    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--cyan);margin-right:6px}
-    .meter{min-width:120px}
-    .meter-bar{height:6px;background:#044;border-radius:4px;overflow:hidden}
-    .meter-bar > span{display:block;height:100%;background:var(--cyan);width:100%}
-    #room-chip{padding:3px 8px;border:1px solid var(--hud-border);border-radius:6px;background:#00161a}
-    /* Items belt bottom center */
-    #belt{
-      position:fixed;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:10px;z-index:60
+    #log {
+      position:fixed; left:10px; bottom:14px; width: min(560px, 60vw);
+      max-height: 35vh; overflow:auto; background:rgba(0,0,0,0.5);
+      border:1px solid #0ff; padding:8px; border-radius:6px; z-index:999;
     }
-    .slot{
-      width:72px;height:72px;border:1px solid var(--hud-border);background:#000c;border-radius:8px;position:relative;
-      display:flex;align-items:center;justify-content:center;cursor:pointer
+    #log b { color:#9ff; }
+    /* Item belt bottom-center */
+    #belt {
+      position:fixed; left:50%; bottom:8px; transform:translateX(-50%);
+      display:flex; gap:8px; padding:8px; background:rgba(0,0,0,0.45);
+      border:1px solid #0ff; border-radius:10px; z-index:1100;
     }
-    .slot.active{outline:2px solid var(--cyan)}
-    .slot .num{position:absolute;left:6px;top:4px;font:11px monospace;color:#8ff}
-    .slot .name{position:absolute;bottom:4px;left:0;right:0;text-align:center;font:10px monospace;color:#9ef;opacity:.85}
-    .slot canvas{width:64px;height:64px}
-    /* Right-hand held item hint (text fallback) */
-    #held-label{
-      position:fixed;right:12px;bottom:92px;background:var(--hud-bg);padding:6px 8px;border:1px solid var(--hud-border);border-radius:8px;
-      font:12px monospace;color:#bdf;z-index:55
+    .slot {
+      width:64px; height:64px; border:1px solid #0ff; border-radius:8px;
+      display:flex; align-items:center; justify-content:center;
+      background:rgba(0,12,12,0.5); color:#0ff; position:relative; cursor:pointer;
     }
-    /* Notebook modal */
-    #notebook{
-      position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:2000
+    .slot .num {
+      position:absolute; top:2px; left:6px; font-size:12px; color:#7ff;
+      opacity:.9;
     }
-    #notebook .book{
-      width:min(1100px,94vw);max-height:90vh;background:#0d0d0d;color:#0ff;border:1px solid var(--hud-border);border-radius:10px;
-      padding:16px;overflow:auto;font-family:monospace
+    .slot.active { outline:2px solid #fff; }
+    .slot img { max-width:70%; max-height:70%; opacity:.9; }
+    /* Right-hand overlay item (small model render) */
+    #handItem {
+      position:fixed; right:16px; bottom:110px; width:220px; height:180px;
+      border:1px solid #0ff; border-radius:8px; background:rgba(0,0,0,0.4);
+      display:none; z-index: 900;
     }
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
-    .tag{display:inline-block;border:1px solid #0ff4;padding:2px 6px;border-radius:6px;margin-right:6px;margin-bottom:6px}
-    /* Dev prompt & panel */
-    #dev-prompt{
-      position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:4000
+    /* Dev modal (ESC) */
+    #devModal {
+      position:fixed; inset:0; background:rgba(0,0,0,0.75);
+      display:none; align-items:center; justify-content:center; z-index:3000;
     }
-    #dev-prompt .card{
-      width:min(460px,92vw);background:#0b0b0b;border:1px solid var(--hud-border);border-radius:10px;padding:16px;color:#9ff;font-family:monospace
+    #devCard {
+      background:#111; color:#0ff; border:1px solid #0ff; border-radius:10px;
+      width:min(520px, 92vw); padding:18px;
     }
-    #dev-panel{
-      position:fixed;top:12px;right:12px;width:260px;background:#0b0b0b;border:1px solid var(--hud-border);border-radius:10px;padding:10px;display:none;z-index:3000;
-      font-family:monospace;color:#9ff
+    #devCard h3 { margin:0 0 10px 0; }
+    #devCard input[type="password"]{
+      width:100%; padding:8px; background:#000; color:#0ff;
+      border:1px solid #0ff; border-radius:6px; margin:10px 0 12px 0;
     }
-    #dev-panel button{
-      width:100%;margin:6px 0;padding:8px;border:1px solid #066;background:#00161a;color:#bff;border-radius:6px;cursor:pointer
+    #devControls { display:none; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    #devControls button, #devCard button {
+      background:#000; color:#0ff; border:1px solid #0ff; padding:8px 10px;
+      border-radius:6px; cursor:pointer;
     }
-    #log{
-      position:fixed;left:12px;top:84px;width:300px;max-height:46vh;overflow:auto;background:#000a;border:1px solid var(--hud-border);
-      border-radius:8px;padding:8px;font:12px monospace;color:#9ff;z-index:40
+
+    /* Simple touch move buttons (only shown on touch) */
+    #touchPad {
+      position:fixed; right:10px; bottom:10px; display:none; flex-direction:column; gap:6px; z-index:1200;
     }
-    /* Touch joystick (simple) */
-    #stick{
-      position:fixed;left:18px;bottom:18px;width:110px;height:110px;border-radius:50%;border:1px solid #0ff6;background:#00161acc;z-index:45;display:none
+    #touchPad .row { display:flex; gap:6px; justify-content:center; }
+    #touchPad button {
+      width:48px; height:48px; border-radius:8px; border:1px solid #0ff; background:rgba(0,0,0,0.45); color:#0ff;
     }
-    #stick-p{position:absolute;width:46px;height:46px;border-radius:50%;background:#0ff9;left:32px;top:32px}
-    /* Hidden until game starts */
-    #hud,#belt,#held-label,#log,#stick{display:none}
   </style>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Start screen (always on top of the logo if any) -->
-  <div id="start-screen">
-    <img id="start-title" src="./logo.png" alt="PhasmaPhoney" onerror="this.style.display='none'"/>
-    <button id="start-btn">Start Investigation</button>
-    <p style="margin-top:10px;font-style:italic;color:#9bd">“Welcome back. Let’s hope your deduction is better than your taste in candles.”</p>
-  </div>
-
-  <!-- Loadout (choose 3). Slots: 1/2/3 = chosen, 4 = Lighter, 5 = Notebook -->
-  <div id="loadout">
-    <div class="panel">
-      <h2 style="margin:0 0 10px 0">Select Your Loadout <small>(pick 3)</small></h2>
-      <div id="loadout-list" class="grid"></div>
-      <div style="display:flex;gap:10px;margin-top:12px">
-        <button id="loadout-confirm" style="padding:10px 14px;border:1px solid #0ff;background:#00161a;color:#bff;border-radius:6px;cursor:pointer">Confirm</button>
-        <button id="loadout-cancel" style="padding:10px 14px;border:1px solid #333;background:#151515;color:#ccc;border-radius:6px;cursor:pointer">Cancel</button>
-      </div>
-      <p style="margin-top:10px;color:#8ad">Fixed slots: <span class="tag">4: Lighter</span> <span class="tag">5: Notebook</span></p>
-    </div>
+  <!-- Title -->
+  <div id="title">
+    <div class="logo" aria-hidden="true"></div>
+    <button id="startBtn">Start Investigation</button>
+    <p>“Welcome back. Let’s hope your deduction is better than your taste in candles.”</p>
   </div>
 
   <!-- HUD -->
   <div id="hud">
-    <div><span class="dot"></span><b>PhasmaPhoney</b></div>
-    <div class="meter">
-      Sanity
-      <div class="meter-bar"><span id="sanity-bar" style="width:100%"></span></div>
-    </div>
-    <div id="room-chip">Room: <b id="room-name">—</b></div>
-    <div>Turn: <b id="turn-count">0</b></div>
+    <div class="chip" id="sanityChip">Sanity: <b id="sanityVal">100%</b></div>
+    <div class="chip" id="roomChip">Room: <b id="roomVal">Van</b></div>
+    <div class="chip">Turn: <b id="turnVal">0</b></div>
   </div>
 
-  <!-- Simple log -->
+  <!-- Item belt -->
+  <div id="belt">
+    <div class="slot" data-slot="1"><span class="num">1</span><span class="label">—</span></div>
+    <div class="slot" data-slot="2"><span class="num">2</span><span class="label">—</span></div>
+    <div class="slot" data-slot="3"><span class="num">3</span><span class="label">—</span></div>
+    <div class="slot" data-slot="4"><span class="num">4</span><span class="label">Lighter</span></div>
+    <div class="slot" data-slot="5"><span class="num">5</span><span class="label">Notebook</span></div>
+  </div>
+
+  <!-- Right-hand overlay miniature item render (separate mini-engine) -->
+  <canvas id="handItem"></canvas>
+
+  <!-- Text Log -->
   <div id="log"></div>
 
-  <!-- Bottom items belt -->
-  <div id="belt"></div>
-  <div id="held-label">Held: <b id="held-name">None</b></div>
-
-  <!-- Minimal touch joystick -->
-  <div id="stick"><div id="stick-p"></div></div>
-
-  <!-- Notebook -->
-  <div id="notebook">
-    <div class="book">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <h2 style="margin:0">Investigation Notebook</h2>
-        <button onclick="Notebook.close()" style="padding:6px 10px;border:1px solid #0ff;background:#00161a;color:#bff;border-radius:6px;cursor:pointer">Close</button>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <section>
-          <h3 style="margin:0 0 6px 0">Evidence</h3>
-          <div id="evidence-list"></div>
-          <div style="margin-top:10px">
-            <small style="color:#8ad">Use the correct tools near activity to unlock evidence.</small>
-          </div>
-        </section>
-        <section>
-          <h3 style="margin:0 0 6px 0">Ghost Guess</h3>
-          <select id="ghost-guess" style="width:100%;padding:8px;background:#091313;color:#aff;border:1px solid #0ff;border-radius:6px"></select>
-          <button id="submit-guess" style="margin-top:8px;padding:8px 10px;border:1px solid #0ff;background:#00161a;color:#bff;border-radius:6px;cursor:pointer">Submit Guess</button>
-          <div id="guess-result" style="margin-top:8px;color:#9ff"></div>
-          <hr style="border-color:#044">
-          <h3 style="margin:8px 0 6px 0">Ghost Encyclopedia</h3>
-          <div id="ghost-list" class="grid"></div>
-        </section>
-      </div>
-    </div>
-  </div>
-
-  <!-- Dev-mode gate + panel -->
-  <div id="dev-prompt">
-    <div class="card">
-      <div id="dev-step1">
-        <h3 style="margin:0 0 8px 0">Enable Developer Options?</h3>
-        <div style="display:flex;gap:8px">
-          <button id="dev-yes" style="padding:8px 12px;border:1px solid #0ff;background:#00161a;color:#bff;border-radius:6px;cursor:pointer">Yes</button>
-          <button id="dev-no" style="padding:8px 12px;border:1px solid #333;background:#151515;color:#ccc;border-radius:6px;cursor:pointer">No</button>
+  <!-- Dev Modal (ESC to open) -->
+  <div id="devModal">
+    <div id="devCard">
+      <h3>Developer Options</h3>
+      <div id="devGate">
+        <p>Enable developer mode?</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="devYes">Yes</button>
+          <button id="devNo">No</button>
+        </div>
+        <div id="devPwdWrap" style="display:none;">
+          <p>Enter password:</p>
+          <input id="devPwd" type="password" placeholder="••••••••" />
+          <button id="devPwdBtn">Unlock</button>
         </div>
       </div>
-      <div id="dev-step2" style="display:none">
-        <h3 style="margin:0 0 8px 0">Password</h3>
-        <input id="dev-pass" type="password" placeholder="••••••" style="width:100%;padding:8px;border:1px solid #0ff;background:#091313;color:#aff;border-radius:6px" />
-        <button id="dev-ok" style="margin-top:8px;padding:8px 12px;border:1px solid #0ff;background:#00161a;color:#bff;border-radius:6px;cursor:pointer">Enable</button>
-        <div id="dev-error" style="margin-top:6px;color:#faa"></div>
+
+      <div id="devControls">
+        <button id="tpGhostBtn">Teleport to Ghost</button>
+        <button id="godBtn">Toggle God Mode</button>
+        <button id="pingBtn">Ping XYZ (log location)</button>
+        <button id="closeDev">Close</button>
+        <p style="margin:8px 0 0;color:#7ff;">PageUp/PageDown fly only when Dev Mode is enabled.</p>
       </div>
     </div>
   </div>
 
-  <div id="dev-panel">
-    <b>Developer Options</b>
-    <button onclick="Dev.teleportToGhost()">Teleport to Ghost</button>
-    <button onclick="Dev.toggleGodMode()">Toggle God Mode</button>
-    <button onclick="Dev.recenterToHouse()">Recenter Camera to House</button>
-    <button onclick="Dev.revealGhost()">Reveal Ghost & Evidence</button>
-    <button onclick="Dev.giveAll()">Give All Items</button>
-    <button onclick="Dev.ping()">Ping XYZ (log)</button>
+  <!-- Touch controls -->
+  <div id="touchPad">
+    <div class="row"><button data-dir="w">W</button></div>
+    <div class="row">
+      <button data-dir="a">A</button>
+      <button data-dir="s">S</button>
+      <button data-dir="d">D</button>
+    </div>
+    <div class="row"><button id="useBtn">Use</button></div>
   </div>
 
 <script>
-/* ----------------------------------------------------------
- * Engine/Scene Boot
- * --------------------------------------------------------*/
-const canvas = document.getElementById('renderCanvas');
-const engine = new BABYLON.Engine(canvas, true, {preserveDrawingBuffer:true, stencil:true, antialias:true});
-let scene, camera, ui;
-let utilityLayer; // for 'held' mesh
-let houseBounds = null;
+/* =======================
+   Small utility logging
+======================= */
+const logDiv = document.getElementById('log');
+function logLine(msg){
+  const line = document.createElement('div');
+  line.innerHTML = msg;
+  logDiv.appendChild(line);
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
 
-// WASD movement + collisions + gravity
+/* =======================
+   Game/runtime state
+======================= */
+const state = {
+  engine: null, scene: null, camera: null, light: null,
+  handEngine: null, handScene: null, handCamera: null, handLight: null,
+  itemsGLB: "./assets/models/items/exploration_objects.glb",
+  houseGLB: "./assets/models/map/Abandoned_House.glb",
+  ghostGLBs: [
+    "./assets/models/ghosts/ghost1.glb",
+    "./assets/models/ghosts/ghost2.glb",
+    "./assets/models/ghosts/ghost3.glb",
+    "./assets/models/ghosts/ghost4.glb",
+  ],
+  player: {
+    pos: new BABYLON.Vector3(37.8045, 0.2, -95.0355), // VAN midpoint spawn (between first two PINGs)
+    speed: 0.12,
+    sanity: 100,
+    turn: 0,
+    godMode: false,
+    inDev: false,
+    currentRoom: "Van",
+  },
+  barrier: {
+    // Your polygon (clockwise) and its bounding rectangle:
+    poly: [
+      new BABYLON.Vector3(18.404, 0, -96.040),
+      new BABYLON.Vector3(57.205, 0, -94.031),
+      new BABYLON.Vector3(62.145, 0, -105.142),
+      new BABYLON.Vector3(61.872, 0, -149.928),
+      new BABYLON.Vector3(18.660, 0, -149.900)
+    ],
+    bounds: { minX: 18.404, maxX: 62.145, minZ: -149.928, maxZ: -94.031 }
+  },
+  ghost: {
+    mesh: null,
+    target: null,
+    speed: 0.05
+  },
+  // Item belt (slots 1..5) — 4=Lighter, 5=Notebook
+  belt: {
+    slot1: null, // set after items load
+    slot2: null,
+    slot3: null,
+    slot4: "Lighter",
+    slot5: "Notebook",
+    active: 1,
+    meshes: {} // name -> mesh clone (for hand render)
+  },
+  input: {
+    forward: false, back: false, left: false, right: false,
+    up: false, down: false // dev fly only
+  }
+};
+
+/* =======================
+   Geometry helpers
+======================= */
+function clampToBounds(vec){
+  const b = state.barrier.bounds;
+  vec.x = Math.max(b.minX, Math.min(b.maxX, vec.x));
+  vec.z = Math.max(b.minZ, Math.min(b.maxZ, vec.z));
+  return vec;
+}
+
+// Point-in-polygon (X,Z)
+function pointInPolygon(x, z, poly){
+  let inside = false;
+  for (let i=0,j=poly.length-1; i<poly.length; j=i++){
+    const xi = poly[i].x, zi = poly[i].z;
+    const xj = poly[j].x, zj = poly[j].z;
+    const intersect = ((zi > z) !== (zj > z)) &&
+                      (x < (xj - xi) * (z - zi) / (zj - zi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function randomPointInBounds(){
+  const b = state.barrier.bounds;
+  let x, z;
+  // Try a handful of samples until one is inside polygon; fallback to bounds
+  for (let i=0; i<16; i++){
+    x = b.minX + Math.random()*(b.maxX - b.minX);
+    z = b.minZ + Math.random()*(b.maxZ - b.minZ);
+    if (pointInPolygon(x, z, state.barrier.poly)) return new BABYLON.Vector3(x, 0.2, z);
+  }
+  return new BABYLON.Vector3(
+    b.minX + Math.random()*(b.maxX - b.minX),
+    0.2,
+    b.minZ + Math.random()*(b.maxZ - b.minZ)
+  );
+}
+
+/* =======================
+   Engine/Scene setup
+======================= */
+const canvas = document.getElementById("renderCanvas");
+state.engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true, disableWebGL2Support: false });
+
 function createScene(){
-  scene = new BABYLON.Scene(engine);
+  const scene = new BABYLON.Scene(state.engine);
   scene.clearColor = new BABYLON.Color4(0,0,0,1);
+
+  // Physics + gravity + collisions
+  const gravity = new BABYLON.Vector3(0, -9.81, 0);
+  const cannon = new BABYLON.CannonJSPlugin(true, 10, CANNON);
+  scene.enablePhysics(gravity, cannon);
   scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0,-0.9,0);
 
-  // Lighting
+  // Camera
+  const cam = new BABYLON.UniversalCamera("cam", state.player.pos.clone(), scene);
+  cam.minZ = 0.1;
+  cam.attachControl(canvas, true);
+  cam.applyGravity = true;
+  cam.checkCollisions = true;
+  cam.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
+  cam.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
+
+  // WASD
+  cam.keysUp = [87];    // W
+  cam.keysDown = [83];  // S
+  cam.keysLeft = [65];  // A
+  cam.keysRight = [68]; // D
+  cam.speed = 0.45;
+
+  // Lights
   const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-  hemi.intensity = 0.8;
+  hemi.intensity = 0.7;
 
-  // Camera (player)
-  camera = new BABYLON.UniversalCamera("playerCam", VAN_SPAWN.add(new BABYLON.Vector3(0,1.6,0)), scene);
-  camera.attachControl(canvas, true);
-  camera.checkCollisions = true;
-  camera.applyGravity = true;
-  camera.ellipsoid = new BABYLON.Vector3(0.5,1.0,0.5);
-  camera.ellipsoidOffset = new BABYLON.Vector3(0,1.0,0);
-  camera.keysUp=[87]; camera.keysDown=[83]; camera.keysLeft=[65]; camera.keysRight=[68]; // W A S D
-  camera.speed = 0.55; camera.inertia = 0.8; camera.angularSensibility = 2500;
+  // Safety fallback ground (invisible, large enough under the house area)
+  const fallbackGround = BABYLON.MeshBuilder.CreateGround("safetyGround",
+    { width: 80, height: 80, subdivisions: 2 }, scene);
+  fallbackGround.position = new BABYLON.Vector3(40, -0.5, -122);
+  fallbackGround.checkCollisions = true;
+  fallbackGround.isVisible = false;
+  fallbackGround.physicsImpostor = new BABYLON.PhysicsImpostor(
+    fallbackGround, BABYLON.PhysicsImpostor.BoxImpostor,
+    { mass: 0, friction: 0.9, restitution: 0 }, scene
+  );
 
-  // Utility layer for held item mesh
-  utilityLayer = new BABYLON.UtilityLayerRenderer(scene);
-  utilityLayer.utilityLayerScene.autoClear = false;
-
-  // UI
-  ui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("ui", true, scene);
+  state.scene = scene;
+  state.camera = cam;
+  state.light = hemi;
 
   return scene;
 }
 
-// VAN spawn (Point A supplied by you)
-const VAN_SPAWN = new BABYLON.Vector3(51.062, 0.905, -104.156);
-
-// Snap to floor helper
-function snapToFloor(vec3){
-  const origin = vec3.add(new BABYLON.Vector3(0, 2.5, 0));
-  const ray = new BABYLON.Ray(origin, new BABYLON.Vector3(0,-1,0), 10);
-  const pick = scene.pickWithRay(ray, m => m.checkCollisions === true);
-  const y = pick && pick.hit ? pick.pickedPoint.y : vec3.y;
-  camera.position.set(vec3.x, y + 1.6, vec3.z);
+/* =======================
+   Hand (right overlay) mini renderer
+======================= */
+const handCanvas = document.getElementById("handItem");
+function createHandScene(){
+  state.handEngine = new BABYLON.Engine(handCanvas, true);
+  const scene = new BABYLON.Scene(state.handEngine);
+  scene.clearColor = new BABYLON.Color4(0,0,0,0);
+  const cam = new BABYLON.ArcRotateCamera("hcam", Math.PI/2, Math.PI/2.5, 2.2, new BABYLON.Vector3(0,0,0), scene);
+  cam.attachControl(handCanvas, false);
+  cam.lowerRadiusLimit = 1.6; cam.upperRadiusLimit = 3.2;
+  const l = new BABYLON.HemisphericLight("hl", new BABYLON.Vector3(0, 1, 0), scene);
+  l.intensity = 0.9;
+  state.handScene = scene; state.handCamera = cam; state.handLight = l;
+  state.handEngine.runRenderLoop(() => scene.render());
 }
 
-/* ----------------------------------------------------------
- * Assets: Map, Items, Audio
- * --------------------------------------------------------*/
-const paths = {
-  house: "./assets/models/map/Abandoned_House.glb",
-  items: "./assets/models/items/exploration_objects.glb",
-  audio: {
-    whisper: "./assets/audio/whisper.mp3",
-    spiritbox: "./assets/audio/spiritbox.mp3",
-    spiritStatic: "./assets/audio/spiritBoxStatic.mp3",
-    emf: "./assets/audio/Radio.mp3",
-    door1: "./assets/audio/doorCreak1.mp3",
-    door2: "./assets/audio/doorCreak2.mp3",
-    slam1: "./assets/audio/doorSlam1.mp3",
-    ambient: "./assets/audio/ambient.mp3",
-    rain: "./assets/audio/rainstorm.mp3",
-    killed: "./assets/audio/gameKilled.mp3",
-    notebook: "./assets/audio/notebook_open.mp3",
-  }
-};
+/* =======================
+   Load world + items + ghost
+======================= */
+async function loadMapAndItems(){
+  const scene = state.scene;
 
-const Audio = {};
-function loadAudio(){
-  for(const [k,src] of Object.entries(paths.audio)){
-    const s = new BABYLON.Sound(k, src, scene, null, {volume: k==='ambient'?0.25:0.7, loop: k==='ambient'});
-    Audio[k]=s;
-  }
-}
+  // Import House
+  logLine("<b>Loading map…</b>");
+  await BABYLON.SceneLoader.ImportMeshAsync("", state.houseGLB.substring(0, state.houseGLB.lastIndexOf("/") + 1), state.houseGLB.split("/").pop(), scene);
 
-// item model handles (from exploration_objects.glb)
-const ItemMeshes = {}; // name -> root mesh
-function cloneItemMesh(name){
-  const src = ItemMeshes[name];
-  if(!src) return null;
-  const c = src.clone(name + "_clone");
-  if(c.getChildMeshes) c.getChildMeshes().forEach(m => {m.isPickable=false; m.checkCollisions=false});
-  return c;
-}
-
-/* ----------------------------------------------------------
- * Game State
- * --------------------------------------------------------*/
-const EvidenceTypes = ["EMF Level 5","Spirit Box","Fingerprints","Ghost Writing","Freezing Temps","D.O.T.S","Orbs"];
-const AllItems = ["EMF","Spirit Box","Thermometer","UV Light","D.O.T.S","Ghost Writing Book","Camera","Crucifix","Salt","Smudge","Motion Sensor","Flashlight"]; // we can extend as we map meshes
-
-const Ghosts = {
-  spirit:          { evidence:["Spirit Box","Ghost Writing","EMF Level 5"] },
-  wraith:          { evidence:["Spirit Box","D.O.T.S","EMF Level 5"] },
-  poltergeist:     { evidence:["Spirit Box","Ghost Writing","Fingerprints"] },
-  banshee:         { evidence:["D.O.T.S","Fingerprints","Orbs"] },
-  jinn:            { evidence:["EMF Level 5","Freezing Temps","Fingerprints"] },
-  mare:            { evidence:["Spirit Box","Ghost Writing","Orbs"] },
-  revenant:        { evidence:["Ghost Writing","Orbs","Freezing Temps"] },
-  shade:           { evidence:["Ghost Writing","Freezing Temps","EMF Level 5"] },
-  demon:           { evidence:["Freezing Temps","Ghost Writing","Fingerprints"] },
-  yurei:           { evidence:["Freezing Temps","D.O.T.S","Orbs"] },
-  oni:             { evidence:["EMF Level 5","Freezing Temps","D.O.T.S"] },
-  yokai:           { evidence:["Spirit Box","D.O.T.S","Orbs"] },
-  hantu:           { evidence:["Freezing Temps","Ghost Writing","Fingerprints"] },
-  goryo:           { evidence:["EMF Level 5","D.O.T.S","Fingerprints"] },
-  myling:          { evidence:["Ghost Writing","EMF Level 5","Fingerprints"] },
-  onryo:           { evidence:["Freezing Temps","Spirit Box","Orbs"] },
-  "the twins":     { evidence:["Spirit Box","Freezing Temps","EMF Level 5"] },
-  raiju:           { evidence:["EMF Level 5","D.O.T.S","Orbs"] },
-  obake:           { evidence:["EMF Level 5","Orbs","Fingerprints"] },
-  "the mimic":     { evidence:["Spirit Box","Freezing Temps","Fingerprints"] },
-  moroi:           { evidence:["Freezing Temps","Ghost Writing","Spirit Box"] },
-  deogen:          { evidence:["Spirit Box","Ghost Writing","D.O.T.S"] },
-  thaye:           { evidence:["Ghost Writing","Orbs","D.O.T.S"] },
-  phantom:         { evidence:["Spirit Box","D.O.T.S","Fingerprints"] },
-  succubus:        { evidence:["Ghost Writing","Orbs","Spirit Box"] }
-};
-
-const Game = {
-  started:false,
-  turn:0,
-  sanity:100,
-  room:"—",
-  ghostKey:null,
-  ghostNode:null,
-  ghostRoomPos:null,
-  ghostEvidence:[],
-  inventory:[], // first 3 slots chosen
-  slotActive:1, // 1..5 (4=Lighter, 5=Notebook)
-  heldMesh:null,
-  godMode:false,
-  dev:false,
-  noClip:false,
-  killOnContact:true,
-};
-
-/* ----------------------------------------------------------
- * UI helpers
- * --------------------------------------------------------*/
-const $ = sel => document.querySelector(sel);
-const $$ = sel => document.querySelectorAll(sel);
-function show(id, yes=true){ const el=$(id); if(!el) return; el.style.display = yes? (el.id==="hud"||el.id==="belt"||el.id==="log"||el.id==="stick"?"flex":"block") : "none"; }
-function log(msg){ const el=$("#log"); const line=document.createElement('div'); line.textContent=msg; el.appendChild(line); el.scrollTop=el.scrollHeight; }
-function setSanity(v){ Game.sanity = Math.max(0, Math.min(100, v)); $("#sanity-bar").style.width = Game.sanity + "%"; }
-function setRoom(name){ Game.room = name; $("#room-name").textContent = name; }
-
-/* ----------------------------------------------------------
- * Start / Loadout flow
- * --------------------------------------------------------*/
-$("#start-btn").onclick = ()=>{
-  // Show loadout selection
-  populateLoadout();
-  show("#start-screen", false);
-  show("#loadout", true);
-};
-
-function populateLoadout(){
-  const list=$("#loadout-list"); list.innerHTML="";
-  AllItems.forEach(name=>{
-    // fixed lighter/notebook are implicit; still allow pick of others
-    const lab=document.createElement("label");
-    lab.style.display="flex"; lab.style.alignItems="center"; lab.style.gap="8px";
-    lab.style.border="1px solid #044"; lab.style.padding="6px 8px"; lab.style.borderRadius="6px"; lab.style.background="#000";
-    lab.innerHTML = `<input type="checkbox" value="${name}"/> <span>${name}</span>`;
-    list.appendChild(lab);
-  });
-  $("#loadout-confirm").onclick = ()=>{
-    const picks=[...list.querySelectorAll("input:checked")].map(cb=>cb.value);
-    if(picks.length>3){ alert("Pick at most 3."); return; }
-    Game.inventory = picks;
-    show("#loadout", false);
-    bootInvestigation();
-  };
-  $("#loadout-cancel").onclick = ()=>{
-    show("#loadout", false);
-    show("#start-screen", true);
-  };
-}
-
-/* ----------------------------------------------------------
- * Investigation Init
- * --------------------------------------------------------*/
-function bootInvestigation(){
-  createScene();
-  show("#hud", true);
-  show("#log", true);
-  // Mobile? show simple joystick
-  if (('ontouchstart' in window) || navigator.maxTouchPoints>0) show("#stick", true);
-
-  // Audio
-  loadAudio();
-  Audio.ambient && Audio.ambient.play();
-
-  // Load map then items
-  BABYLON.SceneLoader.Append("./assets/models/map/","Abandoned_House.glb", scene, ()=>{
-    // Colliders
-    scene.meshes.forEach(m=>{
-      const n=(m.name||"").toLowerCase();
-      if (/(floor|ground|tile|concrete|wood|pavement|road)/.test(n)) { m.checkCollisions=true; m.isPickable=true; }
-      if (/(wall|brick|stair|ramp|rail|pillar|post)/.test(n)) { m.checkCollisions=true; m.isPickable=true; }
-      if (/(glass|foliage|leaf|bush|plant|decal|trash)/.test(n)) { m.checkCollisions=false; }
-    });
-
-    // Compute bounds for house center
-    houseBounds = BABYLON.Mesh.MinMax(scene.meshes.filter(m=>m.checkCollisions));
-    // Spawn at van point A, snap to floor
-    snapToFloor(VAN_SPAWN);
-    setRoom("Van");
-    log("Map loaded.");
-    // Load items GLB
-    BABYLON.SceneLoader.ImportMeshAsync(null,"./assets/models/items/","exploration_objects.glb", scene).then(res=>{
-      res.meshes.forEach(m=>{ m.setEnabled(false); }); // keep templates hidden
-      // Map known names
-      // (These names came from your GLB listing; adjust if needed)
-      const nameMap = {
-        "EMF":"EMF_Detector_EMF_Detector_0",
-        "Spirit Box":"Cone.001_Spirit_Box_0",
-        "Thermometer":"Thermometer_Thermometer_0",
-        "Camera":"Photo_Camera_Photo_Camera_0",
-        "Flashlight":"Flashlight_Flashlight_0",
-        "Thermal Camera":"Thermal_Camera_Thermal_Camera_0",
-        "Voice Recorder":"Voice_Recorder_Voice_Recorder_0"
-      };
-      for(const [friendly,meshName] of Object.entries(nameMap)){
-        const src = scene.getMeshByName(meshName);
-        if(src) ItemMeshes[friendly]=src;
+  // Enable collisions for all imported meshes; add static impostors for stability
+  scene.meshes.forEach(m => {
+    if (m && m.name !== "safetyGround") {
+      m.checkCollisions = true;
+      if (!m.physicsImpostor && m.getTotalVertices() > 0) {
+        try {
+          m.physicsImpostor = new BABYLON.PhysicsImpostor(
+            m, BABYLON.PhysicsImpostor.MeshImpostor,
+            { mass: 0, friction: 0.9, restitution: 0 }, scene
+          );
+        } catch(e){
+          // fallback if mesh impostor fails
+          m.physicsImpostor = new BABYLON.PhysicsImpostor(
+            m, BABYLON.PhysicsImpostor.BoxImpostor,
+            { mass: 0, friction: 0.9, restitution: 0 }, scene
+          );
+        }
       }
-      log("Items loaded.");
-      // Ghost roll
-      startGameLoop();
-    });
+    }
+  });
+  logLine("<b>Map loaded.</b>");
+
+  // Load Items GLB (so we can clone for belt/hand view)
+  logLine("<b>Loading item models (exploration_objects.glb)…</b>");
+  const res = await BABYLON.SceneLoader.ImportMeshAsync("", state.itemsGLB.substring(0, state.itemsGLB.lastIndexOf("/") + 1), state.itemsGLB.split("/").pop(), scene);
+  const itemRoot = res.meshes[0]; // __root__
+  // Index item meshes by an easy label; adjust these names to match your GLB
+  const candidates = {};
+  res.meshes.forEach(m => {
+    candidates[m.name] = m;
   });
 
-  engine.runRenderLoop(()=>scene && scene.render());
-  window.addEventListener('resize', ()=> engine.resize());
+  // Map commonly used items to a source mesh (update mappings to your GLB names)
+  const itemMap = {
+    "EMF": candidates["EMF_Detector_EMF_Detector_0"] || null,
+    "Spirit Box": candidates["Cone.001_Spirit_Box_0"] || null,
+    "Thermometer": candidates["Thermometer_Thermometer_0"] || null,
+    "Camera": candidates["Photo_Camera_Photo_Camera_0"] || null,
+    "Flashlight": candidates["Flashlight_Flashlight_0"] || candidates["Flashlight_Poquet_Flashlight_Poquet_0"] || null,
+    "Voice Recorder": candidates["Voice_Recorder_Voice_Recorder_0"] || null,
+    "Thermal Camera": candidates["Thermal_Camera_Thermal_Camera_0"] || null
+  };
+
+  // Hide source item meshes; we’ll clone when needed
+  Object.values(itemMap).forEach(m => { if (m) m.setEnabled(false); });
+
+  // Place some defaults into belt 1..3 (editable)
+  state.belt.slot1 = "EMF";
+  state.belt.slot2 = "Thermometer";
+  state.belt.slot3 = "Spirit Box";
+
+  // Keep map for hand renderer clones
+  state.belt.meshes = itemMap;
+
+  logLine("<b>Items loaded.</b>");
+
+  await ensureGhostSpawn();
 }
 
-/* ----------------------------------------------------------
- * Ghost roll / rooms
- * --------------------------------------------------------*/
-function pickGhost(){
-  const keys = Object.keys(Ghosts);
-  Game.ghostKey = keys[Math.floor(Math.random()*keys.length)];
-  Game.ghostEvidence = Ghosts[Game.ghostKey].evidence.slice();
-}
-function placeGhost(){
-  // Place somewhere near house center
-  const root = new BABYLON.TransformNode("ghostRoot", scene);
-  const center = houseCenter();
-  const pos = center.add(new BABYLON.Vector3((Math.random()-0.5)*8, 0, (Math.random()-0.5)*8));
-  root.position.copyFrom(pos);
-  snapNodeToFloor(root);
-  Game.ghostNode = root;
-  Game.ghostRoomPos = root.position.clone();
-}
+/* =======================
+   Ghost spawn + wander
+======================= */
+async function ensureGhostSpawn(){
+  if (state.ghost.mesh) return;
+  const scene = state.scene;
+  const choice = state.ghostGLBs[Math.floor(Math.random()*state.ghostGLBs.length)];
+  const basePath = choice.substring(0, choice.lastIndexOf("/") + 1);
+  const fileName = choice.split("/").pop();
+  const imp = await BABYLON.SceneLoader.ImportMeshAsync("", basePath, fileName, scene);
+  // Merge into single transform (first non-root)
+  let ghost = null;
+  for (const m of imp.meshes){
+    if (m.name !== "__root__"){
+      ghost = m; break;
+    }
+  }
+  if (!ghost) ghost = imp.meshes[0];
+  ghost.name = "GHOST";
+  ghost.alwaysSelectAsActiveMesh = true;
+  ghost.isPickable = false;
+  ghost.checkCollisions = false;
+  ghost.position = randomPointInBounds();
+  ghost.position.y = 0.2; // ground-ish
+  state.ghost.mesh = ghost;
+  logLine(`<b>Ghost spawned</b> @ x:${ghost.position.x.toFixed(3)} y:${ghost.position.y.toFixed(3)} z:${ghost.position.z.toFixed(3)}`);
 
-function houseCenter(){
-  if(!houseBounds) return new BABYLON.Vector3(0,0,0);
-  const min = houseBounds.minimum, max = houseBounds.maximum;
-  return new BABYLON.Vector3((min.x+max.x)/2, (min.y+max.y)/2, (min.z+max.z)/2);
-}
-function snapNodeToFloor(node){
-  const ray = new BABYLON.Ray(node.position.add(new BABYLON.Vector3(0,5,0)), new BABYLON.Vector3(0,-1,0), 20);
-  const pick = scene.pickWithRay(ray, m => m.checkCollisions===true);
-  if (pick && pick.hit) node.position.y = pick.pickedPoint.y + 0.05;
-}
+  // set initial target
+  state.ghost.target = randomPointInBounds();
 
-/* ----------------------------------------------------------
- * Items belt & held mesh
- * --------------------------------------------------------*/
-function buildBelt(){
-  const belt=$("#belt"); belt.innerHTML="";
-  // Active slots 1..3 from Game.inventory
-  const slots = [Game.inventory[0]||null, Game.inventory[1]||null, Game.inventory[2]||null, "Lighter", "Notebook"];
-  slots.forEach((name,idx)=>{
-    const i = idx+1;
-    const div=document.createElement('div');
-    div.className="slot";
-    div.dataset.index=i;
-    if(i===Game.slotActive) div.classList.add('active');
-    div.innerHTML = `<div class="num">${i}</div><div class="name">${name?name:"—"}</div>`;
-    belt.appendChild(div);
-    div.onclick = ()=>selectSlot(i);
+  // simple wander loop
+  state.scene.onBeforeRenderObservable.add(() => {
+    if (!state.ghost.mesh) return;
+    const g = state.ghost.mesh;
+    const t = state.ghost.target;
+    if (!t) return;
+    const dir = t.subtract(g.position);
+    const dist = dir.length();
+    if (dist < 0.25) {
+      state.ghost.target = randomPointInBounds();
+    } else {
+      const step = dir.normalize().scale(state.ghost.speed);
+      g.position.addInPlace(step);
+      g.position.y = 0.2; // keep grounded
+    }
   });
+}
 
-  show("#belt", true);
-  updateHeldLabel();
+/* =======================
+   UI wiring (HUD, belt, hand)
+======================= */
+const sanityVal = document.getElementById("sanityVal");
+const roomVal = document.getElementById("roomVal");
+const turnVal = document.getElementById("turnVal");
+
+function refreshHUD(){
+  sanityVal.textContent = `${state.player.sanity}%`;
+  roomVal.textContent = state.player.currentRoom;
+  turnVal.textContent = state.player.turn;
 }
-function selectSlot(i){
-  Game.slotActive = i;
-  $$(".slot").forEach(s=>s.classList.remove('active'));
-  const el=[...$$(".slot")].find(s=>+s.dataset.index===i);
-  el && el.classList.add('active');
-  updateHeldLabel();
-  showHeldMeshForActive();
+
+function populateBelt(){
+  // Put labels (or mini icons if you add them)
+  const beltDiv = document.getElementById("belt");
+  const findSlotDiv = (n) => beltDiv.querySelector(`.slot[data-slot="${n}"]`);
+
+  function setSlot(n, name){
+    const div = findSlotDiv(n);
+    const label = div.querySelector(".label");
+    label.textContent = name || "—";
+    if (parseInt(div.dataset.slot,10) === state.belt.active) div.classList.add("active");
+    else div.classList.remove("active");
+  }
+  setSlot(1, state.belt.slot1);
+  setSlot(2, state.belt.slot2);
+  setSlot(3, state.belt.slot3);
+  setSlot(4, "Lighter");
+  setSlot(5, "Notebook");
+
+  // Click to select (no auto-use)
+  beltDiv.querySelectorAll(".slot").forEach(div => {
+    div.onclick = () => {
+      const slot = parseInt(div.dataset.slot, 10);
+      setActiveSlot(slot);
+    };
+  });
 }
-function activeName(){
-  if (Game.slotActive<=3) return Game.inventory[Game.slotActive-1] || null;
-  if (Game.slotActive===4) return "Lighter";
-  if (Game.slotActive===5) return "Notebook";
+
+function setActiveSlot(slot){
+  if (slot < 1 || slot > 5) return;
+  state.belt.active = slot;
+  // update visual
+  document.querySelectorAll('#belt .slot').forEach(s => s.classList.remove('active'));
+  document.querySelector(`#belt .slot[data-slot="${slot}"]`).classList.add('active');
+  // show right-hand mini render if item has a model
+  const itemName = getActiveItemName();
+  showHandItem(itemName);
+}
+
+function getActiveItemName(){
+  if (state.belt.active === 1) return state.belt.slot1;
+  if (state.belt.active === 2) return state.belt.slot2;
+  if (state.belt.active === 3) return state.belt.slot3;
+  if (state.belt.active === 4) return "Lighter";
+  if (state.belt.active === 5) return "Notebook";
   return null;
 }
-function updateHeldLabel(){
-  const name = activeName();
-  $("#held-name").textContent = name||"None";
-}
-function showHeldMeshForActive(){
-  if(Game.heldMesh){ Game.heldMesh.dispose(); Game.heldMesh=null; }
-  const name = activeName();
-  if(!name || name==="Notebook"){ return; } // no mesh for notebook
-  // Try to find a mapped mesh
-  const mapped = ItemMeshes[name] || ItemMeshes["Flashlight"]; // fallback
-  if(!mapped) return;
-  const clone = mapped.clone(name+"_held", null);
-  clone.getChildMeshes && clone.getChildMeshes().forEach(m=>{m.isPickable=false; m.checkCollisions=false;});
-  clone.setEnabled(true);
-  // Parent to camera so it follows (HUD-like)
-  clone.parent = camera;
-  clone.position = new BABYLON.Vector3(0.35, -0.4, 0.8);
-  clone.rotation = new BABYLON.Vector3(0.2, -0.8, 0);
-  clone.scaling = new BABYLON.Vector3(0.4,0.4,0.4);
-  Game.heldMesh = clone;
-}
 
-/* ----------------------------------------------------------
- * Evidence logic (tool-gated)
- * --------------------------------------------------------*/
-const EvidenceFound = new Set();
-
-function distanceToGhost(){ if(!Game.ghostNode) return 999; return BABYLON.Vector3.Distance(camera.position, Game.ghostNode.position); }
-
-function tryUseActive(){
-  const name = activeName();
-  if(!name) return;
-  // Notebook opens UI
-  if(name==="Notebook"){ Notebook.open(); return; }
-  // Lighter toggles (future: ignite smudge)
-  if(name==="Lighter"){ log("Lighter flickers."); return; }
-
-  // Gate by evidence type
-  const near = distanceToGhost() < 5; // radius for interaction
-  switch(name){
-    case "EMF":
-      Audio.emf && Audio.emf.play();
-      if(near && Game.ghostEvidence.includes("EMF Level 5")){
-        markEvidence("EMF Level 5","Strong EMF spike near activity.");
-      } else if(near){ log("EMF registers but not 5."); }
-      else{ log("EMF quiet."); }
-      break;
-    case "Spirit Box":
-      (Audio.spiritStatic && Audio.spiritStatic.play());
-      if(near && Game.ghostEvidence.includes("Spirit Box")){
-        setTimeout(()=>{ Audio.spiritbox && Audio.spiritbox.play(); log("A voice breaks through the static."); markEvidence("Spirit Box","Direct vocal response."); }, 800);
-      } else { log("Only static."); }
-      break;
-    case "Thermometer":
-      if(near && Game.ghostEvidence.includes("Freezing Temps")){
-        log("Temperature drops sharply."); markEvidence("Freezing Temps","Breath clouds and chill sets in.");
-      } else { log("Temperatures stable."); }
-      break;
-    case "UV Light":
-      if(near && Game.ghostEvidence.includes("Fingerprints")){
-        log("Faint residue glints under UV."); markEvidence("Fingerprints","Distinct trace revealed.");
-      } else { log("No clear residue here."); }
-      break;
-    case "D.O.T.S":
-      if(near && Game.ghostEvidence.includes("D.O.T.S")){
-        log("A fleeting silhouette crosses the grid."); markEvidence("D.O.T.S","Silhouette seen.");
-      } else { log("No movement across the grid."); }
-      break;
-    case "Ghost Writing Book":
-      if(near && Game.ghostEvidence.includes("Ghost Writing")){
-        log("Pages rustle by themselves... writing appears."); Audio.notebook && Audio.notebook.play(); markEvidence("Ghost Writing","Message written.");
-      } else { log("Pages stay blank."); }
-      break;
-    case "Camera":
-      if(near && Game.ghostEvidence.includes("Orbs")){
-        log("The feed shows drifting anomalies."); markEvidence("Orbs","Captured on camera.");
-      } else { log("Camera view clean."); }
-      break;
-    default:
-      log("You hold the " + name + ".");
-  }
-  advanceTurn();
-}
-
-function markEvidence(type, note){
-  if(EvidenceFound.has(type)) return;
-  EvidenceFound.add(type);
-  log("Evidence: " + type + (note? " — "+note:""));
-  Notebook.refreshEvidence();
-}
-
-/* ----------------------------------------------------------
- * Notebook UI
- * --------------------------------------------------------*/
-const Notebook = {
-  open(){
-    $("#guess-result").textContent="";
-    // populate evidence list
-    this.refreshEvidence();
-    // ghost selector
-    const sel=$("#ghost-guess"); sel.innerHTML="";
-    for(const k of Object.keys(Ghosts)){
-      const opt=document.createElement('option'); opt.value=k; opt.textContent=k.toUpperCase(); sel.appendChild(opt);
+let handCurrentMesh = null;
+function showHandItem(itemName){
+  const hand = document.getElementById("handItem");
+  if (!itemName || !state.belt.meshes[itemName]){
+    // special cases (notebook/lighter) – no model? just hide
+    if (itemName === "Notebook" || itemName === "Lighter"){
+      hand.style.display = "none";
+      return;
     }
-    // encyclopedia
-    const gl=$("#ghost-list"); gl.innerHTML="";
-    Object.entries(Ghosts).forEach(([k,val])=>{
-      const div=document.createElement('div');
-      div.style.border="1px solid #044"; div.style.borderRadius="8px"; div.style.padding="8px"; div.style.background="#040b0b";
-      div.innerHTML = `<b>${k.toUpperCase()}</b><div style="margin-top:6px">${val.evidence.map(e=>`<span class="tag">${e}</span>`).join('')}</div>`;
-      gl.appendChild(div);
-    });
-    show("#notebook", true);
-  },
-  close(){ show("#notebook", false); },
-  refreshEvidence(){
-    const el=$("#evidence-list"); el.innerHTML="";
-    EvidenceTypes.forEach(type=>{
-      const row=document.createElement('div');
-      row.style.marginBottom="6px";
-      const have = EvidenceFound.has(type);
-      row.innerHTML = `<span class="tag" style="border-color:${have?'#0f8':'#044'};color:${have?'#8f8':'#78a'}">${have?'✔':'—'} ${type}</span>`;
-      el.appendChild(row);
-    });
+    hand.style.display = "none";
+    return;
   }
-};
-
-$("#submit-guess").onclick = ()=>{
-  const guess=$("#ghost-guess").value;
-  const ok = (guess === Game.ghostKey);
-  $("#guess-result").textContent = ok ? `Correct. It was ${guess.toUpperCase()}.` : `Incorrect. It was ${Game.ghostKey.toUpperCase()}.`;
-};
-
-/* ----------------------------------------------------------
- * Turn / Hunt / Status
- * --------------------------------------------------------*/
-function advanceTurn(){
-  Game.turn++; $("#turn-count").textContent = Game.turn;
-  // sanity down slightly
-  setSanity(Game.sanity - 2);
-  // Danger if close and not god mode
-  if(!Game.godMode && distanceToGhost() < 1.3){
-    log("Something brushes past you… too close.");
-    if(Game.sanity <= 40 && Game.killOnContact){
-      // "death"
-      Audio.killed && Audio.killed.play();
-      log("You died during a hunt. Ghost was " + Game.ghostKey.toUpperCase()+".");
-    }
+  hand.style.display = "block";
+  // Clear previous
+  if (handCurrentMesh){
+    handCurrentMesh.dispose();
+    handCurrentMesh = null;
   }
+  // clone into the hand scene
+  const src = state.belt.meshes[itemName];
+  handCurrentMesh = src.clone("hand_"+itemName, null, true);
+  state.handScene.addMesh(handCurrentMesh);
+  handCurrentMesh.setEnabled(true);
+  // center it
+  handCurrentMesh.position.set(0,0,0);
+  handCurrentMesh.rotationQuaternion = null;
+  handCurrentMesh.rotation.set(0, Math.PI*0.2, 0);
+  // scale heuristics
+  const b = handCurrentMesh.getBoundingInfo().boundingBox;
+  const size = b.maximum.subtract(b.minimum);
+  const maxSide = Math.max(size.x, size.y, size.z);
+  const s = 1.0 / (maxSide || 1.0) * 1.2;
+  handCurrentMesh.scaling.set(s,s,s);
 }
 
-/* ----------------------------------------------------------
- * Dev Mode
- * --------------------------------------------------------*/
-const Dev = {
-  enable(){
-    Game.dev = true;
-    show("#dev-panel", true);
-    log("Developer mode enabled.");
-  },
-  teleportToGhost(){
-    if(!Game.ghostNode){ log("Ghost not ready."); return; }
-    snapToFloor(Game.ghostNode.position.clone());
-    log("Teleported to ghost.");
-  },
-  toggleGodMode(){
-    Game.godMode = !Game.godMode;
-    Game.killOnContact = !Game.godMode;
-    log("God mode " + (Game.godMode?"ON":"OFF"));
-  },
-  recenterToHouse(){
-    const c = houseCenter();
-    snapToFloor(c.add(new BABYLON.Vector3(0,0,0)));
-    log("Camera recentered to house.");
-  },
-  revealGhost(){
-    log("Ghost: "+Game.ghostKey.toUpperCase());
-    log("Evidence: "+Game.ghostEvidence.join(", "));
-  },
-  giveAll(){
-    Game.inventory = AllItems.slice(0,3); // keep belt 1..3 simple
-    buildBelt();
-    log("All items granted to first 3 slots.");
-  },
-  ping(){
-    const p = camera.position;
-    log(`PING @ x:${p.x.toFixed(3)} y:${p.y.toFixed(3)} z:${p.z.toFixed(3)}`);
-  }
-};
-
-// ESC opens dev prompt (separate load)
-document.addEventListener('keydown', (e)=>{
-  // Dev fly only when enabled
-  if(Game.dev && (e.code==="PageUp" || e.code==="PageDown")){
-    e.preventDefault();
-    const dy = (e.code==="PageUp") ? 1.0 : -1.0;
-    camera.position.y += dy;
-  }
-  // Number keys for slots
-  if(e.code>="Digit1" && e.code<="Digit5"){
-    const num = +e.code.replace("Digit","");
-    selectSlot(num);
-  }
-  // Use item (E on keyboard)
-  if(e.code==="KeyE"){
-    tryUseActive();
-  }
-
-  if(e.code==="Escape"){
-    // toggle prompt if not yet dev
-    if(!Game.dev) show("#dev-prompt", true);
-    else show("#dev-panel", $("#dev-panel").style.display!=="none" ? false : true);
-  }
-});
-
-// Dev prompt flow
-$("#dev-yes").onclick = ()=>{ $("#dev-step1").style.display="none"; $("#dev-step2").style.display="block"; $("#dev-error").textContent=""; $("#dev-pass").focus(); };
-$("#dev-no").onclick  = ()=>{ show("#dev-prompt", false); $("#dev-step1").style.display="block"; $("#dev-step2").style.display="none"; };
-$("#dev-ok").onclick  = ()=>{
-  const v=$("#dev-pass").value.trim();
-  if(v==="devmode"){ show("#dev-prompt", false); $("#dev-step1").style.display="block"; $("#dev-step2").style.display="none"; Dev.enable(); }
-  else $("#dev-error").textContent="Incorrect password.";
-};
-
-/* ----------------------------------------------------------
- * Touch joystick (very simple)
- * --------------------------------------------------------*/
-(function(){
-  const stick=$("#stick"), puck=$("#stick-p");
-  let dragging=false, origin={x:0,y:0};
-  stick.addEventListener('pointerdown', e=>{
-    dragging=true; origin={x:e.clientX, y:e.clientY}; puck.style.transform="translate(0,0)";
+/* =======================
+   Input (WASD + numeric slots + touch)
+======================= */
+function bindInputs(){
+  window.addEventListener('keydown', (e) => {
+    if (e.code === "Escape") {
+      // open dev modal
+      document.getElementById("devModal").style.display = "flex";
+      return;
+    }
+    if (["Digit1","Digit2","Digit3","Digit4","Digit5"].includes(e.code)){
+      const slot = parseInt(e.code.replace("Digit",""), 10);
+      setActiveSlot(slot);
+    }
+    if (state.player.inDev){
+      if (e.code === "PageUp") state.input.up = true;
+      if (e.code === "PageDown") state.input.down = true;
+    }
   });
-  window.addEventListener('pointerup', ()=>{dragging=false; puck.style.transform="translate(0,0)";});
-  window.addEventListener('pointermove', e=>{
-    if(!dragging) return;
-    const dx = Math.max(-35, Math.min(35, e.clientX-origin.x));
-    const dy = Math.max(-35, Math.min(35, e.clientY-origin.y));
-    puck.style.transform = `translate(${dx}px,${dy}px)`;
-    // Move camera
-    const forward = -dy/35, strafe = dx/35;
-    const dir = camera.getDirection(BABYLON.Axis.Z).scale(forward*0.2);
-    const right = camera.getDirection(BABYLON.Axis.X).scale(strafe*0.2);
-    camera.cameraDirection.addInPlace(dir.add(right));
-  }, {passive:true});
+  window.addEventListener('keyup', (e) => {
+    if (state.player.inDev){
+      if (e.code === "PageUp") state.input.up = false;
+      if (e.code === "PageDown") state.input.down = false;
+    }
+  });
+
+  // Touch controls (show if touch-capable)
+  if ('ontouchstart' in window || navigator.maxTouchPoints > 0){
+    document.getElementById("touchPad").style.display = "flex";
+    const press = (dir, on) => {
+      if (dir === 'w') state.scene.onBeforeRenderObservable.addOnce(() => state.camera._keys.push(87));
+      if (dir === 's') state.scene.onBeforeRenderObservable.addOnce(() => state.camera._keys.push(83));
+      if (dir === 'a') state.scene.onBeforeRenderObservable.addOnce(() => state.camera._keys.push(65));
+      if (dir === 'd') state.scene.onBeforeRenderObservable.addOnce(() => state.camera._keys.push(68));
+    };
+    document.querySelectorAll('#touchPad button[data-dir]').forEach(b => {
+      b.addEventListener('click', () => press(b.dataset.dir, true));
+    });
+    document.getElementById("useBtn").addEventListener('click', useActiveItem);
+  }
+
+  // Mouse/key “use” – bind to E
+  window.addEventListener('keydown', (e) => {
+    if (e.code === "KeyE") useActiveItem();
+  });
+}
+
+function useActiveItem(){
+  const item = getActiveItemName();
+  if (!item) return;
+  // This is where you wire evidence logic by item
+  if (item === "EMF"){
+    logLine("<b>EMF</b> crackles faintly… (demo)");
+  } else if (item === "Thermometer"){
+    logLine("<b>Thermometer</b> hums softly.");
+  } else if (item === "Spirit Box"){
+    logLine("Static hisses through the <b>spirit box</b>…");
+  } else if (item === "Lighter"){
+    logLine("<b>Lighter</b> flickers.");
+  } else if (item === "Notebook"){
+    logLine("<b>Notebook</b> opened (journal UI TBD).");
+  }
+}
+
+/* =======================
+   Dev modal
+======================= */
+(function devModalInit(){
+  const modal = document.getElementById("devModal");
+  const devGate = document.getElementById("devGate");
+  const devControls = document.getElementById("devControls");
+  const devYes = document.getElementById("devYes");
+  const devNo = document.getElementById("devNo");
+  const pwdWrap = document.getElementById("devPwdWrap");
+  const pwdInput = document.getElementById("devPwd");
+  const pwdBtn = document.getElementById("devPwdBtn");
+  const closeDev = document.getElementById("closeDev");
+  const tpGhostBtn = document.getElementById("tpGhostBtn");
+  const godBtn = document.getElementById("godBtn");
+  const pingBtn = document.getElementById("pingBtn");
+
+  devYes.onclick = () => { pwdWrap.style.display = "block"; };
+  devNo.onclick = () => { modal.style.display = "none"; };
+
+  pwdBtn.onclick = () => {
+    const v = pwdInput.value.trim();
+    if (v === "devmode"){
+      state.player.inDev = true;
+      devGate.style.display = "none";
+      devControls.style.display = "flex";
+      logLine("<b>Developer Mode enabled.</b>");
+    } else {
+      logLine("<b>Incorrect password.</b>");
+    }
+  };
+
+  closeDev.onclick = () => { modal.style.display = "none"; };
+
+  tpGhostBtn.onclick = () => {
+    if (!state.ghost.mesh) { logLine("Ghost not present."); return; }
+    // Teleport camera near ghost
+    const g = state.ghost.mesh.position;
+    state.camera.position.copyFrom(new BABYLON.Vector3(g.x, 1.4, g.z + 1.5));
+    logLine(`<b>Teleported near ghost</b> @ x:${g.x.toFixed(3)} y:${g.y.toFixed(3)} z:${g.z.toFixed(3)}`);
+  };
+  godBtn.onclick = () => {
+    state.player.godMode = !state.player.godMode;
+    logLine(`<b>God Mode:</b> ${state.player.godMode ? "ON" : "OFF"}`);
+  };
+  pingBtn.onclick = () => {
+    const p = state.camera.position;
+    logLine(`PING @ x:${p.x.toFixed(3)} y:${p.y.toFixed(3)} z:${p.z.toFixed(3)}`);
+  };
 })();
 
-/* ----------------------------------------------------------
- * Game loop start
- * --------------------------------------------------------*/
-function startGameLoop(){
-  pickGhost();
-  placeGhost();
-  buildBelt();
-  selectSlot(1);
-  show("#held-label", true);
-  setSanity(100);
-  $("#turn-count").textContent="0";
-  log("Investigation started.");
-}
+/* =======================
+   Start flow
+======================= */
+document.getElementById("startBtn").onclick = async () => {
+  document.getElementById("title").style.display = "none";
+  // Build scenes
+  const scene = createScene();
+  createHandScene();
 
-/* ----------------------------------------------------------
- * Kickoff (we defer until user picks loadout)
- * --------------------------------------------------------*/
-</script>
+  // Keep camera within outer bounds each frame; enable dev vertical fly only in dev mode
+  scene.onBeforeRenderObservable.add(() => {
+    // Clamp X/Z to barrier rectangle (simple guard)
+    clampToBounds(state.camera.position);
 
-<script>
-// Create the scene early so constants exist (some helpers use BABYLON)
-createScene();
+    // Dev fly vertical
+    if (state.player.inDev) {
+      if (state.input.up) state.camera.position.y += 0.15;
+      if (state.input.down) state.camera.position.y -= 0.15;
+    }
+  });
+
+  await loadMapAndItems();
+  populateBelt();
+  setActiveSlot(1);
+  refreshHUD();
+
+  logLine(`<b>Investigation started.</b>`);
+};
+
+/* =======================
+   Render loop + resize
+======================= */
+state.engine.runRenderLoop(() => {
+  if (state.scene) state.scene.render();
+});
+window.addEventListener("resize", () => {
+  state.engine.resize();
+  if (state.handEngine) state.handEngine.resize();
+});
 </script>
 </body>
 </html>
