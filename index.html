@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Phasma-Phoney — Web Build (Map Loader + Float Map UI)</title>
+  <title>Phasma-Phoney — Web Build (Map Loader + Fixes)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; color:#0ff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; }
@@ -36,7 +36,7 @@
 
     /* Dev */
     #devPrompt, #devPanel, #roomPicker { position:fixed; inset:0; display:none; z-index:40; align-items:center; justify-content:center; background:rgba(0,0,0,.6); }
-    .modal { width:min(780px, 92vw); background:#0a0f10; border:1px solid #0ff; box-shadow:0 0 18px rgba(0,255,255,.25); border-radius:12px; padding:16px; color:#9ef; font-family:monospace; }
+    .modal { width:min(760px, 92vw); background:#0a0f10; border:1px solid #0ff; box-shadow:0 0 18px rgba(0,255,255,.25); border-radius:12px; padding:16px; color:#9ef; font-family:monospace; }
     .modal h3 { margin:0 0 8px 0; color:#0ff; }
     .modal .row { margin:8px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .modal button, .modal input, .modal select { background:#000; color:#0ff; border:1px solid #0ff; border-radius:8px; padding:8px 12px; }
@@ -63,10 +63,11 @@
     #stick { position:fixed; left:16px; bottom:16px; width:120px; height:120px; border-radius:50%; border:1px solid #066; background:rgba(0,0,0,.3); display:none; z-index:26; }
     #stick .dot { position:absolute; width:48px; height:48px; border-radius:50%; border:1px solid #0ff; background:#001e1e; left:36px; top:36px; }
 
-    /* Floating Map Controls (appear when Listener ON) */
-    #floatMapCtl { position:fixed; right:16px; bottom:16px; z-index:45; display:none; gap:8px; }
-    #floatMapCtl .group { display:flex; flex-direction:column; gap:6px; }
-    #floatMapCtl button { min-width:140px; background:#001316; color:#0ff; border:1px solid #0ff; border-radius:10px; padding:8px 10px; cursor:pointer; }
+    /* Floating mapping tools */
+    .fabStack { position:fixed; right:16px; top:50%; transform:translateY(-50%); display:none; flex-direction:column; gap:8px; z-index:45; }
+    .fab { width:44px; height:44px; border-radius:50%; border:1px solid #0ff; background:#001014; color:#0ff; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 8px rgba(0,255,255,.2); }
+    .fab:hover { background:#011a1a; }
+    .fab span { font-size:12px; line-height:1; }
   </style>
 </head>
 <body>
@@ -128,7 +129,7 @@
             <option value="furnished_house.glb">furnished_house.glb</option>
           </select>
         </label>
-        <button id="mapLoadBtn">Load Map</button>
+        <button id="loadMapBtn">Load Map</button>
       </div>
       <div class="row" style="border:1px solid #044; padding:8px; border-radius:8px; background:#050b0c; flex-direction:column; gap:8px;">
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -152,6 +153,14 @@
       </div>
       <div class="log" id="devLog"></div>
     </div>
+  </div>
+
+  <!-- Floating mapping tools (shown when Listen is ON) -->
+  <div id="floatMap" class="fabStack" aria-label="Mapping tools">
+    <button id="fmStart" class="fab" title="Start/Stop Map"><span>Start</span></button>
+    <button id="fmPin" class="fab" title="Pin"><span>Pin</span></button>
+    <button id="fmCenter" class="fab" title="Approx Center"><span>Ctr</span></button>
+    <button id="fmConfirm" class="fab" title="Confirm"><span>OK</span></button>
   </div>
 
   <!-- Room picker -->
@@ -192,16 +201,6 @@
     </div>
   </div>
 
-  <!-- Floating Map Controls (shown when Listener ON) -->
-  <div id="floatMapCtl">
-    <div class="group">
-      <button id="fmStart">Start Map</button>
-      <button id="fmPin" disabled>Pin</button>
-      <button id="fmEnd" disabled>End/Confirm</button>
-      <button id="fmCenter" disabled>Approx Center</button>
-    </div>
-  </div>
-
   <!-- Touch stick -->
   <div id="stick"><div class="dot"></div></div>
 
@@ -222,6 +221,7 @@
      * UTIL
      ***************/
     const $ = id => document.getElementById(id);
+    const onReady = (fn)=> (document.readyState!=='loading') ? fn() : document.addEventListener('DOMContentLoaded', fn);
     function toast(msg, ms=1800){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ms); }
     function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
     const rad = d=> d*Math.PI/180;
@@ -240,8 +240,8 @@
       activeIndex:0, have:new Set(['EMF','Spirit Box','Thermometer','Lighter','Notebook']),
       sanity:100, running:false, flyDev:false, god:false, uiLocked:false,
       inVan:false, weather:'Clear',
-      mapRoot:null, house:null, floors:[], doors:[], skybox:null, skyMat:null,
-      boundary:[ // interior polygon (inside = house) -- default polygon; can be replaced by mapping UI
+      house:null, floors:[], doors:[], skybox:null, skyMat:null,
+      boundary:[ // default interior polygon (replaced after map load by bbox)
         new BABYLON.Vector3(18.404,-0.016,-96.040),
         new BABYLON.Vector3(57.205,-0.718,-94.031),
         new BABYLON.Vector3(62.145,-0.651,-105.142),
@@ -254,7 +254,7 @@
     };
 
     /***************
-     * FRONT DOOR (preset pins; may not align to all maps)
+     * FRONT DOOR (pins stay; safe if not used)
      ***************/
     const frontDoor = {
       p1: new BABYLON.Vector3(28.866, 0.831, -117.498),
@@ -270,43 +270,34 @@
     function initFrontDoor(){
       const v = frontDoor.p2.subtract(frontDoor.p1);
       frontDoor.len = v.length();
+      if(frontDoor.len < 0.01) return;
       frontDoor.center = frontDoor.p1.add(frontDoor.p2).scale(0.5);
       frontDoor.yaw = Math.atan2(v.x, v.z);
 
-      const t = v.scale(1/(frontDoor.len||1)); // avoid NaN
+      const t = v.scale(1/frontDoor.len);
       let n = new BABYLON.Vector2(-t.z, t.x);
       const probe = new BABYLON.Vector3(frontDoor.center.x + n.x*0.6, frontDoor.center.y, frontDoor.center.z + n.y*0.6);
       const outside = !pointInPolyXZ(probe.x, probe.z, game.boundary);
       frontDoor.normalOut = outside ? n : new BABYLON.Vector2(-n.x, -n.y);
 
-      // blocker
-      if(frontDoor.blocker){ frontDoor.blocker.dispose(); frontDoor.blocker=null; }
-      const box = BABYLON.MeshBuilder.CreateBox("frontDoorBlocker", {
-        width: frontDoor.len + 0.06, height: 2.2, depth: 0.12
-      }, game.scene);
+      if(frontDoor.blocker) { frontDoor.blocker.dispose(); frontDoor.blocker=null; }
+      const box = BABYLON.MeshBuilder.CreateBox("frontDoorBlocker", { width: frontDoor.len + 0.06, height: 2.2, depth: 0.12 }, game.scene);
       box.position = new BABYLON.Vector3(frontDoor.center.x, Math.max(frontDoor.p1.y, frontDoor.p2.y) + 1.1, frontDoor.center.z);
-      box.rotation.y = frontDoor.yaw;
-      box.isPickable = false;
-      box.checkCollisions = false; // start open
-      box.isVisible = false;
-      frontDoor.blocker = box;
+      box.rotation.y = frontDoor.yaw; box.isPickable=false; box.checkCollisions=false; box.isVisible=false;
+      frontDoor.blocker = box; frontDoor.open = true;
     }
-    function setFrontDoorOpen(isOpen){ frontDoor.open=!!isOpen; if(frontDoor.blocker) frontDoor.blocker.checkCollisions=!frontDoor.open; }
+    function setFrontDoorOpen(isOpen){ frontDoor.open=!!isOpen; if(frontDoor.blocker) frontDoor.blocker.checkCollisions = !frontDoor.open; }
 
-    // clamp ghost crossing if closed
     function clampGhostAgainstFrontDoor(current, proposed){
-      if(frontDoor.open) return proposed;
-      const n = frontDoor.normalOut || new BABYLON.Vector2(0,1);
+      if(frontDoor.open || frontDoor.len < 0.01) return proposed;
+      const n = frontDoor.normalOut;
       const sCur = n.x*(current.x-frontDoor.center.x) + n.y*(current.z-frontDoor.center.z);
       const sNew = n.x*(proposed.x-frontDoor.center.x) + n.y*(proposed.z-frontDoor.center.z);
       if(sCur <= 0 && sNew > 0){
-        const eps = -0.03;
-        const ds = sNew - sCur;
+        const eps = -0.03, ds = sNew - sCur;
         const t = ds!==0 ? (eps - sCur) / ds : 0;
-        if(t>=0 && t<=1){
-          const diff = proposed.subtract(current).scale(t);
-          return current.add(diff);
-        } else return current.clone();
+        if(t>=0 && t<=1) return current.add(proposed.subtract(current).scale(t));
+        return current.clone();
       }
       return proposed;
     }
@@ -376,21 +367,24 @@
     const skyMat = new BABYLON.SkyMaterial("skyMaterial", scene); skyMat.backFaceCulling = false; skyMat.inclination=0.02; skyMat.azimuth=0.3; skyMat.luminance=0.7;
     skybox.material = skyMat; game.skybox = skybox; game.skyMat = skyMat;
 
-    // Safety ground (height adjusted after map load)
+    // Safety ground (will be aligned to floor after map load)
     const safetyGround = BABYLON.MeshBuilder.CreateGround("safety", { width:400, height:400 }, scene);
-    safetyGround.position.y = -0.2; // default; will be adjusted
-    safetyGround.checkCollisions = true; safetyGround.isPickable = true;
+    safetyGround.position.y = -0.4; // initial lower
+    safetyGround.checkCollisions = true;
+    safetyGround.isPickable = true;
 
     // UI refs
     const belt = $('belt'); const hand = $('hand'); const storageBtn = $('storageBtn');
     const sanityFill = $('sanityFill'); const sanityPct = $('sanityPct'); const roomNameEl=$('roomName'); const statusText=$('statusText');
 
     /***************
-     * DOM-READY: Start Button
+     * START UI — attach after DOM is ready (fixes start button)
      ***************/
-    document.addEventListener('DOMContentLoaded', ()=>{
-      const sb=$('startBtn');
-      if(sb){ sb.addEventListener('click', async ()=>{ $('start').style.display='none'; await startGame(); }); }
+    onReady(()=>{
+      const btn = $('startBtn');
+      if(btn){
+        btn.addEventListener('click', async ()=>{ $('start').style.display='none'; await startGame(); });
+      }
     });
 
     /***************
@@ -419,7 +413,7 @@
       if(e.key==='Shift') game.running=false;
     });
 
-    // Touch stick (optional)
+    // Touch stick enable if touch
     (function enableTouchStick(){
       const stick=$('stick'); const dot=stick.querySelector('.dot');
       if(!('ontouchstart' in window)) return;
@@ -438,41 +432,25 @@
      * DEV
      ***************/
     const dev = { enabled:false, showFOV:false, log:(s)=>{ const el=$('devLog'); el.textContent += s+'\\n'; el.scrollTop = el.scrollHeight; } };
-    const listen = { master:false, ghost:false, evidence:false, mapActive:false, pins:[], knownRooms:[], lastGhostState:'', lastLogT:0 };
+    const listen = { master:false, ghost:false, evidence:false, mapActive:false, pins:[], knownRooms:[], lastGhostState:'', lastLogT:0, centerMarker:null };
 
     $('devYes').onclick = ()=> $('devPwRow').style.display='flex';
     $('devNo').onclick  = ()=> $('devPrompt').style.display='none';
     $('devPwOk').onclick= ()=>{ const ok=($('devPw').value.trim()==='devmode'); if(ok){ dev.enabled=true; $('devPrompt').style.display='none'; $('devPanel').style.display='flex'; toast('Dev on'); } else $('devPwMsg').textContent='Wrong password.'; };
     $('closeDev').onclick=()=> $('devPanel').style.display='none';
     $('toggleGod').onclick = (e)=>{ game.god=!game.god; e.target.textContent='God Mode: ' + (game.god?'ON':'OFF'); };
-    $('teleGhost').onclick = ()=>{ if(game.ghostPivot){ game.playerCapsule.position.copyFrom(game.ghostPivot.position).addInPlace(new BABYLON.Vector3(0,0.1,-1.8)); syncCameraToCapsule(); dev.log(`Teleport to ghost`);} };
-    $('pingHere').onclick  = ()=> dev.log(`PING @ ${vecStr(game.playerCapsule.position)}`);
+    $('teleGhost').onclick = ()=>{ if(game.ghostPivot){ playerCapsule.position.copyFrom(game.ghostPivot.position).addInPlace(new BABYLON.Vector3(0,0.1,-1.8)); syncCameraToCapsule(); dev.log('Teleport to ghost');} };
+    $('pingHere').onclick  = ()=> dev.log('PING @ '+vecStr(playerCapsule.position));
     $('flyPg').onclick     = (e)=>{ game.flyDev=!game.flyDev; e.target.textContent='Toggle Fly: ' + (game.flyDev?'ON':'OFF'); };
 
-    // Map loader
-    $('mapLoadBtn').onclick = async ()=>{
-      const sel = $('mapSelect').value;
-      toast('Loading map: '+sel);
-      await loadMap(sel);
-      // Recompute ground height after map
-      adjustSafetyGround();
-      initFrontDoor(); // keep blocker refreshed (may not align perfectly on non-default maps)
-      dev.log('Map loaded: '+sel);
-    };
-
-    function showFloatMapCtl(show){ $('floatMapCtl').style.display = show ? 'flex' : 'none'; }
-
+    // Listen toggle now hides panel and shows floating map FABs
     $('toggleListen').onclick=()=>{
       listen.master=!listen.master;
       $('listenGroup').style.display=listen.master?'block':'none';
       $('listenState').textContent=listen.master?'ON':'OFF';
       dev.log('Listen '+(listen.master?'ENABLED':'DISABLED'));
-      if(listen.master){
-        $('devPanel').style.display='none'; // hide panel as requested
-        showFloatMapCtl(true);
-      } else {
-        showFloatMapCtl(false);
-      }
+      $('devPanel').style.display = 'none';
+      $('floatMap').style.display = listen.master ? 'flex' : 'none';
     };
     $('toggleFOV').onclick = (e)=>{ dev.showFOV=!dev.showFOV; e.target.textContent='Show FOV: ' + (dev.showFOV?'ON':'OFF'); refreshFOVLines(); };
     $('listenGhost').onclick = (e)=>{ listen.ghost=!listen.ghost; e.target.textContent='Ghost Tracking: ' + (listen.ghost?'ON':'OFF'); };
@@ -480,40 +458,31 @@
 
     function vecStr(v){ return `x:${v.x.toFixed(3)} y:${v.y.toFixed(3)} z:${v.z.toFixed(3)}`; }
 
-    // Map flow (dev-panel buttons)
-    $('mapStart').onclick = ()=>{ toggleMapMode(); };
-    $('mapPin').onclick   = ()=>{ addMapPin(); };
-    $('mapConfirm').onclick=()=>{ openRoomPicker(); };
-    $('roomCancel').onclick = ()=> $('roomPicker').style.display='none';
+    // Map flow (panel buttons)
+    $('mapStart').onclick = ()=>toggleMapMode();
+    $('mapPin').onclick   = ()=> addMapPin();
+    $('mapConfirm').onclick=()=> openRoomName();
 
-    // Floating map controls wire-up
-    $('fmStart').onclick  = ()=>{ toggleMapMode(); };
-    $('fmPin').onclick    = ()=>{ addMapPin(); };
-    $('fmEnd').onclick    = ()=>{ openRoomPicker(); };
-    $('fmCenter').onclick = ()=>{ showApproxCenter(); };
+    // Floating FABs mirror the same actions
+    $('fmStart').onclick  = ()=> toggleMapMode();
+    $('fmPin').onclick    = ()=> addMapPin();
+    $('fmConfirm').onclick= ()=> openRoomName();
+    $('fmCenter').onclick = ()=> approximateCenter();
 
     function toggleMapMode(){
       listen.mapActive = !listen.mapActive;
-      if(listen.mapActive){
-        listen.pins = []; dev.log('Map: START');
-        $('mapPin').disabled=false; $('mapConfirm').disabled=true;
-        $('fmPin').disabled=false; $('fmEnd').disabled=true; $('fmCenter').disabled=false;
-        $('fmStart').textContent='Stop Map';
-      }else{
-        dev.log('Map: STOP');
-        $('mapPin').disabled=true; $('mapConfirm').disabled=true;
-        $('fmPin').disabled=true; $('fmEnd').disabled=true; $('fmCenter').disabled=true;
-        $('fmStart').textContent='Start Map';
-      }
+      $('mapStart').textContent = listen.mapActive ? 'Stop Map' : 'Start Map';
+      $('mapPin').disabled = !listen.mapActive;
+      $('mapConfirm').disabled = !listen.mapActive || listen.pins.length===0;
+      $('fmStart').innerHTML = '<span>'+ (listen.mapActive?'Stop':'Start') +'</span>';
+      if(listen.mapActive){ listen.pins = []; dev.log('Map: START'); removeCenterMarker(); } else dev.log('Map: STOP');
     }
     function addMapPin(){
-      const p=game.playerCapsule.position.clone();
-      listen.pins.push(p); dev.log(`Map: PIN ${listen.pins.length} @ ${vecStr(p)}`);
-      $('mapConfirm').disabled = listen.pins.length===0;
-      $('fmEnd').disabled = listen.pins.length===0;
+      if(!listen.mapActive){ toast('Start Map first'); return; }
+      const p=playerCapsule.position.clone(); listen.pins.push(p); $('mapConfirm').disabled=false; dev.log(`Map: PIN ${listen.pins.length} @ ${vecStr(p)}`);
     }
-    function openRoomPicker(){
-      if(!listen.mapActive || listen.pins.length===0){ toast('No pins yet.'); return; }
+    function openRoomName(){
+      if(!listen.mapActive) { toast('Start Map first'); return; }
       if(listen.knownRooms.length===0){
         const names=new Set(['Van','House']); if(game.house){ game.scene.meshes.forEach(m=>{ if(!m.name) return; if(/(kitchen|bed|bath|living|garage|hall|attic|basement|study|room|office|dining)/i.test(m.name)) names.add(m.name.replace(/[^a-z0-9 _-]/ig,'')); }); }
         listen.knownRooms=[...names].slice(0,50);
@@ -521,6 +490,28 @@
       const sel=$('knownRooms'); sel.innerHTML=''; listen.knownRooms.forEach(r=>{ const o=document.createElement('option'); o.textContent=r; o.value=r; sel.appendChild(o); });
       $('customRoom').value=''; $('roomPicker').style.display='flex';
     }
+    function approximateCenter(){
+      if(listen.pins.length===0){ toast('No pins yet'); return; }
+      const c = centroidXZ(listen.pins);
+      dev.log('Map: APPROX CENTER @ '+vecStr(c));
+      // marker
+      removeCenterMarker();
+      const s = BABYLON.MeshBuilder.CreateSphere('mapCenterMarker',{diameter:0.25, segments:8}, scene);
+      s.position = new BABYLON.Vector3(c.x, c.y+0.15, c.z);
+      const mat = new BABYLON.StandardMaterial('mapCenterMat', scene);
+      mat.emissiveColor = new BABYLON.Color3(0,1,1); mat.alpha=0.8; s.material=mat;
+      listen.centerMarker = s;
+    }
+    function removeCenterMarker(){ if(listen.centerMarker){ listen.centerMarker.dispose(); listen.centerMarker=null; } }
+
+    /***************
+     * MAP LOADER
+     ***************/
+    $('loadMapBtn').onclick = async ()=>{
+      const file = $('mapSelect').value;
+      await loadMap(file);
+      toast('Loaded map: '+file);
+    };
 
     /***************
      * MAPPING HELPERS + VAN POLY
@@ -529,31 +520,19 @@
     function centroidXZ(pins){ let cx=0,cz=0; for(const p of pins){ cx+=p.x; cz+=p.z; } const n=Math.max(1,pins.length); return new BABYLON.Vector3(cx/n, pins[0]?.y||0, cz/n); }
     function radiusFromCentroidXZ(c,pins){ let r=0; for(const p of pins){ r=Math.max(r, Math.hypot(p.x-c.x, p.z-c.z)); } return r; }
     function ensureClosedPolyXZ(pins){ if(pins.length<3) return pins.slice(); const f=pins[0], l=pins[pins.length-1]; const closed=pins.slice(); if(Math.abs(f.x-l.x)>1e-6 || Math.abs(f.z-l.z)>1e-6) closed.push(f.clone()); return closed; }
-    function pointInPolyXZ(x,z, poly){ let inside=false; for(let i=0,j=poly.length-1;i<poly.length;j=i++){ const xi=poly[i].x,zi=poly[i].z,xj=poly[j].x,zj=poly[j].z; const inter=((zi>z)!==(zj>z)) && (x < (xj-xi)*(z-zi)/(zj-zi) + xi); if(inter) inside=!inside; } return inside; }
+    function pointInPolyXZ(x,z, poly){ if(!poly||poly.length<3) return false; let inside=false; for(let i=0,j=poly.length-1;i<poly.length;j=i++){ const xi=poly[i].x,zi=poly[i].z,xj=poly[j].x,zj=poly[j].z; const inter=((zi>z)!==(zj>z)) && (x < (xj-xi)*(z-zi)/(zj-zi) + xi); if(inter) inside=!inside; } return inside; }
     function drawPolyDebug(pins, y, color3=new BABYLON.Color3(0,1,1)){
       const pts=ensureClosedPolyXZ(pins).map(p=> new BABYLON.Vector3(p.x,y+0.02,p.z));
-      const lines=BABYLON.MeshBuilder.CreateLines("vanPolyLines",{points:pts},scene); lines.color=color3; lines.alpha=0.9; lines.isPickable=false;
-      const ribbon=BABYLON.MeshBuilder.CreateRibbon("vanPolyFill",{pathArray:[pts], closeArray:true, sideOrientation:BABYLON.Mesh.DOUBLESIDE},scene);
-      ribbon.isPickable=false; const mat=new BABYLON.StandardMaterial("vanFillMat",scene); mat.emissiveColor=new BABYLON.Color3(color3.r*0.2,color3.g*0.2,color3.b*0.2); mat.alpha=0.12; ribbon.material=mat;
+      const lines=BABYLON.MeshBuilder.CreateLines('vanPolyLines',{points:pts},scene); lines.color=color3; lines.alpha=0.9; lines.isPickable=false;
+      const ribbon=BABYLON.MeshBuilder.CreateRibbon('vanPolyFill',{pathArray:[pts], closeArray:true, sideOrientation:BABYLON.Mesh.DOUBLESIDE},scene);
+      ribbon.isPickable=false; const mat=new BABYLON.StandardMaterial('vanFillMat',scene); mat.emissiveColor=new BABYLON.Color3(color3.r*0.2,color3.g*0.2,color3.b*0.2); mat.alpha=0.12; ribbon.material=mat;
       return {lines, ribbon};
     }
 
-    function showApproxCenter(){
-      if(listen.pins.length===0){ toast('No pins yet.'); return; }
-      const p = centroidXZ(dedupePins(listen.pins));
-      dev.log('Approx center @ '+vecStr(p));
-      // Simple visual
-      const marker = BABYLON.MeshBuilder.CreateDisc('centerMarker', {radius:0.25, tessellation:24}, scene);
-      marker.position = new BABYLON.Vector3(p.x, p.y + 0.03, p.z);
-      const mat = new BABYLON.StandardMaterial('centerMat', scene);
-      mat.emissiveColor = new BABYLON.Color3(0,1,1); mat.alpha = 0.6; marker.material = mat;
-      setTimeout(()=>{ marker.dispose(); }, 4000);
-    }
-
     $('roomOk').onclick = ()=>{
-      const name = $('customRoom').value.trim() || $('knownRooms').value || 'Unnamed Area';
+      const name = ($('customRoom').value||'').trim() || $('knownRooms').value || 'Unnamed Area';
       $('roomPicker').style.display='none';
-      let pins = dedupePins(listen.pins); listen.pins=[]; $('mapConfirm').disabled=true; $('fmEnd').disabled=true;
+      let pins = dedupePins(listen.pins); listen.pins=[]; $('mapConfirm').disabled=true;
       dev.log(`Map: CONFIRM "${name}" with ${pins.length} pins`); pins.forEach((p,i)=> dev.log(`  • ${name} #${i+1} @ ${vecStr(p)}`));
       if(pins.length>=3){
         if(!game.mappedAreas) game.mappedAreas={};
@@ -564,10 +543,9 @@
           game.vanZone.center=c.clone(); game.vanZone.radius=Math.max(2.0,r); game.vanZone.poly=ensureClosedPolyXZ(pins);
           dev.log(`Van zone set @ ${vecStr(c)} r≈${game.vanZone.radius.toFixed(2)} poly=${pins.length}`);
         }
-      } else dev.log(`(Info) Need ≥3 pins to define an area.`);
-      // end mapping mode after confirm
-      if(listen.mapActive) toggleMapMode();
+      } else dev.log('(Info) Need ≥3 pins to define an area.');
     };
+    $('roomCancel').onclick = ()=> $('roomPicker').style.display='none';
 
     /***************
      * WEATHER
@@ -580,26 +558,29 @@
     /***************
      * STORAGE / VAN ZONE
      ***************/
-    $('storageBtn').onclick = ()=> toast('Storage opened (prototype).');
+    storageBtn.onclick = ()=> toast('Storage opened (prototype).');
     function updateVanZoneButton(){
       const me = game.playerCapsule.position;
       let inside=false;
       if(game.vanZone.poly && game.vanZone.poly.length>=3) inside = pointInPolyXZ(me.x, me.z, game.vanZone.poly);
       else inside = (BABYLON.Vector3.Distance(me, game.vanZone.center) <= game.vanZone.radius);
-      if(inside && !game.inVan){ game.inVan=true; $('storageBtn').style.display='block'; }
-      else if(!inside && game.inVan){ game.inVan=false; $('storageBtn').style.display='none'; }
+      if(inside && !game.inVan){ game.inVan=true; storageBtn.style.display='block'; }
+      else if(!inside && game.inVan){ game.inVan=false; storageBtn.style.display='none'; }
     }
 
     /***************
-     * MAP LOADING
+     * MODELS / MAP LOADING
      ***************/
-    async function loadMap(fileName){
-      // dispose previous map
-      if(game.mapRoot){ try{ game.mapRoot.dispose(false, true); }catch(e){} }
+    async function loadMap(file){
+      // dispose previous
+      if(game.house){
+        try{ game.house.getChildMeshes().forEach(m=>m.dispose()); }catch(e){}
+        try{ game.house.dispose(); }catch(e){}
+      }
       game.floors=[]; game.doors=[];
 
-      const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", fileName, scene);
-      const root = result.meshes[0]; root.name="MapRoot"; game.mapRoot=root; game.house=root;
+      const result = await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/map/', file, scene);
+      const root = result.meshes[0]; root.name = file; game.house=root;
 
       result.meshes.forEach(m=>{
         if(m===root) return;
@@ -609,27 +590,44 @@
         const info=m.getBoundingInfo?.(); if(info){ const e=info.boundingBox.extendSizeWorld; const flat=(e.y < 0.2 && (e.x>1.5 || e.z>1.5)); if(flat){ game.floors.push(m); } }
         if(/door/i.test(m.name)){ game.doors.push(m); m.metadata = { open:false, baseRotY:m.rotation?.y||0 }; }
       });
+
+      // align safety ground to floor level: same level or 0.1 lower
+      const floorY = computeFloorY(result.meshes) ?? 0;
+      safetyGround.position.y = floorY - 0.10; // lower by 0.1 (your request)
+
+      // compute boundary from bounding box inset
+      const bbox = root.getBoundingInfo().boundingBox;
+      const min = bbox.minimumWorld, max = bbox.maximumWorld;
+      const inset = 1.0;
+      const y = floorY;
+      game.boundary = [
+        new BABYLON.Vector3(min.x+inset, y, min.z+inset),
+        new BABYLON.Vector3(max.x-inset, y, min.z+inset),
+        new BABYLON.Vector3(max.x-inset, y, max.z-inset),
+        new BABYLON.Vector3(min.x+inset, y, max.z-inset)
+      ];
+
+      // re-init front door blocker (safe even if not at this house)
+      initFrontDoor();
     }
 
-    function adjustSafetyGround(){
-      // Lower safety ground to ~0.1 below lowest detected floor plane
-      if(!game.floors.length){ safetyGround.position.y = -0.2; return; }
-      let minY = Infinity;
-      for(const f of game.floors){
+    function computeFloorY(meshes){
+      let minY = +Infinity;
+      const list = meshes || game.floors;
+      list.forEach(m=>{
         try{
-          f.refreshBoundingInfo();
-          const y = f.getBoundingInfo().boundingBox.minimumWorld.y;
-          if(y < minY) minY = y;
-        }catch{}
-      }
-      if(minY!==Infinity){
-        safetyGround.position.y = minY - 0.10; // as requested
-      }
+          m.refreshBoundingInfo();
+          const bb = m.getBoundingInfo().boundingBox;
+          minY = Math.min(minY, bb.minimumWorld.y);
+        }catch(e){}
+      });
+      return (minY<+Infinity) ? minY : null;
     }
 
-    /***************
-     * ITEMS
-     ***************/
+    // Initial default load
+    async function loadHouse(){ await loadMap('Abandoned_House.glb'); }
+
+    // Items library
     const itemModelMap = {
       'EMF': 'EMF_Detector_EMF_Detector_0',
       'Spirit Box': 'Cone.001_Spirit_Box_0',
@@ -642,14 +640,14 @@
     let itemLibraryRoot=null;
 
     async function loadItems(){
-      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/items/", "exploration_objects.glb", scene);
+      const res = await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/items/', 'exploration_objects.glb', scene);
       itemLibraryRoot = res.meshes[0]; itemLibraryRoot.setEnabled(false);
       res.meshes.forEach(m=>{ m.isPickable=false; m.checkCollisions=false; });
       rebuildBelt(); updateHandModel();
     }
     function rebuildBelt(){
-      $('belt').innerHTML=''; const labels=['EMF','Spirit Box','Thermometer','Lighter','Notebook']; game.beltslots=[];
-      for(let i=0;i<5;i++){ const el=document.createElement('div'); el.className='slot'+(i===game.activeIndex?' active':''); el.innerHTML=`<div class="key">${i+1}</div><div class="label">${labels[i]}</div>`; el.onclick=()=>selectSlot(i); $('belt').appendChild(el); game.beltslots.push(el); }
+      belt.innerHTML=''; const labels=['EMF','Spirit Box','Thermometer','Lighter','Notebook']; game.beltslots=[];
+      for(let i=0;i<5;i++){ const el=document.createElement('div'); el.className='slot'+(i===game.activeIndex?' active':''); el.innerHTML=`<div class="key">${i+1}</div><div class="label">${labels[i]}</div>`; el.onclick=()=>selectSlot(i); belt.appendChild(el); game.beltslots.push(el); }
     }
     function selectSlot(i){ game.activeIndex=clamp(i,0,4); game.beltslots.forEach((el,idx)=> el.classList.toggle('active', idx===game.activeIndex)); updateHandModel(); }
     function findItemMesh(name){ if(!itemLibraryRoot) return null; const target=itemModelMap[name]||null; if(!target) return null; return scene.getMeshByName(target) || scene.getTransformNodeByName(target) || null; }
@@ -663,13 +661,11 @@
     function updateHandModel(){
       if(game.handModel){ game.handModel.setEnabled(false); game.handModel=null; }
       const labels=['EMF','Spirit Box','Thermometer','Lighter','Notebook']; const name=labels[game.activeIndex];
-      if(name==='Notebook'){ $('hand').style.opacity=.85; $('hand').querySelector('.hint').textContent='Notebook (N)'; return; }
+      if(name==='Notebook'){ hand.style.opacity=.85; hand.querySelector('.hint').textContent='Notebook (N)'; return; }
 
-      const src=findItemMesh(name==='Lighter'?'Flashlight':name); if(!src){ $('hand').style.opacity=.2; return; }
+      const src=findItemMesh(name==='Lighter'?'Flashlight':name); if(!src){ hand.style.opacity=.2; return; }
       const node=src.clone(name+'_hand', null); node.setEnabled(true); if(node.rotationQuaternion) node.rotationQuaternion=null;
       node.parent=game.camera; node.position=new BABYLON.Vector3(0.4, -0.35, 0.8); node.scaling=new BABYLON.Vector3(0.4,0.4,0.4);
-      const size=measureNodeSize(node); const needsZtoY = size.z > size.y * 1.2;
-      node.rotation = needsZtoY ? new BABYLON.Vector3(0.4, -0.35, 0.8); node.scaling=new BABYLON.Vector3(0.4,0.4,0.4);
       const size=measureNodeSize(node); const needsZtoY = size.z > size.y * 1.2;
       node.rotation = needsZtoY ? new BABYLON.Vector3(rad(-90),0,0) : BABYLON.Vector3.Zero();
       if(name==='Lighter') node.scaling.scaleInPlace(0.7);
@@ -690,15 +686,17 @@
     async function spawnGhost(){
       const pool=['ghost1.glb','ghost2.glb','ghost3.glb','ghost4.glb','ghost5.glb'];
       const file=pool[Math.floor(Math.random()*pool.length)];
-      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", file, scene);
-      const root = res.meshes[0]; root.name="GhostRoot";
-      const pivot=new BABYLON.TransformNode("GhostPivot", scene); root.parent=pivot;
+      const res = await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/ghosts/', file, scene);
+      const root = res.meshes[0]; root.name='GhostRoot';
+      const pivot=new BABYLON.TransformNode('GhostPivot', scene); root.parent=pivot;
 
-      // Normalize height; forward = +Z (we rotate pivot to face motion)
+      // Normalize height; forward = +Z (rotate pivot to face motion). Target ~1.6m tall.
       root.rotation = BABYLON.Vector3.Zero();
       root.refreshBoundingInfo();
       const size=root.getBoundingInfo().boundingBox.extendSizeWorld;
-      const tallest=Math.max(1,size.y*2); const scale=1.7/tallest; root.scaling.set(scale,scale,scale);
+      const approxHeight = Math.max(0.1, size.y*2);
+      const scale = 1.6 / approxHeight;  // lowered per request
+      root.scaling.set(scale,scale,scale);
 
       pivot.position = randomPointInBoundary();
       game.ghost=root; game.ghostPivot=pivot;
@@ -726,14 +724,14 @@
         new BABYLON.Vector3(0,y,0),
         new BABYLON.Vector3(0,y,len)
       ];
-      const lines = BABYLON.MeshBuilder.CreateLines("ghostFOV",{points:pts},scene); lines.color = new BABYLON.Color3(0,1,1);
+      const lines = BABYLON.MeshBuilder.CreateLines('ghostFOV',{points:pts},scene); lines.color = new BABYLON.Color3(0,1,1);
       lines.parent=game.ghostPivot; game.ghostFOVLines=lines;
     }
 
     async function spawnPhoenix(){
       try{
-        const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", "pheonix.glb", scene);
-        const phoenix = res.meshes[0]; phoenix.name="Phoenix"; phoenix.scaling.scaleInPlace(2.5); phoenix.position = new BABYLON.Vector3(0, 40, 0);
+        const res = await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/ghosts/', 'pheonix.glb', scene);
+        const phoenix = res.meshes[0]; phoenix.name='Phoenix'; phoenix.scaling.scaleInPlace(2.5); phoenix.position = new BABYLON.Vector3(0, 40, 0);
         scene.onBeforeRenderObservable.add(()=>{ const t=performance.now()*0.0003; phoenix.position.x=Math.cos(t)*60; phoenix.position.z=Math.sin(t)*60; phoenix.position.y=40+Math.sin(t*2)*5; phoenix.rotation.y=-t*2; });
       }catch(e){ console.warn('Phoenix load failed', e); }
     }
@@ -782,7 +780,7 @@
       if(game.vanZone.poly && game.vanZone.poly.length>=3) nearVan = pointInPolyXZ(game.playerCapsule.position.x, game.playerCapsule.position.z, game.vanZone.poly);
       else nearVan = (BABYLON.Vector3.Distance(game.playerCapsule.position, game.vanZone.center) <= game.vanZone.radius);
       if(nearVan){ storageBtn.click(); return; }
-      // Else try doors (and sync front door blocker if it's that door)
+      // Else try doors
       tryToggleNearestDoor();
     }
 
@@ -813,15 +811,12 @@
     function tryToggleNearestDoor(){
       const me=game.playerCapsule.position;
 
-      // Check for nearby front door center regardless of mesh names
       const fdc = frontDoor.center;
-      const nearFD = BABYLON.Vector3.Distance(me, fdc) < 1.8;
+      const nearFD = (fdc) ? BABYLON.Vector3.Distance(me, fdc) < 1.8 : false;
 
       let toggledFront = false;
       let toggledMeshDoor = false;
-      let newState = null;
 
-      // Toggle mesh door first (if any)
       if(game.doors.length){
         let best=null, d2=3.5*3.5;
         game.doors.forEach(d=>{ const p=d.getAbsolutePosition(); const dx=p.x-me.x,dy=p.y-me.y,dz=p.z-me.z; const t=dx*dx+dy*dy+dz*dz; if(t<d2 && d.isEnabled()){ best=d; d2=t; } });
@@ -829,27 +824,13 @@
           const md=best.metadata || (best.metadata={open:false, baseRotY:best.rotation?.y||0});
           md.open=!md.open; best.rotation.y = md.baseRotY + (md.open ? rad(90) : 0); best.checkCollisions=!md.open;
           toggledMeshDoor = true;
-          newState = md.open;
           toast(md.open?'Door opened':'Door closed');
-
-          // If this mesh is the front door (position near center), sync blocker
-          const bp = best.getAbsolutePosition();
-          if(BABYLON.Vector3.Distance(bp, fdc) < 3.0){
-            setFrontDoorOpen(md.open);
-            toggledFront = true;
-          }
+          // sync front blocker if matching
+          if(fdc && BABYLON.Vector3.Distance(best.getAbsolutePosition(), fdc) < 3.0){ setFrontDoorOpen(md.open); toggledFront=true; }
         }
       }
-
-      // If no mesh door was toggled and player is near our front door segment, toggle the virtual door
-      if(!toggledFront && nearFD){
-        setFrontDoorOpen(!frontDoor.open);
-        toggledFront = true;
-      }
-
-      if(!toggledMeshDoor && !toggledFront){
-        toast('No door nearby.');
-      }
+      if(!toggledFront && nearFD){ setFrontDoorOpen(!frontDoor.open); toggledFront=true; toast(frontDoor.open?'Front door opened':'Front door closed'); }
+      if(!toggledMeshDoor && !toggledFront) toast('No door nearby.');
     }
 
     /***************
@@ -871,7 +852,7 @@
       if(game.currentGhostType==='deogen') return true;
 
       const gp=game.ghostPivot.position.add(new BABYLON.Vector3(0,1.4,0));
-      const pp=game.camera.position.clone(); // player head
+      const pp=game.camera.position.clone();
       const toPlayer=pp.subtract(gp); const dist=toPlayer.length();
       if(dist>12) return false;
       toPlayer.y=0;
@@ -879,7 +860,6 @@
       const angle = Math.acos( clamp(BABYLON.Vector3.Dot(forward.normalize(), toPlayer.normalize()), -1, 1) );
       if(angle > rad(60/2)) return false;
 
-      // Raycast occlusion
       const dir = pp.subtract(gp).normalize();
       const hit = scene.pickWithRay(new BABYLON.Ray(gp, dir, dist), (m)=> m!==game.ghost && m!==game.ghostPivot && m.isPickable===true);
       if(hit && hit.pickedPoint){
@@ -891,7 +871,7 @@
 
     function drawFOVDebugTick(){
       if(!(dev.enabled && listen.master && listen.ghost)) return;
-      dev.log(`[GHOST] ${ghostCanSeePlayer()?'LOS=TRUE':'LOS=false'} State=${game.ghostAnim.state}`);
+      dev.log('[GHOST] '+(ghostCanSeePlayer()?'LOS=TRUE':'LOS=false')+' State='+game.ghostAnim.state);
     }
 
     /***************
@@ -914,7 +894,7 @@
       // Evidence checkboxes
       nb.evid.innerHTML='';
       evidenceTypes.forEach(ev=>{
-        const id='ev_'+ev.replace(/\W+/g,'_');
+        const id='ev_'+ev.replace(/\\W+/g,'_');
         const row=document.createElement('label');
         row.innerHTML=`<input type="checkbox" id="${id}"><span>${ev}</span>`;
         const c=row.querySelector('input'); c.checked = nb.selectedEvidence.has(ev);
@@ -941,7 +921,7 @@
     function renderGhostDetail(){
       if(!nb.selectedGhost){ nb.detail.textContent=''; return; }
       const gp=ghostProfiles[nb.selectedGhost];
-      nb.detail.textContent = `${nb.selectedGhost.toUpperCase()}\nEvidence: ${gp.evidence.join(', ')}\nRule: ${gp.rule || '—'}`;
+      nb.detail.textContent = `${nb.selectedGhost.toUpperCase()}\\nEvidence: ${gp.evidence.join(', ')}\\nRule: ${gp.rule || '—'}`;
     }
 
     /***************
@@ -951,7 +931,6 @@
       setWeather(randomWeather());
       game.playerCapsule.position.copyFrom(game.spawnPointA);
       await loadHouse(); await loadItems(); await spawnGhost(); await spawnPhoenix();
-      initFrontDoor(); // <-- your pins wired up here
       syncCameraToCapsule();
       toast('Investigation started. WASD move • Shift run • C crouch • F use item • E interact • N notebook • ESC dev');
       let last=performance.now();
@@ -960,7 +939,7 @@
 
         // Movement
         movePlayer(dt);
-        // Snap -> camera sync
+        // Snap -> camera sync (prevents hovering)
         snapToGround(); syncCameraToCapsule();
 
         // Ghost behavior (only active inside house)
@@ -975,12 +954,8 @@
               const dir = toMe.normalize();
               const step = dir.scale(0.8 * dt);
               let proposed = game.ghostPivot.position.add(step);
-
-              // Prevent crossing closed front door to outside
               proposed = clampGhostAgainstFrontDoor(game.ghostPivot.position, proposed);
-
               game.ghostPivot.position.copyFrom(proposed);
-              // Face motion (no backwards walk)
               const yaw = Math.atan2(dir.x, dir.z);
               game.ghostPivot.rotation.y = yaw;
               setGhostAnim('walk'); state='chase';
@@ -1032,7 +1007,7 @@
     function maybeLogGhost(state){
       const t=performance.now();
       if(state!==listen.lastGhostState || (t - listen.lastLogT) > 1500){
-        dev.log(`[GHOST] ${state} | LOS=${ghostCanSeePlayer()} | type=${game.currentGhostType}`); listen.lastGhostState=state; listen.lastLogT=t;
+        dev.log('[GHOST] '+state+' | LOS='+ghostCanSeePlayer()+' | type='+game.currentGhostType); listen.lastGhostState=state; listen.lastLogT=t;
       }
     }
 
