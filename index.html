@@ -7,310 +7,764 @@
   <meta name="author" content="Shark-Blades" />
   <meta name="description" content="Turn-based ghost hunting strategy game based on Phasmophobia." />
   <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="PhasmaPhoney" />
 
   <style>
+    :root {
+      --cyan: #0ff;
+      --bg: #000;
+      --panel: #111;
+      --line: #0ff;
+    }
     html, body {
       margin: 0;
       padding: 0;
-      height: 100%;
       overflow: hidden;
-      background: #000;
-      font-family: monospace;
-      color: #0ff;
+      height: 100%;
+      background-color: var(--bg);
+      color: var(--cyan);
+      font-family: monospace, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     }
+
     #renderCanvas {
-      width: 100vw;
-      height: 100vh;
+      position: fixed;
+      inset: 0;
+      width: 100vw; height: 100vh;
       display: block;
-      background: #000;
+      z-index: 0;
+      background:#000;
     }
-    /* START UI */
-    #start-screen {
+
+    /* Title screen */
+    #title-screen {
       position: fixed;
       inset: 0;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      flex-direction: column;
-      background: rgba(0,0,0,0.9);
+      background: #000;
       z-index: 10;
+      text-align: center;
+      gap: 12px;
     }
-    #start-btn {
-      padding: 14px 36px;
-      border: 2px solid #0ff;
+    #title-screen img { max-width: 80%; opacity: 0.9; }
+    #title-screen button {
+      padding: 14px 32px;
+      font-size: 22px;
       background: #111;
-      color: #0ff;
-      font-size: 20px;
+      color: #eee;
+      border: 2px solid #666;
       cursor: pointer;
     }
-    #logo {
-      max-width: 70vw;
-      opacity: .3;
-      margin-bottom: 18px;
-    }
-    /* HUD */
-    #hud {
+
+    /* Modal / Log */
+    #ui-panel {
       position: fixed;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      z-index: 5;
-      pointer-events: none;
-    }
-    .pill {
-      background: rgba(0,0,0,0.6);
-      border: 1px solid #0ff;
-      padding: 6px 10px;
-      pointer-events: auto;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%,-50%);
+      width: min(92vw, 640px);
+      height: 78vh;
+      display: none;
+      z-index: 9;
+      background: var(--panel);
+      border: 2px solid var(--line);
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.8);
+      padding: 16px;
+      gap: 8px;
     }
     #log {
-      position: fixed;
-      bottom: 10px;
-      left: 10px;
-      width: min(520px, 90vw);
-      max-height: 40vh;
-      overflow: auto;
-      background: rgba(0,0,0,.6);
-      border: 1px solid #0ff;
-      padding: 8px;
-      z-index: 5;
-      font-size: 12px;
-      line-height: 1.35;
+      height: 65%;
+      overflow-y: auto;
+      padding: 10px;
+      background: #000;
+      border: 1px solid #333;
+      margin-bottom: 10px;
+      font-size: 14px;
     }
-    #log b { color: #7ff; }
+    #controls {
+      display:flex; flex-wrap:wrap; gap:6px; justify-content:center;
+    }
+    #controls button, .dev-btn, .std-btn {
+      background: #000;
+      color: var(--cyan);
+      border: 1px solid var(--line);
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+
+    #status {
+      text-align:center; margin-top: 6px;
+    }
+
+    /* Dev prompt & password */
+    .modal-overlay {
+      position: fixed; inset: 0; display:none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.7); z-index: 20;
+    }
+    .modal {
+      background:#111;border:2px solid var(--line);color:var(--cyan);
+      padding:16px 18px;border-radius:8px;width:90%;max-width:380px;
+    }
+    .modal h3 { margin:0 0 10px 0; }
+    .row { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
+
+    /* Dev panel (visible when dev-mode) */
+    #dev-panel {
+      position: fixed;
+      right: 10px; top: 10px; z-index: 12;
+      display: none;
+      background:#000a; backdrop-filter: blur(2px);
+      border:1px solid var(--line);
+      border-radius:8px; padding:8px; max-width: 260px;
+    }
+    #dev-panel h4 { margin:0 0 6px 0; }
+    #dev-panel .dev-grid { display:grid; grid-template-columns: 1fr; gap:6px; }
+    #dev-gear {
+      position:fixed; right:10px; bottom:10px; z-index: 12;
+      background:#000; border:1px solid var(--line); color: var(--cyan);
+      padding:4px 8px; opacity:.5; cursor:pointer;
+    }
+
     footer {
       position: fixed;
-      bottom: 8px;
-      right: 10px;
-      font-size: 11px;
-      opacity: 0.7;
-      z-index: 5;
+      bottom: 8px; left: 50%;
+      transform: translateX(-50%);
+      color: #888;
+      font-size: 0.9em;
+      z-index: 8;
+      pointer-events:none;
+    }
+
+    /* Touch hint */
+    #touch-hint {
+      position:fixed; left:12px; bottom:12px; z-index:8;
+      color:#999; font-size:12px; opacity:.7;
+    }
+
+    @media (max-width:700px){
+      #ui-panel { width: 95vw; height: 80vh; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Babylon canvas -->
+  <!-- 3D canvas -->
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Start overlay -->
-  <div id="start-screen">
-    <img id="logo" src="./assets/images/community_image_1405512458.jpg" alt="PhasmaPhoney logo" />
-    <button id="start-btn">Start Investigation</button>
-    <p style="margin-top:10px;opacity:.8;">Deo: “Welcome back. Try not to die.”</p>
+  <!-- Title -->
+  <div id="title-screen">
+    <img src="./assets/images/community_image_1405512458.jpg" alt="PhasmaPhoney"/>
+    <button id="startBtn" onclick="startInvestigation()">Start Investigation</button>
+    <p style="font-style: italic; font-size: 0.95em;color:#9ff;">
+      “Welcome back. Let’s hope your deduction is better than your taste in candles.”
+    </p>
   </div>
 
-  <!-- HUD -->
-  <div id="hud" style="display:none;">
-    <div class="pill">Turn: <span id="turn">0</span></div>
-    <div class="pill">Sanity: <span id="sanity">100</span>%</div>
-    <div class="pill">Room: <span id="room">Van</span></div>
-    <div class="pill"><button id="spawn-test" style="background:#000;border:1px solid #0ff;color:#0ff;cursor:pointer;">Spawn EMF (demo)</button></div>
+  <!-- Main UI / Log -->
+  <div id="ui-panel">
+    <div id="room-line" style="margin-bottom:6px;font-weight:bold">
+      Room: <span id="room-name">Van</span>
+    </div>
+    <div id="log">Interface ready.</div>
+    <div id="controls">
+      <button class="std-btn" onclick="handleCommand('map')">🗺 Map</button>
+      <button class="std-btn" onclick="openItemUse()">🎒 Use Item</button>
+      <button class="std-btn" onclick="handleCommand('inventory')">📦 Inventory</button>
+      <button class="std-btn" onclick="openGuess()">👻 Guess Ghost</button>
+      <button class="std-btn" onclick="handleCommand('end')">🚫 End</button>
+    </div>
+    <div id="status">
+      Turn: <span id="turn">0</span> |
+      Sanity: <span id="sanity">100</span>%
+    </div>
   </div>
 
-  <!-- Log -->
-  <div id="log" style="display:none;"></div>
+  <!-- Item use popup -->
+  <div id="item-popup" class="modal-overlay">
+    <div class="modal">
+      <h3>Select an item to use</h3>
+      <div id="item-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      <div class="row">
+        <button class="std-btn" onclick="closeItemUse()">Close</button>
+      </div>
+    </div>
+  </div>
 
-  <footer>Shark-Blades — Phasma-Phoney Prototype Web Build</footer>
+  <!-- Guess popup -->
+  <div id="guess-popup" class="modal-overlay">
+    <div class="modal" style="max-height:80vh;overflow:auto;">
+      <h3>Which ghost do you think it is?</h3>
+      <div id="guess-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;"></div>
+      <div class="row">
+        <button class="std-btn" onclick="closeGuess()">Cancel</button>
+      </div>
+    </div>
+  </div>
 
-  <!-- Babylon core + loaders (from your /cdn folder) -->
+  <!-- Developer prompt -->
+  <div id="dev-prompt" class="modal-overlay">
+    <div class="modal">
+      <h3>Enable developer options?</h3>
+      <div class="row">
+        <button class="std-btn" onclick="devPromptNo()">No</button>
+        <button class="std-btn" onclick="devPromptYes()">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Developer password -->
+  <div id="dev-pass" class="modal-overlay">
+    <div class="modal">
+      <h3>Enter password</h3>
+      <input id="dev-input" type="password" placeholder="password" autocomplete="off"
+             style="width:100%;padding:8px;background:#000;border:1px solid var(--line);color:var(--cyan);font-family:monospace;">
+      <div class="row">
+        <button class="std-btn" onclick="devPassCancel()">Cancel</button>
+        <button class="std-btn" onclick="devPassSubmit()">Unlock</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dev panel -->
+  <div id="dev-panel">
+    <h4>Developer Options</h4>
+    <div class="dev-grid">
+      <button class="dev-btn" onclick="spawnDemoEMF()">Spawn EMF in front</button>
+      <button class="dev-btn" onclick="recenterCamera()">Recenter Camera to House</button>
+      <button class="dev-btn" onclick="teleportToGhost()">Teleport to Ghost Room</button>
+      <button class="dev-btn" onclick="revealGhost()">Reveal Ghost</button>
+      <button class="dev-btn" onclick="giveAllItems()">Give All Items</button>
+    </div>
+  </div>
+  <button id="dev-gear" title="Developer options" onclick="openDevPrompt()">⚙</button>
+
+  <div id="touch-hint">Tip: WASD / arrow keys or swipe to move</div>
+
+  <footer>Shark-Blades — Phasma-Phoney Prototype Web Build v1.5.0</footer>
+
+  <!-- Babylon local CDN -->
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-  <!-- optional: inspector for debugging -->
-  <!-- <script src="./cdn/inspector/babylon.inspector.bundle.js"></script> -->
 
   <script>
-    // ======= Minimal game state (wire up as needed) =======
-    const game = {
-      started: false,
-      active: false,
-      turn: 0,
-      sanity: 100,
-      ghost: null,
-      ghostRoom: null,
-      inventory: ['EMF','Notebook','Lighter'],
-      roomNameMap: [
-        ['Van','Foyer','Kitchen'],
-        ['Basement','Living Room','Bathroom'],
-        ['Garage','Bedroom','Storage']
-      ],
-      position: [0,0] // grid position if you keep it
+  /***********************
+   * Core State & Content
+   ***********************/
+  const evidenceTypes = [
+    "EMF Level 5", "Spirit Box", "Fingerprints",
+    "Ghost Writing", "Freezing Temps", "D.O.T.S", "Orbs"
+  ];
+
+  const ghostProfiles = {
+    spirit:       { evidence: ["Spirit Box", "Ghost Writing", "EMF Level 5"] },
+    wraith:       { evidence: ["Spirit Box", "D.O.T.S", "EMF Level 5"] },
+    poltergeist:  { evidence: ["Spirit Box", "Ghost Writing", "Fingerprints"] },
+    banshee:      { evidence: ["D.O.T.S", "Fingerprints", "Orbs"] },
+    jinn:         { evidence: ["EMF Level 5", "Freezing Temps", "Fingerprints"] },
+    mare:         { evidence: ["Spirit Box", "Ghost Writing", "Orbs"] },
+    revenant:     { evidence: ["Ghost Writing", "Orbs", "Freezing Temps"] },
+    shade:        { evidence: ["Ghost Writing", "Freezing Temps", "EMF Level 5"] },
+    demon:        { evidence: ["Freezing Temps", "Ghost Writing", "Fingerprints"] },
+    yurei:        { evidence: ["Freezing Temps", "D.O.TS", "Orbs".replace('T','T')] }, // keep DOTS typo safe
+    oni:          { evidence: ["EMF Level 5", "Freezing Temps", "D.O.T.S"] },
+    yokai:        { evidence: ["Spirit Box", "D.O.T.S", "Orbs"] },
+    hantu:        { evidence: ["Freezing Temps", "Ghost Writing", "Fingerprints"] },
+    goryo:        { evidence: ["EMF Level 5", "D.O.T.S", "Fingerprints"] },
+    myling:       { evidence: ["Ghost Writing", "EMF Level 5", "Fingerprints"] },
+    onryo:        { evidence: ["Freezing Temps", "Spirit Box", "Orbs"] },
+    "the twins":  { evidence: ["Spirit Box", "Freezing Temps", "EMF Level 5"] },
+    raiju:        { evidence: ["EMF Level 5", "D.O.T.S", "Orbs"] },
+    obake:        { evidence: ["EMF Level 5", "Orbs", "Fingerprints"] },
+    "the mimic":  { evidence: ["Spirit Box", "Freezing Temps", "Fingerprints"] },
+    moroi:        { evidence: ["Freezing Temps", "Ghost Writing", "Spirit Box"] },
+    deogen:       { evidence: ["Spirit Box", "Ghost Writing", "D.O.T.S"] },
+    thaye:        { evidence: ["Ghost Writing", "Orbs", "D.O.T.S"] },
+    phantom:      { evidence: ["Spirit Box", "D.O.T.S", "Fingerprints"] },
+    succubus:     { evidence: ["Ghost Writing", "Orbs", "Spirit Box"] }
+  };
+
+  const allItems = [
+    "EMF","Spirit Box","Thermometer","Crucifix","Salt","Smudge",
+    "Camera","UV Light","D.O.T.S","Ghost Writing Book","Motion Sensor",
+    "Flashlight","Photo Camera","Thermal Camera","Voice Recorder"
+  ];
+
+  const game = {
+    started:false, active:false,
+    turn:0, sanity:100,
+    inventory:["Notebook","Lighter"],
+    usedItems:[],
+    ghost:null,
+    ghostRoom:"Living Room",
+    evidence:[],
+    position:[0,0],
+    roomNameMap:[
+      ["Van","Foyer","Kitchen"],
+      ["Basement","Living Room","Bathroom"],
+      ["Garage","Bedroom","Storage"]
+    ],
+    settings:{ devMode:false },
+    _houseCenter:null
+  };
+
+  /***********************
+   * UI helpers
+   ***********************/
+  function log(msg, from="") {
+    const logEl = document.getElementById("log");
+    const line = document.createElement("div");
+    line.innerHTML = from ? `<strong>${from}:</strong> <span>${msg}</span>` : `<span>${msg}</span>`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function setStatus() {
+    document.getElementById("turn").textContent = game.turn;
+    document.getElementById("sanity").textContent = game.sanity;
+  }
+  function setRoomLabel() {
+    const [x,y] = game.position;
+    document.getElementById("room-name").textContent = game.roomNameMap[x][y];
+  }
+
+  /***********************
+   * Babylon Setup
+   ***********************/
+  const canvas = document.getElementById("renderCanvas");
+  const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
+
+  let scene, camera, light;
+  let houseContainer = null;
+  let itemsContainer = null;
+
+  function createScene() {
+    scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0,0,0,1);
+
+    camera = new BABYLON.ArcRotateCamera("cam",
+      -Math.PI/2, Math.PI/3, 12,
+      new BABYLON.Vector3(0,1,0), scene);
+    camera.attachControl(canvas, true);
+    camera.lowerRadiusLimit = 4; camera.upperRadiusLimit = 50;
+
+    light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+    light.intensity = 0.9;
+
+    // Load Abandoned House map
+    log("Loading map…","System");
+    BABYLON.SceneLoader.LoadAssetContainer("./assets/models/map/","Abandoned_House.glb", scene,
+      (container) => {
+        houseContainer = container;
+        container.addAllToScene();
+
+        // Compute house center for spawn/camera targeting
+        const meshes = container.meshes.filter(m=>m && m.getBoundingInfo);
+        if (meshes.length) {
+          let min = new BABYLON.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+          let max = new BABYLON.Vector3(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
+          meshes.forEach(m=>{
+            const b = m.getBoundingInfo().boundingBox;
+            min = BABYLON.Vector3.Minimize(min, b.minimumWorld);
+            max = BABYLON.Vector3.Maximize(max, b.maximumWorld);
+          });
+          const center = max.add(min).scale(0.5);
+          game._houseCenter = center.clone();
+          camera.target = center.clone();
+          camera.radius = Math.max(8, BABYLON.Vector3.Distance(max, min) * 0.3);
+        }
+        log("Map loaded.","System");
+
+        // Load Items GLB (no addAllToScene; we'll clone per spawn)
+        log("Loading item models (exploration_objects.glb)…","System");
+        BABYLON.SceneLoader.LoadAssetContainer("./assets/models/items/","exploration_objects.glb", scene,
+          (c)=>{
+            itemsContainer = c;
+            log("Items loaded.","System");
+          },
+          null,
+          (sc, msg)=>log("Items load error: "+msg,"System")
+        );
+      },
+      null,
+      (sc, msg)=>log("Map load error: "+msg,"System")
+    );
+
+    return scene;
+  }
+
+  scene = createScene();
+  engine.runRenderLoop(()=>{ if (scene) scene.render(); });
+  window.addEventListener("resize", ()=>engine.resize());
+
+  /***********************
+   * Items Registry & Spawn
+   ***********************/
+  const Items = (() => {
+    const reg = new Map();
+    return {
+      register:(name, meshNames)=>reg.set(name, meshNames),
+      get:(name)=>reg.get(name)||null
     };
+  })();
 
-    // ======= DOM helpers =======
-    const $ = (s)=>document.querySelector(s);
-    const logEl = $('#log');
-    function log(msg, from='ADA') {
-      if (!logEl) return;
-      const line = document.createElement('div');
-      line.innerHTML = `<b>${from}:</b> ${msg}`;
-      logEl.appendChild(line);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-    function setHUD({turn, sanity, room}) {
-      if (turn!=null) $('#turn').textContent = String(turn);
-      if (sanity!=null) $('#sanity').textContent = String(sanity);
-      if (room!=null) $('#room').textContent = room;
-    }
+  // Names taken from your GLB log dump
+  Items.register("Thermometer", ["Thermometer_Thermometer_0"]);
+  Items.register("EMF", ["EMF_Detector_EMF_Detector_0"]);
+  Items.register("Spirit Box", ["Cone.001_Spirit_Box_0"]);
+  Items.register("Photo Camera", ["Photo_Camera_Photo_Camera_0","Photo_Camera_Pantalla_0"]);
+  Items.register("Flashlight", ["Flashlight_Flashlight_0","Flashlight_Poquet_Flashlight_Poquet_0"]);
+  Items.register("Thermal Camera", ["Thermal_Camera_Thermal_Camera_0","Thermal_Camera_Pantalla_0"]);
+  Items.register("Voice Recorder", ["Voice_Recorder_Voice_Recorder_0"]);
 
-    // ======= Babylon bootstrapping =======
-    let engine, scene, camera, light;
-    let mapRoot = null;
+  function spawnAtHouseCenterOffset(offset=new BABYLON.Vector3(0,0,0)) {
+    const base = game._houseCenter || new BABYLON.Vector3(0,0,0);
+    return base.add(offset);
+  }
 
-    // Items container & registry
-    let itemsContainer = null;            // AssetContainer for exploration_objects.glb
-    const itemPrefabByName = new Map();   // name -> node (original)
-    const itemListCache = [];             // for quick listing
+  function spawnItem(itemName, pos=null) {
+    if (!itemsContainer) { log("Items not loaded yet.","System"); return null; }
+    const patterns = Items.get(itemName);
+    if (!patterns) { log(`No mesh mapping found for "${itemName}".`,"System"); return null; }
 
-    async function createEngineScene() {
-      const canvas = document.getElementById('renderCanvas');
-      engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true, antialias: true });
-      scene  = new BABYLON.Scene(engine);
-      scene.clearColor = new BABYLON.Color4(0,0,0,1);
+    const root = new BABYLON.TransformNode(`${itemName}_root_${Date.now()}`, scene);
+    root.position = pos ? pos.clone() : spawnAtHouseCenterOffset(new BABYLON.Vector3(0,0.2,0));
 
-      // Camera
-      camera = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(0, 1.6, -4), scene);
-      camera.attachControl(canvas, true);
-      camera.speed = 0.25;
-      camera.minZ = 0.05;
-
-      // Light
-      light = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0,1,0), scene);
-      light.intensity = 0.7;
-
-      // Subtle fog for mood
-      scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-      scene.fogDensity = 0.015;
-      scene.fogColor = new BABYLON.Color3(0.02, 0.02, 0.03);
-
-      // Optional: enable Inspector with Shift+I
-      window.addEventListener('keydown', (e)=>{
-        if ((e.key === 'I' || e.key === 'i') && e.shiftKey) scene.debugLayer.isVisible() ? scene.debugLayer.hide() : scene.debugLayer.show();
-      });
-
-      // Resize
-      window.addEventListener('resize', () => engine.resize());
-    }
-
-    async function loadMap() {
-      // Append map scene into current scene
-      // Path per your repo: ./assets/models/map/Abandoned_House.glb
-      log('Loading map…');
-      await BABYLON.SceneLoader.AppendAsync('./assets/models/map/', 'Abandoned_House.glb', scene);
-      // After append, we can find a root by name or by picking the largest root.
-      mapRoot = scene.meshes.find(m => m.name === 'Abandoned_House' || (m.parent === null && m.getTotalVertices() > 0)) || null;
-      log('Map loaded.');
-    }
-
-    async function loadItemsContainer() {
-      // Load into an AssetContainer so we can instantiate multiple copies easily
-      // exploration_objects.glb path from your repo map
-      log('Loading item models (exploration_objects.glb)…');
-      itemsContainer = await BABYLON.SceneLoader.LoadAssetContainerAsync(
-        './assets/models/items/',
-        'exploration_objects.glb',
-        scene
-      );
-      // Register nodes by name for quick access
-      itemsContainer.meshes.forEach(node => {
-        if (node?.name && node.getTotalVertices && node.getTotalVertices() > 0) {
-          itemPrefabByName.set(node.name, node);
-          itemListCache.push(node.name);
-        }
-      });
-      log(`Items loaded. Found meshes: ${itemListCache.join(', ') || '(none)'} `);
-    }
-
-    // List available item names (from GLB)
-    function getAvailableItemNames() {
-      return [...itemListCache];
-    }
-
-    // Spawn an instance of itemName at position (Vector3). Returns the root of the instance.
-    function spawnItem(itemName, position = new BABYLON.Vector3(0,1,0)) {
-      // Try exact match first
-      let template = itemPrefabByName.get(itemName);
-
-      // If not exact, try a "contains" search (so "EMF" can match "EMF_Meter" etc.)
-      if (!template) {
-        const key = [...itemPrefabByName.keys()].find(k => k.toLowerCase().includes(itemName.toLowerCase()));
-        if (key) template = itemPrefabByName.get(key);
-      }
-
-      if (!template) {
-        log(`No mesh named like "${itemName}" found in exploration_objects.glb.`, 'SYS');
-        return null;
-      }
-
-      // Make a fresh container instance so materials, animations, etc. are preserved
-      const inst = itemsContainer.instantiateModelsToScene((n)=>`${n}_${performance.now().toFixed(0)}`);
-      // Place near camera by default
-      inst.rootNodes.forEach(root => {
-        root.position = position.clone();
-      });
-
-      // Try to find the node by name inside the instantiated set
-      let chosen = inst.rootNodes.find(n => n.name.toLowerCase().includes(template.name.toLowerCase()));
-      if (!chosen) chosen = inst.rootNodes[0];
-
-      // Optional: a small glow/emissive tweak for visibility
-      chosen.getChildMeshes().forEach(m=>{
-        if (m.material && m.material.emissiveColor) {
-          m.material.emissiveColor = m.material.emissiveColor.add(new BABYLON.Color3(0.05,0.1,0.1));
-        }
-      });
-
-      return chosen;
-    }
-
-    // ======= Game flow =======
-    async function startGame() {
-      $('#start-screen').style.display = 'none';
-      $('#hud').style.display = '';
-      $('#log').style.display = '';
-
-      await createEngineScene();
-      await loadMap();
-      await loadItemsContainer();
-
-      // Randomize a starting room label (purely cosmetic unless you bind to actual nodes)
-      const flatRooms = game.roomNameMap.flat();
-      game.ghostRoom = flatRooms[Math.floor(Math.random() * flatRooms.length)];
-      setHUD({room: game.ghostRoom});
-
-      // Place camera at a reasonable spawn (tweak as needed; depends on Abandoned_House.glb origin)
-      camera.setTarget(BABYLON.Vector3.Zero());
-      camera.position = new BABYLON.Vector3(0, 1.7, -5);
-
-      log('Investigation started.');
-      engine.runRenderLoop(() => scene.render());
-    }
-
-    // ======= Hook UI =======
-    document.getElementById('start-btn').addEventListener('click', startGame);
-
-    // Demo button: try to spawn an EMF model ~2 meters in front of camera
-    document.getElementById('spawn-test').addEventListener('click', ()=>{
-      if (!scene) return;
-      const forward = camera.getDirection(BABYLON.Axis.Z);
-      const pos = camera.position.add(forward.scale(2));
-      const spawned = spawnItem('EMF', pos);
-      if (spawned) {
-        log(`Spawned: ${spawned.name}`);
-      }
+    let cloned = 0;
+    patterns.forEach(p=>{
+      itemsContainer.meshes
+        .filter(m=>m && m.name===p)
+        .forEach(src=>{
+          const c = src.clone(`${src.name}_${Date.now()}`, root);
+          if (c && c.material) c.material = c.material.clone(`${c.material.name}_${c.name}`);
+          cloned++;
+        });
     });
+    if (!cloned) { root.dispose(); log(`Couldn't find meshes for "${itemName}" in GLB.`,"System"); return null; }
+    root.getChildMeshes().forEach(m=>m.isPickable = true);
+    return root;
+  }
 
-    // Expose to window for your other scripts (items logic, etc.)
-    window.Phasma = {
-      getAvailableItemNames,
-      spawnItem,
-      scene: ()=>scene,
-      camera: ()=>camera,
-      game
+  /***********************
+   * Game Flow
+   ***********************/
+  const introDialogues = [
+    "I've got a bad feeling about this one...",
+    "Remember, this isn't a ghost story—it's real.",
+    "Stay on your toes out there.",
+    "Let's see what we're dealing with this time.",
+    "Keep the lights on and the sanity high!"
+  ];
+
+  function randomGhost() {
+    const keys = Object.keys(ghostProfiles);
+    return keys[Math.floor(Math.random()*keys.length)];
+  }
+  function randomGhostRoom() {
+    const flat = game.roomNameMap.flat();
+    // avoid Van as ghost room
+    const rooms = flat.filter(r=>r!=="Van");
+    return rooms[Math.floor(Math.random()*rooms.length)];
+  }
+
+  function startInvestigation() {
+    document.getElementById("title-screen").style.display = "none";
+    document.getElementById("ui-panel").style.display = "flex";
+    game.started = true;
+    game.active = true;
+    game.turn = 0;
+    game.sanity = 100;
+    game.ghost = randomGhost();
+    game.ghostRoom = randomGhostRoom();
+    game.position = [0,0];
+    setStatus(); setRoomLabel();
+    log(introDialogues[Math.floor(Math.random()*introDialogues.length)], "Deo");
+    log("Investigation started.","System");
+  }
+
+  function endGame(message) {
+    log(message,"System");
+    game.started = false;
+    game.active = false;
+  }
+
+  function advanceTurn() {
+    game.turn++;
+    game.sanity = Math.max(0, game.sanity - 3);
+    setStatus();
+  }
+
+  /***********************
+   * Movement (WASD + touch)
+   ***********************/
+  function move(dir) {
+    let [x,y] = game.position;
+    if (dir==='up') x = Math.max(0, x-1);
+    if (dir==='down') x = Math.min(2, x+1);
+    if (dir==='left') y = Math.max(0, y-1);
+    if (dir==='right') y = Math.min(2, y+1);
+    game.position = [x,y];
+    setRoomLabel();
+    const here = game.roomNameMap[x][y];
+    const msg = (here===game.ghostRoom)
+      ? "Something about this room sits wrong."
+      : "Quiet… for now.";
+    log(`Moved to ${here}. ${msg}`);
+    advanceTurn();
+  }
+
+  const key2dir = { w:"up", a:"left", s:"down", d:"right", ArrowUp:"up", ArrowLeft:"left", ArrowDown:"down", ArrowRight:"right" };
+  window.addEventListener("keydown", (e)=>{
+    const k = e.key;
+    const dir = key2dir[k] || key2dir[k.toLowerCase()];
+    if (dir) { e.preventDefault(); move(dir); }
+  });
+
+  // Touch swipe
+  let touchStart = null;
+  window.addEventListener("touchstart", e=>{
+    const t = e.changedTouches[0]; touchStart = {x:t.clientX,y:t.clientY};
+  }, {passive:true});
+  window.addEventListener("touchend", e=>{
+    if (!touchStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
+    const ax = Math.abs(dx), ay = Math.abs(dy);
+    if (ax<24 && ay<24) { touchStart=null; return; }
+    if (ax>ay) move(dx>0?"right":"left"); else move(dy>0?"down":"up");
+    touchStart=null;
+  }, {passive:true});
+
+  /***********************
+   * Commands & Inventory
+   ***********************/
+  function handleCommand(cmd) {
+    const c = cmd.toLowerCase().trim();
+    if (!game.started || !game.active) { log("The investigation hasn't started.","System"); return; }
+
+    if (c==="map") {
+      log("Simple layout (3x3):");
+      game.roomNameMap.forEach(row=>log(" - "+row.join(" | ")));
+      advanceTurn();
+      return;
+    }
+
+    if (c==="inventory") {
+      log("You have: "+game.inventory.join(", "));
+      advanceTurn();
+      return;
+    }
+
+    if (c==="end") {
+      endGame("Investigation ended.");
+      document.getElementById("ui-panel").style.display = "none";
+      document.getElementById("title-screen").style.display = "flex";
+      return;
+    }
+
+    log("Unknown command.");
+  }
+
+  function openItemUse() {
+    const overlay = document.getElementById("item-popup");
+    const list = document.getElementById("item-list");
+    list.innerHTML = "";
+    game.inventory.forEach(item=>{
+      const b = document.createElement("button");
+      b.className = "std-btn";
+      b.textContent = item;
+      b.onclick = ()=>{ closeItemUse(); useItem(item); };
+      list.appendChild(b);
+    });
+    overlay.style.display = "flex";
+  }
+  function closeItemUse(){ document.getElementById("item-popup").style.display="none"; }
+
+  /***********************
+   * Evidence & Items (usability)
+   * - Evidence revealed only if correct tool is used AND you're in the ghost room
+   ***********************/
+  const toolToEvidence = {
+    "EMF": "EMF Level 5",
+    "Spirit Box": "Spirit Box",
+    "Thermometer": "Freezing Temps",
+    "UV Light": "Fingerprints",
+    "D.O.T.S": "D.O.T.S",
+    "Ghost Writing Book": "Ghost Writing",
+    "Camera": "Orbs" // ONLY via camera check
+  };
+
+  function inGhostRoom() {
+    const [x,y]=game.position; return (game.roomNameMap[x][y]===game.ghostRoom);
+  }
+  function revealEvidence(ev) {
+    if (!game.evidence.includes(ev)) {
+      game.evidence.push(ev);
+      log(`Evidence noted: ${ev}`,"Journal");
+    } else {
+      log(`(Already noted) ${ev}`,"Journal");
+    }
+  }
+
+  function useItem(item) {
+    if (!game.inventory.includes(item)) { log(`You don't have ${item}.`); return; }
+
+    const evidence = toolToEvidence[item];
+    const here = inGhostRoom();
+
+    // Ambient, subtle narratives (no direct giveaway unless correct + present)
+    const subtle = {
+      "EMF": [
+        "Something buzzes at the edge of your awareness.",
+        "A prickle runs up your arm, like static in the air."
+      ],
+      "Spirit Box":[
+        "The quiet feels charged, as if words could slip through the noise.",
+        "You wait… the silence seems to lean closer."
+      ],
+      "Thermometer":[
+        "A breath you didn’t mean to take fogs a little.",
+        "The air tastes colder than it should."
+      ],
+      "UV Light":[
+        "Surfaces feel… touched. Hard to say by what.",
+        "You angle the light, hunting for what doesn’t want to be found."
+      ],
+      "D.O.T.S":[
+        "You swear something moved where nothing should.",
+        "The room’s edges flicker in your periphery."
+      ],
+      "Ghost Writing Book":[
+        "Paper rustles with no draft.",
+        "You set the book down. It waits with you."
+      ],
+      "Camera":[
+        "You frame the room through the lens; the world looks different that way.",
+        "Glass catches more than eyes ever do."
+      ],
+      "Smudge":[
+        "The scent clings to the air; the space feels a shade lighter.",
+      ],
+      "Crucifix":[
+        "You set it down. The room feels… negotiated with.",
+      ]
     };
+
+    // Always give a subtle line
+    const pool = subtle[item] || ["You use it."];
+    log(pool[Math.floor(Math.random()*pool.length)]);
+
+    // Only confirm evidence if: correct tool + in ghost room + that ghost actually has that evidence
+    if (evidence && here) {
+      const ghostEv = ghostProfiles[game.ghost].evidence;
+      if (ghostEv.includes(evidence)) {
+        // Some special behaviors:
+        if (item === "Ghost Writing Book") {
+          // Writing appears with a delay (1 turn)
+          setTimeout(()=>{ revealEvidence(evidence); }, 700);
+        } else {
+          revealEvidence(evidence);
+        }
+      } else {
+        // Using the right tool but wrong ghost type -> nothing conclusive
+        log("Nothing you can log yet.");
+      }
+    } else if (evidence && !here) {
+      // Tool is valid but not in the right room -> no hint
+      log("Hard to read anything from here.");
+    }
+
+    advanceTurn();
+  }
+
+  /***********************
+   * Guessing
+   ***********************/
+  function openGuess() {
+    const overlay = document.getElementById("guess-popup");
+    const list = document.getElementById("guess-list");
+    list.innerHTML = "";
+    Object.keys(ghostProfiles).forEach(name=>{
+      const b = document.createElement("button");
+      b.className = "std-btn";
+      b.textContent = name.toUpperCase();
+      b.onclick = ()=>{ closeGuess(); processGuess(name); };
+      list.appendChild(b);
+    });
+    overlay.style.display = "flex";
+  }
+  function closeGuess(){ document.getElementById("guess-popup").style.display="none"; }
+
+  function processGuess(name) {
+    if (name===game.ghost) endGame(`✅ Correct. It was ${name.toUpperCase()}.`);
+    else endGame(`❌ Incorrect. It was ${game.ghost.toUpperCase()}.`);
+  }
+
+  /***********************
+   * Developer Mode
+   ***********************/
+  function openDevPrompt(){ document.getElementById("dev-prompt").style.display="flex"; }
+  function devPromptNo(){ document.getElementById("dev-prompt").style.display="none"; log("Developer options not enabled.","System"); }
+  function devPromptYes(){ document.getElementById("dev-prompt").style.display="none"; document.getElementById("dev-pass").style.display="flex"; setTimeout(()=>document.getElementById("dev-input").focus(), 50); }
+  function devPassCancel(){ document.getElementById("dev-pass").style.display="none"; log("Developer options cancelled.","System"); }
+  function devPassSubmit(){
+    const val = (document.getElementById("dev-input").value||"").trim();
+    if (val==="devmode") {
+      document.getElementById("dev-pass").style.display="none";
+      game.settings.devMode = true;
+      document.getElementById("dev-panel").style.display = "block";
+      log("Developer mode enabled.","System");
+    } else {
+      log("Incorrect password.","System");
+    }
+  }
+
+  // Dev actions
+  function spawnDemoEMF(){
+    const p = spawnAtHouseCenterOffset(new BABYLON.Vector3(0,0.2,0));
+    const node = spawnItem("EMF", p);
+    if (node) log("Spawned: EMF","System");
+  }
+  function recenterCamera(){
+    if (game._houseCenter) {
+      camera.target = game._houseCenter.clone();
+      camera.radius = Math.max(camera.radius, 8);
+      log("Camera recentered to house center.","System");
+    } else {
+      log("House center not available yet.","System");
+    }
+  }
+  function revealGhost(){
+    log("Ghost: "+game.ghost.toUpperCase(),"System");
+    log("Evidence: "+ghostProfiles[game.ghost].evidence.join(", "),"System");
+  }
+  function giveAllItems(){
+    allItems.forEach(i=>{
+      if (!game.inventory.includes(i)) game.inventory.push(i);
+    });
+    log("All items granted.","System");
+  }
+  function teleportToGhost(){
+    // Teleport in logical grid to ghost room
+    const idx = game.roomNameMap.flat().indexOf(game.ghostRoom);
+    if (idx>=0) {
+      const x = Math.floor(idx/3), y = idx%3;
+      game.position = [x,y];
+      setRoomLabel();
+      log(`Teleported to ${game.ghostRoom}.`,"System");
+    } else {
+      log("Couldn't locate ghost room on grid.","System");
+    }
+  }
+
+  // Show prompt at load
+  window.addEventListener("DOMContentLoaded", ()=>{
+    setTimeout(openDevPrompt, 350);
+  });
+
   </script>
 </body>
 </html>
