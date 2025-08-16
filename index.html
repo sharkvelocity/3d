@@ -2,22 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Phasma-Phoney — Web Build (Map Loader + Fixes)</title>
+  <title>Phasma-Phoney — Web Build (Dev UI Overhaul + Map Fixes)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; color:#0ff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; }
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; color:#d7feff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; }
     #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; }
 
     /* HUD */
-    #hud { position:fixed; top:10px; left:10px; z-index:20; color:#0ff; background:rgba(0,0,0,.45); border:1px solid #0ff; border-radius:8px; padding:8px 10px; min-width:260px; backdrop-filter: blur(3px); box-shadow:0 0 10px rgba(0,255,255,.25) inset; }
-    #hud .row { display:flex; align-items:center; gap:8px; margin:4px 0; flex-wrap:wrap; }
-    .badge { padding:2px 6px; border:1px solid #0ff; border-radius:6px; }
-    .meter { position:relative; height:8px; background:#033; border:1px solid #0ff; border-radius:4px; width:160px; }
+    #hud { position:fixed; top:10px; left:10px; z-index:20; color:#8ff; background:rgba(0,10,12,.45); border:1px solid #0ff; border-radius:12px; padding:10px 12px; min-width:280px; backdrop-filter: blur(6px) saturate(1.1); box-shadow:0 0 10px rgba(0,255,255,.25) inset; }
+    #hud .row { display:flex; align-items:center; gap:8px; margin:6px 0; flex-wrap:wrap; }
+    .badge { padding:2px 8px; border:1px solid #0ff; border-radius:10px; }
+    .meter { position:relative; height:8px; background:#033; border:1px solid #0ff; border-radius:4px; width:180px; }
     .meter>span { display:block; height:100%; background:#0ff; width:100%; }
 
     /* Belt */
-    #belt { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:10px; z-index:22; background:rgba(0,0,0,.5); padding:8px 10px; border:1px solid #0ff; border-radius:12px; backdrop-filter: blur(3px); }
-    .slot { width:72px; height:72px; border:1px dashed #0aa; border-radius:8px; display:flex; align-items:center; justify-content:center; position:relative; color:#0ff; font-size:.8rem; user-select:none; cursor:pointer; }
+    #belt { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); display:flex; gap:10px; z-index:22; background:rgba(0,0,0,.5); padding:10px 12px; border:1px solid #0ff; border-radius:14px; backdrop-filter: blur(3px); }
+    .slot { width:72px; height:72px; border:1px dashed #0aa; border-radius:10px; display:flex; align-items:center; justify-content:center; position:relative; color:#0ff; font-size:.8rem; user-select:none; cursor:pointer; }
     .slot.active { outline:2px solid #0ff; box-shadow:0 0 10px #0ff inset; }
     .slot .key { position:absolute; top:-8px; left:-8px; width:20px; height:20px; display:grid; place-items:center; color:#021; background:#0ff; border-radius:50%; font-weight:700; font-size:.7rem; border:1px solid #033; }
     .slot .label { position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:.7rem; color:#7ff; }
@@ -27,26 +27,41 @@
     #hand .hint { position:absolute; bottom:6px; right:8px; font-size:.75rem; color:#8ff; opacity:.8; }
 
     /* Storage */
-    #storageBtn { position:fixed; right:18px; top:18px; z-index:25; background:#111; color:#0ff; border:1px solid #0ff; border-radius:8px; padding:10px 14px; cursor:pointer; display:none; }
+    #storageBtn { position:fixed; right:18px; top:18px; z-index:25; background:#111; color:#0ff; border:1px solid #0ff; border-radius:10px; padding:10px 14px; cursor:pointer; display:none; }
 
     /* Start */
-    #start { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; gap:18px; align-items:center; justify-content:center; background:linear-gradient(180deg, rgba(0,0,0,.65), rgba(0,0,0,.85)); }
+    #start { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; gap:18px; align-items:center; justify-content:center; background:radial-gradient(1200px 600px at 50% 10%, rgba(0,50,60,.25), rgba(0,0,0,.85)); }
     #start .logo { width:min(560px, 80vw); height:180px; background:url("./logo.jpg") center/contain no-repeat; filter:drop-shadow(0 0 8px rgba(0,255,255,.2)); }
-    #start button { padding:14px 26px; font-size:20px; border-radius:10px; border:1px solid #0ff; color:#0ff; background:#111; cursor:pointer; z-index:51; }
+    #start button { padding:14px 26px; font-size:20px; border-radius:12px; border:1px solid #0ff; color:#0ff; background:#0a1517; cursor:pointer; z-index:51; }
 
-    /* Dev */
+    /* Dev (overhauled) */
     #devPrompt, #devPanel, #roomPicker { position:fixed; inset:0; display:none; z-index:40; align-items:center; justify-content:center; background:rgba(0,0,0,.6); }
-    .modal { width:min(760px, 92vw); background:#0a0f10; border:1px solid #0ff; box-shadow:0 0 18px rgba(0,255,255,.25); border-radius:12px; padding:16px; color:#9ef; font-family:monospace; }
-    .modal h3 { margin:0 0 8px 0; color:#0ff; }
-    .modal .row { margin:8px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .modal button, .modal input, .modal select { background:#000; color:#0ff; border:1px solid #0ff; border-radius:8px; padding:8px 12px; }
-    .log { background:#000; border:1px solid #044; min-height:120px; padding:8px; border-radius:6px; color:#aff; font-size:.85rem; overflow:auto; max-height:40vh; white-space:pre-wrap; }
+    .modal { width:min(840px, 92vw); background:linear-gradient(180deg, #03181c, #041015); border:1px solid #0ff; box-shadow:0 0 28px rgba(0,255,255,.22); border-radius:16px; padding:16px; color:#baf8ff; }
+    .modal h3 { margin:0 0 10px 0; color:#0ff; letter-spacing:.5px; }
+    .grid { display:grid; gap:10px; grid-template-columns: repeat(12, 1fr); }
+    .card { background:rgba(0,20,24,.6); border:1px solid #064b4e; border-radius:12px; padding:10px; }
+    .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .log { background:#000; border:1px solid #044; min-height:120px; padding:8px; border-radius:8px; color:#aff; font-size:.85rem; overflow:auto; max-height:38vh; white-space:pre-wrap; }
 
-    /* Flash */
-    #flash { position:fixed; inset:0; background:white; opacity:0; pointer-events:none; z-index:30; transition:opacity 120ms linear; }
+    /* Better buttons & switches */
+    .btn { background:#071b1d; color:#9ff; border:1px solid #0ff; border-radius:10px; padding:8px 12px; cursor:pointer; }
+    .btn.secondary { border-color:#066; color:#7fd; }
+    .btn.warn { border-color:#faa; color:#fee; }
+    .btn:active { transform:translateY(1px); }
+    .pill { display:inline-flex; align-items:center; gap:8px; background:#071b1d; border:1px solid #0ff; border-radius:999px; padding:6px 10px; }
+    .switch { position:relative; width:46px; height:26px; background:#022; border:1px solid #066; border-radius:20px; cursor:pointer; flex:0 0 46px; }
+    .switch .knob { position:absolute; top:2px; left:2px; width:20px; height:20px; background:#0ff; border-radius:50%; transition:all .15s ease; }
+    .switch.on { background:#003b41; }
+    .switch.on .knob { left:24px; }
 
-    /* Toast */
-    #toast { position:fixed; left:10px; bottom:10px; background:rgba(0,0,0,.55); border:1px solid #044; color:#9ef; padding:6px 10px; border-radius:8px; font-family:monospace; font-size:.85rem; z-index:24; max-width:50vw; display:none; }
+    .field { display:flex; align-items:center; gap:8px; }
+    select, input[type="range"], input[type="text"], input[type="password"] { background:#000; color:#0ff; border:1px solid #0ff; border-radius:8px; padding:8px 10px; }
+
+    /* Floating mapping tools */
+    .fabStack { position:fixed; right:16px; top:50%; transform:translateY(-50%); display:none; flex-direction:column; gap:10px; z-index:45; }
+    .fab { width:46px; height:46px; border-radius:50%; border:1px solid #0ff; background:#001014; color:#0ff; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 8px rgba(0,255,255,.2); }
+    .fab:hover { background:#011a1a; }
+    .fab span { font-size:12px; line-height:1; }
 
     /* Notebook */
     #notebook { position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.65); }
@@ -63,11 +78,9 @@
     #stick { position:fixed; left:16px; bottom:16px; width:120px; height:120px; border-radius:50%; border:1px solid #066; background:rgba(0,0,0,.3); display:none; z-index:26; }
     #stick .dot { position:absolute; width:48px; height:48px; border-radius:50%; border:1px solid #0ff; background:#001e1e; left:36px; top:36px; }
 
-    /* Floating mapping tools */
-    .fabStack { position:fixed; right:16px; top:50%; transform:translateY(-50%); display:none; flex-direction:column; gap:8px; z-index:45; }
-    .fab { width:44px; height:44px; border-radius:50%; border:1px solid #0ff; background:#001014; color:#0ff; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 8px rgba(0,255,255,.2); }
-    .fab:hover { background:#011a1a; }
-    .fab span { font-size:12px; line-height:1; }
+    /* Flash & toast */
+    #flash { position:fixed; inset:0; background:white; opacity:0; pointer-events:none; z-index:30; transition:opacity 120ms linear; }
+    #toast { position:fixed; left:10px; bottom:10px; background:rgba(0,0,0,.55); border:1px solid #044; color:#9ef; padding:6px 10px; border-radius:8px; font-family:monospace; font-size:.85rem; z-index:24; max-width:50vw; display:none; }
   </style>
 </head>
 <body>
@@ -96,62 +109,89 @@
 
   <!-- Dev prompt -->
   <div id="devPrompt">
-    <div class="modal">
+    <div class="modal" style="max-width:460px;">
       <h3>Enable Developer Options?</h3>
       <div class="row">
-        <button id="devYes">Yes</button>
-        <button id="devNo">No</button>
+        <button id="devYes" class="btn">Yes</button>
+        <button id="devNo" class="btn secondary">No</button>
       </div>
       <div class="row" id="devPwRow" style="display:none;">
         <label>Password:&nbsp;<input id="devPw" type="password" placeholder="••••••" /></label>
-        <button id="devPwOk">Enable</button>
+        <button id="devPwOk" class="btn">Enable</button>
         <div id="devPwMsg" style="color:#f88;"></div>
       </div>
     </div>
   </div>
 
-  <!-- Dev panel -->
+  <!-- Dev panel (overhauled layout) -->
   <div id="devPanel">
     <div class="modal">
-      <h3>Developer Options</h3>
-      <div class="row">
-        <button id="teleGhost">Teleport to Ghost</button>
-        <button id="toggleGod">God Mode: OFF</button>
-        <button id="pingHere">Ping XYZ</button>
-        <button id="flyPg">Toggle Fly: OFF</button>
-        <button id="closeDev" style="margin-left:auto;">Close</button>
-      </div>
-      <div class="row">
-        <label>Map:&nbsp;
-          <select id="mapSelect">
-            <option value="Abandoned_House.glb">Abandoned_House.glb</option>
-            <option value="house_fully_furnished.glb">house_fully_furnished.glb</option>
-            <option value="furnished_house.glb">furnished_house.glb</option>
-          </select>
-        </label>
-        <button id="loadMapBtn">Load Map</button>
-      </div>
-      <div class="row" style="border:1px solid #044; padding:8px; border-radius:8px; background:#050b0c; flex-direction:column; gap:8px;">
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <button id="toggleListen">Enable Developer Listen</button> <span id="listenState" style="opacity:.8;">OFF</span>
-          <button id="toggleFOV">Show FOV: OFF</button>
-        </div>
-        <div id="listenGroup" style="display:none;">
-          <div class="row">
-            <button id="listenGhost">Ghost Tracking: OFF</button>
-            <button id="listenEvidence">Evidence Use Log: OFF</button>
-          </div>
-          <div class="row">
-            <button id="mapStart">Start Map</button>
-            <button id="mapPin" disabled>Pin</button>
-            <button id="mapConfirm" disabled>Confirm Map</button>
-          </div>
-          <div style="font-size:.85rem; opacity:.8;">
-            Logs ghost state/LOS and evidence usage. Map mode pins XYZ and names an area on confirm.
+      <h3>Developer Console</h3>
+      <div class="grid">
+        <!-- Actions -->
+        <div class="card" style="grid-column: span 12;">
+          <div class="row" style="gap:12px;">
+            <button id="teleGhost" class="btn">Teleport to Ghost</button>
+            <button id="respawnFloor" class="btn">Respawn to Floor</button>
+            <button id="centerHere" class="btn">Teleport to Map Center</button>
+            <span class="pill">God
+              <div id="swGod" class="switch"><div class="knob"></div></div>
+            </span>
+            <span class="pill">Fly
+              <div id="swFly" class="switch"><div class="knob"></div></div>
+            </span>
+            <span class="pill">Show FOV
+              <div id="swFOV" class="switch"><div class="knob"></div></div>
+            </span>
+            <button id="closeDev" class="btn secondary" style="margin-left:auto;">Close</button>
           </div>
         </div>
+
+        <!-- Map Loader -->
+        <div class="card" style="grid-column: span 6;">
+          <div class="row">
+            <strong>Map</strong>
+            <span class="field">
+              <select id="mapSelect">
+                <option value="Abandoned_House.glb">Abandoned_House.glb</option>
+                <option value="house_fully_furnished.glb">house_fully_furnished.glb</option>
+                <option value="furnished_house.glb">furnished_house.glb</option>
+              </select>
+              <button id="loadMapBtn" class="btn">Load</button>
+            </span>
+          </div>
+          <div class="row">
+            <label>Ground Offset&nbsp;<input id="groundOffset" type="range" min="-0.30" max="0.10" step="0.01" value="-0.10" /></label>
+            <span id="groundOffsetVal" style="min-width:60px;">-0.10</span>
+            <button id="applyGround" class="btn secondary">Apply</button>
+          </div>
+          <div class="row">
+            <button id="recalcBoundary" class="btn secondary">Recalculate Interior Boundary</button>
+          </div>
+        </div>
+
+        <!-- Listener / Mapping -->
+        <div class="card" style="grid-column: span 6;">
+          <div class="row">
+            <button id="toggleListen" class="btn">Enable Developer Listen</button>
+            <span style="opacity:.8;">→ Shows floating mapping tools</span>
+          </div>
+          <div class="row" id="listenRow">
+            <span class="pill">Ghost Log <div id="swGhost" class="switch"><div class="knob"></div></div></span>
+            <span class="pill">Evidence Log <div id="swEvidence" class="switch"><div class="knob"></div></div></span>
+          </div>
+          <div class="row">
+            <button id="mapStart" class="btn">Start Map</button>
+            <button id="mapPin" class="btn" disabled>Pin</button>
+            <button id="mapConfirm" class="btn" disabled>Confirm Map</button>
+          </div>
+        </div>
+
+        <!-- Log -->
+        <div class="card" style="grid-column: span 12;">
+          <div class="log" id="devLog"></div>
+        </div>
       </div>
-      <div class="log" id="devLog"></div>
     </div>
   </div>
 
@@ -165,7 +205,7 @@
 
   <!-- Room picker -->
   <div id="roomPicker">
-    <div class="modal">
+    <div class="modal" style="max-width:720px;">
       <h3>Name this mapped area</h3>
       <div class="row">
         <label>Known rooms:&nbsp;<select id="knownRooms"></select></label>
@@ -173,8 +213,8 @@
         <label>Custom:&nbsp;<input id="customRoom" type="text" placeholder="Enter room name" /></label>
       </div>
       <div class="row">
-        <button id="roomOk">Save</button>
-        <button id="roomCancel">Cancel</button>
+        <button id="roomOk" class="btn">Save</button>
+        <button id="roomCancel" class="btn secondary">Cancel</button>
       </div>
     </div>
   </div>
@@ -185,11 +225,11 @@
       <div class="card">
         <div style="display:flex; align-items:center;">
           <h3 style="flex:1;">Evidence</h3>
-          <button id="nbClose">Close (N)</button>
+          <button id="nbClose" class="btn secondary">Close (N)</button>
         </div>
         <div id="evidenceList"></div>
         <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-          <button id="clearEvidence">Clear</button>
+          <button id="clearEvidence" class="btn secondary">Clear</button>
           <span id="matchCount" style="opacity:.9;"></span>
         </div>
       </div>
@@ -254,17 +294,13 @@
     };
 
     /***************
-     * FRONT DOOR (pins stay; safe if not used)
+     * FRONT DOOR (kept)
      ***************/
     const frontDoor = {
       p1: new BABYLON.Vector3(28.866, 0.831, -117.498),
       p2: new BABYLON.Vector3(28.000, 0.822, -117.489),
-      center: null,
-      yaw: 0,
-      len: 0,
-      open: true,
-      normalOut: null,
-      blocker: null
+      center: null, yaw: 0, len: 0, open: true,
+      normalOut: null, blocker: null
     };
 
     function initFrontDoor(){
@@ -273,13 +309,11 @@
       if(frontDoor.len < 0.01) return;
       frontDoor.center = frontDoor.p1.add(frontDoor.p2).scale(0.5);
       frontDoor.yaw = Math.atan2(v.x, v.z);
-
       const t = v.scale(1/frontDoor.len);
       let n = new BABYLON.Vector2(-t.z, t.x);
       const probe = new BABYLON.Vector3(frontDoor.center.x + n.x*0.6, frontDoor.center.y, frontDoor.center.z + n.y*0.6);
       const outside = !pointInPolyXZ(probe.x, probe.z, game.boundary);
       frontDoor.normalOut = outside ? n : new BABYLON.Vector2(-n.x, -n.y);
-
       if(frontDoor.blocker) { frontDoor.blocker.dispose(); frontDoor.blocker=null; }
       const box = BABYLON.MeshBuilder.CreateBox("frontDoorBlocker", { width: frontDoor.len + 0.06, height: 2.2, depth: 0.12 }, game.scene);
       box.position = new BABYLON.Vector3(frontDoor.center.x, Math.max(frontDoor.p1.y, frontDoor.p2.y) + 1.1, frontDoor.center.z);
@@ -287,7 +321,6 @@
       frontDoor.blocker = box; frontDoor.open = true;
     }
     function setFrontDoorOpen(isOpen){ frontDoor.open=!!isOpen; if(frontDoor.blocker) frontDoor.blocker.checkCollisions = !frontDoor.open; }
-
     function clampGhostAgainstFrontDoor(current, proposed){
       if(frontDoor.open || frontDoor.len < 0.01) return proposed;
       const n = frontDoor.normalOut;
@@ -367,7 +400,7 @@
     const skyMat = new BABYLON.SkyMaterial("skyMaterial", scene); skyMat.backFaceCulling = false; skyMat.inclination=0.02; skyMat.azimuth=0.3; skyMat.luminance=0.7;
     skybox.material = skyMat; game.skybox = skybox; game.skyMat = skyMat;
 
-    // Safety ground (will be aligned to floor after map load)
+    // Safety ground (aligned after map load)
     const safetyGround = BABYLON.MeshBuilder.CreateGround("safety", { width:400, height:400 }, scene);
     safetyGround.position.y = -0.4; // initial lower
     safetyGround.checkCollisions = true;
@@ -378,13 +411,11 @@
     const sanityFill = $('sanityFill'); const sanityPct = $('sanityPct'); const roomNameEl=$('roomName'); const statusText=$('statusText');
 
     /***************
-     * START UI — attach after DOM is ready (fixes start button)
+     * START UI — fix race on script load
      ***************/
     onReady(()=>{
       const btn = $('startBtn');
-      if(btn){
-        btn.addEventListener('click', async ()=>{ $('start').style.display='none'; await startGame(); });
-      }
+      if(btn){ btn.addEventListener('click', async ()=>{ $('start').style.display='none'; await startGame(); }); }
     });
 
     /***************
@@ -429,46 +460,67 @@
     })();
 
     /***************
-     * DEV
+     * DEV (overhauled behaviors)
      ***************/
-    const dev = { enabled:false, showFOV:false, log:(s)=>{ const el=$('devLog'); el.textContent += s+'\\n'; el.scrollTop = el.scrollHeight; } };
+    const dev = { enabled:false, showFOV:false, log:(s)=>{ const el=$('devLog'); el.textContent += s+'\\n'; el.scrollTop = el.scrollHeight; }, groundOffset:-0.10 };
     const listen = { master:false, ghost:false, evidence:false, mapActive:false, pins:[], knownRooms:[], lastGhostState:'', lastLogT:0, centerMarker:null };
 
+    // prompt
     $('devYes').onclick = ()=> $('devPwRow').style.display='flex';
     $('devNo').onclick  = ()=> $('devPrompt').style.display='none';
     $('devPwOk').onclick= ()=>{ const ok=($('devPw').value.trim()==='devmode'); if(ok){ dev.enabled=true; $('devPrompt').style.display='none'; $('devPanel').style.display='flex'; toast('Dev on'); } else $('devPwMsg').textContent='Wrong password.'; };
+
+    // switches
+    function toggleSwitch(swEl, on){
+      swEl.classList.toggle('on', on);
+      const knob=swEl.querySelector('.knob');
+      return on;
+    }
+    const swGod=$('swGod'), swFly=$('swFly'), swFOV=$('swFOV'), swGhost=$('swGhost'), swEvidence=$('swEvidence');
+    swGod.onclick = ()=>{ game.god = toggleSwitch(swGod, !swGod.classList.contains('on')); };
+    swFly.onclick = ()=>{ game.flyDev = toggleSwitch(swFly, !swFly.classList.contains('on')); };
+    swFOV.onclick = ()=>{ dev.showFOV = toggleSwitch(swFOV, !swFOV.classList.contains('on')); refreshFOVLines(); };
+    swGhost.onclick = ()=>{ listen.ghost = toggleSwitch(swGhost, !swGhost.classList.contains('on')); };
+    swEvidence.onclick = ()=>{ listen.evidence = toggleSwitch(swEvidence, !swEvidence.classList.contains('on')); };
+
     $('closeDev').onclick=()=> $('devPanel').style.display='none';
-    $('toggleGod').onclick = (e)=>{ game.god=!game.god; e.target.textContent='God Mode: ' + (game.god?'ON':'OFF'); };
+
     $('teleGhost').onclick = ()=>{ if(game.ghostPivot){ playerCapsule.position.copyFrom(game.ghostPivot.position).addInPlace(new BABYLON.Vector3(0,0.1,-1.8)); syncCameraToCapsule(); dev.log('Teleport to ghost');} };
-    $('pingHere').onclick  = ()=> dev.log('PING @ '+vecStr(playerCapsule.position));
-    $('flyPg').onclick     = (e)=>{ game.flyDev=!game.flyDev; e.target.textContent='Toggle Fly: ' + (game.flyDev?'ON':'OFF'); };
+    $('centerHere').onclick = ()=> teleportToMapCenter();
+    $('respawnFloor').onclick = ()=> placePlayerOnFloor();
 
     // Listen toggle now hides panel and shows floating map FABs
     $('toggleListen').onclick=()=>{
       listen.master=!listen.master;
-      $('listenGroup').style.display=listen.master?'block':'none';
-      $('listenState').textContent=listen.master?'ON':'OFF';
       dev.log('Listen '+(listen.master?'ENABLED':'DISABLED'));
       $('devPanel').style.display = 'none';
       $('floatMap').style.display = listen.master ? 'flex' : 'none';
     };
-    $('toggleFOV').onclick = (e)=>{ dev.showFOV=!dev.showFOV; e.target.textContent='Show FOV: ' + (dev.showFOV?'ON':'OFF'); refreshFOVLines(); };
-    $('listenGhost').onclick = (e)=>{ listen.ghost=!listen.ghost; e.target.textContent='Ghost Tracking: ' + (listen.ghost?'ON':'OFF'); };
-    $('listenEvidence').onclick=(e)=>{ listen.evidence=!listen.evidence; e.target.textContent='Evidence Use Log: ' + (listen.evidence?'ON':'OFF'); };
 
-    function vecStr(v){ return `x:${v.x.toFixed(3)} y:${v.y.toFixed(3)} z:${v.z.toFixed(3)}`; }
-
-    // Map flow (panel buttons)
+    // Map tools (panel & floating)
     $('mapStart').onclick = ()=>toggleMapMode();
     $('mapPin').onclick   = ()=> addMapPin();
     $('mapConfirm').onclick=()=> openRoomName();
-
-    // Floating FABs mirror the same actions
     $('fmStart').onclick  = ()=> toggleMapMode();
     $('fmPin').onclick    = ()=> addMapPin();
     $('fmConfirm').onclick= ()=> openRoomName();
     $('fmCenter').onclick = ()=> approximateCenter();
 
+    $('loadMapBtn').onclick = async ()=>{
+      const file = $('mapSelect').value;
+      await loadMap(file, true);
+      toast('Loaded map: '+file);
+    };
+
+    $('groundOffset').oninput = (e)=> { dev.groundOffset = parseFloat(e.target.value); $('groundOffsetVal').textContent = dev.groundOffset.toFixed(2); };
+    $('applyGround').onclick = ()=> applyGroundOffset();
+    $('recalcBoundary').onclick = ()=> recalcBoundaryFromHouse();
+
+    function vecStr(v){ return `x:${v.x.toFixed(3)} y:${v.y.toFixed(3)} z:${v.z.toFixed(3)}`; }
+
+    /***************
+     * MAP FLOW (mapping)
+     ***************/
     function toggleMapMode(){
       listen.mapActive = !listen.mapActive;
       $('mapStart').textContent = listen.mapActive ? 'Stop Map' : 'Start Map';
@@ -503,15 +555,6 @@
       listen.centerMarker = s;
     }
     function removeCenterMarker(){ if(listen.centerMarker){ listen.centerMarker.dispose(); listen.centerMarker=null; } }
-
-    /***************
-     * MAP LOADER
-     ***************/
-    $('loadMapBtn').onclick = async ()=>{
-      const file = $('mapSelect').value;
-      await loadMap(file);
-      toast('Loaded map: '+file);
-    };
 
     /***************
      * MAPPING HELPERS + VAN POLY
@@ -569,9 +612,9 @@
     }
 
     /***************
-     * MODELS / MAP LOADING
+     * MODELS / MAP LOADING (robust)
      ***************/
-    async function loadMap(file){
+    async function loadMap(file, recentreAfter=false){
       // dispose previous
       if(game.house){
         try{ game.house.getChildMeshes().forEach(m=>m.dispose()); }catch(e){}
@@ -580,7 +623,14 @@
       game.floors=[]; game.doors=[];
 
       const result = await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/map/', file, scene);
-      const root = result.meshes[0]; root.name = file; game.house=root;
+      const root = result.meshes[0];
+      // Normalize transforms to ensure consistent perceived size/origin
+      if(root.rotationQuaternion){ root.rotationQuaternion = null; }
+      root.position.set(0,0,0);
+      root.rotation.set(0,0,0);
+      root.scaling.set(1,1,1);
+      root.name = file;
+      game.house=root;
 
       result.meshes.forEach(m=>{
         if(m===root) return;
@@ -591,24 +641,14 @@
         if(/door/i.test(m.name)){ game.doors.push(m); m.metadata = { open:false, baseRotY:m.rotation?.y||0 }; }
       });
 
-      // align safety ground to floor level: same level or 0.1 lower
-      const floorY = computeFloorY(result.meshes) ?? 0;
-      safetyGround.position.y = floorY - 0.10; // lower by 0.1 (your request)
+      applyGroundOffset(result.meshes);
+      recalcBoundaryFromHouse();
 
-      // compute boundary from bounding box inset
-      const bbox = root.getBoundingInfo().boundingBox;
-      const min = bbox.minimumWorld, max = bbox.maximumWorld;
-      const inset = 1.0;
-      const y = floorY;
-      game.boundary = [
-        new BABYLON.Vector3(min.x+inset, y, min.z+inset),
-        new BABYLON.Vector3(max.x-inset, y, min.z+inset),
-        new BABYLON.Vector3(max.x-inset, y, max.z-inset),
-        new BABYLON.Vector3(min.x+inset, y, max.z-inset)
-      ];
+      initFrontDoor(); // safe either way
 
-      // re-init front door blocker (safe even if not at this house)
-      initFrontDoor();
+      if(recentreAfter){ teleportToMapCenter(true); }
+      // Reset ghost spawn to inside the new boundary
+      if(game.ghostPivot){ game.ghostPivot.position = randomPointInBoundary(); snapGhostToGround(); }
     }
 
     function computeFloorY(meshes){
@@ -621,11 +661,30 @@
           minY = Math.min(minY, bb.minimumWorld.y);
         }catch(e){}
       });
-      return (minY<+Infinity) ? minY : null;
+      return (minY<+Infinity) ? minY : 0;
     }
 
-    // Initial default load
-    async function loadHouse(){ await loadMap('Abandoned_House.glb'); }
+    function recalcBoundaryFromHouse(){
+      if(!game.house){ return; }
+      const bbox = game.house.getBoundingInfo().boundingBox;
+      const min = bbox.minimumWorld, max = bbox.maximumWorld;
+      const inset = 1.0;
+      const y = computeFloorY() || 0;
+      game.boundary = [
+        new BABYLON.Vector3(min.x+inset, y, min.z+inset),
+        new BABYLON.Vector3(max.x-inset, y, min.z+inset),
+        new BABYLON.Vector3(max.x-inset, y, max.z-inset),
+        new BABYLON.Vector3(min.x+inset, y, max.z-inset)
+      ];
+    }
+
+    function applyGroundOffset(meshesOpt){
+      const y = computeFloorY(meshesOpt);
+      const target = y + dev.groundOffset; // dev.groundOffset default -0.10
+      const before = safetyGround.position.y;
+      safetyGround.position.y = target;
+      dev.log(`Ground offset applied: floorY=${y.toFixed(3)} -> safety=${target.toFixed(3)} (was ${before.toFixed(3)})`);
+    }
 
     // Items library
     const itemModelMap = {
@@ -695,7 +754,7 @@
       root.refreshBoundingInfo();
       const size=root.getBoundingInfo().boundingBox.extendSizeWorld;
       const approxHeight = Math.max(0.1, size.y*2);
-      const scale = 1.6 / approxHeight;  // lowered per request
+      const scale = 1.6 / approxHeight;
       root.scaling.set(scale,scale,scale);
 
       pivot.position = randomPointInBoundary();
@@ -707,7 +766,6 @@
 
       refreshFOVLines();
 
-      // Choose a ghost type
       const names = Object.keys(ghostProfiles);
       game.currentGhostType = names[Math.floor(Math.random()*names.length)];
     }
@@ -771,16 +829,32 @@
       toast(game.crouched?'Crouch':'Stand');
     }
 
+    function placePlayerOnFloor(){
+      const floorY = computeFloorY() || 0;
+      game.playerCapsule.position.y = floorY + game.playerCapsule.ellipsoidOffset.y + 0.1;
+      syncCameraToCapsule();
+      dev.log('Player placed on floor @ y=' + game.playerCapsule.position.y.toFixed(3));
+    }
+
+    function teleportToMapCenter(forceDown){
+      if(!game.house){ return; }
+      const bbox = game.house.getBoundingInfo().boundingBox;
+      const min = bbox.minimumWorld, max = bbox.maximumWorld;
+      const cx = (min.x + max.x) * 0.5;
+      const cz = (min.z + max.z) * 0.5;
+      game.playerCapsule.position.x = cx;
+      game.playerCapsule.position.z = cz - 2.0; // slight offset
+      if(forceDown){ placePlayerOnFloor(); } else { syncCameraToCapsule(); }
+    }
+
     /***************
      * INTERACT / USE
      ***************/
     function interact(){
-      // If near van, open storage
       let nearVan = false;
       if(game.vanZone.poly && game.vanZone.poly.length>=3) nearVan = pointInPolyXZ(game.playerCapsule.position.x, game.playerCapsule.position.z, game.vanZone.poly);
       else nearVan = (BABYLON.Vector3.Distance(game.playerCapsule.position, game.vanZone.center) <= game.vanZone.radius);
       if(nearVan){ storageBtn.click(); return; }
-      // Else try doors
       tryToggleNearestDoor();
     }
 
@@ -810,10 +884,8 @@
      ***************/
     function tryToggleNearestDoor(){
       const me=game.playerCapsule.position;
-
       const fdc = frontDoor.center;
       const nearFD = (fdc) ? BABYLON.Vector3.Distance(me, fdc) < 1.8 : false;
-
       let toggledFront = false;
       let toggledMeshDoor = false;
 
@@ -825,7 +897,6 @@
           md.open=!md.open; best.rotation.y = md.baseRotY + (md.open ? rad(90) : 0); best.checkCollisions=!md.open;
           toggledMeshDoor = true;
           toast(md.open?'Door opened':'Door closed');
-          // sync front blocker if matching
           if(fdc && BABYLON.Vector3.Distance(best.getAbsolutePosition(), fdc) < 3.0){ setFrontDoorOpen(md.open); toggledFront=true; }
         }
       }
@@ -850,7 +921,6 @@
     function ghostCanSeePlayer(){
       if(!game.ghostPivot) return false;
       if(game.currentGhostType==='deogen') return true;
-
       const gp=game.ghostPivot.position.add(new BABYLON.Vector3(0,1.4,0));
       const pp=game.camera.position.clone();
       const toPlayer=pp.subtract(gp); const dist=toPlayer.length();
@@ -859,7 +929,6 @@
       const forward=ghostForward();
       const angle = Math.acos( clamp(BABYLON.Vector3.Dot(forward.normalize(), toPlayer.normalize()), -1, 1) );
       if(angle > rad(60/2)) return false;
-
       const dir = pp.subtract(gp).normalize();
       const hit = scene.pickWithRay(new BABYLON.Ray(gp, dir, dist), (m)=> m!==game.ghost && m!==game.ghostPivot && m.isPickable===true);
       if(hit && hit.pickedPoint){
@@ -891,7 +960,6 @@
     $('clearEvidence').onclick = ()=>{ nb.selectedEvidence.clear(); renderNotebook(); };
 
     function renderNotebook(){
-      // Evidence checkboxes
       nb.evid.innerHTML='';
       evidenceTypes.forEach(ev=>{
         const id='ev_'+ev.replace(/\\W+/g,'_');
@@ -901,13 +969,9 @@
         c.onchange = ()=>{ if(c.checked) nb.selectedEvidence.add(ev); else nb.selectedEvidence.delete(ev); renderNotebook(); };
         nb.evid.appendChild(row);
       });
-
-      // Filter ghosts
       const selected=[...nb.selectedEvidence];
       const entries = Object.entries(ghostProfiles).filter(([name, g])=> selected.every(s=> g.evidence.includes(s)));
       $('matchCount').textContent = `${entries.length} match${entries.length!==1?'es':''}`;
-
-      // List
       nb.list.innerHTML='';
       entries.forEach(([name, g])=>{
         const div=document.createElement('div'); div.className='g'; div.textContent = `${name} — [${g.evidence.join(', ')}]`;
@@ -929,27 +993,24 @@
      ***************/
     async function startGame(){
       setWeather(randomWeather());
-      game.playerCapsule.position.copyFrom(game.spawnPointA);
-      await loadHouse(); await loadItems(); await spawnGhost(); await spawnPhoenix();
+      await loadMap('Abandoned_House.glb', true); // loads and recenters
+      await loadItems(); await spawnGhost(); await spawnPhoenix();
+      placePlayerOnFloor();
       syncCameraToCapsule();
       toast('Investigation started. WASD move • Shift run • C crouch • F use item • E interact • N notebook • ESC dev');
       let last=performance.now();
       engine.runRenderLoop(()=>{
         const now=performance.now(), dt=(now-last)/1000; last=now;
 
-        // Movement
         movePlayer(dt);
-        // Snap -> camera sync (prevents hovering)
         snapToGround(); syncCameraToCapsule();
 
-        // Ghost behavior (only active inside house)
         if(game.ghostPivot){
           const inside = playerInsideHouse();
           let state='idle';
           if(inside){
             const me=game.playerCapsule.position; const gp=game.ghostPivot.position; const toMe=me.subtract(gp); toMe.y=0; const dist=toMe.length();
             const canSee = ghostCanSeePlayer();
-
             if(canSee && dist>2.5){
               const dir = toMe.normalize();
               const step = dir.scale(0.8 * dt);
@@ -959,19 +1020,14 @@
               const yaw = Math.atan2(dir.x, dir.z);
               game.ghostPivot.rotation.y = yaw;
               setGhostAnim('walk'); state='chase';
-            } else {
-              setGhostAnim('idle'); state='idle';
-            }
+            } else { setGhostAnim('idle'); state='idle'; }
             snapGhostToGround();
-          } else {
-            setGhostAnim('idle'); state='inactive';
-          }
+          } else { setGhostAnim('idle'); state='inactive'; }
 
           statusText.textContent = (playerInsideHouse()? (ghostCanSeePlayer()?'Seen':'Unseen') : 'Inactive');
           if(dev.enabled && listen.master && listen.ghost) maybeLogGhost(state);
         }
 
-        // Sanity
         if(!game.god){
           game.sanity = clamp(game.sanity - (game.crouched?0.0015:0.0025), 0, 100);
           sanityFill.style.width = `${game.sanity.toFixed(0)}%`; sanityPct.textContent = `${game.sanity.toFixed(0)}%`;
@@ -1014,7 +1070,7 @@
     /***************
      * RESIZE
      ***************/
-    window.addEventListener('resize', ()=> engine.resize());
+    window.addEventListener('resize', ()=> game.engine.resize());
   </script>
 
   <!-- Start overlay -->
