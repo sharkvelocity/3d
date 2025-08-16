@@ -462,7 +462,7 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     function randomWeather(){ // Choose Clear or Rain
       const r = Math.random(); return (r<0.6)?'Clear':'Rain';
     }
-    function lightningFlash(){
+    function lightningFlash(){ if(window.__lightning_guard) return;
       if(game.weather!=='Rain') return;
       if(Math.random()<0.1){
         const flash = $('flash');
@@ -948,5 +948,71 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
   <footer style="position:fixed; bottom:8px; right:10px; color:#69d; font:12px monospace; opacity:.75; z-index:5;">
     Shark-Blades — Phasma-Phoney Web Prototype (Babylon.js)
   </footer>
+
+  <script>
+    (function(){
+      const BOOT_TIMEOUT_MS = 2000;
+      function showBoot(msg){
+        let d=document.getElementById('bootDiag');
+        if(!d){
+          d=document.createElement('div');
+          d.id='bootDiag';
+          d.style.cssText='position:fixed;left:10px;top:10px;z-index:99990;background:rgba(0,0,0,.7);color:#0ff;border:1px solid #0ff;border-radius:8px;padding:8px 10px;font:12px monospace;max-width:46vw;';
+          document.body.appendChild(d);
+        }
+        d.textContent = msg;
+      }
+      function hideBoot(){
+        const d=document.getElementById('bootDiag');
+        if(d) d.remove();
+      }
+      function exists(id){ return !!document.getElementById(id); }
+      function vis(el){ return el && (getComputedStyle(el).display!=='none'); }
+      // Freeze lightning until game.start
+      window.__lightning_guard = true;
+      // Ctrl+Alt+S => force show Start
+      window.addEventListener('keydown', function(ev){
+        if(ev.ctrlKey && ev.altKey && (ev.key==='s' || ev.key==='S')){
+          var st=document.getElementById('start'); if(st){ st.style.display='flex'; }
+          showBoot('Forced Start overlay visible (Ctrl+Alt+S).');
+        }
+      });
+      setTimeout(function(){
+        try{
+          var okay = !!(window.BABYLON && BABYLON.Engine);
+          var startEl = document.getElementById('start');
+          var hudEl = document.getElementById('hud');
+          var status = [
+            '[SafeBoot] Babylon: ' + (okay?'OK':'MISSING'),
+            'Start overlay in DOM: ' + (!!startEl),
+            'Start overlay visible: ' + (startEl ? (getComputedStyle(startEl).display!=='none') : 'n/a'),
+            'HUD visible: ' + (hudEl ? (getComputedStyle(hudEl).display!=='none') : 'n/a')
+          ].join('\\n');
+          if(!okay){
+            showBoot(status + '\\nHint: check /cdn/babylon.js exists.');
+            return;
+          }
+          // If no investigation has begun, force show the start overlay and ensure weather is Clear.
+          if(startEl && getComputedStyle(startEl).display==='none' && (!window.__investigation_started)){
+            startEl.style.display='flex';
+            if(window.game){ game.weather='Clear'; }
+          }
+          if(!window.__investigation_started){
+            showBoot(status + '\\nNo investigation yet. Use the Start button. (Ctrl+Alt+S to force show)');
+          } else {
+            hideBoot();
+          }
+        }catch(e){
+          showBoot('SafeBoot exception: '+e);
+        }
+      }, BOOT_TIMEOUT_MS);
+    })();
+  </script>
+
+
+  <script>
+    (function(){ try{ var st=document.getElementById('start'); if(st){ st.style.display='flex'; } }catch(_){ } })();
+  </script>
+
 </body>
 </html>
