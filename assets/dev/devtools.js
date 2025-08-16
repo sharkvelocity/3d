@@ -6,8 +6,7 @@
 
 /* ------------------------------------------------------------------------- *
  * Small DOM helpers
- * ------------*/
-
+ * ------------------------------------------------------------------------- */
 function h(tag, attrs={}, ...kids){
   const el = document.createElement(tag);
   for(const [k,v] of Object.entries(attrs||{})){
@@ -121,6 +120,7 @@ function updateSnapUI(){
  * Model Viewer / Spawner (drag & drop)  — stores pivots with metadata
  * ------------------------------------------------------------------------- */
 let _mv;
+
 function ensureModelViewer(ctx){
   if(_mv) return _mv;
   const scene = ctx.scene;
@@ -236,7 +236,7 @@ function ensureModelViewer(ctx){
   function listChildren(){
     const pre = byId('mvList'); if(!pre) return;
     if(!pivot){ pre.textContent='(none)'; return; }
-    pre.textContent = pivot.getChildren().map(n=> n.name).join('\\n');
+    pre.textContent = pivot.getChildren().map(n=> n.name).join('\n');
   }
 
   function collectPivot(){
@@ -492,142 +492,6 @@ function ensureModelViewer(ctx){
   byId('mvExportTextures').onclick = downloadTextures;
   byId('mvSnapshot').onclick = snapshotPNG;
   byId('mvUnlit').onclick = ()=> setUnlit(!unlitOn);
-  byId('mvClose').onclick = close;
-
-  _mv = { open, close, setPivot, spawnFromURL };
-  return _mv;
-}
-  document.body.appendChild(root);
-
-  const giz = ensureGizmo(scene);
-
-  let pivot = null;
-  let lastPickedPoint = null;
-  function byId(id){ return document.getElementById(id); }
-  function open(){ root.style.display='flex'; updateFieldsFromPivot(); }
-  function close(){ root.style.display='none'; }
-  function updateFieldsFromPivot(){
-    if(!pivot) return;
-    byId('mvX').value = (pivot.position.x||0).toFixed(3);
-    byId('mvY').value = (pivot.position.y||0).toFixed(3);
-    byId('mvZ').value = (pivot.position.z||0).toFixed(3);
-    byId('mvRY').value = (pivot.rotation?.y? (pivot.rotation.y*180/Math.PI).toFixed(1):'0');
-    const s = pivot.scaling?.x || 1; byId('mvS').value = s.toFixed(3);
-  }
-  function setPivot(node){
-    pivot = node;
-    DT.sel = pivot;
-    giz.attachToMesh(pivot);
-    ensureHL(scene)?.addMesh(pivot, BABYLON.Color3.Teal()); setTimeout(()=> ensureHL(scene)?.removeMesh(pivot), 900);
-    updateFieldsFromPivot();
-  }
-  function exportGLB(){
-    try{
-      if(!window.BABYLON?.GLTF2Export){ alert("GLB export requires babylon.glTF2Serializer.min.js"); return; }
-      if(!pivot){ alert('Nothing selected to export'); return; }
-      const meshes = pivot.getChildMeshes(true);
-      const tmp = new BABYLON.TransformNode('tmpExport', scene);
-      meshes.forEach(m=>{ m.setParent(tmp); });
-      BABYLON.GLTF2Export.GLBAsync(scene, 'selection').then(glb=>{
-        glb.downloadFiles();
-        // restore parents
-        meshes.forEach(m=>{ m.setParent(pivot); });
-        tmp.dispose();
-      });
-    }catch(e){ console.error(e); alert('Export failed: '+e); }
-  }
-  async function downloadTextures(){
-    if(!pivot){ alert('No selection'); return; }
-    const a = document.createElement('a');
-    const seen = new Set();
-    pivot.getChildMeshes(true).forEach(m=>{
-      const mat = m.material;
-      const urls = [];
-      if(!mat) return;
-      const push = (t)=>{ if(t && t.url && !seen.has(t.url)){ urls.push(t.url); seen.add(t.url);} };
-      if(mat.albedoTexture) push(mat.albedoTexture);
-      if(mat.diffuseTexture) push(mat.diffuseTexture);
-      if(mat.normalTexture || mat.bumpTexture) push(mat.normalTexture||mat.bumpTexture);
-      if(mat.metallicTexture) push(mat.metallicTexture);
-      if(mat.ambientTexture) push(mat.ambientTexture);
-      if(mat.emissiveTexture) push(mat.emissiveTexture);
-      urls.forEach(u=>{
-        try{
-          a.href = u; a.download = (u.split('/').pop()||'texture.png'); a.click();
-        }catch(e){ console.warn('Download failed for', u, e); }
-      });
-    });
-  }
-  async function snapshotPNG(){
-    try{
-      const data = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(DT.ctx.engine, DT.ctx.game.camera, { width: 1024, height: 1024 });
-      const a = document.createElement('a'); a.href = data; a.download = 'snapshot.png'; a.click();
-    }catch(e){ console.warn(e); alert('Snapshot failed'); }
-  }
-
-  // file input + drop
-  function readFile(file){
-    const url = URL.createObjectURL(file);
-    spawnFromURL(url, file.name.toLowerCase()).then(()=> URL.revokeObjectURL(url));
-  }
-  byId('mvFile').addEventListener('change', (ev)=>{ const f=ev.target.files?.[0]; if(f) readFile(f); ev.target.value=''; });
-  const drop = byId('mvDrop');
-  function over(ev){ ev.preventDefault(); drop.style.background='rgba(0,255,255,0.08)'; }
-  function leave(){ drop.style.background='transparent'; }
-  drop.addEventListener('dragover', over); drop.addEventListener('dragleave', leave);
-  drop.addEventListener('drop', (ev)=>{ ev.preventDefault(); leave(); const f=ev.dataTransfer.files?.[0]; if(f) readFile(f); });
-
-  // pick point for spawn
-  scene.onPointerObservable.add((pi)=>{
-    if(root.style.display!=='flex') return;
-    if(pi.type===BABYLON.PointerEventTypes.POINTERUP){
-      const pick = scene.pick(scene.pointerX, scene.pointerY, (m)=> m && m.isPickable!==false);
-      if(pick?.pickedPoint) lastPickedPoint = pick.pickedPoint.clone();
-    }
-  });
-
-  async function spawnFromURL(url, filename){
-    if(DT.sel && DT.sel.metadata?.phasmaPlaced){ DT.sel = null; }
-    const node = new BABYLON.TransformNode('spawnPivot', scene);
-    node.metadata = Object.assign({}, node.metadata||{}, { phasmaPlaced:true, source: filename||url });
-    DT.placedPivots.push(node);
-    // Import
-    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "", url, scene).catch(()=> BABYLON.SceneLoader.ImportMeshAsync("", url.replace(/[^\/]+$/, ''), url, scene));
-    res.meshes.forEach(m=>{ if(!m.parent) m.parent = node; });
-    // Place
-    let at = null;
-    if(lastPickedPoint){ at = lastPickedPoint.clone(); }
-    else if(DT.ctx.game.camera){ const f = DT.ctx.game.camera.getDirection(BABYLON.Axis.Z); at = DT.ctx.game.camera.position.add(f.scale(2.5)); }
-    else at = new BABYLON.Vector3(0,1,0);
-    node.position.copyFrom(at); node.rotation = new BABYLON.Vector3(0,0,0); node.scaling.set(1,1,1);
-    setPivot(node);
-    listChildren();
-    return node;
-  }
-
-  function listChildren(){
-    const pre = $('mvList'); if(!pre) return;
-    if(!pivot){ pre.textContent='(none)'; return; }
-    pre.textContent = pivot.getChildren().map(n=> n.name).join('\n');
-  }
-
-  // controls
-  function applyFromFields(){
-    if(!pivot) return;
-    const x=parseFloat(byId('mvX').value||'0'), y=parseFloat(byId('mvY').value||'1'), z=parseFloat(byId('mvZ').value||'0');
-    const ry=parseFloat(byId('mvRY').value||'0')*Math.PI/180, s=parseFloat(byId('mvS').value||'1');
-    pivot.position.set(x,y,z); pivot.rotation.y = ry; pivot.scaling.set(s,s,s);
-  }
-  byId('mvApply').onclick = applyFromFields;
-  byId('mvDelete').onclick = ()=>{ if(!pivot) return; pivot.getChildren().forEach(n=> n.dispose && n.dispose()); pivot.dispose(); pivot=null; $('mvList').textContent='(none)'; };
-  byId('mvMakePick').onclick = ()=>{ if(!pivot) return; pivot.getChildren().forEach(n=> n.isPickable=true); };
-  byId('mvMakeCollide').onclick = ()=>{ if(!pivot) return; pivot.getChildren().forEach(n=> n.checkCollisions=true); };
-  byId('mvGizmoPos').onclick = ()=> setGizmoMode('pos');
-  byId('mvGizmoRot').onclick = ()=> setGizmoMode('rot');
-  byId('mvGizmoScale').onclick = ()=> setGizmoMode('scl');
-  byId('mvExportGLB').onclick = exportGLB;
-  byId('mvExportTextures').onclick = downloadTextures;
-  byId('mvSnapshot').onclick = snapshotPNG;
   byId('mvClose').onclick = close;
 
   _mv = { open, close, setPivot, spawnFromURL };
@@ -1028,6 +892,9 @@ function buildSceneConfig(){
     houseBoundsPoly: Array.isArray(g.houseBoundsPoly)? g.houseBoundsPoly.map(v=>({x:v.x,y:v.y,z:v.z})) : null,
     pins: g.pins || null,
     placed: collectPlaced(),
+    sprites: g.sprites || [],
+    lights: g.lights || [],
+    doors: g.doors || [],
     ghost: {
       type: g.ghost?.profile?.name || null,
       speed: g.ghostSpeed || 1.7,
@@ -1072,6 +939,410 @@ function injectExportButtons(){
   $('expHtml').onclick = exportHTMLWithConfig;
 }
 
+
+/* ------------------------------------------------------------------------- *
+ * Door Editor
+ * ------------------------------------------------------------------------- */
+function ensureDoorEditor(){
+  const id='doorEditor';
+  if($(id)) return;
+  const panel = $('dev-panel'); if(!panel) return;
+  const card = h('div', { id:id, class:'card', style:{ gridColumn:'span 12' } },
+    h('div', { class:'row', style:{ justifyContent:'space-between' } },
+      h('strong', null, 'Door Editor'),
+      h('div', null,
+        h('label', null, 'Axis ',
+          (function(){ const s=h('select',{id:'doorAxis'}); ['x','y','z'].forEach(a=> s.appendChild(h('option',{value:a},a.toUpperCase()))); s.value='y'; return s; })()
+        ),
+        ' ',
+        h('label', null, 'Open° <input id="doorAngle" type="number" value="90" style="width:80px">'),
+        ' ',
+        h('label', null, 'Speed (°/s) <input id="doorSpeed" type="number" value="120" style="width:90px">')
+      )
+    ),
+    h('div', { class:'row', style:{ gap:'8px', marginTop:'8px', flexWrap:'wrap' } },
+      h('button', { class:'btn', id:'doorMark' }, 'Mark Selected as Door'),
+      h('button', { class:'btn', id:'doorHingeCenter' }, 'Hinge: Center'),
+      h('button', { class:'btn', id:'doorHingeLeft' }, 'Hinge: Left Edge'),
+      h('button', { class:'btn', id:'doorHingeRight' }, 'Hinge: Right Edge'),
+      h('button', { class:'btn', id:'doorHingePick' }, 'Hinge: Pick Point'),
+      h('button', { class:'btn', id:'doorTestOpen' }, 'Test Open'),
+      h('button', { class:'btn', id:'doorTestClose' }, 'Test Close'),
+      h('button', { class:'btn', id:'doorSave' }, 'Save Door'),
+      h('button', { class:'btn', id:'doorExport' }, 'Export Doors JSON')
+    ),
+    h('div', { id:'doorStatus', class:'muted', style:{ marginTop:'6px' } }, 'Select a door mesh, then set hinge and test.')
+  );
+  panel.parentElement.insertBefore(card, panel.nextSibling);
+
+  DT.ctx.game.doors = DT.ctx.game.doors || [];
+  let lastPickPoint = null;
+  DT.ctx.scene.onPointerObservable.add((pi)=>{
+    if(pi.type===BABYLON.PointerEventTypes.POINTERUP){
+      const pick = DT.ctx.scene.pick(DT.ctx.scene.pointerX, DT.ctx.scene.pointerY, (m)=> m && m.isPickable!==false);
+      if(pick?.pickedPoint) lastPickPoint = pick.pickedPoint.clone();
+    }
+  });
+
+  function doorMesh(){ return (DT.sel && DT.sel.getClassName?.()==='Mesh') ? DT.sel : null; }
+  function setStatus(t){ const el=$('doorStatus'); if(el) el.textContent = t; }
+  function markDoor(){
+    const m = doorMesh(); if(!m){ setStatus('Select a mesh first.'); return; }
+    m.metadata = Object.assign({}, m.metadata||{}, { isDoor:true });
+    flash(m); setStatus(`Marked ${m.name} as door.`);
+  }
+  function setHinge(mode){
+    const m = doorMesh(); if(!m){ setStatus('Select a mesh first.'); return; }
+    const bb = m.getBoundingInfo()?.boundingBox;
+    let hinge = null;
+    if(mode==='center' && bb) hinge = bb.centerWorld.clone();
+    if(mode==='left' && bb){
+      const min = bb.minimumWorld, max = bb.maximumWorld;
+      hinge = new BABYLON.Vector3(min.x, (min.y+max.y)/2, (min.z+max.z)/2);
+    }
+    if(mode==='right' && bb){
+      const min = bb.minimumWorld, max = bb.maximumWorld;
+      hinge = new BABYLON.Vector3(max.x, (min.y+max.y)/2, (min.z+max.z)/2);
+    }
+    if(mode==='pick'){
+      hinge = lastPickPoint ? lastPickPoint.clone() : (bb? bb.centerWorld.clone() : m.getAbsolutePosition());
+    }
+    if(!hinge){ setStatus('Could not compute hinge.'); return; }
+    m.setPivotPoint(hinge, BABYLON.Space.WORLD);
+    flashSphere(hinge, 0.15, new BABYLON.Color3(1,1,0));
+    setStatus(`Set hinge @ ${hinge.toString()}`);
+  }
+  function cfgFromUI(){
+    return {
+      axis: ($('doorAxis')?.value||'y'),
+      angle: parseFloat($('doorAngle')?.value||'90'),
+      speed: parseFloat($('doorSpeed')?.value||'120')
+    };
+  }
+  function animateDoor(open){
+    const m = doorMesh(); if(!m) return;
+    const cfg = cfgFromUI();
+    const axis = cfg.axis.toLowerCase();
+    const target = (open? cfg.angle : 0) * Math.PI/180;
+    m._devDoor = m._devDoor || { t: 0 };
+    const start = m._devDoor.current || 0;
+    const diff = target - start;
+    const dur = Math.max(0.05, Math.abs(diff) / (cfg.speed * Math.PI/180)); // seconds
+    const t0 = performance.now();
+    const s = DT.ctx.scene;
+    const sub = s.onBeforeRenderObservable.add(()=>{
+      const t = (performance.now() - t0) / (dur*1000);
+      const k = t>=1 ? 1 : t;
+      const val = start + diff * k;
+      m._devDoor.current = val;
+      const rot = m.rotation.clone();
+      if(axis==='x') rot.x = val;
+      if(axis==='y') rot.y = val;
+      if(axis==='z') rot.z = val;
+      m.rotation = rot;
+      if(k>=1){ s.onBeforeRenderObservable.remove(sub); }
+    });
+  }
+  function saveDoor(){
+    const m = doorMesh(); if(!m){ setStatus('Select a mesh first.'); return; }
+    const entry = Object.assign({
+      meshName: m.name,
+      pivot: (function(){ const p=m.getPivotPoint(BABYLON.Space.WORLD); return { x:p.x, y:p.y, z:p.z }; })()
+    }, cfgFromUI());
+    const list = DT.ctx.game.doors;
+    const idx = list.findIndex(d=> d.meshName===entry.meshName);
+    if(idx>=0) list[idx] = entry; else list.push(entry);
+    setStatus(`Saved door config for ${m.name}.`);
+  }
+  function exportDoors(){
+    const text = JSON.stringify(DT.ctx.game.doors||[], null, 2);
+    downloadText(text, 'doors.json');
+  }
+
+  $('doorMark').onclick = markDoor;
+  $('doorHingeCenter').onclick = ()=> setHinge('center');
+  $('doorHingeLeft').onclick = ()=> setHinge('left');
+  $('doorHingeRight').onclick = ()=> setHinge('right');
+  $('doorHingePick').onclick = ()=> setHinge('pick');
+  $('doorTestOpen').onclick = ()=> animateDoor(true);
+  $('doorTestClose').onclick = ()=> animateDoor(false);
+  $('doorSave').onclick = saveDoor;
+  $('doorExport').onclick = exportDoors;
+}
+
+/* ------------------------------------------------------------------------- *
+ * Sprite Manager
+ * ------------------------------------------------------------------------- */
+function ensureSpriteManager(){
+  const id='spriteManager';
+  if($(id)) return;
+  const panel = $('dev-panel'); if(!panel) return;
+  const card = h('div', { id:id, class:'card', style:{ gridColumn:'span 12' } },
+    h('div', { class:'row', style:{ justifyContent:'space-between' } },
+      h('strong', null, 'Sprite Manager'),
+      h('div', null,
+        h('label', null, 'Billboard <input id="spBill" type="checkbox" checked>'),
+        ' ',
+        h('label', null, 'Width <input id="spW" type="number" value="1" step="0.05" style="width:80px">'),
+        ' ',
+        h('label', null, 'Height <input id="spH" type="number" value="1" step="0.05" style="width:80px">'),
+        ' ',
+        h('label', null, 'AlphaCut <input id="spAlpha" type="number" value="0.05" step="0.01" style="width:80px">')
+      )
+    ),
+    h('div', { class:'row', style:{ gap:'8px', marginTop:'8px', flexWrap:'wrap' } },
+      h('label', { class:'btn', for:'spFile' }, 'Choose Image'),
+      h('input', { id:'spFile', type:'file', accept:'.png,.jpg,.jpeg,.webp', style:'display:none' }),
+      h('div', { id:'spDrop', class:'pill', style:{ border:'1px dashed #0ff6', padding:'8px' } }, 'Drag & drop image here to spawn'),
+      h('button', { class:'btn', id:'spExport' }, 'Export Sprites JSON')
+    ),
+    h('div', { id:'spStatus', class:'muted', style:{ marginTop:'6px' } }, 'Drop an image, then click ground to position.')
+  );
+  panel.parentElement.insertBefore(card, panel.nextSibling);
+
+  DT.ctx.game.sprites = DT.ctx.game.sprites || [];
+
+  let lastPick = null;
+  DT.ctx.scene.onPointerObservable.add((pi)=>{
+    if(pi.type===BABYLON.PointerEventTypes.POINTERUP){
+      const pick = DT.ctx.scene.pick(DT.ctx.scene.pointerX, DT.ctx.scene.pointerY, (m)=> m && m.isPickable!==false);
+      if(pick?.pickedPoint) lastPick = pick.pickedPoint.clone();
+    }
+  });
+  function status(t){ $('spStatus').textContent = t; }
+
+  function spawnSprite(url){
+    const s = DT.ctx.scene;
+    const w = parseFloat($('spW').value||'1'), h = parseFloat($('spH').value||'1'), bill = !!$('spBill').checked, alpha = parseFloat($('spAlpha').value||'0');
+    const plane = BABYLON.MeshBuilder.CreatePlane('spritePlane', { width:w, height:h, sideOrientation:BABYLON.Mesh.DOUBLESIDE }, s);
+    plane.isPickable = true;
+    const mat = new BABYLON.StandardMaterial('spriteMat', s);
+    mat.diffuseTexture = new BABYLON.Texture(url, s, true, false, BABYLON.Texture.BILINEAR_SAMPLINGMODE);
+    mat.useAlphaFromDiffuseTexture = true;
+    mat.emissiveColor = new BABYLON.Color3(1,1,1);
+    mat.alphaCutOff = alpha;
+    plane.material = mat;
+    plane.billboardMode = bill ? BABYLON.AbstractMesh.BILLBOARDMODE_Y : BABYLON.AbstractMesh.BILLBOARDMODE_NONE;
+    plane.position = lastPick ? lastPick.clone() : (DT.ctx.game.camera ? DT.ctx.game.camera.position.add(DT.ctx.game.camera.getDirection(BABYLON.Axis.Z).scale(2)) : new BABYLON.Vector3(0,1,0));
+    ensureGizmo(DT.ctx.scene).attachToMesh(plane);
+    DT.ctx.game.sprites.push({ url, w, h, bill, alpha, position:{ x:plane.position.x, y:plane.position.y, z:plane.position.z } });
+    status('Sprite spawned.');
+  }
+
+  function readImage(file){
+    const url = URL.createObjectURL(file);
+    spawnSprite(url);
+  }
+
+  $('spFile').addEventListener('change', (ev)=>{ const f=ev.target.files?.[0]; if(f) readImage(f); ev.target.value=''; });
+  const drop = $('spDrop');
+  function over(ev){ ev.preventDefault(); drop.style.background='rgba(0,255,255,0.08)'; }
+  function leave(){ drop.style.background='transparent'; }
+  drop.addEventListener('dragover', over); drop.addEventListener('dragleave', leave);
+  drop.addEventListener('drop', (ev)=>{ ev.preventDefault(); leave(); const f=ev.dataTransfer.files?.[0]; if(f) readImage(f); });
+
+  $('spExport').onclick = ()=> downloadText(JSON.stringify(DT.ctx.game.sprites||[], null, 2), 'sprites.json');
+}
+
+/* ------------------------------------------------------------------------- *
+ * Light Painter
+ * ------------------------------------------------------------------------- */
+function ensureLightPainter(){
+  const id='lightPainter';
+  if($(id)) return;
+  const panel = $('dev-panel'); if(!panel) return;
+  const card = h('div', { id:id, class:'card', style:{ gridColumn:'span 12' } },
+    h('div', { class:'row', style:{ justifyContent:'space-between' } },
+      h('strong', null, 'Light Painter'),
+      h('div', null,
+        h('label', null, 'Type ',
+          (function(){ const s=h('select',{id:'lpType'}); ['Point','Spot','Directional'].forEach(a=> s.appendChild(h('option',{value:a},a))); s.value='Point'; return s; })()
+        ),
+        ' ',
+        h('label', null, 'Color <input id="lpColor" type="text" value="#ffffff" style="width:90px">'),
+        ' ',
+        h('label', null, 'Intensity <input id="lpInt" type="number" step="0.1" value="1.2" style="width:80px">'),
+        ' ',
+        h('label', null, 'Range <input id="lpRange" type="number" step="0.5" value="18" style="width:80px">'),
+        ' ',
+        h('label', null, 'Spot° <input id="lpAngle" type="number" step="1" value="35" style="width:70px">'),
+        ' ',
+        h('label', null, 'Shadows <input id="lpShadow" type="checkbox">')
+      )
+    ),
+    h('div', { class:'row', style:{ gap:'8px', marginTop:'8px', flexWrap:'wrap' } },
+      h('button', { class:'btn', id:'lpAdd' }, 'Add Light'),
+      h('button', { class:'btn', id:'lpExport' }, 'Export Lights JSON')
+    ),
+    h('div', { id:'lpStatus', class:'muted', style:{ marginTop:'6px' } }, 'Use gizmo to move/aim lights. Directional/Spot use rotation for aim.')
+  );
+  panel.parentElement.insertBefore(card, panel.nextSibling);
+
+  DT.ctx.game.lights = DT.ctx.game.lights || [];
+  function hexToColor3(hex){
+    hex = hex.trim();
+    if(hex[0]==='#') hex = hex.slice(1);
+    if(hex.length===3) hex = hex.split('').map(c=> c+c).join('');
+    const num = parseInt(hex, 16);
+    const r = ((num>>16)&255)/255, g = ((num>>8)&255)/255, b = (num&255)/255;
+    return new BABYLON.Color3(r,g,b);
+  }
+
+  $('lpAdd').onclick = ()=>{
+    const type = $('lpType').value;
+    const color = hexToColor3($('lpColor').value||'#ffffff');
+    const intensity = parseFloat($('lpInt').value||'1.2');
+    const range = parseFloat($('lpRange').value||'18');
+    const angleDeg = parseFloat($('lpAngle').value||'35');
+    const doShadow = !!$('lpShadow').checked;
+    const s = DT.ctx.scene;
+    let L=null;
+    if(type==='Point'){
+      L = new BABYLON.PointLight('lpPoint', DT.ctx.game.camera? DT.ctx.game.camera.position.clone(): new BABYLON.Vector3(0,3,0), s);
+      L.range = range;
+    }else if(type==='Spot'){
+      L = new BABYLON.SpotLight('lpSpot', DT.ctx.game.camera? DT.ctx.game.camera.position.clone(): new BABYLON.Vector3(0,3,0), new BABYLON.Vector3(0,-1,0), angleDeg*Math.PI/180, 2, s);
+      L.range = range;
+    }else{
+      L = new BABYLON.DirectionalLight('lpDir', new BABYLON.Vector3(-0.4,-1,-0.2), s);
+    }
+    L.diffuse = color; L.specular = color; L.intensity = intensity;
+
+    ensureGizmo(s).attachToMesh(L);
+
+    if(doShadow && (L.getTypeID?.()===BABYLON.Light.LIGHTTYPEID_DIRECTIONALLIGHT || L.getTypeID?.()===BABYLON.Light.LIGHTTYPEID_SPOTLIGHT)){
+      try{
+        const sg = new BABYLON.ShadowGenerator(1024, L);
+        sg.useExponentialShadowMap = true;
+        sg.bias = 0.0006;
+        s.meshes.forEach(m=>{ if(m.receiveShadows!==undefined) m.receiveShadows = true; if(m.isVerticesDataPresent && m.getTotalVertices?.()>0) sg.addShadowCaster(m, true); });
+      }catch(e){ console.warn('Shadow generator failed', e); }
+    }
+
+    const rec = { type, color: $('lpColor').value, intensity, range, angle: angleDeg, shadow: doShadow,
+      position: { x:L.position?.x||0, y:L.position?.y||0, z:L.position?.z||0 },
+      direction: { x:L.direction?.x||0, y:L.direction?.y||0, z:L.direction?.z||0 } };
+    DT.ctx.game.lights.push(rec);
+    $('lpStatus').textContent = `Added ${type} light.`;
+  };
+
+  $('lpExport').onclick = ()=> downloadText(JSON.stringify(DT.ctx.game.lights||[], null, 2), 'lights.json');
+}
+
+/* ------------------------------------------------------------------------- *
+ * Session Autosave (localStorage)
+ * ------------------------------------------------------------------------- */
+function ensureAutosave(){
+  const id='autosaveCard';
+  if($(id)) return;
+  const panel = $('dev-panel'); if(!panel) return;
+  const card = h('div', { id:id, class:'card', style:{ gridColumn:'span 12' } },
+    h('div', { class:'row', style:{ justifyContent:'space-between' } },
+      h('strong', null, 'Session Autosave'),
+      h('div', null,
+        h('label', null, 'Enable <input id="asOn" type="checkbox">'),
+        ' ',
+        h('button', { class:'btn', id:'asSave' }, 'Save Now'),
+        ' ',
+        h('button', { class:'btn', id:'asLoad' }, 'Load'),
+        ' ',
+        h('button', { class:'btn', id:'asClear' }, 'Clear')
+      )
+    ),
+    h('div', { id:'asStatus', class:'muted', style:{ marginTop:'6px' } }, 'Stores layout to localStorage: bounds, pins, placed props, doors, sprites, lights, ghost tuning.')
+  );
+  panel.parentElement.insertBefore(card, panel.nextSibling);
+
+  const KEY='phasma_dev_session';
+  function status(t){ $('asStatus').textContent = t; }
+  function save(){
+    const cfg = buildSceneConfig();
+    try{ localStorage.setItem(KEY, JSON.stringify(cfg)); status('Saved to localStorage.'); }catch(e){ status('Save failed: '+e); }
+  }
+  function load(){
+    try{
+      const raw = localStorage.getItem(KEY); if(!raw){ status('Nothing saved.'); return; }
+      const cfg = JSON.parse(raw);
+      applySceneConfig(cfg).then(()=> status('Loaded from localStorage.'));
+    }catch(e){ status('Load failed: '+e); }
+  }
+  function clear(){ localStorage.removeItem(KEY); status('Cleared.'); }
+  $('asSave').onclick = save;
+  $('asLoad').onclick = load;
+  $('asClear').onclick = clear;
+
+  let timer=null;
+  $('asOn').onchange = (ev)=>{
+    if(ev.target.checked){
+      timer = setInterval(save, 8000);
+      status('Autosave ON (every ~8s).');
+    }else{
+      if(timer) clearInterval(timer);
+      timer=null;
+      status('Autosave OFF.');
+    }
+  };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Apply Scene Config (usable by autosave & export snippet)
+ * ------------------------------------------------------------------------- */
+async function applySceneConfig(cfg){
+  const g=DT.ctx.game, scene=DT.ctx.scene;
+  if(cfg.houseBoundsPoly){ g.houseBoundsPoly = cfg.houseBoundsPoly.map(o=> new BABYLON.Vector3(o.x,o.y,o.z)); }
+  if(cfg.pins){ g.pins = cfg.pins; }
+  if(cfg.ghost){ g.ghost = g.ghost||{profile:{}}; g.ghost.profile.name = cfg.ghost.type; g.ghostSpeed = cfg.ghost.speed; g.ghostFOVdeg = cfg.ghost.fovDeg; g.ghostLOSDist = cfg.ghost.losDist; g.huntSanityThreshold = cfg.ghost.huntSanity; }
+  if(Array.isArray(cfg.placed)){
+    for(const p of cfg.placed){
+      try{
+        const res = await BABYLON.SceneLoader.ImportMeshAsync('', '', p.source, scene);
+        const pivot = new BABYLON.TransformNode(p.name||'spawnPivot', scene);
+        res.meshes.forEach(m=>{ if(!m.parent) m.parent=pivot; });
+        pivot.position = new BABYLON.Vector3(p.position.x, p.position.y, p.position.z);
+        pivot.rotation = new BABYLON.Vector3(0, p.rotationY||0, 0);
+        const s = p.scale||1; pivot.scaling = new BABYLON.Vector3(s,s,s);
+        pivot.getChildren().forEach(n=>{ if(p.pickable) n.isPickable=true; if(p.collidable) n.checkCollisions=true; });
+        DT.placedPivots.push(pivot);
+      }catch(e){ console.warn('Import failed for', p.source, e); }
+    }
+  }
+  if(Array.isArray(cfg.sprites)){
+    cfg.sprites.forEach(sp=>{
+      const plane = BABYLON.MeshBuilder.CreatePlane('spritePlane',{ width:sp.w, height:sp.h, sideOrientation:BABYLON.Mesh.DOUBLESIDE }, scene);
+      const mat = new BABYLON.StandardMaterial('spriteMat', scene);
+      mat.diffuseTexture = new BABYLON.Texture(sp.url, scene, true, false, BABYLON.Texture.BILINEAR_SAMPLINGMODE);
+      mat.useAlphaFromDiffuseTexture = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+      mat.alphaCutOff = sp.alpha||0.05; plane.material = mat;
+      plane.billboardMode = sp.bill ? BABYLON.AbstractMesh.BILLBOARDMODE_Y : BABYLON.AbstractMesh.BILLBOARDMODE_NONE;
+      plane.position = new BABYLON.Vector3(sp.position.x, sp.position.y, sp.position.z);
+    });
+  }
+  if(Array.isArray(cfg.lights)){
+    cfg.lights.forEach(L=>{
+      const col = (function(hex){ hex = (hex||'#fff').replace('#',''); if(hex.length===3) hex=hex.split('').map(c=>c+c).join(''); const n=parseInt(hex,16); return new BABYLON.Color3(((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255); }) (L.color);
+      let light=null;
+      if(L.type==='Point'){ light = new BABYLON.PointLight('p', new BABYLON.Vector3(L.position.x,L.position.y,L.position.z), scene); light.range = L.range||18; }
+      else if(L.type==='Spot'){ light = new BABYLON.SpotLight('s', new BABYLON.Vector3(L.position.x,L.position.y,L.position.z), new BABYLON.Vector3(L.direction.x,L.direction.y,L.direction.z), (L.angle||35)*Math.PI/180, 2, scene); light.range=L.range||18; }
+      else { light = new BABYLON.DirectionalLight('d', new BABYLON.Vector3(L.direction.x,L.direction.y,L.direction.z), scene); }
+      light.diffuse = col; light.specular = col; light.intensity = L.intensity||1;
+      if(L.shadow && (light.getTypeID?.()===BABYLON.Light.LIGHTTYPEID_DIRECTIONALLIGHT || L.getTypeID?.()===BABYLON.Light.LIGHTTYPEID_SPOTLIGHT)){
+        try{ const sg = new BABYLON.ShadowGenerator(1024, light); sg.useExponentialShadowMap = true; sg.bias=0.0006; scene.meshes.forEach(m=>{ if(m.receiveShadows!==undefined) m.receiveShadows=true; if(m.isVerticesDataPresent && m.getTotalVertices?.()>0) sg.addShadowCaster(m, true); }); }catch(e){}
+      }
+    });
+  }
+  if(Array.isArray(cfg.doors)){
+    g.doors = cfg.doors;
+    cfg.doors.forEach(d=>{
+      const m = scene.getMeshByName(d.meshName);
+      if(m){
+        const pivot = new BABYLON.Vector3(d.pivot.x,d.pivot.y,d.pivot.z);
+        m.setPivotPoint(pivot, BABYLON.Space.WORLD);
+        m.metadata = Object.assign({}, m.metadata||{}, { isDoor:true, doorAxis:d.axis, doorAngle:d.angle, doorSpeed:d.speed });
+      }
+    });
+  }
+}
+
 /* ------------------------------------------------------------------------- *
  * Inject model viewer & new sections into existing dev panel
  * ------------------------------------------------------------------------- */
@@ -1085,6 +1356,10 @@ export function initDevTools({ game, scene }){
   ensurePlacementTools();
   ensureBoundsEditor();
   ensureGhostInspector();
+  ensureDoorEditor();
+  ensureSpriteManager();
+  ensureLightPainter();
+  ensureAutosave();
   injectExportButtons();
 
   // Ensure Model Viewer button
