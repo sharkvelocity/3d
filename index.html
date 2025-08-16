@@ -103,6 +103,43 @@
       <button id="start-button">Start Investigation</button>
     </div>
   </div>
+<script>
+  // Put these near the top of your script (before initUI), or replace your existing start logic.
+  let __started = false;
+  function safeStart() {
+    if (__started) return;              // don't run twice
+    __started = true;
+
+    const scr = document.getElementById('title-screen');
+    if (scr) scr.style.display = 'none'; // hide immediately
+
+    // continue with your existing start actions
+    const w = Math.random() < 0.5 ? 'Clear' : 'Rain';
+    setWeather(w);
+    playWeatherAudio();
+    const keys = Object.keys(GHOSTS);
+    currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+    toast('Investigation started. Suspected: ???', 1400);
+  }
+  window.safeStart = safeStart; // so you can call it from console if needed
+
+  // Attach listeners early and safely (won't throw if elements are missing)
+  window.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('start-button');
+    const screen = document.getElementById('title-screen');
+
+    if (btn) btn.addEventListener('click', safeStart, { once: true });
+    // also allow clicking anywhere on the title screen to start
+    if (screen) screen.addEventListener('click', (e) => {
+      if (e.target.id !== 'start-button') safeStart();
+    }, { once: true });
+
+    // keyboard fallback
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') safeStart();
+    }, { once: true });
+  });
+</script>
 
   <!-- HUD -->
   <div id="hud">
@@ -943,13 +980,8 @@ function confirmLoadout(){ closeStorage(); }
    STARTUP / EVENTS
    =========================================================== */
 function initUI(){
-  document.getElementById('start-button').onclick = ()=>{
-    document.getElementById('title-screen').style.display='none';
-    const w = Math.random() < 0.5 ? 'Clear' : 'Rain';
-    setWeather(w); playWeatherAudio();
-    const keys = Object.keys(GHOSTS); currentGhostKey = keys[Math.floor(Math.random()*keys.length)];
-    toast(`Investigation started. Suspected: ???`, 1400);
-  };
+document.getElementById('start-button').onclick = safeStart;
+
 
   document.getElementById('storage-button').onclick = ()=> openStorage();
   document.getElementById('storage-close').onclick = ()=> closeStorage();
