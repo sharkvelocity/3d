@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Phasma-Phoney — Web Build (Front Door & LOS)</title>
+  <title>Phasma-Phoney — Web Build (Map Loader + Float Map UI)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; color:#0ff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; }
@@ -36,7 +36,7 @@
 
     /* Dev */
     #devPrompt, #devPanel, #roomPicker { position:fixed; inset:0; display:none; z-index:40; align-items:center; justify-content:center; background:rgba(0,0,0,.6); }
-    .modal { width:min(720px, 92vw); background:#0a0f10; border:1px solid #0ff; box-shadow:0 0 18px rgba(0,255,255,.25); border-radius:12px; padding:16px; color:#9ef; font-family:monospace; }
+    .modal { width:min(780px, 92vw); background:#0a0f10; border:1px solid #0ff; box-shadow:0 0 18px rgba(0,255,255,.25); border-radius:12px; padding:16px; color:#9ef; font-family:monospace; }
     .modal h3 { margin:0 0 8px 0; color:#0ff; }
     .modal .row { margin:8px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .modal button, .modal input, .modal select { background:#000; color:#0ff; border:1px solid #0ff; border-radius:8px; padding:8px 12px; }
@@ -62,6 +62,11 @@
     /* Touch stick */
     #stick { position:fixed; left:16px; bottom:16px; width:120px; height:120px; border-radius:50%; border:1px solid #066; background:rgba(0,0,0,.3); display:none; z-index:26; }
     #stick .dot { position:absolute; width:48px; height:48px; border-radius:50%; border:1px solid #0ff; background:#001e1e; left:36px; top:36px; }
+
+    /* Floating Map Controls (appear when Listener ON) */
+    #floatMapCtl { position:fixed; right:16px; bottom:16px; z-index:45; display:none; gap:8px; }
+    #floatMapCtl .group { display:flex; flex-direction:column; gap:6px; }
+    #floatMapCtl button { min-width:140px; background:#001316; color:#0ff; border:1px solid #0ff; border-radius:10px; padding:8px 10px; cursor:pointer; }
   </style>
 </head>
 <body>
@@ -114,6 +119,16 @@
         <button id="pingHere">Ping XYZ</button>
         <button id="flyPg">Toggle Fly: OFF</button>
         <button id="closeDev" style="margin-left:auto;">Close</button>
+      </div>
+      <div class="row">
+        <label>Map:&nbsp;
+          <select id="mapSelect">
+            <option value="Abandoned_House.glb">Abandoned_House.glb</option>
+            <option value="house_fully_furnished.glb">house_fully_furnished.glb</option>
+            <option value="furnished_house.glb">furnished_house.glb</option>
+          </select>
+        </label>
+        <button id="mapLoadBtn">Load Map</button>
       </div>
       <div class="row" style="border:1px solid #044; padding:8px; border-radius:8px; background:#050b0c; flex-direction:column; gap:8px;">
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -177,6 +192,16 @@
     </div>
   </div>
 
+  <!-- Floating Map Controls (shown when Listener ON) -->
+  <div id="floatMapCtl">
+    <div class="group">
+      <button id="fmStart">Start Map</button>
+      <button id="fmPin" disabled>Pin</button>
+      <button id="fmEnd" disabled>End/Confirm</button>
+      <button id="fmCenter" disabled>Approx Center</button>
+    </div>
+  </div>
+
   <!-- Touch stick -->
   <div id="stick"><div class="dot"></div></div>
 
@@ -215,8 +240,8 @@
       activeIndex:0, have:new Set(['EMF','Spirit Box','Thermometer','Lighter','Notebook']),
       sanity:100, running:false, flyDev:false, god:false, uiLocked:false,
       inVan:false, weather:'Clear',
-      house:null, floors:[], doors:[], skybox:null, skyMat:null,
-      boundary:[ // interior polygon (inside = house)
+      mapRoot:null, house:null, floors:[], doors:[], skybox:null, skyMat:null,
+      boundary:[ // interior polygon (inside = house) -- default polygon; can be replaced by mapping UI
         new BABYLON.Vector3(18.404,-0.016,-96.040),
         new BABYLON.Vector3(57.205,-0.718,-94.031),
         new BABYLON.Vector3(62.145,-0.651,-105.142),
@@ -229,7 +254,7 @@
     };
 
     /***************
-     * FRONT DOOR (from your pins)
+     * FRONT DOOR (preset pins; may not align to all maps)
      ***************/
     const frontDoor = {
       p1: new BABYLON.Vector3(28.866, 0.831, -117.498),
@@ -238,30 +263,26 @@
       yaw: 0,
       len: 0,
       open: true,
-      normalOut: null,   // 2D normal pointing OUTSIDE
-      blocker: null      // collision box for player when closed
+      normalOut: null,
+      blocker: null
     };
 
     function initFrontDoor(){
-      // geometry
       const v = frontDoor.p2.subtract(frontDoor.p1);
       frontDoor.len = v.length();
       frontDoor.center = frontDoor.p1.add(frontDoor.p2).scale(0.5);
       frontDoor.yaw = Math.atan2(v.x, v.z);
 
-      // normal candidates
-      const t = v.scale(1/frontDoor.len); // along segment
-      let n = new BABYLON.Vector2(-t.z, t.x); // rotate left
-      // choose outward by probing
+      const t = v.scale(1/(frontDoor.len||1)); // avoid NaN
+      let n = new BABYLON.Vector2(-t.z, t.x);
       const probe = new BABYLON.Vector3(frontDoor.center.x + n.x*0.6, frontDoor.center.y, frontDoor.center.z + n.y*0.6);
       const outside = !pointInPolyXZ(probe.x, probe.z, game.boundary);
       frontDoor.normalOut = outside ? n : new BABYLON.Vector2(-n.x, -n.y);
 
-      // blocker box (invisible wall toggled by open/closed)
+      // blocker
+      if(frontDoor.blocker){ frontDoor.blocker.dispose(); frontDoor.blocker=null; }
       const box = BABYLON.MeshBuilder.CreateBox("frontDoorBlocker", {
-        width: frontDoor.len + 0.06,
-        height: 2.2,
-        depth: 0.12
+        width: frontDoor.len + 0.06, height: 2.2, depth: 0.12
       }, game.scene);
       box.position = new BABYLON.Vector3(frontDoor.center.x, Math.max(frontDoor.p1.y, frontDoor.p2.y) + 1.1, frontDoor.center.z);
       box.rotation.y = frontDoor.yaw;
@@ -270,33 +291,22 @@
       box.isVisible = false;
       frontDoor.blocker = box;
     }
+    function setFrontDoorOpen(isOpen){ frontDoor.open=!!isOpen; if(frontDoor.blocker) frontDoor.blocker.checkCollisions=!frontDoor.open; }
 
-    function setFrontDoorOpen(isOpen){
-      frontDoor.open = !!isOpen;
-      if(frontDoor.blocker) frontDoor.blocker.checkCollisions = !frontDoor.open;
-      if(dev.enabled) dev.log(`Front Door: ${frontDoor.open?'OPEN':'CLOSED'}`);
-      toast(frontDoor.open?'Front door opened':'Front door closed');
-    }
-
-    // clamp ghost from crossing closed door threshold (logic-based)
+    // clamp ghost crossing if closed
     function clampGhostAgainstFrontDoor(current, proposed){
       if(frontDoor.open) return proposed;
-      // signed distance to plane: dot(nOut, p - center)
-      const n = frontDoor.normalOut;
+      const n = frontDoor.normalOut || new BABYLON.Vector2(0,1);
       const sCur = n.x*(current.x-frontDoor.center.x) + n.y*(current.z-frontDoor.center.z);
       const sNew = n.x*(proposed.x-frontDoor.center.x) + n.y*(proposed.z-frontDoor.center.z);
-      // inside = s <= 0 ; outside = s > 0
       if(sCur <= 0 && sNew > 0){
-        // find t where s(t) = -epsilon
         const eps = -0.03;
         const ds = sNew - sCur;
         const t = ds!==0 ? (eps - sCur) / ds : 0;
         if(t>=0 && t<=1){
           const diff = proposed.subtract(current).scale(t);
           return current.add(diff);
-        } else {
-          return current.clone();
-        }
+        } else return current.clone();
       }
       return proposed;
     }
@@ -366,19 +376,22 @@
     const skyMat = new BABYLON.SkyMaterial("skyMaterial", scene); skyMat.backFaceCulling = false; skyMat.inclination=0.02; skyMat.azimuth=0.3; skyMat.luminance=0.7;
     skybox.material = skyMat; game.skybox = skybox; game.skyMat = skyMat;
 
-    // Safety ground
+    // Safety ground (height adjusted after map load)
     const safetyGround = BABYLON.MeshBuilder.CreateGround("safety", { width:400, height:400 }, scene);
-    safetyGround.position.y = -0.05; safetyGround.checkCollisions = true; safetyGround.isPickable = true;
+    safetyGround.position.y = -0.2; // default; will be adjusted
+    safetyGround.checkCollisions = true; safetyGround.isPickable = true;
 
     // UI refs
     const belt = $('belt'); const hand = $('hand'); const storageBtn = $('storageBtn');
     const sanityFill = $('sanityFill'); const sanityPct = $('sanityPct'); const roomNameEl=$('roomName'); const statusText=$('statusText');
 
     /***************
-     * START UI
+     * DOM-READY: Start Button
      ***************/
-    $('start').onclick = null;
-    $('startBtn').onclick = async ()=>{ $('start').style.display='none'; await startGame(); };
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const sb=$('startBtn');
+      if(sb){ sb.addEventListener('click', async ()=>{ $('start').style.display='none'; await startGame(); }); }
+    });
 
     /***************
      * INPUT
@@ -424,7 +437,7 @@
     /***************
      * DEV
      ***************/
-    const dev = { enabled:false, showFOV:false, log:(s)=>{ const el=$('devLog'); el.textContent += s+'\n'; el.scrollTop = el.scrollHeight; } };
+    const dev = { enabled:false, showFOV:false, log:(s)=>{ const el=$('devLog'); el.textContent += s+'\\n'; el.scrollTop = el.scrollHeight; } };
     const listen = { master:false, ghost:false, evidence:false, mapActive:false, pins:[], knownRooms:[], lastGhostState:'', lastLogT:0 };
 
     $('devYes').onclick = ()=> $('devPwRow').style.display='flex';
@@ -432,34 +445,82 @@
     $('devPwOk').onclick= ()=>{ const ok=($('devPw').value.trim()==='devmode'); if(ok){ dev.enabled=true; $('devPrompt').style.display='none'; $('devPanel').style.display='flex'; toast('Dev on'); } else $('devPwMsg').textContent='Wrong password.'; };
     $('closeDev').onclick=()=> $('devPanel').style.display='none';
     $('toggleGod').onclick = (e)=>{ game.god=!game.god; e.target.textContent='God Mode: ' + (game.god?'ON':'OFF'); };
-    $('teleGhost').onclick = ()=>{ if(game.ghostPivot){ playerCapsule.position.copyFrom(game.ghostPivot.position).addInPlace(new BABYLON.Vector3(0,0.1,-1.8)); syncCameraToCapsule(); dev.log(`Teleport to ghost`);} };
-    $('pingHere').onclick  = ()=> dev.log(`PING @ ${vecStr(playerCapsule.position)}`);
+    $('teleGhost').onclick = ()=>{ if(game.ghostPivot){ game.playerCapsule.position.copyFrom(game.ghostPivot.position).addInPlace(new BABYLON.Vector3(0,0.1,-1.8)); syncCameraToCapsule(); dev.log(`Teleport to ghost`);} };
+    $('pingHere').onclick  = ()=> dev.log(`PING @ ${vecStr(game.playerCapsule.position)}`);
     $('flyPg').onclick     = (e)=>{ game.flyDev=!game.flyDev; e.target.textContent='Toggle Fly: ' + (game.flyDev?'ON':'OFF'); };
-    $('toggleListen').onclick=()=>{ listen.master=!listen.master; $('listenGroup').style.display=listen.master?'block':'none'; $('listenState').textContent=listen.master?'ON':'OFF'; dev.log('Listen '+(listen.master?'ENABLED':'DISABLED')); };
+
+    // Map loader
+    $('mapLoadBtn').onclick = async ()=>{
+      const sel = $('mapSelect').value;
+      toast('Loading map: '+sel);
+      await loadMap(sel);
+      // Recompute ground height after map
+      adjustSafetyGround();
+      initFrontDoor(); // keep blocker refreshed (may not align perfectly on non-default maps)
+      dev.log('Map loaded: '+sel);
+    };
+
+    function showFloatMapCtl(show){ $('floatMapCtl').style.display = show ? 'flex' : 'none'; }
+
+    $('toggleListen').onclick=()=>{
+      listen.master=!listen.master;
+      $('listenGroup').style.display=listen.master?'block':'none';
+      $('listenState').textContent=listen.master?'ON':'OFF';
+      dev.log('Listen '+(listen.master?'ENABLED':'DISABLED'));
+      if(listen.master){
+        $('devPanel').style.display='none'; // hide panel as requested
+        showFloatMapCtl(true);
+      } else {
+        showFloatMapCtl(false);
+      }
+    };
     $('toggleFOV').onclick = (e)=>{ dev.showFOV=!dev.showFOV; e.target.textContent='Show FOV: ' + (dev.showFOV?'ON':'OFF'); refreshFOVLines(); };
     $('listenGhost').onclick = (e)=>{ listen.ghost=!listen.ghost; e.target.textContent='Ghost Tracking: ' + (listen.ghost?'ON':'OFF'); };
     $('listenEvidence').onclick=(e)=>{ listen.evidence=!listen.evidence; e.target.textContent='Evidence Use Log: ' + (listen.evidence?'ON':'OFF'); };
 
     function vecStr(v){ return `x:${v.x.toFixed(3)} y:${v.y.toFixed(3)} z:${v.z.toFixed(3)}`; }
 
-    // Map flow (unchanged from last build)
-    $('mapStart').onclick = ()=>{
+    // Map flow (dev-panel buttons)
+    $('mapStart').onclick = ()=>{ toggleMapMode(); };
+    $('mapPin').onclick   = ()=>{ addMapPin(); };
+    $('mapConfirm').onclick=()=>{ openRoomPicker(); };
+    $('roomCancel').onclick = ()=> $('roomPicker').style.display='none';
+
+    // Floating map controls wire-up
+    $('fmStart').onclick  = ()=>{ toggleMapMode(); };
+    $('fmPin').onclick    = ()=>{ addMapPin(); };
+    $('fmEnd').onclick    = ()=>{ openRoomPicker(); };
+    $('fmCenter').onclick = ()=>{ showApproxCenter(); };
+
+    function toggleMapMode(){
       listen.mapActive = !listen.mapActive;
-      $('mapStart').textContent = listen.mapActive ? 'Stop Map' : 'Start Map';
-      $('mapPin').disabled = !listen.mapActive;
-      $('mapConfirm').disabled = !listen.mapActive || listen.pins.length===0;
-      if(listen.mapActive){ listen.pins = []; dev.log('Map: START'); } else dev.log('Map: STOP');
-    };
-    $('mapPin').onclick = ()=>{ const p=playerCapsule.position.clone(); listen.pins.push(p); $('mapConfirm').disabled=false; dev.log(`Map: PIN ${listen.pins.length} @ ${vecStr(p)}`); };
-    $('mapConfirm').onclick=()=>{
+      if(listen.mapActive){
+        listen.pins = []; dev.log('Map: START');
+        $('mapPin').disabled=false; $('mapConfirm').disabled=true;
+        $('fmPin').disabled=false; $('fmEnd').disabled=true; $('fmCenter').disabled=false;
+        $('fmStart').textContent='Stop Map';
+      }else{
+        dev.log('Map: STOP');
+        $('mapPin').disabled=true; $('mapConfirm').disabled=true;
+        $('fmPin').disabled=true; $('fmEnd').disabled=true; $('fmCenter').disabled=true;
+        $('fmStart').textContent='Start Map';
+      }
+    }
+    function addMapPin(){
+      const p=game.playerCapsule.position.clone();
+      listen.pins.push(p); dev.log(`Map: PIN ${listen.pins.length} @ ${vecStr(p)}`);
+      $('mapConfirm').disabled = listen.pins.length===0;
+      $('fmEnd').disabled = listen.pins.length===0;
+    }
+    function openRoomPicker(){
+      if(!listen.mapActive || listen.pins.length===0){ toast('No pins yet.'); return; }
       if(listen.knownRooms.length===0){
         const names=new Set(['Van','House']); if(game.house){ game.scene.meshes.forEach(m=>{ if(!m.name) return; if(/(kitchen|bed|bath|living|garage|hall|attic|basement|study|room|office|dining)/i.test(m.name)) names.add(m.name.replace(/[^a-z0-9 _-]/ig,'')); }); }
         listen.knownRooms=[...names].slice(0,50);
       }
       const sel=$('knownRooms'); sel.innerHTML=''; listen.knownRooms.forEach(r=>{ const o=document.createElement('option'); o.textContent=r; o.value=r; sel.appendChild(o); });
       $('customRoom').value=''; $('roomPicker').style.display='flex';
-    };
-    $('roomCancel').onclick = ()=> $('roomPicker').style.display='none';
+    }
 
     /***************
      * MAPPING HELPERS + VAN POLY
@@ -477,10 +538,22 @@
       return {lines, ribbon};
     }
 
+    function showApproxCenter(){
+      if(listen.pins.length===0){ toast('No pins yet.'); return; }
+      const p = centroidXZ(dedupePins(listen.pins));
+      dev.log('Approx center @ '+vecStr(p));
+      // Simple visual
+      const marker = BABYLON.MeshBuilder.CreateDisc('centerMarker', {radius:0.25, tessellation:24}, scene);
+      marker.position = new BABYLON.Vector3(p.x, p.y + 0.03, p.z);
+      const mat = new BABYLON.StandardMaterial('centerMat', scene);
+      mat.emissiveColor = new BABYLON.Color3(0,1,1); mat.alpha = 0.6; marker.material = mat;
+      setTimeout(()=>{ marker.dispose(); }, 4000);
+    }
+
     $('roomOk').onclick = ()=>{
       const name = $('customRoom').value.trim() || $('knownRooms').value || 'Unnamed Area';
       $('roomPicker').style.display='none';
-      let pins = dedupePins(listen.pins); listen.pins=[]; $('mapConfirm').disabled=true;
+      let pins = dedupePins(listen.pins); listen.pins=[]; $('mapConfirm').disabled=true; $('fmEnd').disabled=true;
       dev.log(`Map: CONFIRM "${name}" with ${pins.length} pins`); pins.forEach((p,i)=> dev.log(`  • ${name} #${i+1} @ ${vecStr(p)}`));
       if(pins.length>=3){
         if(!game.mappedAreas) game.mappedAreas={};
@@ -492,6 +565,8 @@
           dev.log(`Van zone set @ ${vecStr(c)} r≈${game.vanZone.radius.toFixed(2)} poly=${pins.length}`);
         }
       } else dev.log(`(Info) Need ≥3 pins to define an area.`);
+      // end mapping mode after confirm
+      if(listen.mapActive) toggleMapMode();
     };
 
     /***************
@@ -505,22 +580,27 @@
     /***************
      * STORAGE / VAN ZONE
      ***************/
-    storageBtn.onclick = ()=> toast('Storage opened (prototype).');
+    $('storageBtn').onclick = ()=> toast('Storage opened (prototype).');
     function updateVanZoneButton(){
       const me = game.playerCapsule.position;
       let inside=false;
       if(game.vanZone.poly && game.vanZone.poly.length>=3) inside = pointInPolyXZ(me.x, me.z, game.vanZone.poly);
       else inside = (BABYLON.Vector3.Distance(me, game.vanZone.center) <= game.vanZone.radius);
-      if(inside && !game.inVan){ game.inVan=true; storageBtn.style.display='block'; }
-      else if(!inside && game.inVan){ game.inVan=false; storageBtn.style.display='none'; }
+      if(inside && !game.inVan){ game.inVan=true; $('storageBtn').style.display='block'; }
+      else if(!inside && game.inVan){ game.inVan=false; $('storageBtn').style.display='none'; }
     }
 
     /***************
-     * MODELS
+     * MAP LOADING
      ***************/
-    async function loadHouse(){
-      const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
-      const root = result.meshes[0]; root.name="Abandoned_House"; game.house=root;
+    async function loadMap(fileName){
+      // dispose previous map
+      if(game.mapRoot){ try{ game.mapRoot.dispose(false, true); }catch(e){} }
+      game.floors=[]; game.doors=[];
+
+      const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", fileName, scene);
+      const root = result.meshes[0]; root.name="MapRoot"; game.mapRoot=root; game.house=root;
+
       result.meshes.forEach(m=>{
         if(m===root) return;
         const mat=m.material; const transparent = !!mat && ((mat.alpha??1)<.8 || (mat.transparencyMode??0)>0);
@@ -529,10 +609,27 @@
         const info=m.getBoundingInfo?.(); if(info){ const e=info.boundingBox.extendSizeWorld; const flat=(e.y < 0.2 && (e.x>1.5 || e.z>1.5)); if(flat){ game.floors.push(m); } }
         if(/door/i.test(m.name)){ game.doors.push(m); m.metadata = { open:false, baseRotY:m.rotation?.y||0 }; }
       });
-      if(game.floors.length) safetyGround.position.y=-0.2;
     }
 
-    // Items library
+    function adjustSafetyGround(){
+      // Lower safety ground to ~0.1 below lowest detected floor plane
+      if(!game.floors.length){ safetyGround.position.y = -0.2; return; }
+      let minY = Infinity;
+      for(const f of game.floors){
+        try{
+          f.refreshBoundingInfo();
+          const y = f.getBoundingInfo().boundingBox.minimumWorld.y;
+          if(y < minY) minY = y;
+        }catch{}
+      }
+      if(minY!==Infinity){
+        safetyGround.position.y = minY - 0.10; // as requested
+      }
+    }
+
+    /***************
+     * ITEMS
+     ***************/
     const itemModelMap = {
       'EMF': 'EMF_Detector_EMF_Detector_0',
       'Spirit Box': 'Cone.001_Spirit_Box_0',
@@ -551,8 +648,8 @@
       rebuildBelt(); updateHandModel();
     }
     function rebuildBelt(){
-      belt.innerHTML=''; const labels=['EMF','Spirit Box','Thermometer','Lighter','Notebook']; game.beltslots=[];
-      for(let i=0;i<5;i++){ const el=document.createElement('div'); el.className='slot'+(i===game.activeIndex?' active':''); el.innerHTML=`<div class="key">${i+1}</div><div class="label">${labels[i]}</div>`; el.onclick=()=>selectSlot(i); belt.appendChild(el); game.beltslots.push(el); }
+      $('belt').innerHTML=''; const labels=['EMF','Spirit Box','Thermometer','Lighter','Notebook']; game.beltslots=[];
+      for(let i=0;i<5;i++){ const el=document.createElement('div'); el.className='slot'+(i===game.activeIndex?' active':''); el.innerHTML=`<div class="key">${i+1}</div><div class="label">${labels[i]}</div>`; el.onclick=()=>selectSlot(i); $('belt').appendChild(el); game.beltslots.push(el); }
     }
     function selectSlot(i){ game.activeIndex=clamp(i,0,4); game.beltslots.forEach((el,idx)=> el.classList.toggle('active', idx===game.activeIndex)); updateHandModel(); }
     function findItemMesh(name){ if(!itemLibraryRoot) return null; const target=itemModelMap[name]||null; if(!target) return null; return scene.getMeshByName(target) || scene.getTransformNodeByName(target) || null; }
@@ -566,11 +663,13 @@
     function updateHandModel(){
       if(game.handModel){ game.handModel.setEnabled(false); game.handModel=null; }
       const labels=['EMF','Spirit Box','Thermometer','Lighter','Notebook']; const name=labels[game.activeIndex];
-      if(name==='Notebook'){ hand.style.opacity=.85; hand.querySelector('.hint').textContent='Notebook (N)'; return; }
+      if(name==='Notebook'){ $('hand').style.opacity=.85; $('hand').querySelector('.hint').textContent='Notebook (N)'; return; }
 
-      const src=findItemMesh(name==='Lighter'?'Flashlight':name); if(!src){ hand.style.opacity=.2; return; }
+      const src=findItemMesh(name==='Lighter'?'Flashlight':name); if(!src){ $('hand').style.opacity=.2; return; }
       const node=src.clone(name+'_hand', null); node.setEnabled(true); if(node.rotationQuaternion) node.rotationQuaternion=null;
       node.parent=game.camera; node.position=new BABYLON.Vector3(0.4, -0.35, 0.8); node.scaling=new BABYLON.Vector3(0.4,0.4,0.4);
+      const size=measureNodeSize(node); const needsZtoY = size.z > size.y * 1.2;
+      node.rotation = needsZtoY ? new BABYLON.Vector3(0.4, -0.35, 0.8); node.scaling=new BABYLON.Vector3(0.4,0.4,0.4);
       const size=measureNodeSize(node); const needsZtoY = size.z > size.y * 1.2;
       node.rotation = needsZtoY ? new BABYLON.Vector3(rad(-90),0,0) : BABYLON.Vector3.Zero();
       if(name==='Lighter') node.scaling.scaleInPlace(0.7);
