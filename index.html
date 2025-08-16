@@ -2,140 +2,154 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Web Build</title>
+  <title>Phasma-Phoney — Web Build</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="author" content="Shark-Blades" />
-  <meta name="description" content="3D ghost-hunting prototype built on Babylon.js" />
 
-  <!-- Inline styles -->
+  <!-- Core libs (order matters) -->
+  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/earcut.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js"></script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./cdn/gui/babylon.gui.min.js"></script>
+
   <style>
-    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#000; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; color:#0ff; }
-    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; }
-    /* HUD: top-left */
-    #hud {
-      position:fixed; top:10px; left:10px; z-index:20; color:#0ff; background:rgba(0,0,0,.45);
-      border:1px solid #0ff; border-radius:8px; padding:8px 10px; min-width:260px; backdrop-filter: blur(3px);
-      box-shadow:0 0 10px rgba(0,255,255,.25) inset;
-    }
-    #hud .row { display:flex; align-items:center; gap:8px; margin:4px 0; flex-wrap:wrap; }
-    .badge { padding:2px 6px; border:1px solid #0ff; border-radius:6px; }
-    .meter { position:relative; height:8px; background:#033; border:1px solid #0ff; border-radius:4px; width:160px; }
-    .meter>span { display:block; height:100%; background:#0ff; width:100%; }
-    /* Weather */
-    #weather { font-size:.9rem; opacity:.9; }
-
-    /* Items belt (bottom-center) */
-    #belt {
-      position:fixed; bottom:16px; left:50%; transform:translateX(-50%);
-      display:flex; gap:10px; z-index:22; background:rgba(0,0,0,.5); padding:8px 10px;
-      border:1px solid #0ff; border-radius:12px; backdrop-filter: blur(3px);
-    }
-    .slot {
-      width:72px; height:72px; border:1px dashed #0aa; border-radius:8px; display:flex; align-items:center; justify-content:center; position:relative;
-      color:#0ff; font-size:.8rem; user-select:none;
-    }
-    .slot.active { outline:2px solid #0ff; box-shadow:0 0 10px #0ff inset; }
-    .slot .key {
-      position:absolute; top:-8px; left:-8px; width:20px; height:20px; display:grid; place-items:center;
-      color:#021; background:#0ff; border-radius:50%; font-weight:700; font-size:.7rem; border:1px solid #033;
-    }
-    .slot .label { position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:.7rem; color:#7ff; }
-
-    /* Active hand prop (small, right side) */
-    #hand {
-      position:fixed; right:18px; bottom:108px; width:160px; height:120px; z-index:21;
-      pointer-events:none; opacity:.9; display:flex; align-items:center; justify-content:center;
-      border-radius:10px; border:1px solid rgba(0,255,255,.2); background:linear-gradient(180deg, rgba(0,0,0,.0), rgba(0,0,0,.5));
-    }
-    #hand .hint { position:absolute; bottom:6px; right:8px; font-size:.75rem; color:#8ff; opacity:.8; }
-
-    /* Storage button (van zone only) */
-    #storageBtn {
-      position:fixed; right:18px; top:18px; z-index:25;
-      background:#111; color:#0ff; border:1px solid #0ff; border-radius:8px; padding:10px 14px; cursor:pointer;
-      display:none;
-    }
-
-    /* Developer options */
-    #devPrompt, #devPanel {
-      position:fixed; inset:0; display:none; z-index:40; align-items:center; justify-content:center; background:rgba(0,0,0,.6);
-    }
-    .modal {
-      width:min(560px, 92vw); background:#0a0f10; border:1px solid #0ff; box-shadow:0 0 18px rgba(0,255,255,.25);
-      border-radius:12px; padding:16px; color:#9ef; font-family:monospace;
-    }
-    .modal h3 { margin:0 0 8px 0; color:#0ff; }
-    .modal .row { margin:8px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .modal input[type="password"] { background:#000; border:1px solid #0ff; color:#0ff; padding:6px 8px; border-radius:6px; width:220px; }
-    .modal button { background:#000; color:#0ff; border:1px solid #0ff; border-radius:8px; padding:8px 12px; cursor:pointer; }
-    .modal .log { background:#000; border:1px solid #044; min-height:100px; padding:8px; border-radius:6px; color:#aff; font-size:.85rem; overflow:auto; max-height:38vh; }
+    :root { --ink:#cfffff; --acc:#0ff; --bg:#061015; --pane:#07131a; --muted:#9be; }
+    html, body { margin:0; height:100%; overflow:hidden; background:#000; color:#fff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica, Arial, sans-serif; }
+    canvas { width:100vw; height:100vh; display:block; touch-action:none; }
 
     /* Start screen */
-    #start {
-      position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; gap:18px;
-      align-items:center; justify-content:center; background:linear-gradient(180deg, rgba(0,0,0,.65), rgba(0,0,0,.85));
-      pointer-events:auto;
-    }
-    #start .logo {
-      width:min(560px, 80vw); height:180px; background:url("./logo.jpg") center/contain no-repeat; filter:drop-shadow(0 0 8px rgba(0,255,255,.2));
-    }
-    #start button {
-      padding:14px 26px; font-size:20px; border-radius:10px; border:1px solid #0ff; color:#0ff; background:#111; cursor:pointer; z-index:51;
-    }
+    #start { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:40; background:linear-gradient(180deg, rgba(0,0,0,.65), rgba(0,0,0,.85)); }
+    #start .modal { width:min(980px, 95vw); max-height:92vh; overflow:auto; background:linear-gradient(180deg, #07131a, #081017); border:1px solid var(--acc); border-radius:14px; padding:14px; color:var(--ink); box-shadow:0 0 20px rgba(0,255,255,.22); }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .grid { display:grid; grid-template-columns:repeat(12, 1fr); gap:12px; }
+    .card { background:#07131a; border:1px solid #0a3b3f; border-radius:12px; padding:12px; grid-column:span 12; }
+    h3 { margin:0 0 8px 0; color:#bff; }
+    select, input[type="text"], input[type="number"] { background:#07131a; color:var(--ink); border:1px solid #0a3b3f; border-radius:8px; padding:8px; }
+    .pill { display:inline-block; border:1px solid #0ff5; border-radius:999px; padding:4px 10px; margin:3px; font:12px monospace; }
+    .btn { background:#05242a; color:var(--ink); border:1px solid var(--acc); padding:8px 14px; border-radius:10px; cursor:pointer; }
+    .btn:hover { filter:brightness(1.12); }
+    .muted { color:var(--muted); opacity:.9; }
 
-    /* Onscreen stick (touch) */
-    #stick {
-      position:fixed; left:16px; bottom:16px; width:120px; height:120px; border-radius:50%; border:1px solid #066; background:rgba(0,0,0,.3);
-      display:none; z-index:26;
-    }
-    #stick .dot {
-      position:absolute; width:48px; height:48px; border-radius:50%; border:1px solid #0ff; background:#001e1e; left:36px; top:36px;
-    }
+    /* HUD */
+    #hud { position:fixed; top:10px; left:50%; transform:translateX(-50%); z-index:5; font:13px/1.2 monospace; text-shadow:0 1px 2px #000; display:flex; gap:14px; }
+    #coords { position:fixed; top:10px; right:10px; z-index:5; font:12px monospace; color:#9ff; text-shadow:0 1px 2px #000; }
+    #belt { position:fixed; bottom:12px; left:50%; transform:translateX(-50%); display:flex; gap:10px; z-index:5; }
+    .slot { min-width:92px; min-height:28px; border:1px solid #0ff4; padding:6px 10px; border-radius:10px; background:#001a22aa; font:12px monospace; }
+    .slot.active { outline:2px solid #0ff; }
 
-    /* Flash overlay (lightning) */
-    #flash { position:fixed; inset:0; background:white; opacity:0; pointer-events:none; z-index:30; transition:opacity 120ms linear; }
+    /* Notebook */
+    #notebook { position:fixed; inset:6% 8%; background:#0a0f12; border:1px solid #0ff6; border-radius:12px; padding:12px; display:none; z-index:10; overflow:auto; }
+    #notebook.show { display:block; }
 
-    /* Debug toast bottom-left */
-    #toast {
-      position:fixed; left:10px; bottom:10px; background:rgba(0,0,0,.55); border:1px solid #044; color:#9ef; padding:6px 10px; border-radius:8px; font-family:monospace; font-size:.85rem; z-index:24; max-width:50vw;
-    }
+    /* Dev */
+    #devOpenBtn { position:fixed; top:10px; right:10px; z-index:6; opacity:.7 }
+    #devPrompt, #devPanel { position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:50; background:rgba(0,0,0,.7); }
+    #devPanel .modal { width:min(1000px, 95vw); }
+
+    /* Touch stick */
+    #stick { position:fixed; left:16px; bottom:16px; width:120px; height:120px; border-radius:50%; border:1px solid #066; background:rgba(0,0,0,.3); display:none; z-index:26; }
+    #stick .dot { position:absolute; width:48px; height:48px; border-radius:50%; border:1px solid #0ff; background:#001e1e; left:36px; top:36px; }
+
+    /* Lightning */
+    #flash { position:fixed; inset:0; pointer-events:none; background:#fff; opacity:0; transition:opacity 160ms linear; z-index:20; }
+
+    /* Safe boot */
+    #bootDiag { position:fixed; left:10px; top:10px; z-index:99; background:rgba(0,0,0,.7); color:#0ff; border:1px solid #0ff; border-radius:8px; padding:8px 10px; font:12px monospace; max-width:46vw; white-space:pre-wrap; }
   </style>
 </head>
 <body>
+  <button id="devOpenBtn" class="btn">DEV</button>
+
+  <!-- Start -->
+  <div id="start">
+    <div class="modal">
+      <div class="grid">
+        <div class="card">
+          <h3>Start Investigation</h3>
+          <div class="row">
+            <div>
+              <label class="muted">Map</label><br/>
+              <select id="preMap">
+                <option>house_fully_furnished.glb</option>
+                <option selected>Abandoned_House.glb</option>
+                <option>furnished_house.glb</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted">Spawn</label><br/>
+              <select id="preSpawn">
+                <option value="van" selected>Van</option>
+                <option value="frontdoor">Front Door</option>
+                <option value="backdoor">Back Door</option>
+                <option value="center">House Center</option>
+              </select>
+            </div>
+            <div>
+              <label class="muted">Weather</label><br/>
+              <select id="preWeather">
+                <option selected>Clear</option>
+                <option>Rain</option>
+                <option>Thunder</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Loadout (max 5)</h3>
+          <div id="loadoutBox" class="row"></div>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between;">
+            <span class="muted">Use <b>E</b> interact • <b>F</b> use item • <b>C</b> crouch • <b>Shift</b> jog</span>
+            <button id="startBtn" class="btn">Start Investigation</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Canvas -->
   <canvas id="renderCanvas"></canvas>
 
   <!-- HUD -->
   <div id="hud">
-    <div class="row" id="weather">Weather: —</div>
-    <div class="row">Room: <span id="roomName" class="badge">—</span></div>
-    <div class="row" style="gap:10px;">
-      Sanity:
-      <div class="meter"><span id="sanityFill" style="width:100%"></span></div>
-      <span id="sanityPct">100%</span>
-    </div>
+    <div>Room: <span id="roomName">—</span></div>
+    <div>Temp: <span id="tempValue">—</span></div>
+    <div>Sanity: <span id="sanityValue">100%</span></div>
+    <div>Weather: <span id="weatherVal">—</span></div>
   </div>
+  <div id="coords">X: 0.00 | Z: 0.00</div>
 
   <!-- Items belt -->
   <div id="belt"></div>
 
-  <!-- Hand prop viewport -->
-  <div id="hand"><span class="hint">1-5 slots • Click/Tap to use</span></div>
+  <!-- Notebook -->
+  <div id="notebook">
+    <div class="row" style="justify-content:space-between;">
+      <h3 style="margin:0">Notebook</h3>
+      <button class="btn" onclick="document.getElementById('notebook').classList.remove('show')">Close</button>
+    </div>
+    <div class="grid" style="margin-top:10px;">
+      <div class="card">
+        <h3>Evidence</h3>
+        <div id="evBox"></div>
+      </div>
+      <div class="card">
+        <h3>Ghosts (25)</h3>
+        <div id="ghostBox"></div>
+      </div>
+    </div>
+  </div>
 
-  <!-- Storage button (visible only in van zone) -->
-  <button id="storageBtn">STORAGE</button>
-
-  <!-- Dev prompt (ESC) -->
+  <!-- Dev prompt -->
   <div id="devPrompt">
     <div class="modal">
-      <h3>Enable Developer Options?</h3>
-      <div class="row">
-        <button id="devYes">Yes</button>
-        <button id="devNo">No</button>
-      </div>
-      <div id="devPwRow" class="row" style="display:none;">
-        <label>Password:&nbsp;<input id="devPw" type="password" placeholder="••••••"></label>
-        <button id="devPwOk">Enable</button>
-        <div id="devPwMsg" style="color:#f88;"></div>
+      <div class="row" style="justify-content:space-between;">
+        <h3 style="margin:0">Enable Developer Options?</h3>
+        <div>
+          <button id="devYes" class="btn">Enable</button>
+          <button id="devNo" class="btn">Cancel</button>
+        </div>
       </div>
     </div>
   </div>
@@ -143,25 +157,57 @@
   <!-- Dev panel -->
   <div id="devPanel">
     <div class="modal">
-      <h3>Developer Options</h3>
-      <div class="row">
-        <button id="teleGhost">Teleport to Ghost</button>
-        <button id="toggleGod">God Mode: OFF</button>
-        <button id="pingHere">Ping XYZ</button>
-        <button id="closeDev">Close</button>
-      </div>
-      <div class="row" style="gap:12px;">
-        <button id="flyPg" title="Enable PageUp/PageDown fly only in dev">Toggle Fly: OFF</button>
-        <span style="opacity:.8;">(PageUp/PageDown move vertically while ON)</span>
-      </div>
-      <div class="log" id="devLog"></div>
-    </div>
-  </div>
+      <div class="grid">
+        <div class="card" style="grid-column: span 12;">
+          <div class="row" style="justify-content:space-between;">
+            <strong>Developer Console</strong>
+            <button id="closeDev" class="btn">Close</button>
+          </div>
+        </div>
 
-  <!-- Start overlay -->
-  <div id="start">
-    <div class="logo" aria-label="PhasmaPhoney"></div>
-    <button id="startBtn">Start Investigation</button>
+        <div class="card">
+          <div class="row" style="gap:8px;">
+            <label>Map:&nbsp;
+              <select id="devMap">
+                <option>Abandoned_House.glb</option>
+                <option>house_fully_furnished.glb</option>
+                <option>furnished_house.glb</option>
+              </select>
+            </label>
+            <button id="devLoadMap" class="btn">Load Map</button>
+            <button id="devWallClip" class="btn">Wall Clip: OFF</button>
+            <label>X <input id="tpX" type="number" step="0.01" style="width:120px"></label>
+            <label>Y <input id="tpY" type="number" step="0.01" style="width:120px"></label>
+            <label>Z <input id="tpZ" type="number" step="0.01" style="width:120px"></label>
+            <button id="devTeleport" class="btn">Teleport</button>
+            <button id="devListener" class="btn" title="Hide dev panel and enable pin tools">Listener Mode</button>
+          </div>
+        </div>
+
+        <!-- Classic tools hook -->
+        <div class="card">
+          <div class="row" style="justify-content:space-between;">
+            <strong>Dev Tools (classic)</strong>
+            <button id="loadDevTools" class="btn">Load Dev Tools</button>
+          </div>
+          <div id="dev-panel" class="row" style="flex-wrap:wrap; gap:8px; margin-top:8px;">
+            <button class="dev-btn btn" data-dev="tp-ghost">TP to Ghost</button>
+            <button class="dev-btn btn" data-dev="reveal">Reveal Ghost</button>
+            <button class="dev-btn btn" data-dev="sanity100">Sanity 100%</button>
+            <button class="dev-btn btn" data-dev="give-items">Give All Items</button>
+            <button class="dev-btn btn" data-dev="coords">Log Coords</button>
+            <button class="dev-btn btn" data-dev="toggle-nohud">Toggle HUD</button>
+            <button class="dev-btn btn" data-dev="end-hunt">End Hunt</button>
+          </div>
+          <div id="dev-info" class="muted" style="margin-top:8px; min-height:18px; font:12px monospace;"></div>
+        </div>
+
+        <div class="card" style="grid-column: span 12;">
+          <h3>Log</h3>
+          <pre id="devLog" style="margin:0; max-height:260px; overflow:auto; background:#03131a; border:1px solid #0a3; padding:8px; border-radius:8px;"></pre>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Touch stick -->
@@ -170,95 +216,163 @@
   <!-- Lightning flash -->
   <div id="flash"></div>
 
-  <!-- Debug toast -->
-  <div id="toast" style="display:none;"></div>
-
-  <!-- Babylon and loaders -->
-  <script src="./cdn/babylon.js"></script>
-  <script src="./cdn/earcut.min.js"></script>
-  <script src="./cdn/meshopt_decoder.js"></script>
-  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-  <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <!-- Safe boot -->
+  <div id="bootDiag" style="display:none;"></div>
 
   <script>
-    /***************
-     * UTILITIES
-     ***************/
-    const $ = (id)=>document.getElementById(id);
-    function toast(msg, ms=1800){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ms); }
-    function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
-    const deg = (r)=>r*180/Math.PI; const rad = (d)=>d*Math.PI/180;
+  // ====== UTIL ======
+  const $ = (id)=>document.getElementById(id);
+  const rad = (d)=>d*Math.PI/180; const deg=(r)=>r*180/Math.PI;
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  function toast(msg){ const el=$('devLog'); if(el){ el.textContent += msg+'\\n'; el.scrollTop = el.scrollHeight; } console.log('[DEV]', msg); }
 
-    /***************
-     * CORE STATE
-     ***************/
-    window.game = {
+  // ====== STATE ======
+  window.game = {
+    engine:null, scene:null, camera:null, player:null, playerCapsule:null,
+    keys:{}, running:false, crouch:false, inVan:true,
+    weather:'Clear', loadout:[], spawnChoice:'van',
+    ghost:null, ghostPivot:null, ghostActive:false, ghostFOVdeg:60, ghostLOSDist:18,
+    houseBoundsPoly: null, // polygon for inside check
+    mapFile: 'Abandoned_House.glb',
+    sanity: 100, temperature: 10
+  };
 
-      scene:null, engine:null, camera:null,
-      playerCapsule:null, handPivot:null,
-      ghost:null, ghostPivot:null, ghostAnim:{ idle:null, walk:null, state:'idle' },
-      activeIndex:0, // 0..4 => 1..5 keys
-      items: [ 'EMF', 'Spirit Box', 'Thermometer', 'Lighter', 'Notebook' ], // 4=Lighter, 5=Notebook reserved
-      have: new Set(['EMF','Spirit Box','Thermometer','Lighter','Notebook']),
-      sanity:100,
-      running:false, flyDev:false, god:false,
-      inVan:false, weather:'Clear',
-      beltslots:[], handModel:null,
-      house:null, floors:[], doors:[], vanZone:{ center:new BABYLON.Vector3(38.0,0.2,-98.0), radius:8.0 },
-      boundary:[ // user-provided PING loop (rough wall perimeter)
-        new BABYLON.Vector3(18.404, -0.016, -96.040),
-        new BABYLON.Vector3(57.205, -0.718, -94.031),
-        new BABYLON.Vector3(62.145, -0.651, -105.142),
-        new BABYLON.Vector3(61.872,  1.165, -149.928),
-        new BABYLON.Vector3(18.660,  1.165, -149.900),
-        new BABYLON.Vector3(18.404, -0.016, -96.040)
-      ],
-      spawnPointA: new BABYLON.Vector3(38.0, 0.3, -98.0), // Van area — safe spawn
-      ghostArea: null, // computed from boundary
-      lastGroundY: 0,
-      keys:{}, touch:{active:false, dx:0, dy:0},
-      useCooldown:false
-    };
+  // Evidence & 25 Ghosts (frozen)
+  const EVIDENCE = ["EMF 5","Spirit Box","Fingerprints","Freezing Temps","Ghost Writing","DOTS","Ghost Orb"];
+  const ghostProfiles = {
+    Spirit:{evidence:["EMF 5","Spirit Box","Ghost Writing"]},
+    Wraith:{evidence:["EMF 5","Spirit Box","DOTS"]},
+    Phantom:{evidence:["Spirit Box","Fingerprints","DOTS"]},
+    Poltergeist:{evidence:["Spirit Box","Fingerprints","Ghost Writing"]},
+    Banshee:{evidence:["Fingerprints","Ghost Orb","DOTS"]},
+    Jinn:{evidence:["EMF 5","Fingerprints","Freezing Temps"]},
+    Mare:{evidence:["Spirit Box","Ghost Orb","Ghost Writing"]},
+    Revenant:{evidence:["Ghost Orb","Ghost Writing","Freezing Temps"]},
+    Shade:{evidence:["EMF 5","Ghost Writing","Freezing Temps"]},
+    Demon:{evidence:["Fingerprints","Ghost Writing","Freezing Temps"]},
+    Yurei:{evidence:["Ghost Orb","Freezing Temps","DOTS"]},
+    Oni:{evidence:["EMF 5","Freezing Temps","DOTS"]},
+    Hantu:{evidence:["Fingerprints","Ghost Orb","Freezing Temps"]},
+    Yokai:{evidence:["Spirit Box","Ghost Orb","DOTS"]},
+    Goryo:{evidence:["EMF 5","Fingerprints","DOTS"]},
+    Myling:{evidence:["EMF 5","Fingerprints","Ghost Writing"]},
+    Onryo:{evidence:["Spirit Box","Ghost Orb","Freezing Temps"]},
+    "The Twins":{evidence:["EMF 5","Spirit Box","Freezing Temps"]},
+    Raiju:{evidence:["EMF 5","Ghost Orb","DOTS"]},
+    Obake:{evidence:["EMF 5","Ghost Orb","Fingerprints"]},
+    "The Mimic":{evidence:["Spirit Box","Fingerprints","Freezing Temps", "Ghost Orb (fake)"]},
+    Moroi:{evidence:["Spirit Box","Ghost Writing","Freezing Temps"]},
+    Deogen:{evidence:["Spirit Box","Ghost Writing","DOTS"]},
+    Thaye:{evidence:["Ghost Orb","Ghost Writing","DOTS"]},
+    Succubus:{evidence:["Ghost Orb","DOTS","Ghost Writing"]}
+  };
+  Object.freeze(ghostProfiles);
+  if(Object.keys(ghostProfiles).length!==25){ throw new Error('Expected exactly 25 ghost profiles'); }
 
-    /***************
-     * EVIDENCE / GHOSTS
-     ***************/
-    const evidenceTypes = ["EMF Level 5","Spirit Box","Fingerprints","Ghost Writing","Freezing Temps","D.O.T.S","Orbs"];
-    const ghostProfiles = {
-      spirit:{ evidence:["Spirit Box","Ghost Writing","EMF Level 5"] },
-      wraith:{ evidence:["Spirit Box","D.O.T.S","EMF Level 5"] },
-      poltergeist:{ evidence:["Spirit Box","Ghost Writing","Fingerprints"] },
-      banshee:{ evidence:["D.O.TS","Fingerprints","Orbs"] },
-      jinn:{ evidence:["EMF Level 5","Freezing Temps","Fingerprints"] },
-      mare:{ evidence:["Spirit Box","Ghost Writing","Orbs"] },
-      revenant:{ evidence:["Ghost Writing","Orbs","Freezing Temps"] },
-      shade:{ evidence:["Ghost Writing","Freezing Temps","EMF Level 5"] },
-      demon:{ evidence:["Freezing Temps","Ghost Writing","Fingerprints"] },
-      yurei:{ evidence:["Freezing Temps","D.O.T.S","Orbs"] },
-      oni:{ evidence:["EMF Level 5","Freezing Temps","D.O.T.S"] },
-      yokai:{ evidence:["Spirit Box","D.O.T.S","Orbs"] },
-      hantu:{ evidence:["Freezing Temps","Ghost Writing","Fingerprints"] },
-      goryo:{ evidence:["EMF Level 5","D.O.T.S","Fingerprints"] },
-      myling:{ evidence:["Ghost Writing","EMF Level 5","Fingerprints"] },
-      onryo:{ evidence:["Freezing Temps","Spirit Box","Orbs"] },
-      "the twins":{ evidence:["Spirit Box","Freezing Temps","EMF Level 5"] },
-      raiju:{ evidence:["EMF Level 5","D.O.T.S","Orbs"] },
-      obake:{ evidence:["EMF Level 5","Orbs","Fingerprints"] },
-      "the mimic":{ evidence:["Spirit Box","Freezing Temps","Fingerprints"] },
-      moroi:{ evidence:["Freezing Temps","Ghost Writing","Spirit Box"] },
-      deogen:{ evidence:["Spirit Box","Ghost Writing","D.O.T.S"] },
-      thaye:{ evidence:["Ghost Writing","Orbs","D.O.T.S"] },
-      phantom:{ evidence:["Spirit Box","D.O.T.S","Fingerprints"] },
-      succubus:{ evidence:["Ghost Writing","Orbs","Spirit Box"] }
-    };
-Object.freeze(ghostProfiles);
-if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile count mismatch: expected 25'); }
+  // Notebook populate
+  function buildNotebook(){
+    const ev = $('evBox'); ev.innerHTML='';
+    EVIDENCE.forEach(e=>{ const span=document.createElement('span'); span.className='pill'; span.textContent=e; ev.appendChild(span); });
+    const gb = $('ghostBox'); gb.innerHTML='';
+    Object.keys(ghostProfiles).sort().forEach(g=>{
+      const row=document.createElement('div'); row.style.margin='4px 0';
+      row.innerHTML = `<b>${g}</b> — <span class="muted">${ghostProfiles[g].evidence.join(', ')}</span>`;
+      gb.appendChild(row);
+    });
+  }
 
+  // Loadout
+  const LOADOUT = ["EMF","Spirit Box","Thermometer","Notebook","Photo Camera","Flashlight","Thermal Camera","Voice Recorder","UV Light","D.O.T.S"];
+  function buildLoadoutChooser(){
+    const box = $('loadoutBox'); box.innerHTML='';
+    LOADOUT.forEach(name=>{
+      const id = 'ld_'+name.replace(/\\W+/g,'_');
+      const wrap = document.createElement('label');
+      wrap.innerHTML = `<input type="checkbox" id="${id}" ${name==='Notebook' || name==='EMF' || name==='Spirit Box' || name==='Thermometer' ? 'checked':''}> ${name}`;
+      box.appendChild(wrap);
+    });
+  }
 
-    /***************
-     * ENGINE / SCENE
-     ***************/
-    const canvas = $('renderCanvas');
+  // Start wiring
+  function wireStart(){
+    const btn=$('startBtn'); if(!btn || btn.__wired) return;
+    btn.addEventListener('click', async ()=>{
+      $('start').style.display='none';
+      game.mapFile = $('preMap').value;
+      game.spawnChoice = $('preSpawn').value;
+      game.weather = $('preWeather').value;
+      game.loadout = [];
+      LOADOUT.forEach(name=>{
+        const id='ld_'+name.replace(/\\W+/g,'_');
+        const c=$(id); if(c && c.checked) game.loadout.push(name);
+      });
+      if(game.loadout.length>5) game.loadout = game.loadout.slice(0,5);
+      await boot();
+    });
+    btn.__wired = true;
+  }
+
+  // Dev panel open
+  $('devOpenBtn').onclick = ()=> $('devPrompt').style.display='flex';
+  $('devYes').onclick = ()=>{ $('devPrompt').style.display='none'; $('devPanel').style.display='flex'; toast('Developer options enabled'); ensureDevTools(); };
+  $('devNo').onclick  = ()=> $('devPrompt').style.display='none';
+  $('closeDev').onclick = ()=> $('devPanel').style.display='none';
+
+  // Dev wall clip / teleport / map load / listener
+  $('devWallClip').onclick = (e)=>{
+    const on = e.target.textContent.includes('OFF');
+    e.target.textContent = 'Wall Clip: ' + (on? 'ON':'OFF');
+    if(game.camera){
+      game.camera.checkCollisions = !on;
+      game.camera.applyGravity = !on;
+    }
+    if(game.playerCapsule){
+      game.playerCapsule.checkCollisions = !on;
+    }
+  };
+  $('devTeleport').onclick = ()=>{
+    const x=parseFloat($('tpX').value||'0'), y=parseFloat($('tpY').value||'1.6'), z=parseFloat($('tpZ').value||'0');
+    if(game.playerCapsule){ game.playerCapsule.position.set(x,y,z); syncCameraToCapsule(); toast('Teleported'); }
+  };
+  $('devLoadMap').onclick = async ()=>{
+    const file = $('devMap').value;
+    if(game.houseRoot){ game.houseRoot.dispose(true, true); game.houseRoot = null; }
+    await appendMap(file);
+    toast('Map loaded: '+file);
+  };
+  $('devListener').onclick = ()=>{ $('devPanel').style.display='none'; toast('Listener mode on (pin tools stub).'); };
+
+  // Keyboard mapping (F=use item, E=interact, C=crouch)
+  window.addEventListener('keydown', (e)=>{
+    const k = (typeof e.key==='string'? e.key : (typeof e.code==='string'? e.code : '')).toLowerCase();
+    if(!k || k==='unidentified' || k==='process') return;
+    game.keys[k] = true;
+    if(k==='n'){ $('notebook').classList.toggle('show'); }
+    if(k==='e'){ interact(); }            // environment
+    if(k==='f'){ useHeldItem(); }         // item use
+    if(k==='c'){ toggleCrouch(); }
+    if(k==='enter' || k===' '){
+      if(getComputedStyle($('start')).display!=='none'){ e.preventDefault(); $('startBtn').click(); }
+    }
+  });
+  window.addEventListener('keyup', (e)=>{
+    const k=(typeof e.key==='string'? e.key : (typeof e.code==='string'? e.code : '')).toLowerCase();
+    if(k) delete game.keys[k];
+  });
+
+  function toggleCrouch(){
+    game.crouch = !game.crouch;
+    if(game.camera){
+      game.camera.position.y += game.crouch ? -0.5 : 0.5;
+    }
+  }
+
+  function useHeldItem(){ toast('Used held item (F).'); }
+  function interact(){ toast('Interact (E).'); }
+
+  // Boot -> engine/scene/camera/map/ghost
+  async function boot(){
+    const canvas = document.getElementById('renderCanvas');
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
     game.engine = engine;
     const scene = new BABYLON.Scene(engine);
@@ -266,678 +380,412 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     scene.collisionsEnabled = true;
     scene.gravity = new BABYLON.Vector3(0, -0.18, 0);
 
-    // Camera
-    const camera = new BABYLON.FreeCamera("playerCam", new BABYLON.Vector3(0, 1.6, 0), scene);
-    camera.minZ = 0.05;
-    camera.maxZ = 10000;
+    const camera = new BABYLON.FreeCamera("cam", new BABYLON.Vector3(0, 1.6, 0), scene);
     camera.attachControl(canvas, true);
     camera.inertia = 0.6;
-    camera.angularSensibility = 2500; // slower look on mouse
+    camera.angularSensibility = 2500;
     camera.checkCollisions = true;
     camera.applyGravity = true;
     camera.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
     game.camera = camera;
 
-    // Player capsule (invisible controller mesh)
+    // Player capsule
     const playerCapsule = BABYLON.MeshBuilder.CreateCapsule("playerCapsule", { height:1.8, radius:0.4, tessellation:12 }, scene);
     playerCapsule.isVisible = false;
-    playerCapsule.isPickable = false; // IMPORTANT: prevent self-hit by ground ray
+    playerCapsule.isPickable = false;
     playerCapsule.checkCollisions = true;
     playerCapsule.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
     playerCapsule.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
     game.playerCapsule = playerCapsule;
 
-    // Player "hand" pivot for HUD model (unparented to camera; we'll render to a layer)
-    const handPivot = new BABYLON.TransformNode("handPivot", scene);
-    game.handPivot = handPivot;
+    const hemi = new BABYLON.HemisphericLight('hemi', new BABYLON.Vector3(0,1,0), scene); hemi.intensity=0.72;
+    const moon = new BABYLON.DirectionalLight('moon', new BABYLON.Vector3(-0.6,-1,-0.2), scene); moon.intensity=0.32;
+    const flashPoint = new BABYLON.PointLight('flashPoint', new BABYLON.Vector3(40, 40, -120), scene); flashPoint.intensity=0.0;
 
-    // Lights
-    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 0.7;
+    // Safety ground slightly lower than real floor
+    const safetyGround = BABYLON.MeshBuilder.CreateGround('safety', {width:400, height:400}, scene);
+    safetyGround.position.y = -0.1; safetyGround.checkCollisions = true; safetyGround.isPickable = true;
 
-    // Night directional (moon) + lightning point flash
-    const moon = new BABYLON.DirectionalLight("moon", new BABYLON.Vector3(-0.6,-1,-0.2), scene);
-    moon.intensity = 0.35;
-    const lightning = new BABYLON.PointLight("flashPoint", new BABYLON.Vector3(40, 40, -120), scene);
-    lightning.intensity = 0.0;
+    // Map
+    await appendMap(game.mapFile);
 
-    // UI wiring
-    const belt = $('belt'); const hand = $('hand'); const storageBtn = $('storageBtn');
-    const sanityFill = $('sanityFill'); const sanityPct = $('sanityPct'); const roomNameEl = $('roomName');
-
-    // Safety ground (in case map isn't ready yet)
-    const safetyGround = BABYLON.MeshBuilder.CreateGround("safety", { width:400, height:400 }, scene);
-    safetyGround.position.y = -0.05; // a little lower so real floor wins
-    safetyGround.checkCollisions = true;
-    safetyGround.isPickable = true;
-
-    /***************
-     * START UI / INPUT
-     ***************/
-    $('startBtn').onclick = async () => {
-      $('start').style.display = 'none';
-      await startGame();
+    // Spawn points (per your coordinates)
+    const pins = {
+      'Abandoned_House.glb': {
+        van: [
+          new BABYLON.Vector3(45.600, 0.700, -106.214),
+          new BABYLON.Vector3(46.159, 0.700, -100.031),
+          new BABYLON.Vector3(53.277, 0.700, -100.115),
+          new BABYLON.Vector3(53.157, 0.700, -106.622),
+          new BABYLON.Vector3(45.600, 0.700, -106.214)
+        ],
+        frontdoor: [
+          new BABYLON.Vector3(28.866, 0.831, -117.498),
+          new BABYLON.Vector3(28.000, 0.822, -117.489)
+        ],
+        backdoor: [
+          new BABYLON.Vector3(28.837, 0.710, -131.907),
+          new BABYLON.Vector3(28.760, 0.731, -132.546)
+        ]
+      },
+      'house_fully_furnished.glb': {
+        van: [ new BABYLON.Vector3(46.159, 0.700, -100.031) ],
+        frontdoor: [ new BABYLON.Vector3(28.000, 0.822, -117.489) ],
+        backdoor: [ new BABYLON.Vector3(28.760, 0.731, -132.546) ]
+      },
+      'furnished_house.glb': {
+        van: [ new BABYLON.Vector3(53.277, 0.700, -100.115) ],
+        frontdoor: [ new BABYLON.Vector3(53.157, 0.700, -106.622) ],
+        backdoor: [ new BABYLON.Vector3(45.600, 0.700, -106.214) ]
+      }
     };
+    const set = pins[game.mapFile] || pins['Abandoned_House.glb'];
+    const spawnChoice = (set[game.spawnChoice] && set[game.spawnChoice][0]) || (set.van && set.van[0]);
+    playerCapsule.position.copyFrom(spawnChoice || new BABYLON.Vector3(0,1.6,0));
+    syncCameraToCapsule();
 
-    // Dev prompt via ESC
-    window.addEventListener('keydown', (e)=>{
-      if(e.key === 'Escape'){
-        if(!dev.enabled && $('devPrompt').style.display!=='flex'){ $('devPrompt').style.display='flex'; }
-        else if(dev.enabled){ $('devPanel').style.display = ($('devPanel').style.display==='flex'?'none':'flex'); if($('devPanel').style.display==='flex' && typeof ensureDevTools==='function') ensureDevTools(); }
+    // Weather
+    setWeather(game.weather, scene, flashPoint);
+
+    // Items belt
+    rebuildBelt();
+
+    // Ghost
+    await spawnGhost(scene);
+
+    // Input: WASD/touch
+    setupInput();
+
+    // Notebook content
+    buildNotebook();
+
+    // Loop
+    let last = performance.now();
+    engine.runRenderLoop(()=>{
+      const now = performance.now(); const dt = (now-last)/1000; last = now;
+
+      movePlayer(dt);
+      snapToGround(scene);
+
+      // Ghost update
+      if(game.ghostPivot && game.ghost){
+        const gp = game.ghostPivot.position;
+        const me = game.playerCapsule.position;
+        // LOS cone + outside gate (except Deogen)
+        const sees = canSeePlayer(gp, me);
+        const isDeo = (game.ghost.profile && game.ghost.profile.name === 'Deogen');
+        const chase = isDeo ? true : sees;
+        let v = new BABYLON.Vector3(0,0,0);
+        if(chase){
+          const dir = me.subtract(gp); dir.y=0;
+          const d = dir.length();
+          dir.normalize();
+          let s = 1.6;
+          if(isDeo){ s = (d>4? 2.4 : 0.35); } // deogen slows when close
+          v = dir.scale(s*dt);
+          game.ghostPivot.position.addInPlace(v);
+          // face direction
+          if(v.length()>1e-4){
+            game.ghostPivot.rotation.y = Math.atan2(v.x, v.z);
+          }
+        }else{
+          // wander a little
+          if(now % 1200 < 16){
+            const rx = (Math.random()*2-1)*0.8;
+            const rz = (Math.random()*2-1)*0.8;
+            v = new BABYLON.Vector3(rx,0,rz);
+            game.ghostPivot.position.addInPlace(v.scale(dt));
+          }
+        }
+        snapGhostToGround(scene);
       }
-      // Slots 1..5
-      if(e.key>='1' && e.key<='5'){ selectSlot(parseInt(e.key)-1); }
-      // run
-      if(e.key==='Shift'){ game.running = true; }
-      // open door
-      if(e.key.toLowerCase()==='e'){ tryToggleNearestDoor(); }
-      // dev fly vertical
-      if(game.flyDev){
-        if(e.key==='PageUp'){ playerCapsule.position.y += 0.3; }
-        if(e.key==='PageDown'){ playerCapsule.position.y -= 0.3; }
-      }
+
+      // HUD
+      $('coords').textContent = `X: ${game.camera.position.x.toFixed(2)} | Z: ${game.camera.position.z.toFixed(2)}`;
+      $('roomName').textContent = (insideHouse(game.playerCapsule.position) ? 'House' : 'Outside');
+      $('sanityValue').textContent = `${Math.round(game.sanity)}%`;
+      $('tempValue').textContent = `${game.temperature.toFixed(1)}°C`;
+
+      game.scene.render();
     });
-    window.addEventListener('keyup', (e)=>{ if(e.key==='Shift'){ game.running=false; } });
 
-    // Onscreen stick (touch)
+    window.addEventListener('resize', ()=> engine.resize());
+  }
+
+  async function appendMap(file){
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", file, game.scene);
+    game.houseRoot = res.meshes[0];
+    res.meshes.forEach(m=>{ if(m!==game.houseRoot){ m.checkCollisions = true; m.isPickable = true; } });
+
+    // Build polygon from mesh bounds (rough): or keep user boundary for Abandoned_House
+    if(file==='Abandoned_House.glb'){
+      game.houseBoundsPoly = [
+        new BABYLON.Vector3(18.404, 0, -96.040),
+        new BABYLON.Vector3(57.205, 0, -94.031),
+        new BABYLON.Vector3(62.145, 0, -105.142),
+        new BABYLON.Vector3(61.872, 0, -149.928),
+        new BABYLON.Vector3(18.660, 0, -149.900)
+      ];
+    }else{
+      // Derive from AABB
+      let min = new BABYLON.Vector3( Infinity,  Infinity,  Infinity);
+      let max = new BABYLON.Vector3(-Infinity, -Infinity, -Infinity);
+      game.scene.meshes.forEach(m=>{
+        if(!m.getBoundingInfo) return;
+        const b = m.getBoundingInfo().boundingBox;
+        min = BABYLON.Vector3.Minimize(min, b.minimumWorld);
+        max = BABYLON.Vector3.Maximize(max, b.maximumWorld);
+      });
+      game.houseBoundsPoly = [
+        new BABYLON.Vector3(min.x,0,min.z),
+        new BABYLON.Vector3(max.x,0,min.z),
+        new BABYLON.Vector3(max.x,0,max.z),
+        new BABYLON.Vector3(min.x,0,max.z)
+      ];
+    }
+  }
+
+  function pointInPolyXZ(x,z, poly){
+    let inside=false;
+    for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+      const xi=poly[i].x, zi=poly[i].z;
+      const xj=poly[j].x, zj=poly[j].z;
+      const intersect = ((zi>z)!==(zj>z)) && (x < (xj - xi) * (z - zi) / (zj - zi) + xi);
+      if(intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function insideHouse(p){
+    const poly = game.houseBoundsPoly; if(!poly) return true;
+    return pointInPolyXZ(p.x, p.z, poly);
+  }
+
+  function setWeather(mode, scene, flashPoint){
+    game.weather = mode;
+    $('weatherVal').textContent = mode;
+    // optional audio (omitted to avoid autoplay restrictions)
+
+    if(mode==='Rain' || mode==='Thunder'){
+      // simple GPU rain
+      const ps = new BABYLON.GPUParticleSystem("rain", { capacity: 8000 }, scene);
+      ps.manualEmitCount = 0;
+      ps.particleTexture = new BABYLON.Texture("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIW2P8z/C/HwAF8gJbB+o3owAAAABJRU5ErkJggg==", scene);
+      ps.emitter = new BABYLON.Vector3(0, 15, 0);
+      ps.minEmitBox = new BABYLON.Vector3(-40, 0, -40);
+      ps.maxEmitBox = new BABYLON.Vector3( 40, 0,  40);
+      ps.color1 = new BABYLON.Color4(0.8,0.9,1.0,0.85);
+      ps.color2 = new BABYLON.Color4(0.8,0.9,1.0,0.85);
+      ps.minSize = 0.05; ps.maxSize = 0.08;
+      ps.minLifeTime = 0.6; ps.maxLifeTime = 1.2;
+      ps.emitRate = 7500;
+      ps.direction1 = new BABYLON.Vector3(0, -18, 0);
+      ps.direction2 = new BABYLON.Vector3(0, -22, 0);
+      ps.gravity = new BABYLON.Vector3(0, -9.8, 0);
+      ps.start();
+      game._rain = ps;
+    }
+    if(mode==='Thunder'){
+      // gentle flashes
+      const flash = $('flash');
+      setInterval(()=>{
+        if(Math.random()<0.2){
+          flashPoint.intensity = 2 + Math.random()*2;
+          flash.style.opacity = 0.15 + Math.random()*0.15;
+          setTimeout(()=>{ flashPoint.intensity=0; flash.style.opacity=0; }, 140+Math.random()*220);
+        }
+      }, 1600);
+    }
+  }
+
+  function setupInput(){
+    // Touch stick
     const stick = $('stick'); const dot = stick.querySelector('.dot');
     function enableTouchStick(){
       stick.style.display='block';
-      stick.addEventListener('touchstart', (ev)=>{ ev.preventDefault(); game.touch.active=true; }, {passive:false});
-      stick.addEventListener('touchend',   (ev)=>{ ev.preventDefault(); game.touch.active=false; game.touch.dx=0; game.touch.dy=0; dot.style.left='36px'; dot.style.top='36px'; }, {passive:false});
+      stick.addEventListener('touchstart', (ev)=>{ ev.preventDefault(); game.touchActive=true; }, {passive:false});
+      stick.addEventListener('touchend',   (ev)=>{ ev.preventDefault(); game.touchActive=false; game.touchDX=0; game.touchDY=0; dot.style.left='36px'; dot.style.top='36px'; }, {passive:false});
       stick.addEventListener('touchmove',  (ev)=>{
         ev.preventDefault();
         const t = ev.touches[0]; const rect = stick.getBoundingClientRect();
         const cx = rect.left + rect.width/2; const cy = rect.top + rect.height/2;
         let dx = (t.clientX - cx); let dy = (t.clientY - cy);
-        const m = Math.hypot(dx, dy); const r = 42; // radius for knob
+        const m = Math.hypot(dx, dy); const r = 42;
         if(m>r){ dx = dx/m*r; dy = dy/m*r; }
         dot.style.left = (36 + dx) + 'px'; dot.style.top = (36 + dy) + 'px';
-        game.touch.dx = dx / r; game.touch.dy = dy / r;
+        game.touchDX = dx / r; game.touchDY = dy / r;
       }, {passive:false});
-      // tap to use
-      canvas.addEventListener('touchend', (ev)=>{
-        // Short tap on right half triggers use
-        const w=window.innerWidth; if(ev.changedTouches && ev.changedTouches[0].clientX > w*0.6){ useActiveItem(); }
-      });
     }
     if(('ontouchstart' in window)) enableTouchStick();
+  }
 
-    // Keyboard movement
-    window.addEventListener('keydown',(e)=>{ game.keys[e.key.toLowerCase()] = true; });
-    window.addEventListener('keyup',(e)=>{ game.keys[e.key.toLowerCase()] = false; });
+  function inputVector(){
+    let x=0, z=0;
+    if(game.keys['w']) z += 1;
+    if(game.keys['s']) z -= 1;
+    if(game.keys['a']) x -= 1;
+    if(game.keys['d']) x += 1;
+    if(game.touchActive){ z += game.touchDY||0; x += game.touchDX||0; }
+    const len = Math.hypot(x,z); if(len>1e-3){ x/=len; z/=len; }
+    return {x,z};
+  }
 
-    canvas.addEventListener('pointerdown', ()=>{ useActiveItem(); });
+  function movePlayer(dt){
+    const speed = (game.keys['shift']? 3.2 : 1.8) * (game.crouch? 0.7 : 1);
+    const move = inputVector();
+    if(move.x===0 && move.z===0) return;
 
-    /***************
-     * DEV PANEL
-     ***************/
-    const dev = {
-      enabled:false,
-      log:(s)=>{ const el=$('devLog'); el.textContent += s+'\n'; el.scrollTop = el.scrollHeight; }
-    };
-    $('devYes').onclick = ()=>{ $('devPwRow').style.display='flex'; };
-    $('devNo').onclick  = ()=>{ $('devPrompt').style.display='none'; };
-    $('devPwOk').onclick = ()=>{
-      const ok = ($('devPw').value.trim()==='devmode');
-      if(ok){ dev.enabled=true; $('devPrompt').style.display='none'; $('devPanel').style.display='flex'; toast('Developer options enabled'); }
-      else { $('devPwMsg').textContent = 'Wrong password.'; }
-    };
-    $('closeDev').onclick = ()=> $('devPanel').style.display='none';
-    $('teleGhost').onclick = ()=>{
-      if(game.ghostPivot){ playerCapsule.position.copyFrom(game.ghostPivot.position).addInPlace(new BABYLON.Vector3(0,0.1, -1.8)); syncCameraToCapsule(); dev.log(`Teleport to ghost @ ${vecStr(game.ghostPivot.position)}`); }
-    };
-    $('toggleGod').onclick = (e)=>{
-      game.god = !game.god; e.target.textContent = 'God Mode: ' + (game.god?'ON':'OFF'); dev.log('God mode ' + (game.god?'ENABLED':'DISABLED'));
-    };
-    $('pingHere').onclick = ()=> { dev.log('PING @ ' + vecStr(playerCapsule.position)); };
-    $('flyPg').onclick = (e)=>{ game.flyDev = !game.flyDev; e.target.textContent = 'Toggle Fly: ' + (game.flyDev?'ON':'OFF'); };
+    const forward = game.camera.getDirection(BABYLON.Axis.Z);
+    const right   = game.camera.getDirection(BABYLON.Axis.X);
+    const dir = new BABYLON.Vector3(
+      right.x*move.x + forward.x*move.z,
+      0,
+      right.z*move.x + forward.z*move.z
+    ).normalize();
+    const step = dir.scale(speed * dt);
+    game.playerCapsule.moveWithCollisions(step);
+    syncCameraToCapsule();
+  }
 
-    function vecStr(v){ return `x:${v.x.toFixed(3)} y:${v.y.toFixed(3)} z:${v.z.toFixed(3)}`; }
+  function syncCameraToCapsule(){
+    const off = new BABYLON.Vector3(0, 0.7, 0);
+    game.camera.position.copyFrom(game.playerCapsule.position.add(off));
+  }
 
-    /***************
-     * WEATHER / LIGHTNING
-     ***************/
-    function setWeather(kind){
-      game.weather = kind;
-      $('weather').textContent = 'Weather: ' + kind;
-    }
-    function randomWeather(){ // Choose Clear or Rain
-      const r = Math.random(); return (r<0.6)?'Clear':'Rain';
-    }
-    function lightningFlash(){
-      if(game.weather!=='Rain') return;
-      if(Math.random()<0.1){
-        const flash = $('flash');
-        lightning.intensity = 8 + Math.random()*10;
-        flash.style.opacity = .5 + Math.random()*.4;
-        setTimeout(()=>{ lightning.intensity = 0; flash.style.opacity = 0; }, 120 + Math.random()*200);
+  // Ground snap (below-only)
+  function snapToGround(scene){
+    const origin = game.playerCapsule.position.add(new BABYLON.Vector3(0, 0.5, 0));
+    const ray = new BABYLON.Ray(origin, new BABYLON.Vector3(0,-1,0), 6.0);
+    const hits = scene.multiPickWithRay(ray, (m)=> m !== game.playerCapsule && m.checkCollisions===true);
+    if(!hits || !hits.length) return;
+    const curY = game.playerCapsule.position.y;
+    let best=null, bestDy=Infinity;
+    for(const h of hits){
+      if(!h.hit || !h.pickedPoint) continue;
+      const y = h.pickedPoint.y;
+      if(y <= curY + 0.01){
+        const dy = origin.y - y;
+        if(dy>=0 && dy<bestDy){ best=h; bestDy=dy; }
       }
     }
-    setInterval(lightningFlash, 1200);
-
-    /***************
-     * STORAGE BUTTON (van zone)
-     ***************/
-    storageBtn.onclick = ()=>{
-      toast('Storage opened (prototype). Pick/Trade items here.');
-      // TODO: implement actual inventory exchange UI
-    };
-
-    /***************
-     * MODELS
-     ***************/
-    async function loadHouse(){
-      const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
-      const root = result.meshes[0];
-      root.name = "Abandoned_House";
-      game.house = root;
-
-      // Make house meshes collidable except obviously transparent decorations
-      result.meshes.forEach(m=>{
-        if(m === root) return;
-        // Heuristic: disable collisions for transparent materials / obvious small props
-        const mat = m.material;
-        const transparent = !!mat && (mat.alpha < .8 || mat.transparencyMode>0);
-        const isSmall = (m.getBoundingInfo?.().boundingBox.extendSizeWorld.length() || 1) < 0.2;
-        if(transparent || isSmall || /glass|leaf|foliage|trash|paper|cloth/i.test(m.name)){
-          m.checkCollisions = false;
-        } else {
-          m.checkCollisions = true;
-        }
-        m.isPickable = true;
-        // Floors detection (rough: horizontal & large)
-        const info = m.getBoundingInfo?.();
-        if(info){
-          const e = info.boundingBox.extendSizeWorld;
-          const flat = (e.y < 0.2 && (e.x>1.5 || e.z>1.5));
-          if(flat){ game.floors.push(m); }
-        }
-        // Door guess by name
-        if(/door/i.test(m.name)){
-          game.doors.push(m);
-          // Allow opening: start closed, collisions on
-          m.metadata = { open:false, baseRotY:m.rotation?.y||0 };
-        }
-      });
-
-      // If no detected floors, keep safety ground
-      if(game.floors.length===0){
-        toast('Warning: no floor meshes detected; safety ground remains active.');
-      } else {
-        // Keep safety ground but lower it a bit more as fallback
-        safetyGround.position.y = -0.2;
+    if(best){
+      const desiredY = best.pickedPoint.y + game.playerCapsule.ellipsoidOffset.y;
+      if(curY < desiredY - 0.05){
+        game.playerCapsule.position.y = desiredY;
       }
     }
-
-    // Items/hand models from exploration_objects.glb
-    const itemModelMap = {
-      'EMF': 'EMF_Detector_EMF_Detector_0',
-      'Spirit Box': 'Cone.001_Spirit_Box_0',
-      'Thermometer': 'Thermometer_Thermometer_0',
-      'Photo Camera': 'Photo_Camera_Photo_Camera_0',
-      'Flashlight': 'Flashlight_Flashlight_0',
-      'Thermal Camera': 'Thermal_Camera_Thermal_Camera_0',
-      'Voice Recorder': 'Voice_Recorder_Voice_Recorder_0'
-    };
-    let itemLibraryRoot=null;
-
-    async function loadItems(){
-      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/items/", "exploration_objects.glb", scene);
-      itemLibraryRoot = res.meshes[0];
-      itemLibraryRoot.setEnabled(false);
-      res.meshes.forEach(m=>{ m.isPickable=false; m.checkCollisions=false; });
-
-      // Prepare belt slots
-      rebuildBelt();
-      // Set default hand model
-      updateHandModel();
-    }
-
-    function rebuildBelt(){
-      belt.innerHTML='';
-      const labels = ['EMF','Spirit Box','Thermometer','Lighter','Notebook'];
-      game.beltslots = [];
-      for(let i=0;i<5;i++){
-        const el = document.createElement('div');
-        el.className = 'slot' + (i===game.activeIndex?' active':'');
-        el.innerHTML = `<div class="key">${i+1}</div><div class="label">${labels[i]}</div>`;
-        el.onclick = ()=>selectSlot(i);
-        belt.appendChild(el); game.beltslots.push(el);
+  }
+  function snapGhostToGround(scene){
+    if(!game.ghostPivot) return;
+    const origin = game.ghostPivot.position.add(new BABYLON.Vector3(0, 2, 0));
+    const ray = new BABYLON.Ray(origin, new BABYLON.Vector3(0,-1,0), 8.0);
+    const hits = scene.multiPickWithRay(ray, (m)=> m !== game.ghost && m.checkCollisions===true);
+    if(!hits || !hits.length) return;
+    const curY = game.ghostPivot.position.y;
+    let best=null, bestDy=Infinity;
+    for(const h of hits){
+      if(!h.hit || !h.pickedPoint) continue;
+      const y = h.pickedPoint.y;
+      if(y <= curY + 0.01){
+        const dy = origin.y - y;
+        if(dy>=0 && dy<bestDy){ best=h; bestDy=dy; }
       }
     }
-    function selectSlot(i){
-      game.activeIndex = clamp(i,0,4);
-      game.beltslots.forEach((el,idx)=>{ if(idx===game.activeIndex) el.classList.add('active'); else el.classList.remove('active'); });
-      updateHandModel();
+    if(best){
+      const newY = best.pickedPoint.y + 0.05;
+      if(curY < newY - 0.03) game.ghostPivot.position.y = newY;
     }
+  }
 
-    function findItemMesh(name){
-      if(!itemLibraryRoot) return null;
-      const targetName = itemModelMap[name] || null;
-      if(!targetName) return null;
-      const mesh = scene.getMeshByName(targetName) || scene.getTransformNodeByName(targetName);
-      return mesh||null;
-    }
+  // Ghost helpers
+  function randomGhostProfile(){
+    const ks = Object.keys(ghostProfiles);
+    const name = ks[(Math.random()*ks.length)|0];
+    return { name };
+  }
 
-    function updateHandModel(){
-      if(game.handModel){ game.handModel.setEnabled(false); game.handModel = null; }
-      const labels = ['EMF','Spirit Box','Thermometer','Lighter','Notebook'];
-      const name = labels[game.activeIndex];
-      if(name==='Notebook'){ hand.style.opacity=.85; hand.querySelector('.hint').textContent='Notebook (5): open/close'; return; }
-      const src = findItemMesh(name==='Lighter'?'Flashlight':name);
-      if(!src){ hand.style.opacity=.2; return; }
-      const node = src.clone(name+'_hand');
-      node.setEnabled(true);
-      node.position = new BABYLON.Vector3(0,0,0);
-      // Place in a corner overlay using a utility layer renderer
-      if(!game.handLayer){
-        game.handLayer = new BABYLON.UtilityLayerRenderer(scene, false);
-        game.handLayer.utilityLayerScene.autoClear = true;
-        game.handLayer.utilityLayerScene.clearColor = new BABYLON.Color4(0,0,0,0);
+  async function spawnGhost(scene){
+    const pool = ['ghost1.glb','ghost2.glb','ghost3.glb','ghost4.glb','ghost5.glb'];
+    const file = pool[(Math.random()*pool.length)|0];
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", file, scene);
+    const root = res.meshes[0];
+    const pivot = new BABYLON.TransformNode("GhostPivot", scene);
+    root.parent = pivot;
+    root.rotation = new BABYLON.Vector3(0, rad(180), 0);
+    // Normalize height ~1.7m
+    const binfo = root.getBoundingInfo();
+    const size = binfo ? binfo.boundingBox.extendSizeWorld : new BABYLON.Vector3(0.5,0.5,0.5);
+    const tallest = Math.max(1, size.y*2);
+    const scale = 1.7 / tallest;
+    root.scaling = new BABYLON.Vector3(scale, scale, scale);
+
+    // Start at house center-ish
+    const poly = game.houseBoundsPoly || [new BABYLON.Vector3(-2,0,-2), new BABYLON.Vector3(2,0,-2), new BABYLON.Vector3(2,0,2), new BABYLON.Vector3(-2,0,2)];
+    let minX=Infinity, maxX=-Infinity, minZ=Infinity, maxZ=-Infinity;
+    poly.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
+    pivot.position = new BABYLON.Vector3((minX+maxX)/2, 0.3, (minZ+maxZ)/2);
+
+    game.ghost = { mesh:root, profile: randomGhostProfile() };
+    game.ghostPivot = pivot;
+  }
+
+  function canSeePlayer(ghostPos, playerPos){
+    const deogen = (game.ghost?.profile?.name==='Deogen');
+    if(!deogen && !insideHouse(playerPos)) return false;
+    const to = playerPos.subtract(ghostPos);
+    const dist = to.length();
+    if(dist > game.ghostLOSDist) return false;
+    // FOV cone: assume ghost forward +Z
+    const forward = new BABYLON.Vector3(0,0,1);
+    const dot = BABYLON.Vector3.Dot(forward, to.normalize());
+    const angle = Math.acos(BABYLON.Scalar.Clamp(dot, -1, 1)) * 180/Math.PI;
+    return angle <= (game.ghostFOVdeg*0.5);
+  }
+
+  // Belt
+  function rebuildBelt(){
+    const belt = $('belt'); belt.innerHTML='';
+    const held = game.loadout || [];
+    held.forEach((n,i)=>{ const s=document.createElement('div'); s.className='slot'+(i===0?' active':''); s.textContent=`${i+1}) ${n}`; belt.appendChild(s); });
+  }
+
+  // Dev Tools module
+  async function ensureDevTools(){
+    try{
+      const mod = await import('./assets/dev/devtools.js');
+      if(mod && typeof mod.initDevTools==='function'){
+        mod.initDevTools({ game: window.game, scene: window.game?.scene });
+        $('dev-info').textContent = 'devtools.js loaded';
       }
-      // Parent to a tiny camera in utility scene to render on a dynamic texture -> but simpler:
-      // We'll just keep it in main scene near camera and exclude from collisions
-      node.parent = game.camera;
-      node.position = new BABYLON.Vector3(0.4, -0.35, 0.8);
-      node.scaling = new BABYLON.Vector3(0.4,0.4,0.4);
-      // Upright fix (items sometimes imported sideways/upside-down)
-      node.rotation = new BABYLON.Vector3(rad(-90), 0, 0); // Z-up to Y-up
-      // For flashlight as "lighter", a bit smaller
-      if(name==='Lighter'){ node.scaling.scaleInPlace(0.7); }
-      game.handModel = node;
+    }catch(e){
+      $('dev-info').textContent = 'Failed to load devtools.js: '+e;
     }
+  }
+  $('loadDevTools').onclick = ensureDevTools;
 
-    /***************
-     * GHOST
-     ***************/
-    function randomPointInBoundary(){
-      // Simple polygon bounding box sampling until inside
-      const pts = game.boundary;
-      let minX=Infinity, maxX=-Infinity, minZ=Infinity, maxZ=-Infinity, y=pts[0].y;
-      pts.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
-      for(let tries=0; tries<200; tries++){
-        const x = minX + Math.random()*(maxX-minX);
-        const z = minZ + Math.random()*(maxZ-minZ);
-        if(pointInPolyXZ(x,z, pts)) return new BABYLON.Vector3(x, y, z);
-      }
-      return new BABYLON.Vector3( (minX+maxX)/2, y, (minZ+maxZ)/2 );
-    }
-    function pointInPolyXZ(x,z, poly){
-      // ray casting in XZ
-      let inside=false;
-      for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-        const xi=poly[i].x, zi=poly[i].z;
-        const xj=poly[j].x, zj=poly[j].z;
-        const intersect = ((zi>z)!==(zj>z)) && (x < (xj - xi) * (z - zi) / (zj - zi) + xi);
-        if(intersect) inside = !inside;
-      }
-      return inside;
-    }
+  // SafeBoot
+  function showBoot(msg){ const d=$('bootDiag'); d.style.display='block'; d.textContent=msg; }
+  setTimeout(()=>{
+    const msg = [
+      '[SafeBoot] Babylon: '+(window.BABYLON&&BABYLON.Engine?'OK':'MISSING'),
+      'Start overlay in DOM: '+ !!$('start'),
+      'Start overlay visible: '+ ($('start')? getComputedStyle($('start')).display!=='none' : 'n/a'),
+    ].join('\\n');
+    showBoot(msg);
+  }, 800);
 
-    async function spawnGhost(){
-      // Load one of the ghost GLBs at random scale fix
-      const pool = ['ghost1.glb','ghost2.glb','ghost3.glb','ghost4.glb','ghost5.glb'].filter(fn=>{
-        return !!fn; // as per repo
-      });
-      const file = pool[Math.floor(Math.random()*pool.length)];
-      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", file, scene);
-      const root = res.meshes[0];
-      root.name = "GhostRoot";
-      // Pivot for movement
-      const pivot = new BABYLON.TransformNode("GhostPivot", scene);
-      root.parent = pivot;
+  // Build UI
+  buildLoadoutChooser();
+  wireStart();
 
-      // Correct orientation & scale (sideways fix)
-      pivot.rotation = BABYLON.Vector3.Zero();
-      root.rotation = new BABYLON.Vector3(0, rad(180), 0); // face forward – adjust as needed
-      const binfo = root.getBoundingInfo();
-      const size = binfo ? binfo.boundingBox.extendSizeWorld : new BABYLON.Vector3(0.5,0.5,0.5);
-      const tallest = Math.max(1, size.y*2);
-      const scale = 1.7 / tallest; // normalize to ~1.7m tall
-      root.scaling = new BABYLON.Vector3(scale, scale, scale);
-
-      pivot.position = randomPointInBoundary();
-      game.ghost = root;
-      game.ghostPivot = pivot;
-
-      // Walk/idle basic animation state (if clips exist)
-      let idle = null, walk = null;
-      if(res.animationGroups && res.animationGroups.length){
-        // pick 1st as idle, 2nd as walk if present
-        idle = res.animationGroups[0]||null;
-        walk = res.animationGroups[1]||null;
-        if(idle){ idle.start(true); }
-      }
-      game.ghostAnim.idle = idle; game.ghostAnim.walk = walk; game.ghostAnim.state = 'idle';
-    }
-
-    function setGhostAnim(state){
-      if(game.ghostAnim.state===state) return;
-      game.ghostAnim.state = state;
-      if(game.ghostAnim.idle) game.ghostAnim.idle.stop();
-      if(game.ghostAnim.walk) game.ghostAnim.walk.stop();
-      if(state==='walk' && game.ghostAnim.walk) game.ghostAnim.walk.start(true);
-      if(state==='idle' && game.ghostAnim.idle) game.ghostAnim.idle.start(true);
-    }
-
-    /***************
-     * MOVEMENT & GROUND SNAP — FIXED
-     ***************/
-    function inputVector(){
-      // WASD + touch stick
-      let x=0, z=0;
-      if(game.keys['w']) z += 1;
-      if(game.keys['s']) z -= 1;
-      if(game.keys['a']) x -= 1;
-      if(game.keys['d']) x += 1;
-      // touch
-      if(game.touch.active){
-        z += game.touch.dy; x += game.touch.dx;
-      }
-      // normalize
-      const len = Math.hypot(x,z);
-      if(len>1e-3){ x/=len; z/=len; }
-      return {x,z};
-    }
-
-    function movePlayer(dt){
-      const speed = (game.running? 3.2 : 1.8); // m/s
-      const move = inputVector();
-      if(move.x===0 && move.z===0) return;
-
-      // camera forward (on ground plane)
-      const forward = game.camera.getDirection(BABYLON.Axis.Z);
-      const right = game.camera.getDirection(BABYLON.Axis.X);
-      const dir = new BABYLON.Vector3(
-        right.x*move.x + forward.x*move.z,
-        0,
-        right.z*move.x + forward.z*move.z
-      ).normalize();
-
-      const step = dir.scale(speed * dt);
-      playerCapsule.moveWithCollisions(step);
-      syncCameraToCapsule();
-    }
-
-    function syncCameraToCapsule(){
-      const off = new BABYLON.Vector3(0, 0.7, 0);
-      camera.position.copyFrom(playerCapsule.position.add(off));
-    }
-
-    // *** CRITICAL FIX: below-only, multi-pick ground snap (prevents "falling up") ***
-    function snapToGround(){
-      // Cast a short ray from just above player downward.
-      const origin = playerCapsule.position.add(new BABYLON.Vector3(0, 0.5, 0));
-      const ray = new BABYLON.Ray(origin, new BABYLON.Vector3(0,-1,0), 6.0);
-
-      // Multi-pick to choose best candidate beneath us. Ignore self.
-      const hits = scene.multiPickWithRay(ray, (m) => m !== playerCapsule && m.checkCollisions === true);
-
-      if (!hits || !hits.length) return;
-
-      const curY = playerCapsule.position.y;
-      let best = null; let bestDy = Infinity;
-
-      for (const h of hits){
-        if (!h.hit || !h.pickedPoint) continue;
-        const y = h.pickedPoint.y;
-        // Only consider surfaces at/below our current position (ignore ceilings/beams above)
-        if (y <= curY + 0.01){
-          const dy = origin.y - y;
-          if (dy >= 0 && dy < bestDy){ best = h; bestDy = dy; }
-        }
-      }
-
-      if (!best) return;
-
-      const desiredY = best.pickedPoint.y + playerCapsule.ellipsoidOffset.y;
-      // Only lift if actually below ground (avoid being pulled up to ceiling)
-      if (curY < desiredY - 0.05){
-        playerCapsule.position.y = desiredY;
-      }
-      // Save last ground Y for minor step up continuity
-      game.lastGroundY = best.pickedPoint.y;
-    }
-
-    // Ghost ground keep (same fix idea)
-    function snapGhostToGround(){
-      if(!game.ghostPivot) return;
-      const pivot = game.ghostPivot;
-      const origin = pivot.position.add(new BABYLON.Vector3(0, 2, 0));
-      const ray = new BABYLON.Ray(origin, new BABYLON.Vector3(0,-1,0), 8.0);
-      const hits = scene.multiPickWithRay(ray, (m)=> m !== game.ghost && m.checkCollisions===true);
-      if(!hits || !hits.length) return;
-      const curY = pivot.position.y;
-      let best=null, bestDy = Infinity;
-      for(const h of hits){
-        if(!h.hit || !h.pickedPoint) continue;
-        const y = h.pickedPoint.y;
-        if(y <= curY + 0.01){
-          const dy = origin.y - y;
-          if(dy>=0 && dy<bestDy){ best=h; bestDy=dy; }
-        }
-      }
-      if(best){
-        const newY = best.pickedPoint.y + 0.05;
-        if(curY < newY - 0.03) pivot.position.y = newY;
-      }
-    }
-
-    /***************
-     * DOORS (open on E)
-     ***************/
-    function tryToggleNearestDoor(){
-      if(!game.doors.length) return;
-      const me = playerCapsule.position;
-      let nearest = null, dist2 = 4.0; // within ~2m
-      game.doors.forEach(d=>{
-        const p = d.getAbsolutePosition();
-        const dx=p.x-me.x, dy=p.y-me.y, dz=p.z-me.z;
-        const d2 = dx*dx+dy*dy+dz*dz;
-        if(d2 < dist2 && d.isEnabled()){
-          nearest = d; dist2 = d2;
-        }
-      });
-      if(!nearest) { toast('No door nearby.'); return; }
-      const md = nearest.metadata || (nearest.metadata={open:false, baseRotY:nearest.rotation?.y||0});
-      md.open = !md.open;
-      nearest.rotation.y = md.baseRotY + (md.open ? rad(90) : 0);
-      nearest.checkCollisions = !md.open; // when open: walk through
-      toast(md.open ? 'Door opened' : 'Door closed');
-    }
-
-    /***************
-     * VAN ZONE / STORAGE
-     ***************/
-    function updateVanZoneButton(){
-      const me = playerCapsule.position;
-      const d = BABYLON.Vector3.Distance(me, game.vanZone.center);
-      const inside = d <= game.vanZone.radius;
-      if(inside && !game.inVan){
-        game.inVan = true; storageBtn.style.display='block';
-      } else if(!inside && game.inVan){
-        game.inVan = false; storageBtn.style.display='none';
-      }
-    }
-
-    /***************
-     * ITEMS USE
-     ***************/
-    function activeNameByIndex(i){
-      const labels = ['EMF','Spirit Box','Thermometer','Lighter','Notebook'];
-      return labels[i];
-    }
-
-    function useActiveItem(){
-      if(game.useCooldown) return;
-      game.useCooldown = true; setTimeout(()=>game.useCooldown=false, 250); // small debounce
-
-      const name = activeNameByIndex(game.activeIndex);
-      if(name==='Notebook'){
-        toast('Notebook opened (evidence UI placeholder).');
-        // TODO: show overlay with ghosts/evidence selection like 2D version
-        return;
-      }
-      if(name==='Lighter'){
-        toast('Flick lighter (placeholder).');
-        // TODO: simple point-light flick near hand
-        return;
-      }
-      if(name==='EMF'){
-        // EMF check near ghost
-        const near = game.ghostPivot ? BABYLON.Vector3.Distance(playerCapsule.position, game.ghostPivot.position) < 3.2 : false;
-        toast(near ? 'EMF spikes! (close)' : 'EMF baseline.');
-        return;
-      }
-      if(name==='Spirit Box'){
-        // simple random whisper if in same room as ghost
-        const near = game.ghostPivot ? BABYLON.Vector3.Distance(playerCapsule.position, game.ghostPivot.position) < 2.5 : false;
-        toast(near ? '…a faint response comes through.' : 'Static…');
-        return;
-      }
-      if(name==='Thermometer'){
-        // colder near ghost
-        const near = game.ghostPivot ? BABYLON.Vector3.Distance(playerCapsule.position, game.ghostPivot.position) < 3.5 : false;
-        const t = (near? (Math.random()*2+0.0) : (Math.random()*8+8.0)).toFixed(1);
-        toast(`Temp: ${t}°C`);
-        return;
-      }
-    }
-
-    /***************
-     * ROOM NAME (stub)
-     ***************/
-    function updateRoomName(){
-      // If house provides named rooms, pick by proximity. Placeholder: van / house
-      const me = playerCapsule.position;
-      const dVan = BABYLON.Vector3.Distance(me, game.vanZone.center);
-      roomNameEl.textContent = dVan<=game.vanZone.radius ? 'Van' : 'House';
-    }
-
-    /***************
-     * GAME LOOP
-     ***************/
-    async function startGame(){
-      setWeather(randomWeather());
-
-      // Spawn / position player (center of van area)
-      playerCapsule.position.copyFrom(game.spawnPointA);
-      syncCameraToCapsule();
-
-      // Load content
-      await loadHouse();
-      await loadItems();
-      await spawnGhost();
-
-      // Scene ready
-      toast('Investigation started. WASD to move, Shift to run, E to open doors. ESC: Dev panel.');
-
-      // Render loop
-      let last = performance.now();
-      engine.runRenderLoop(()=>{
-        const now = performance.now(); const dt = (now-last)/1000; last = now;
-
-        // Movement
-        movePlayer(dt);
-
-        // Snap to ground (FIXED)
-        snapToGround();
-
-        // Ghost behavior: simple wander
-        if(game.ghostPivot){
-          // Move ghost toward player randomly / slowly
-          const me = playerCapsule.position;
-          const gp = game.ghostPivot.position;
-          const toMe = me.subtract(gp); toMe.y=0;
-          const dist = toMe.length();
-          let v = new BABYLON.Vector3(0,0,0);
-          if(dist>4){
-            v = toMe.normalize().scale(0.8*dt);
-            game.ghostPivot.position.addInPlace(v);
-            // face direction
-            if(v.length()>1e-4){
-              const yaw = Math.atan2(v.x, v.z);
-              game.ghostPivot.rotation.y = yaw;
-              setGhostAnim('walk');
-            }
-          } else {
-            setGhostAnim('idle');
-          }
-          // Keep ghost on ground
-          snapGhostToGround();
-        }
-
-        // Sanity drain slowly (if not god)
-        if(!game.god){
-          game.sanity = clamp(game.sanity - 0.0025, 0, 100);
-          sanityFill.style.width = `${game.sanity.toFixed(0)}%`;
-          sanityPct.textContent = `${game.sanity.toFixed(0)}%`;
-        }
-
-        updateVanZoneButton();
-        updateRoomName();
-
-        scene.render();
-      });
-    }
-
-    /***************
-     * RESIZE
-     ***************/
-    window.addEventListener('resize', ()=> engine.resize());
-
+  // Hotkeys
+  window.addEventListener('keydown', (e)=>{
+    if(e.ctrlKey && e.altKey && (e.key==='D' || e.key==='d')){ $('devPanel').style.display='flex'; ensureDevTools(); }
+    if(e.ctrlKey && e.altKey && (e.key==='S' || e.key==='s')){ $('start').style.display='flex'; }
+  });
   </script>
+
   <footer style="position:fixed; bottom:8px; right:10px; color:#69d; font:12px monospace; opacity:.75; z-index:5;">
     Shark-Blades — Phasma-Phoney Web Prototype (Babylon.js)
   </footer>
-
-  <script type="module">
-    // Lazy-load classic dev tools and init with our game + scene
-    let __devToolsLoaded = false;
-    async function ensureDevTools(){
-      if(__devToolsLoaded) return true;
-      try{
-        const mod = await import('./assets/dev/devtools.js');
-        if(mod && typeof mod.initDevTools === 'function'){
-          mod.initDevTools({ game: window.game, scene: window.game?.scene });
-          __devToolsLoaded = true;
-          return true;
-        }
-      }catch(e){
-        console.error('Failed to load devtools.js', e);
-        const box = document.getElementById('dev-info'); if(box) box.textContent = 'Failed to load devtools.js: ' + e;
-      }
-      return false;
-    }
-    // Expose small helpers for the module
-    window.updateRoomLabel = function(){
-      try { const el = document.getElementById('roomName'); if(el) { el.textContent = (window.game ? (window.game.inVan ? 'Van' : (window.game ? (window.game.boundary ? 'House' : 'Outside') : '—')) : '—'); } } catch(_){}
-    };
-    window.simulateTyping = function(msg, who){
-      try { const log = document.getElementById('devLog') || document.getElementById('dev-info'); if(log){ const t = '['+(who||'System')+'] '+msg; log.textContent += (log.textContent ? '\n' : '') + t; log.scrollTop = log.scrollHeight; } } catch(_){}
-    };
-    window.GameHotbar = { renderHotbar: function(){ try{ if(typeof rebuildBelt === 'function') rebuildBelt(); }catch(_){}} };
-
-    // Wire: clicking "Load Dev Tools" or opening the Dev Panel will load it
-    (function(){
-      const btn = document.getElementById('loadDevTools');
-      if(btn) btn.addEventListener('click', ensureDevTools);
-      // When Dev Panel becomes visible, attempt to load
-      const devPanel = document.getElementById('devPanel');
-      if(devPanel){
-        const obs = new MutationObserver(()=>{
-          const vis = getComputedStyle(devPanel).display !== 'none';
-          if(vis) ensureDevTools();
-        });
-        obs.observe(devPanel, { attributes:true, attributeFilter:['style','class'] });
-      }
-      // As a backstop, load it a moment after boot if the Start overlay is already dismissed
-      setTimeout(()=>{
-        if(window.__investigation_started) ensureDevTools();
-      }, 2500);
-    })();
-  </script>
-
 </body>
 </html>
