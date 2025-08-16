@@ -102,8 +102,6 @@
   </style>
 </head>
 <body>
-<button id="devOpenBtn" class="btn" style="position:fixed;top:10px;right:10px;z-index:55;opacity:.6;">DEV</button>
-
   <canvas id="renderCanvas"></canvas>
 
   <!-- HUD -->
@@ -128,7 +126,7 @@
 
   <!-- Dev prompt (ESC) -->
   <div id="devPrompt">
-    <div class="modal" style="max-height:90vh; overflow:auto;">
+    <div class="modal">
       <h3>Enable Developer Options?</h3>
       <div class="row">
         <button id="devYes">Yes</button>
@@ -177,62 +175,6 @@
 
   <!-- Babylon and loaders -->
   <script src="./cdn/babylon.js"></script>
-
-  <script>
-    (function(){
-      function showOverlay(msg){
-        var d=document.createElement('div');
-        d.id='babylonDiag';
-        d.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.86);color:#0ff;font:14px/1.4 monospace;padding:16px;overflow:auto;';
-        d.innerHTML='<div style="max-width:900px;margin:0 auto;"><h2 style="margin:0 0 8px 0;color:#0ff;">Babylon Loader Diagnostic</h2><pre style="white-space:pre-wrap">'+msg+'</pre><button id="babylonDiagClose" style="margin-top:10px;background:#001;border:1px solid #0ff;color:#0ff;padding:6px 10px;border-radius:8px;cursor:pointer;">Close</button></div>';
-        document.body.appendChild(d);
-        document.getElementById('babylonDiagClose').onclick=function(){ d.remove(); };
-      }
-      // Surface uncaught errors
-      window.addEventListener('error', function(e){
-        try{
-          var m='Uncaught error: '+(e.message||'')+'\nSource: '+(e.filename||'')+':'+(e.lineno||'')+':'+(e.colno||'')+
-                (e.error && e.error.stack ? '\n\nStack:\n'+e.error.stack : '');
-          if(!document.getElementById('babylonDiag')) showOverlay(m);
-        }catch(_){}
-      });
-
-      function ok(){ return !!(window.BABYLON && BABYLON.Engine); }
-
-      function tryFallback(){
-        var tag = document.querySelector('script[src$="cdn/babylon.js"],script[src$="cdn/babylon.js?"]') ||
-                  document.querySelector('script[src*="babylon.js"]');
-        if(!tag){ showOverlay('Could not find <script src="./cdn/babylon.js"> tag in DOM.'); return; }
-        var alt='./cdn/babylon.max.js';
-        var s=document.createElement('script');
-        s.src=alt; s.onload=function(){
-          if(ok()){ console.log('[Babylon] Fallback loaded:', alt); }
-          else { showOverlay('Tried fallback '+alt+' but BABYLON is still undefined. Check /cdn path or file names.'); }
-        };
-        s.onerror=function(){
-          showOverlay('Failed to load '+alt+' too. Verify files exist.'); 
-        };
-        console.warn('[Babylon] Primary failed, trying fallback:', alt);
-        tag.insertAdjacentElement('afterend', s);
-      }
-
-      // Early check a tick after current scripts
-      setTimeout(function(){
-        if(ok()) return;
-        // If primary didn't set BABYLON, fallback
-        tryFallback();
-        // Re-check after a moment
-        setTimeout(function(){
-          if(!ok()){
-            showOverlay('BABYLON is undefined after trying fallbacks.\n' +
-              'Checked: ./cdn/babylon.js then ./cdn/babylon.max.js\n' +
-              'Make sure your /cdn folder is next to index.html and names match case exactly.');
-          }
-        }, 800);
-      }, 50);
-    })();
-  </script>
-
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
@@ -250,7 +192,8 @@
     /***************
      * CORE STATE
      ***************/
-    const game = {
+    window.game = {
+
       scene:null, engine:null, camera:null,
       playerCapsule:null, handPivot:null,
       ghost:null, ghostPivot:null, ghostAnim:{ idle:null, walk:null, state:'idle' },
@@ -359,7 +302,7 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     lightning.intensity = 0.0;
 
     // UI wiring
-    const belt = $('belt'); const hand = $('hand'); const storageBtn = $('storageBtn'); const devOpenBtn = $('devOpenBtn');
+    const belt = $('belt'); const hand = $('hand'); const storageBtn = $('storageBtn');
     const sanityFill = $('sanityFill'); const sanityPct = $('sanityPct'); const roomNameEl = $('roomName');
 
     // Safety ground (in case map isn't ready yet)
@@ -380,23 +323,21 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     window.addEventListener('keydown', (e)=>{
       if(e.key === 'Escape'){
         if(!dev.enabled && $('devPrompt').style.display!=='flex'){ $('devPrompt').style.display='flex'; }
-        else if(dev.enabled){ $('devPanel').style.display = ($('devPanel').style.display==='flex'?'none':'flex'); }
+        else if(dev.enabled){ $('devPanel').style.display = ($('devPanel').style.display==='flex'?'none':'flex'); if($('devPanel').style.display==='flex' && typeof ensureDevTools==='function') ensureDevTools(); }
       }
       // Slots 1..5
-      if(typeof e.key==='string' && e.key>='1' && e.key<='5'){ selectSlot(parseInt(e.key)-1); }
+      if(e.key>='1' && e.key<='5'){ selectSlot(parseInt(e.key)-1); }
       // run
       if(e.key==='Shift'){ game.running = true; }
       // open door
-      const __kr = (typeof e.key==='string'? e.key : (typeof e.code==='string'? e.code : ''));
-      const __kl = String(__kr).toLowerCase();
-      if(__kl==='e'){ tryToggleNearestDoor(); }
+      if(e.key.toLowerCase()==='e'){ tryToggleNearestDoor(); }
       // dev fly vertical
       if(game.flyDev){
         if(e.key==='PageUp'){ playerCapsule.position.y += 0.3; }
         if(e.key==='PageDown'){ playerCapsule.position.y -= 0.3; }
       }
     });
-    window.addEventListener('keyup', (e)=>{ if(e && e.key==='Shift'){ game.running=false; } });
+    window.addEventListener('keyup', (e)=>{ if(e.key==='Shift'){ game.running=false; } });
 
     // Onscreen stick (touch)
     const stick = $('stick'); const dot = stick.querySelector('.dot');
@@ -423,8 +364,8 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     if(('ontouchstart' in window)) enableTouchStick();
 
     // Keyboard movement
-    window.addEventListener('keydown',(e)=>{ const k=String(e.key||'').toLowerCase(); if(!k||k==='unidentified'||k==='process') return; game.keys[k]=true; });
-    window.addEventListener('keyup',(e)=>{ const k=String(e.key||'').toLowerCase(); if(!k) return; game.keys[k]=false; });
+    window.addEventListener('keydown',(e)=>{ game.keys[e.key.toLowerCase()] = true; });
+    window.addEventListener('keyup',(e)=>{ game.keys[e.key.toLowerCase()] = false; });
 
     canvas.addEventListener('pointerdown', ()=>{ useActiveItem(); });
 
@@ -464,7 +405,7 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     function randomWeather(){ // Choose Clear or Rain
       const r = Math.random(); return (r<0.6)?'Clear':'Rain';
     }
-    function lightningFlash(){ if(window.__lightning_guard) return;
+    function lightningFlash(){
       if(game.weather!=='Rain') return;
       if(Math.random()<0.1){
         const flash = $('flash');
@@ -951,169 +892,50 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     Shark-Blades — Phasma-Phoney Web Prototype (Babylon.js)
   </footer>
 
-  <script>
-    (function(){
-      const BOOT_TIMEOUT_MS = 2000;
-      function showBoot(msg){
-        let d=document.getElementById('bootDiag');
-        if(!d){
-          d=document.createElement('div');
-          d.id='bootDiag';
-          d.style.cssText='position:fixed;left:10px;top:10px;z-index:99990;background:rgba(0,0,0,.7);color:#0ff;border:1px solid #0ff;border-radius:8px;padding:8px 10px;font:12px monospace;max-width:46vw;';
-          document.body.appendChild(d);
+  <script type="module">
+    // Lazy-load classic dev tools and init with our game + scene
+    let __devToolsLoaded = false;
+    async function ensureDevTools(){
+      if(__devToolsLoaded) return true;
+      try{
+        const mod = await import('./assets/dev/devtools.js');
+        if(mod && typeof mod.initDevTools === 'function'){
+          mod.initDevTools({ game: window.game, scene: window.game?.scene });
+          __devToolsLoaded = true;
+          return true;
         }
-        d.textContent = msg;
+      }catch(e){
+        console.error('Failed to load devtools.js', e);
+        const box = document.getElementById('dev-info'); if(box) box.textContent = 'Failed to load devtools.js: ' + e;
       }
-      function hideBoot(){
-        const d=document.getElementById('bootDiag');
-        if(d) d.remove();
-      }
-      function exists(id){ return !!document.getElementById(id); }
-      function vis(el){ return el && (getComputedStyle(el).display!=='none'); }
-      // Freeze lightning until game.start
-      window.__lightning_guard = true;
-      // Ctrl+Alt+S => force show Start
-      window.addEventListener('keydown', function(ev){
-        if(ev.ctrlKey && ev.altKey && (ev.key==='s' || ev.key==='S')){
-          var st=document.getElementById('start'); if(st){ st.style.display='flex'; }
-          showBoot('Forced Start overlay visible (Ctrl+Alt+S).');
-        }
-      });
-      setTimeout(function(){
-        try{
-          var okay = !!(window.BABYLON && BABYLON.Engine);
-          var startEl = document.getElementById('start');
-          var hudEl = document.getElementById('hud');
-          var status = [
-            '[SafeBoot] Babylon: ' + (okay?'OK':'MISSING'),
-            'Start overlay in DOM: ' + (!!startEl),
-            'Start overlay visible: ' + (startEl ? (getComputedStyle(startEl).display!=='none') : 'n/a'),
-            'HUD visible: ' + (hudEl ? (getComputedStyle(hudEl).display!=='none') : 'n/a')
-          ].join('\\n');
-          if(!okay){
-            showBoot(status + '\\nHint: check /cdn/babylon.js exists.');
-            return;
-          }
-          // If no investigation has begun, force show the start overlay and ensure weather is Clear.
-          if(startEl && getComputedStyle(startEl).display==='none' && (!window.__investigation_started)){
-            startEl.style.display='flex';
-            if(window.game){ game.weather='Clear'; }
-          }
-          if(!window.__investigation_started){
-            showBoot(status + '\\nNo investigation yet. Use the Start button. (Ctrl+Alt+S to force show)');
-          } else {
-            hideBoot();
-          }
-        }catch(e){
-          showBoot('SafeBoot exception: '+e);
-        }
-      }, BOOT_TIMEOUT_MS);
-    })();
-  </script>
+      return false;
+    }
+    // Expose small helpers for the module
+    window.updateRoomLabel = function(){
+      try { const el = document.getElementById('roomName'); if(el) { el.textContent = (window.game ? (window.game.inVan ? 'Van' : (window.game ? (window.game.boundary ? 'House' : 'Outside') : '—')) : '—'); } } catch(_){}
+    };
+    window.simulateTyping = function(msg, who){
+      try { const log = document.getElementById('devLog') || document.getElementById('dev-info'); if(log){ const t = '['+(who||'System')+'] '+msg; log.textContent += (log.textContent ? '\n' : '') + t; log.scrollTop = log.scrollHeight; } } catch(_){}
+    };
+    window.GameHotbar = { renderHotbar: function(){ try{ if(typeof rebuildBelt === 'function') rebuildBelt(); }catch(_){}} };
 
-
-  <script>
-    (function(){ try{ var st=document.getElementById('start'); if(st){ st.style.display='flex'; } }catch(_){ } })();
-  </script>
-
-
-  <script>
+    // Wire: clicking "Load Dev Tools" or opening the Dev Panel will load it
     (function(){
-      window.addEventListener('keydown', function(ev){
-        if(ev.ctrlKey && ev.altKey && (ev.key==='d' || ev.key==='D')){
-          try{
-            if(window.dev){ dev.enabled=true; }
-            var dp=document.getElementById('devPanel');
-            var dpr=document.getElementById('devPrompt');
-            if(dpr) dpr.style.display='none';
-            if(dp) dp.style.display='flex';
-          }catch(_){}
-        }
-      });
-    })();
-  </script>
-
-
-  <script>
-    (function(){
-      function buildIfEmpty(){
-        try{
-          var box = document.getElementById('loadoutBox');
-          if(box && box.children.length === 0 && typeof buildLoadoutChooser === 'function'){
-            buildLoadoutChooser();
-          }
-        }catch(_){}
+      const btn = document.getElementById('loadDevTools');
+      if(btn) btn.addEventListener('click', ensureDevTools);
+      // When Dev Panel becomes visible, attempt to load
+      const devPanel = document.getElementById('devPanel');
+      if(devPanel){
+        const obs = new MutationObserver(()=>{
+          const vis = getComputedStyle(devPanel).display !== 'none';
+          if(vis) ensureDevTools();
+        });
+        obs.observe(devPanel, { attributes:true, attributeFilter:['style','class'] });
       }
-      if(document.readyState === 'complete' || document.readyState === 'interactive'){
-        setTimeout(buildIfEmpty, 50);
-      } else {
-        document.addEventListener('DOMContentLoaded', buildIfEmpty);
-      }
-      // Failsafe timer
-      setTimeout(buildIfEmpty, 1200);
-    })();
-  </script>
-
-
-  <script>
-    (function(){
-      function hydrateStartAndDev(){
-        try{
-          // Loadout build
-          if (typeof buildLoadoutChooser === 'function') {
-            var box = document.getElementById('loadoutBox');
-            if (box && box.children.length === 0) buildLoadoutChooser();
-          }
-          // Wire Start button if not already
-          var btn = document.getElementById('startBtn');
-          if (btn && !btn.__wired){
-            btn.addEventListener('click', async ()=>{
-              document.getElementById('start').style.display='none';
-              const map = document.getElementById('preMap').value;
-              window.game.spawnChoice = document.getElementById('preSpawn').value;
-              window.game.weather = document.getElementById('preWeather').value;
-              window.game.loadout = (function(){
-                const out=[]; const all=['EMF','Spirit Box','Thermometer','Lighter','Notebook','Photo Camera','Flashlight','Thermal Camera','Voice Recorder'];
-                all.forEach(n=>{ var c=document.getElementById('ld_'+n.replace(/\W+/g,'_')); if(c && c.checked) out.push(n); });
-                return out.slice(0,5).length? out.slice(0,5) : ['EMF','Spirit Box','Thermometer','Notebook'];
-              })();
-              await startGame(map);
-            });
-            btn.__wired = true;
-          }
-        }catch(e){ console.warn('hydrateStartAndDev error:', e); }
-      }
-      // Add "Fix UI" quick button
-      var fix = document.createElement('button');
-      fix.textContent = 'Fix UI'; fix.title='Rehydrate panels';
-      fix.style.cssText='position:fixed;left:10px;bottom:10px;z-index:56;background:#111;color:#0ff;border:1px solid #0ff;border-radius:8px;padding:6px 10px;opacity:.65;';
-      fix.onclick = hydrateStartAndDev;
-      document.body.appendChild(fix);
-      // Try right away + after a short delay
-      hydrateStartAndDev();
-      setTimeout(hydrateStartAndDev, 400);
-      document.addEventListener('DOMContentLoaded', hydrateStartAndDev);
-    })();
-  </script>
-
-
-  <script>
-    (function(){
-      window.addEventListener('keydown', function(ev){
-        try{
-          if(window.__investigation_started) return;
-          var st=document.getElementById('start');
-          if(!st) return;
-          var visible = getComputedStyle(st).display !== 'none';
-          if(!visible) return;
-          var k = (typeof ev.key==='string'?ev.key:(typeof ev.code==='string'?ev.code:''));
-          if(k==='Enter' || k===' ' || k==='Spacebar'){
-            ev.preventDefault();
-            var btn=document.getElementById('startBtn');
-            if(btn){ btn.click(); }
-          }
-        }catch(_){}
-      });
+      // As a backstop, load it a moment after boot if the Start overlay is already dismissed
+      setTimeout(()=>{
+        if(window.__investigation_started) ensureDevTools();
+      }, 2500);
     })();
   </script>
 
