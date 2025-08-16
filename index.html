@@ -9,7 +9,6 @@
   <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
 
   <!-- Babylon core + loaders (local to repo) -->
-  
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
@@ -104,7 +103,6 @@
     </div>
   </div>
 
-
   <!-- HUD -->
   <div id="hud">
     <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
@@ -166,7 +164,7 @@
   <!-- Dev Tools -->
   <button id="devtools-toggle" class="hud-btn">Dev Tools</button>
 
-  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:460px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
+  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:480px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <strong>Developer Tools</strong>
       <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
@@ -205,11 +203,13 @@
       <div class="row">
         <label><input id="devtools-god" type="checkbox"> God mode</label>
         <label><input id="devtools-fly" type="checkbox"> Fly (PageUp/PageDown)</label>
+        <label><input id="devtools-reveal" type="checkbox"> Reveal ghost (override)</label>
       </div>
       <div class="row">
         <button id="devtools-teleport" class="hud-btn">Teleport to ghost</button>
         <button id="devtools-inspector" class="hud-btn">Inspector</button>
         <button id="devtools-ping" class="hud-btn">Ping XYZ</button>
+        <button id="devtools-hunt" class="hud-btn">Force Hunt</button>
       </div>
     </fieldset>
 
@@ -280,7 +280,12 @@ let allowFly = false;
 
 let houseRoot = null;
 let doorMeshes = [];
-let ghost = { mesh:null, target:null, speed:0.9, alive:true, anims:{ idle:null, walk:null } }; // units/s
+let ghost = {
+  mesh:null, target:null, speed:0.9, baseSpeed:0.9, huntSpeed:1.8,
+  state:'roam', // 'roam' | 'hunt'
+  alive:true, anims:{ idle:null, walk:null }, forceReveal:false,
+  stepAcc:0, stepStride:0.9, lastPos:null
+};
 let phoenix = { mesh:null, t:0 };
 let weather = { state:'Clear', rainPS:null, lightningTimer:0, nextStrike:0 };
 let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
@@ -339,6 +344,7 @@ const GHOSTS = {
 let discoveredEvidence = new Set();
 let currentGhostKey = null;
 
+/* Ghost polygon (wander zone) */
 let ghostPolygon = [
   new BABYLON.Vector3(18.404, 0, -96.040),
   new BABYLON.Vector3(57.205, 0, -94.031),
@@ -346,6 +352,19 @@ let ghostPolygon = [
   new BABYLON.Vector3(61.872, 0, -149.928),
   new BABYLON.Vector3(18.660, 0, -149.900)
 ];
+
+/* Audio context for synthesized footsteps */
+let AC = null, STEP_BUF = null;
+
+/* Hunt logic timers */
+let huntCooldown = 18;      // seconds between possible hunts
+let huntTimer = 0;          // time remaining for active hunt
+let huntMaxDuration = 22;   // cap for a hunt
+let sinceLastHunt = 99;
+
+/* Myling hearing distance tweak (others use default range) */
+const FOOTSTEP_RANGE_DEFAULT = 18; // meters-ish
+const FOOTSTEP_RANGE_MYLING = 10;
 
 /* ===========================================================
    UTILS
@@ -381,7 +400,6 @@ function pointInPolyXZ(p, poly){
   }
   return inside;
 }
-function vecToYaw(v){ return Math.atan2(v.x, v.z); }
 function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
 
 /* ===========================================================
@@ -420,7 +438,12 @@ skybox.material = skyMat;
 skybox.isPickable = false;
 skybox.checkCollisions = false;
 
-// Weather
+/* ===========================================================
+   WEATHER & AMBIENT AUDIO
+   =========================================================== */
+function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
+function lightningStrike(){ const overlay=document.getElementById('flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
+
 function setWeather(state){
   weather.state = state;
   document.getElementById('hud-weather').textContent = state;
@@ -448,8 +471,6 @@ function setWeather(state){
     weather.nextStrike = 0;
   }
 }
-function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
-function lightningStrike(){ const overlay=document.getElementById('flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
 
 const audio = {
   ambient: new Audio("./assets/audio/ambient.mp3"),
@@ -492,7 +513,7 @@ async function loadMap(){
   const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
   fallbackGround.position.y = 0;
   fallbackGround.checkCollisions = true;
-  fallbackGround.isPickable = true; // so pickGroundHeightAt can catch it
+  fallbackGround.isPickable = true;
   fallbackGround.visibility = 0;
 
   const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
@@ -538,6 +559,13 @@ async function loadGhost(){
   const gy = pickGroundHeightAt(p.x, p.z);
   ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
   ghost.target = randomPointInPolygonXZ(ghostPolygon);
+
+  // IMPORTANT: start invisible
+  ghost.mesh.isVisible = false;
+  ghost.baseSpeed = 0.9;
+  ghost.huntSpeed = 1.8;
+  ghost.speed = ghost.baseSpeed;
+  ghost.lastPos = ghost.mesh.position.clone();
 }
 
 /* ===========================================================
@@ -579,13 +607,11 @@ function handleMovement(dt){
     const fwd = camera.getForwardRay().direction; fwd.y = 0; fwd.normalize();
     const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
     const desired = fwd.scale(move.z).add(right.scale(move.x)).normalize();
-    // Time-based movement (fixed!)
     camera.cameraDirection = desired.scale(speed * dt);
   } else {
     camera.cameraDirection = new BABYLON.Vector3(0,0,0);
   }
 
-  // Fly (dev only)
   if(allowFly && dev.enabled){
     if(keysDown["PageUp"])   camera.position.y += 0.6 * dt * 60;
     if(keysDown["PageDown"]) camera.position.y -= 0.6 * dt * 60;
@@ -734,6 +760,7 @@ function renderNotebook(){
 /* ===========================================================
    STORAGE
    =========================================================== */
+const $ = s=>document.querySelector(s);
 function openStorage(){
   const modal=$('#storage-modal'); const grid=$('#storage-grid'); grid.innerHTML='';
   STORAGE_ITEMS.forEach(it=>{ const card=document.createElement('div'); card.style.cssText='border:1px solid #066; padding:8px; background:#111; border-radius:6px;'; const title=document.createElement('div'); title.style.color='#9ff'; title.style.marginBottom='6px'; title.textContent=it; const btn=document.createElement('button'); btn.textContent='Add to Slots 1–3'; btn.className='hud-btn'; btn.onclick=()=> addToLoadout(it); card.appendChild(title); card.appendChild(btn); grid.appendChild(card); });
@@ -748,31 +775,27 @@ function confirmLoadout(){ closeStorage(); }
    DEVTOOLS (incl. Assets panel)
    =========================================================== */
 (function setupDevTools(){
-  const $ = s => document.querySelector(s);
-
   const toggleBtn   = $('#devtools-toggle');
   const panel       = $('#devtools-panel');
   const enableBtn   = $('#devtools-enable');
   const chkGhost    = $('#devtools-group-ghost');
   const chkEv       = $('#devtools-group-evidence');
   const chkXYZ      = $('#devtools-group-xyz');
-  const mapStartBtn = $('#devtools-map-start');
-  const mapPinBtn   = $('#devtools-map-pin');
-  const mapOkBtn    = $('#devtools-map-confirm');
   const roomSel     = $('#devtools-room-select');
   const exportBtn   = $('#devtools-export-rooms');
   const logTa       = $('#devtools-log');
 
-  // Player/debug controls
   const walkRange = $('#devtools-walk');
   const runRange  = $('#devtools-run');
   const chkGod    = $('#devtools-god');
   const chkFly    = $('#devtools-fly');
+  const chkReveal = $('#devtools-reveal');
   const btnTp     = $('#devtools-teleport');
   const btnPing   = $('#devtools-ping');
   const btnInspect= $('#devtools-inspector');
+  const btnHunt   = $('#devtools-hunt');
 
-  // Assets panel
+  // Assets ui
   const reloadMapBtn  = $('#asset-reload-map');
   const glbFileInput  = $('#asset-glb-file');
   const appendGlbBtn  = $('#asset-append-glb');
@@ -840,11 +863,14 @@ function confirmLoadout(){ closeStorage(); }
   chkXYZ?.addEventListener('change',  ()=>{ if (enableBtn.dataset.on==='1'){ if (chkXYZ.checked) startXYZ(); else stopXYZ(); } });
 
   // Map recorder
+  const mapStartBtn = $('#devtools-map-start');
+  const mapPinBtn   = $('#devtools-map-pin');
+  const mapOkBtn    = $('#devtools-map-confirm');
   setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false);
   mapStartBtn.addEventListener('click', ()=>{ mapping={points:[]}; setEnabled(mapPinBtn,true); setEnabled(mapOkBtn,true); log('Map recording started. Use “Pin”.'); });
   mapPinBtn.addEventListener('click', ()=>{ if(!mapping) return; const p=camera?.position||{x:0,y:0,z:0}; mapping.points.push({x:p.x,y:p.y,z:p.z}); log(`Pinned: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); });
-  mapOkBtn.addEventListener('click', ()=>{ if(!mapping) return; const name=roomSel?.value?.trim(); if(!name){ log('Select a room name before Confirm.'); return; } window.__mappedRooms=window.__mappedRooms||[]; window.__mappedRooms.push({ name, points:mapping.points }); log(`Map "${name}" saved (${mapping.points.length} pins).`); mapping=null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false); });
-  exportBtn.addEventListener('click', ()=>{ const data=(window.__mappedRooms&&window.__mappedRooms.length)?window.__mappedRooms:[]; const pretty=JSON.stringify(data,null,2); const content=`// Auto-generated by Dev Tools\\nexport const ROOMS = [\\n  ...${pretty}\\n];`; const blob=new Blob([content],{type:'application/javascript'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms.generated.js'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); log(\`Exported \${data.length} room(s) to rooms.generated.js\`); });
+  mapOkBtn.addEventListener('click', ()=>{ if(!mapping) return; const name=$('#devtools-room-select')?.value?.trim(); if(!name){ log('Select a room name before Confirm.'); return; } window.__mappedRooms=window.__mappedRooms||[]; window.__mappedRooms.push({ name, points:mapping.points }); log(`Map "${name}" saved (${mapping.points.length} pins).`); mapping=null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false); });
+  exportBtn.addEventListener('click', ()=>{ const data=(window.__mappedRooms&&window.__mappedRooms.length)?window.__mappedRooms:[]; const pretty=JSON.stringify(data,null,2); const content=`// Auto-generated by Dev Tools\nexport const ROOMS = [\n  ...${pretty}\n];`; const blob=new Blob([content],{type:'application/javascript'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms.generated.js'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); log(`Exported ${data.length} room(s) to rooms.generated.js`); });
 
   // Player/debug controls
   walkRange.value = String(player.speedWalk); runRange.value = String(player.speedRun);
@@ -852,26 +878,23 @@ function confirmLoadout(){ closeStorage(); }
   runRange .addEventListener('input', e=>{ player.speedRun =parseFloat(e.target.value); log(`Run speed: ${player.speedRun.toFixed(2)}`); });
   chkGod.addEventListener('change', e=>{ player.god=e.target.checked; log(`God mode: ${player.god}`); });
   chkFly.addEventListener('change', e=>{ allowFly=e.target.checked; log(`Fly enabled: ${allowFly}`); });
+  chkReveal.addEventListener('change', e=>{ ghost.forceReveal = e.target.checked; updateGhostVisibility(); log(`Reveal override: ${ghost.forceReveal}`); });
   btnTp.addEventListener('click', ()=>{ if(ghost.mesh){ camera.position = ghost.mesh.position.add(new BABYLON.Vector3(0,1.7,-2)); log('Teleported to ghost.'); } else log('No ghost mesh yet.'); });
   btnPing.addEventListener('click', ()=>{ const p=camera.position; log(`PING @ x:${p.x.toFixed(3)} y:${p.y.toFixed(3)} z:${p.z.toFixed(3)}`); });
   btnInspect.addEventListener('click', ()=>{ if(scene.debugLayer.isVisible()) scene.debugLayer.hide(); else scene.debugLayer.show({ embedMode:true }); });
+  btnHunt.addEventListener('click', ()=>{ beginHunt(); log('Forced hunt.'); });
 
   // Assets panel actions
-  reloadMapBtn.addEventListener('click', async ()=>{ try{ log('Reloading map…'); // quick-and-dirty: remove existing map meshes (not including skybox/fallbackGround)
-      scene.meshes.slice().forEach(m=>{ if(m.name && m!==skybox && m.name!=='fallbackGround' && m!==camera){} });
-      await loadMap(); log('Map reloaded.'); }catch(e){ log('Reload map error: '+e.message); } });
-
+  reloadMapBtn.addEventListener('click', async ()=>{ try{ log('Reloading map…'); await loadMap(); log('Map reloaded.'); }catch(e){ log('Reload map error: '+e.message); } });
   appendGlbBtn.addEventListener('click', async ()=>{
     const f = glbFileInput.files?.[0]; if(!f){ log('Choose a GLB/GLTF first.'); return; }
-    try{ log(`Appending GLB: ${f.name}`); await BABYLON.SceneLoader.AppendAsync("", f, scene); log('Append complete. Use List Meshes to inspect.'); }
+    try{ log(`Appending GLB: ${f.name}`); await BABYLON.SceneLoader.AppendAsync("", f, scene); log('Append complete.'); }
     catch(e){ log('Append error: '+e.message); }
   });
-
   replaceMapBtn.addEventListener('click', async ()=>{
     const f = glbFileInput.files?.[0]; if(!f){ log('Choose a GLB/GLTF first.'); return; }
     try{
       log(`Replacing map with: ${f.name}`);
-      // dispose previous map meshes except skybox & fallbackGround
       scene.meshes.slice().forEach(m=>{
         if(m && m.name && m.name!=='skybox' && m.name!=='fallbackGround' && m!==camera){ try{ m.dispose(); }catch{} }
       });
@@ -880,15 +903,12 @@ function confirmLoadout(){ closeStorage(); }
       log('Replace complete.');
     }catch(e){ log('Replace error: '+e.message); }
   });
-
   listMeshesBtn.addEventListener('click', ()=>{
     const list = meshes(); meshSelect.innerHTML = '<option value="">(select a mesh)</option>' + list.map((m,i)=>`<option value="${i}">${i}: ${m.name}</option>`).join('');
     log(`Found ${list.length} meshes.`);
-    // populate materials too
     const mats = scene.materials || [];
     matSelect.innerHTML = '<option value="">(material)</option>' + mats.map((m,i)=>`<option value="${i}">${i}: ${m.name||'(unnamed)'}</option>`).join('');
   });
-
   meshSelect.addEventListener('change', ()=>{
     const idx = parseInt(meshSelect.value,10); const m = meshes()[idx]; if(!m) return;
     chkVisible.checked = m.isVisible !== false;
@@ -898,38 +918,26 @@ function confirmLoadout(){ closeStorage(); }
     chkWire.checked    = !!(m.material && m.material.wireframe);
     log(`Selected mesh: ${m.name}`);
   });
-
   focusBtn.addEventListener('click', ()=>{
     const idx=parseInt(meshSelect.value,10); const m=meshes()[idx]; if(!m) return;
     const b=m.getBoundingInfo().boundingBox; const c=b.centerWorld; camera.position = new BABYLON.Vector3(c.x, c.y+3, c.z-6); camera.setTarget(c); log('Camera focused on mesh.');
   });
-
   chkVisible.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isVisible = chkVisible.checked; } });
   chkPick.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isPickable = chkPick.checked; } });
   chkCollide.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.checkCollisions = chkCollide.checked; } });
   chkBBox.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.showBoundingBox = chkBBox.checked; } });
   chkWire.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m && m.material){ m.material.wireframe = chkWire.checked; } });
-
   matSelect.addEventListener('change', ()=>{ const i=parseInt(matSelect.value,10); const mat=scene.materials[i]; if(!mat) return; alphaRange.value = String(mat.alpha ?? 1); log(`Selected material: ${mat.name||'(unnamed)'} alpha=${alphaRange.value}`); });
   alphaRange.addEventListener('input', ()=>{ const i=parseInt(matSelect.value,10); const mat=scene.materials[i]; if(mat){ mat.alpha = parseFloat(alphaRange.value); } });
-
   applyTexBtn.addEventListener('click', ()=>{
     const i=parseInt(matSelect.value,10); const mat=scene.materials[i]; const url=(texUrlInput.value||'').trim();
     if(!mat){ log('Pick a material first.'); return; }
     if(!url){ log('Enter a texture URL.'); return; }
     try{
-      // Try PBR/Standard variants
       if(mat.albedoTexture !== undefined) mat.albedoTexture = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
       else mat.diffuseTexture = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
       log('Applied texture to material.');
     }catch(e){ log('Texture error: '+e.message); }
-  });
-
-  exportMeshesBtn.addEventListener('click', ()=>{
-    const data = meshes().map(m=>({ name:m.name, id:m.id, pos:m.position, checkCollisions:m.checkCollisions, isPickable:m.isPickable, mat:m.material?.name || null }));
-    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mesh-list.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-    log(`Exported ${data.length} meshes to mesh-list.json`);
   });
 
   function ghostLogger(e){ const d=e?.detail||{}; log(`Ghost: state=${d.state??'n/a'} room=${d.room??'n/a'} action=${d.action??'n/a'} speed=${typeof d.speed==='number'?d.speed.toFixed(2):'n/a'} hunt=${!!d.hunt}`); }
@@ -939,54 +947,210 @@ function confirmLoadout(){ closeStorage(); }
 
   log('Devtools wired.');
 })();
-  const $ = (s) => document.querySelector(s);
-  // Put these near the top of your script (before initUI), or replace your existing start logic.
-  let __started = false;
-  function safeStart() {
-    if (__started) return;              // don't run twice
-    __started = true;
 
-    const scr = document.getElementById('title-screen');
-    if (scr) scr.style.display = 'none'; // hide immediately
-
-    // continue with your existing start actions
-    const w = Math.random() < 0.5 ? 'Clear' : 'Rain';
-    setWeather(w);
-    playWeatherAudio();
-    const keys = Object.keys(GHOSTS);
-    currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
-    toast('Investigation started. Suspected: ???', 1400);
-  }
-  window.safeStart = safeStart; // so you can call it from console if needed
-
-  // Attach listeners early and safely (won't throw if elements are missing)
-  window.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('start-button');
-    const screen = document.getElementById('title-screen');
-
-    if (btn) btn.addEventListener('click', safeStart, { once: true });
-    // also allow clicking anywhere on the title screen to start
-    if (screen) screen.addEventListener('click', (e) => {
-      if (e.target.id !== 'start-button') safeStart();
-    }, { once: true });
-
-    // keyboard fallback
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') safeStart();
-    }, { once: true });
-  });
 /* ===========================================================
-   STARTUP / EVENTS
+   SANITY & HUNT LOGIC
    =========================================================== */
-function initUI(){
-document.getElementById('start-button').onclick = safeStart;
+function sanityUpdate(dt){
+  // Base drain; more if near ghost; none in van.
+  let drain = 0.015 * dt; // ~1.5% per 100s baseline
+  if (player.room === 'Van') drain *= 0.15;
+  if (ghost.mesh){
+    const d = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+    if (d < 8) drain += 0.08 * dt;
+    else if (d < 15) drain += 0.03 * dt;
+  }
+  player.sanity = Math.max(0, player.sanity - drain*100);
+}
 
+function canHunt(){
+  if (player.room === 'Van') return false;
+  if (sinceLastHunt < huntCooldown) return false;
+  if (!ghost.mesh) return false;
+  const near = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 22;
+  // More likely with low sanity
+  const chance = (player.sanity < 30) ? 0.010 : (player.sanity < 60 ? 0.004 : 0.001);
+  return Math.random() < chance && near;
+}
+
+function beginHunt(){
+  if (!ghost.mesh) return;
+  ghost.state = 'hunt';
+  ghost.speed = ghost.huntSpeed;
+  huntTimer = 0;
+  sinceLastHunt = 0;
+  updateGhostVisibility(); // becomes visible unless overridden off
+}
+
+function endHunt(){
+  ghost.state = 'roam';
+  ghost.speed = ghost.baseSpeed;
+  updateGhostVisibility(); // hides again unless overridden on
+}
+
+/* ===========================================================
+   FOOTSTEP SYNTH (WebAudio) — distance falloff + Myling range
+   =========================================================== */
+function ensureAudioCtx(){
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  // Make a short "thump" buffer
+  const sr = AC.sampleRate;
+  const len = Math.floor(sr * 0.12);
+  const buf = AC.createBuffer(1, len, sr);
+  const ch = buf.getChannelData(0);
+  for(let i=0;i<len;i++){
+    const t = i/len;
+    // Sine + touch of noise, exponential decay
+    const env = Math.exp(-8*t);
+    const s = Math.sin(2*Math.PI*120*i/sr) * env + (Math.random()*2-1)*0.02*env;
+    ch[i] = s * 0.9;
+  }
+  STEP_BUF = buf;
+}
+
+function playFootstep(distance){
+  if (!AC || !STEP_BUF) return;
+  const isMyling = (currentGhostKey === 'myling');
+  const range = isMyling ? FOOTSTEP_RANGE_MYLING : FOOTSTEP_RANGE_DEFAULT;
+  if (distance > range) return; // inaudible
+
+  // Volume falls off with distance (quadratic)
+  let v = 1 - (distance / range);
+  v = Math.max(0, v);
+  v = v*v;
+
+  const src = AC.createBufferSource();
+  src.buffer = STEP_BUF;
+  // Faster steps if ghost is fast
+  src.playbackRate.value = ghost.state === 'hunt' ? 1.15 : 1.0;
+
+  const gain = AC.createGain();
+  gain.gain.value = v * 0.8; // master volume
+
+  src.connect(gain).connect(AC.destination);
+  src.start();
+}
+
+/* ===========================================================
+   GHOST UPDATE
+   =========================================================== */
+function updateGhost(dt){
+  if(!ghost.mesh || !ghost.alive) return;
+
+  // Wandering target
+  if(!ghost.target || BABYLON.Vector3.Distance(ghost.mesh.position, ghost.target) < 1.5){
+    ghost.target = randomPointInPolygonXZ(ghostPolygon);
+  }
+
+  const tgt = new BABYLON.Vector3(ghost.target.x, pickGroundHeightAt(ghost.target.x, ghost.target.z), ghost.target.z);
+  let dir = tgt.subtract(ghost.mesh.position);
+  dir.y = 0;
+  const d = dir.length();
+
+  if(d>0.001){
+    dir.normalize();
+    const before = ghost.mesh.position.clone();
+    ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt)); // time-based
+    ghost.mesh.position.y = pickGroundHeightAt(ghost.mesh.position.x, ghost.mesh.position.z);
+    lookAtXZ(ghost.mesh, tgt);
+
+    // step accumulator (distance moved)
+    const moved = BABYLON.Vector3.Distance(before, ghost.mesh.position);
+    ghost.stepAcc += moved;
+    if (ghost.state === 'hunt' && ghost.stepAcc >= ghost.stepStride){
+      ghost.stepAcc = 0;
+      const distToPlayer = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+      playFootstep(distToPlayer);
+    }
+
+    if(ghost.anims.walk && !ghost.anims.walk.isPlaying){ if(ghost.anims.idle) ghost.anims.idle.stop(); ghost.anims.walk.start(true); }
+  } else {
+    if(ghost.anims.idle && !ghost.anims.idle.isPlaying){ if(ghost.anims.walk) ghost.anims.walk.stop(); ghost.anims.idle.start(true); }
+  }
+
+  const pd = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+  if(pd < 6 && Math.random()<0.002){ audio.whisper.play().catch(()=>{}); }
+
+  // Hunt lifecycle
+  sinceLastHunt += dt;
+  if (ghost.state === 'roam'){
+    if (canHunt()) beginHunt();
+  } else {
+    huntTimer += dt;
+    // stop conditions: player in van, too long, or got far enough away
+    if (player.room === 'Van' || huntTimer > huntMaxDuration || pd > 28){
+      endHunt();
+    }
+  }
+
+  __devGhostLogTimer += dt;
+  if(__devGhostLogTimer > 1){
+    __devGhostLogTimer=0;
+    devBus.dispatchEvent(new CustomEvent('ghost', { detail:{ state:ghost.state, room:player.room, action:'move', speed:ghost.speed, hunt:(ghost.state==='hunt') }}));
+  }
+}
+
+function updateGhostVisibility(){
+  if (!ghost.mesh) return;
+  const shouldBeVisible = ghost.forceReveal || (ghost.state === 'hunt');
+  ghost.mesh.isVisible = !!shouldBeVisible;
+}
+
+/* ===========================================================
+   MAIN LOOP
+   =========================================================== */
+scene.onBeforeRenderObservable.add(()=>{
+  const dt = engine.getDeltaTime()/1000;
+  handleMovement(dt);
+  sanityUpdate(dt);
+
+  if(weather.state==='Rain'){
+    weather.lightningTimer += dt;
+    if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
+  }
+  updateGhost(dt);
+  updatePhoenix(dt);
+  updateHUD();
+});
+engine.runRenderLoop(()=> scene.render());
+window.addEventListener('resize', ()=> engine.resize());
+
+/* ===========================================================
+   START / UI / KEYS
+   =========================================================== */
+let __started = false;
+function safeStart() {
+  if (__started) return;
+  __started = true;
+
+  // Resume WebAudio for footsteps and our HTML audio
+  ensureAudioCtx();
+  try { AC.resume(); } catch {}
+  Object.values(audio).forEach(a=>{ try{ a.play().then(()=>a.pause()).catch(()=>{});}catch{} });
+
+  // Hide title
+  const scr = document.getElementById('title-screen'); if (scr) scr.style.display = 'none';
+
+  // Weather + ghost pick
+  const w = Math.random() < 0.5 ? 'Clear' : 'Rain';
+  setWeather(w);
+  playWeatherAudio();
+
+  const keys = Object.keys(GHOSTS);
+  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+
+  toast('Investigation started. Suspected: ???', 1400);
+}
+
+function initUI(){
+  document.getElementById('start-button').onclick = safeStart;
 
   document.getElementById('storage-button').onclick = ()=> openStorage();
-  document.getElementById('storage-close').onclick = ()=> closeStorage();
+  document.getElementById('storage-close').onclick   = ()=> closeStorage();
   document.getElementById('storage-confirm').onclick = ()=> confirmLoadout();
 
-  document.getElementById('notebook-close').onclick = ()=> closeNotebook();
+  document.getElementById('notebook-close').onclick  = ()=> closeNotebook();
 
   // Dev gate
   document.getElementById('dev-yes').onclick = ()=> { document.getElementById('dev-pass-wrap').style.display='block'; };
@@ -1050,55 +1214,6 @@ window.addEventListener('keyup', (e)=>{
   if(e.key==='a'||e.key==='A') controls.left=false;
   if(e.key==='d'||e.key==='D') controls.right=false;
 });
-
-/* ===========================================================
-   GHOST UPDATE
-   =========================================================== */
-function updateGhost(dt){
-  if(!ghost.mesh || !ghost.alive) return;
-
-  if(!ghost.target || BABYLON.Vector3.Distance(ghost.mesh.position, ghost.target) < 1.5){
-    ghost.target = randomPointInPolygonXZ(ghostPolygon);
-  }
-
-  const tgt = new BABYLON.Vector3(ghost.target.x, pickGroundHeightAt(ghost.target.x, ghost.target.z), ghost.target.z);
-  let dir = tgt.subtract(ghost.mesh.position);
-  dir.y = 0; // <<< keep horizontal (prevents vertical drift)
-  const d = dir.length();
-
-  if(d>0.001){
-    dir.normalize();
-    ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt)); // time-based
-    ghost.mesh.position.y = pickGroundHeightAt(ghost.mesh.position.x, ghost.mesh.position.z); // clamp to ground
-    lookAtXZ(ghost.mesh, tgt);
-    if(ghost.anims.walk && !ghost.anims.walk.isPlaying){ if(ghost.anims.idle) ghost.anims.idle.stop(); ghost.anims.walk.start(true); }
-  } else {
-    if(ghost.anims.idle && !ghost.anims.idle.isPlaying){ if(ghost.anims.walk) ghost.anims.walk.stop(); ghost.anims.idle.start(true); }
-  }
-
-  const pd = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
-  if(pd < 6 && Math.random()<0.002){ audio.whisper.play().catch(()=>{}); }
-
-  __devGhostLogTimer += dt;
-  if(__devGhostLogTimer > 1){ __devGhostLogTimer=0; devBus.dispatchEvent(new CustomEvent('ghost', { detail:{ state:'wandering', room:player.room, action:'move', speed:ghost.speed, hunt:false }})); }
-}
-
-/* ===========================================================
-   MAIN LOOP
-   =========================================================== */
-scene.onBeforeRenderObservable.add(()=>{
-  const dt = engine.getDeltaTime()/1000;
-  handleMovement(dt);
-
-  if(weather.state==='Rain'){
-    weather.lightningTimer += dt;
-    if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
-  }
-  updateGhost(dt);
-  updatePhoenix(dt);
-});
-engine.runRenderLoop(()=> scene.render());
-window.addEventListener('resize', ()=> engine.resize());
 
 /* ===========================================================
    BOOTSTRAP
