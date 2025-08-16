@@ -230,41 +230,40 @@
     </div>
   </div>
 
-<!-- Developer toggle -->
-<button id="devtools-toggle" class="hud-btn">Dev Tools</button>
+  <!-- Developer toggle + panel -->
+  <button id="devtools-toggle" class="hud-btn">Dev Tools</button>
 
-<!-- Developer panel -->
-<div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:420px;max-height:70vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <strong>Developer Tools</strong>
-    <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
-  </div>
-
-  <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
-    <legend>Listen Groups</legend>
-    <label><input id="devtools-group-ghost" type="checkbox" checked> Ghost tracking</label><br>
-    <label><input id="devtools-group-evidence" type="checkbox"> Evidence item activity</label><br>
-    <label><input id="devtools-group-xyz" type="checkbox"> XYZ tracker (player)</label>
-  </fieldset>
-
-  <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
-    <legend>Map Recorder</legend>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-      <button id="devtools-map-start" class="hud-btn">Start Map</button>
-      <button id="devtools-map-pin" class="hud-btn" disabled>Pin</button>
-      <button id="devtools-map-confirm" class="hud-btn" disabled>Confirm</button>
-      <select id="devtools-room-select" style="flex:1;min-width:160px;">
-        <option value="">Select room…</option>
-        <!-- populate dynamically if you have a room list; static options are fine too -->
-      </select>
+  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:420px;max-height:70vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong>Developer Tools</strong>
+      <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
     </div>
-  </fieldset>
 
-  <div>
-    <label for="devtools-log">Developer Log</label>
-    <textarea id="devtools-log" style="width:100%;height:180px;background:#0b0b0b;color:#a8f;resize:vertical;border:1px solid #333;border-radius:8px;padding:8px;" readonly></textarea>
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Listen Groups</legend>
+      <label><input id="devtools-group-ghost" type="checkbox" checked> Ghost tracking</label><br>
+      <label><input id="devtools-group-evidence" type="checkbox"> Evidence item activity</label><br>
+      <label><input id="devtools-group-xyz" type="checkbox"> XYZ tracker (player)</label>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Map Recorder</legend>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button id="devtools-map-start" class="hud-btn">Start Map</button>
+        <button id="devtools-map-pin" class="hud-btn" disabled>Pin</button>
+        <button id="devtools-map-confirm" class="hud-btn" disabled>Confirm</button>
+        <select id="devtools-room-select" style="flex:1;min-width:160px;">
+          <option value="">Select room…</option>
+        </select>
+      </div>
+    </fieldset>
+
+    <div>
+      <label for="devtools-log">Developer Log</label>
+      <textarea id="devtools-log" style="width:100%;height:180px;background:#0b0b0b;color:#a8f;resize:vertical;border:1px solid #333;border-radius:8px;padding:8px;" readonly></textarea>
+    </div>
   </div>
-</div>
+
   <!-- Item hand preview -->
   <div id="hand-preview"></div>
 
@@ -302,6 +301,9 @@ let dev = { enabled: false, gateOpen: false, log: [] };
 let activeItemSlot = 1;
 let inventory = { slots: {1:null,2:null,3:null,4:'Lighter',5:'Notebook'}, models: {}, icons: {} };
 let itemSceneContainer = null; // hand preview scene
+const devBus = new EventTarget(); // 🔸 Devtools event bus
+let __devGhostLogTimer = 0;       // 🔸 throttle for ghost logs
+
 const STORAGE_ITEMS = [
   'EMF', 'Spirit Box', 'Thermometer', 'Crucifix', 'Salt', 'Smudge',
   'Camera', 'UV Light', 'D.O.T.S', 'Ghost Writing Book', 'Motion Sensor'
@@ -389,9 +391,7 @@ function pointInPolyXZ(p, poly){
   }
   return inside;
 }
-function vecToYaw(v){
-  return Math.atan2(v.x, v.z); // yaw around Y
-}
+function vecToYaw(v){ return Math.atan2(v.x, v.z); }
 function lookAtXZ(mesh, target){
   const dir = target.subtract(mesh.position); dir.y = 0;
   if(dir.lengthSquared() > 0.001){
@@ -558,9 +558,7 @@ async function loadItems(){
    =========================================================== */
 async function loadGhost(){
   // pick one of the ghost files randomly
-  const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"].filter(fn=>{
-    try { return true; } catch(e){ return false; }
-  });
+  const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
   const pick = list[Math.floor(Math.random()*list.length)];
   const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
   ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
@@ -573,7 +571,6 @@ async function loadGhost(){
   const targetHeight = 1.9;
   const scale = targetHeight / (height || 1);
   ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
-  // Face forward on +Z initially
   ghost.mesh.rotation = new BABYLON.Vector3(0, 0, 0);
 
   // Animations
@@ -712,26 +709,35 @@ function refreshHandPreview(){
   wrap.innerHTML = '';
   const item = inventory.slots[activeItemSlot];
   if(!item || !itemsGlb) { wrap.style.display='none'; return; }
-  // small scene for preview
-  const pv = new BABYLON.Engine(wrap, true);
+
+  // Create a canvas for the preview engine
+  const c = document.createElement('canvas');
+  c.width = 180; c.height = 140;
+  c.style.width = '100%'; c.style.height = '100%';
+  wrap.appendChild(c);
+
+  const pv = new BABYLON.Engine(c, true);
   const pvScene = new BABYLON.Scene(pv);
   const pvCam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), pvScene);
-  pvCam.attachControl(wrap, false);
+  pvCam.attachControl(c, false);
   pvCam.panningSensibility = 0;
   pvCam.wheelPrecision = 50;
   pvScene.clearColor = new BABYLON.Color4(0,0,0,0);
   const hem = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), pvScene);
   hem.intensity = 1.2;
+
   // clone mesh by name
   const meshName = ITEM_MODEL_MAP[item];
   let src = meshName && inventory.models[meshName];
   if(!src){ wrap.style.display='none'; pv.dispose(); return; }
+
   const clone = src.clone("pv-"+meshName, null, true);
   pvScene.addMesh(clone);
   // orientation correction (items often sideways/upside-down)
   clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0);
   clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
   wrap.style.display='block';
+
   pv.runRenderLoop(()=>{ pvScene.render(); });
   window.addEventListener('resize', ()=> pv.resize());
 }
@@ -754,6 +760,10 @@ function logEvidence(type){
     const cb = document.querySelector(`input[data-ev="${type}"]`);
     if(cb){ cb.checked = true; }
   }
+  // 🔸 Devtools evidence tap
+  if (window.__onEvidenceLogged) {
+    window.__onEvidenceLogged({ item: type, result: type, room: player.room, success: true });
+  }
 }
 function useActiveItem(){
   const item = inventory.slots[activeItemSlot]; if(!item) return;
@@ -761,31 +771,26 @@ function useActiveItem(){
   const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
   switch(item){
     case 'EMF':
-      // If near ghost, chance to hit EMF 5
       if(dist < 5){
         if(Math.random() < 0.5) logEvidence("EMF Level 5");
         toast("EMF spikes!", 1000);
       } else toast("EMF quiet.", 800);
       break;
     case 'Spirit Box':
-      // Only if near ghost and not in van
       if(player.room!=='Van' && dist < 4){
         if(Math.random() < 0.55){ audio.spiritbox.play().catch(()=>{}); logEvidence("Spirit Box"); }
         else { audio.spiritStatic.play().catch(()=>{}); toast("...static...", 900); }
       } else toast("No response.", 800);
       break;
     case 'Thermometer':
-      // If near ghost or in its "area", register freezing
       if(dist < 6 && Math.random() < 0.5){ logEvidence("Freezing Temps"); toast("It’s unnaturally cold here.", 900); }
       else toast("Temp normal.", 900);
       break;
     case 'UV Light':
-      // If near a door and ghost recently "touched" (simulate)
       if(Math.random()<0.4){ logEvidence("Fingerprints"); toast("A latent mark glows faintly.", 1000); }
       else toast("Nothing glows.", 900);
       break;
     case 'Ghost Writing Book':
-      // Place & wait (simulate instant for demo)
       audio.writing.play().catch(()=>{});
       setTimeout(()=>{ logEvidence("Ghost Writing"); }, 1200);
       toast("You place the book down...", 900);
@@ -795,7 +800,6 @@ function useActiveItem(){
       else toast("Nothing passes through.", 900);
       break;
     case 'Camera':
-      // Orbs only via camera
       showCameraOrb();
       if(Math.random()<0.4){ logEvidence("Orbs"); }
       break;
@@ -934,15 +938,134 @@ function addToLoadout(item){
 function confirmLoadout(){ closeStorage(); }
 
 /* ===========================================================
-   DEV PANEL
+   DEVTOOLS (links #devtools-* panel to game)
    =========================================================== */
-function openDevGate(){
-  const g = document.getElementById('dev-gate'); g.style.display='flex'; dev.gateOpen=true;
-}
-function closeDevGate(){ document.getElementById('dev-gate').style.display='none'; dev.gateOpen=false; }
-function openDevPanel(){ document.getElementById('dev-panel').style.display='flex'; }
-function closeDevPanel(){ document.getElementById('dev-panel').style.display='none'; }
-function devLog(s){ dev.log.push(s); const el = document.getElementById('dev-log'); el.textContent = dev.log.slice(-200).join("\n"); el.scrollTop = el.scrollHeight; }
+(function setupDevTools(){
+  const $ = s => document.querySelector(s);
+
+  const toggleBtn   = $('#devtools-toggle');
+  const panel       = $('#devtools-panel');
+  const enableBtn   = $('#devtools-enable');
+  const chkGhost    = $('#devtools-group-ghost');
+  const chkEv       = $('#devtools-group-evidence');
+  const chkXYZ      = $('#devtools-group-xyz');
+  const mapStartBtn = $('#devtools-map-start');
+  const mapPinBtn   = $('#devtools-map-pin');
+  const mapOkBtn    = $('#devtools-map-confirm');
+  const roomSel     = $('#devtools-room-select');
+  const logTa       = $('#devtools-log');
+
+  let xyzTicker = null;
+  let mapping   = null; // {points:[]}
+
+  function log(msg){
+    if(!logTa) return;
+    const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+    logTa.value += line;
+    logTa.scrollTop = logTa.scrollHeight;
+    console.debug('%cDEV','color:#8af', msg);
+  }
+  function setEnabled(el,on){ if(!el) return; el.disabled=!on; el.style.opacity=on?'1':'0.6'; }
+
+  // Expose minimal API for gate → panel
+  window.DevTools = {
+    showToggle(){ if(toggleBtn) toggleBtn.style.display='block'; },
+    open(){ if(panel) panel.style.display='block'; },
+    close(){ if(panel) panel.style.display='none'; },
+    log
+  };
+
+  // Start hidden until dev enabled
+  if(toggleBtn) toggleBtn.style.display = 'none';
+
+  // Toggle button shows/hides the panel
+  toggleBtn?.addEventListener('click', ()=>{
+    panel.style.display = (panel.style.display==='block') ? 'none' : 'block';
+  });
+
+  // Enable “listen” → subscribe to groups
+  enableBtn?.addEventListener('click', ()=>{
+    const on = enableBtn.dataset.on==='1' ? false : true;
+    enableBtn.dataset.on = on ? '1':'0';
+    enableBtn.textContent = on ? 'Disable Developer Listen' : 'Enable Developer Listen';
+    log(on ? 'Developer Listen: ON' : 'Developer Listen: OFF');
+
+    // Ghost tracking
+    if (chkGhost) {
+      if (on && chkGhost.checked) devBus.addEventListener('ghost', ghostLogger);
+      else                         devBus.removeEventListener('ghost', ghostLogger);
+    }
+    // Evidence activity
+    if (chkEv) {
+      if (on && chkEv.checked) window.__onEvidenceLogged = (d)=> evidenceLogger(d);
+      else                     window.__onEvidenceLogged = null;
+    }
+    // XYZ tracker (player)
+    if (chkXYZ) {
+      if (on && chkXYZ.checked) startXYZ();
+      else                      stopXYZ();
+    }
+  });
+
+  chkGhost?.addEventListener('change', ()=>{
+    if (enableBtn?.dataset.on==='1') {
+      if (chkGhost.checked) devBus.addEventListener('ghost', ghostLogger);
+      else                  devBus.removeEventListener('ghost', ghostLogger);
+    }
+  });
+  chkXYZ?.addEventListener('change', ()=>{
+    if (enableBtn?.dataset.on==='1') {
+      if (chkXYZ.checked) startXYZ();
+      else                stopXYZ();
+    }
+  });
+
+  // Map recorder
+  setEnabled(mapPinBtn,false);
+  setEnabled(mapOkBtn,false);
+  mapStartBtn?.addEventListener('click', ()=>{
+    mapping = { points: [] };
+    setEnabled(mapPinBtn,true);
+    setEnabled(mapOkBtn,true);
+    log('Map recording started. Use “Pin”.');
+  });
+  mapPinBtn?.addEventListener('click', ()=>{
+    if(!mapping) return;
+    const p = camera?.position || {x:0,y:0,z:0};
+    mapping.points.push({x:p.x,y:p.y,z:p.z});
+    log(`Pinned: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`);
+  });
+  mapOkBtn?.addEventListener('click', ()=>{
+    if(!mapping) return;
+    const name = roomSel?.value?.trim() || 'Unnamed';
+    window.__mappedRooms = window.__mappedRooms || [];
+    window.__mappedRooms.push({ name, points: mapping.points });
+    log(`Map "${name}" saved (${mapping.points.length} pins).`);
+    mapping = null;
+    setEnabled(mapPinBtn,false);
+    setEnabled(mapOkBtn,false);
+  });
+
+  // Loggers
+  function ghostLogger(e){
+    const d = e?.detail || {};
+    log(`Ghost: state=${d.state??'n/a'} room=${d.room??'n/a'} action=${d.action??'n/a'} speed=${typeof d.speed==='number'?d.speed.toFixed(2):'n/a'} hunt=${!!d.hunt}`);
+  }
+  function evidenceLogger(d){
+    // d: { item, result, room, success }
+    log(`Evidence: ${d.item} -> ${d.result??'none'} in ${d.room??'unknown'} (${d.success?'ok':'fail'})`);
+  }
+  function startXYZ(){
+    stopXYZ();
+    xyzTicker = setInterval(()=>{
+      const p = camera?.position || {x:0,y:0,z:0};
+      log(`XYZ: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`);
+    }, 1000);
+  }
+  function stopXYZ(){ if(xyzTicker){ clearInterval(xyzTicker); xyzTicker=null; } }
+
+  log('Devtools wired.');
+})();
 
 /* ===========================================================
    STARTUP / EVENT BINDINGS
@@ -985,20 +1108,9 @@ function initUI(){
   document.getElementById('dev-pass-submit').onclick = ()=>{
     const pw = (document.getElementById('dev-pass').value||'').trim();
     if(pw === 'devmode'){
-      dev.enabled = true; closeDevGate(); openDevPanel(); devLog('Developer mode enabled.');
+      dev.enabled = true; closeDevGate(); DevTools.showToggle(); DevTools.open(); DevTools.log('Developer mode enabled.');
     } else toast('Wrong password.', 900);
   };
-  document.getElementById('dev-close').onclick = ()=> closeDevPanel();
-  document.getElementById('dev-teleport').onclick = ()=>{
-    if(ghost.mesh){ camera.position = ghost.mesh.position.add(new BABYLON.Vector3(0,1.7, -2)); devLog('Teleported to ghost.'); }
-  };
-  document.getElementById('dev-god').onchange = (e)=>{ player.god = e.target.checked; devLog(`God mode: ${player.god}`); };
-  document.getElementById('dev-fly').onchange = (e)=>{ allowFly = e.target.checked; devLog(`Fly enabled: ${allowFly}`); };
-  document.getElementById('dev-ping').onclick = ()=>{
-    const p = camera.position; const msg = `PING @ x:${p.x.toFixed(3)} y:${p.y.toFixed(3)} z:${p.z.toFixed(3)}`;
-    devLog(msg);
-  };
-  document.getElementById('dev-inspector').onclick = ()=>{ if(scene.debugLayer.isVisible()) scene.debugLayer.hide(); else scene.debugLayer.show({ embedMode:true }); };
 
   // Belt
   rebuildBelt();
@@ -1017,7 +1129,14 @@ function initUI(){
     hold(document.getElementById('t-right'), ()=>{ controls.right=true; }, ()=>{ controls.right=false; });
     document.getElementById('t-use').addEventListener('touchstart', e=>{ e.preventDefault(); useActiveItem(); });
   }
+
+  // Hide Dev Tools toggle until enabled
+  const _dtToggle = document.getElementById('devtools-toggle');
+  if (_dtToggle) _dtToggle.style.display = 'none';
 }
+function openDevGate(){ const g = document.getElementById('dev-gate'); g.style.display='flex'; dev.gateOpen=true; }
+function closeDevGate(){ document.getElementById('dev-gate').style.display='none'; dev.gateOpen=false; }
+
 const keysDown = {};
 window.addEventListener('keydown', (e)=>{
   keysDown[e.key] = true;
@@ -1040,8 +1159,10 @@ window.addEventListener('keydown', (e)=>{
 
   // Dev gate (ESC)
   if(e.key==='Escape'){
-    if(dev.enabled){ if(document.getElementById('dev-panel').style.display==='flex') closeDevPanel(); else openDevPanel(); }
-    else openDevGate();
+    if(dev.enabled){
+      const dp = document.getElementById('devtools-panel');
+      dp.style.display = (dp.style.display==='block') ? 'none' : 'block';
+    } else openDevGate();
   }
 });
 window.addEventListener('keyup', (e)=>{
@@ -1077,6 +1198,15 @@ function updateGhost(dt){
   // Random whispers near player
   const pd = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
   if(pd < 6 && Math.random()<0.002){ audio.whisper.play().catch(()=>{}); }
+
+  // 🔸 Dev ghost event stream (1 Hz)
+  __devGhostLogTimer += dt;
+  if (__devGhostLogTimer > 1) {
+    __devGhostLogTimer = 0;
+    devBus.dispatchEvent(new CustomEvent('ghost', {
+      detail: { state: 'wandering', room: player.room, action: 'move', speed: ghost.speed, hunt: false }
+    }));
+  }
 }
 
 /* ===========================================================
