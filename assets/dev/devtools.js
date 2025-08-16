@@ -131,24 +131,28 @@ function ensureModelViewer(ctx){
   Object.assign(root.style, { position:'fixed', inset:'0', display:'none', zIndex:'70',
     background:'rgba(0,0,0,.72)', alignItems:'center', justifyContent:'center' });
   root.innerHTML = `
-  <div class="modal" style="width:min(1020px,95vw); max-height:92vh; overflow:auto; background:linear-gradient(180deg,#07131a,#081017); border:1px solid #0ff; border-radius:14px; padding:12px; color:#cfffff; box-shadow:0 0 20px rgba(0,255,255,.22)">
+  <div class="modal" style="width:min(1100px,95vw); max-height:92vh; overflow:auto; background:linear-gradient(180deg,#07131a,#081017); border:1px solid #0ff; border-radius:14px; padding:12px; color:#cfffff; box-shadow:0 0 20px rgba(0,255,255,.22)">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
       <strong>Model Viewer / Spawner</strong>
       <div>
         <button id="mvExportGLB" class="btn">Export GLB</button>
+        <button id="mvExportJSON" class="btn">Export JSON</button>
         <button id="mvExportTextures" class="btn">Download Textures</button>
+        <button id="mvUnlit" class="btn" title="Toggle temporary unlit preview">Unlit: OFF</button>
         <button id="mvSnapshot" class="btn">Snapshot PNG</button>
         <button id="mvClose" class="btn">Close</button>
       </div>
     </div>
+
     <div class="row" style="gap:10px; flex-wrap:wrap;">
       <label class="btn" for="mvFile">Choose File</label>
       <input id="mvFile" type="file" accept=".glb,.gltf,.obj,.stl,.zip" style="display:none">
-      <span class="muted">Drag & drop .glb/.gltf here • FBX not supported (convert to glTF)</span>
+      <span class="muted">Drag & drop .glb/.gltf here • Click ground to set spawn point</span>
     </div>
     <div id="mvDrop" style="margin-top:10px; border:1px dashed #0ff6; border-radius:10px; padding:16px; text-align:center;">
-      Drop file here to spawn<br><span class="muted">(click a point in scene to set spawn, else spawns in front of camera)</span>
+      Drop file here to spawn
     </div>
+
     <div class="grid" style="margin-top:10px;">
       <div class="card" style="grid-column:span 12;">
         <div class="row" style="gap:8px; flex-wrap:wrap;">
@@ -166,12 +170,333 @@ function ensureModelViewer(ctx){
           <button id="mvGizmoScale" class="btn">Gizmo: Scale</button>
         </div>
       </div>
+
+      <div class="card" style="grid-column:span 12;">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <strong>Pivot Data</strong>
+          <input id="mvFilter" type="text" placeholder="filter meshes/materials/textures…" style="width:260px">
+        </div>
+        <div class="grid" style="margin-top:8px;">
+          <div class="card" style="grid-column:span 12;">
+            <details open>
+              <summary>Meshes (<span id="mvCountMeshes">0</span>)</summary>
+              <div id="mvMeshes"></div>
+            </details>
+          </div>
+          <div class="card" style="grid-column:span 12;">
+            <details>
+              <summary>Materials (<span id="mvCountMats">0</span>)</summary>
+              <div id="mvMats"></div>
+            </details>
+          </div>
+          <div class="card" style="grid-column:span 12;">
+            <details>
+              <summary>Textures (<span id="mvCountTex">0</span>)</summary>
+              <div id="mvTex"></div>
+            </details>
+          </div>
+        </div>
+      </div>
+
       <div class="card" style="grid-column:span 12;">
         <div class="muted">Loaded nodes:</div>
         <pre id="mvList" style="margin:0; max-height:220px; overflow:auto; background:#03131a; border:1px solid #0a3; padding:8px; border-radius:8px;"></pre>
       </div>
     </div>
   </div>`;
+  document.body.appendChild(root);
+
+  const giz = ensureGizmo(scene);
+
+  let pivot = null;
+  let lastPickedPoint = null;
+  let unlitOn = false;
+  const _storedMats = new Map(); // node -> original material
+
+  function byId(id){ return document.getElementById(id); }
+  function open(){ root.style.display='flex'; updateFieldsFromPivot(); refreshPivotData(); }
+  function close(){ root.style.display='none'; }
+  function updateFieldsFromPivot(){
+    if(!pivot) return;
+    byId('mvX').value = (pivot.position.x||0).toFixed(3);
+    byId('mvY').value = (pivot.position.y||0).toFixed(3);
+    byId('mvZ').value = (pivot.position.z||0).toFixed(3);
+    byId('mvRY').value = (pivot.rotation?.y? (pivot.rotation.y*180/Math.PI).toFixed(1):'0');
+    const s = pivot.scaling?.x || 1; byId('mvS').value = s.toFixed(3);
+  }
+  function setPivot(node){
+    pivot = node;
+    DT.sel = pivot;
+    giz.attachToMesh(pivot);
+    ensureHL(scene)?.addMesh(pivot, BABYLON.Color3.Teal()); setTimeout(()=> ensureHL(scene)?.removeMesh(pivot), 900);
+    updateFieldsFromPivot();
+    refreshPivotData();
+  }
+
+  function listChildren(){
+    const pre = byId('mvList'); if(!pre) return;
+    if(!pivot){ pre.textContent='(none)'; return; }
+    pre.textContent = pivot.getChildren().map(n=> n.name).join('\\n');
+  }
+
+  function collectPivot(){
+    const meshes = [];
+    const matsMap = new Map();
+    const texMap  = new Map();
+    if(!pivot) return { meshes, materials:[], textures:[] };
+
+    const kids = pivot.getChildMeshes(true);
+    kids.forEach(m=>{
+      const mat = m.material;
+      meshes.push({
+        name: m.name || '(unnamed)',
+        vertices: m.getTotalVertices?.()||0,
+        indices: m.getTotalIndices?.()||0,
+        material: mat?.name || null,
+        pickable: !!m.isPickable,
+        collisions: !!m.checkCollisions
+      });
+      if(mat){
+        const mkey = mat.uniqueId || mat.name || Math.random().toString(36).slice(2);
+        if(!matsMap.has(mkey)){
+          matsMap.set(mkey, {
+            name: mat.name||'(unnamed)',
+            class: mat.getClassName?.() || 'Material',
+            alpha: mat.alpha,
+            metallic: mat.metallic || undefined,
+            roughness: mat.roughness || undefined,
+            backFaceCulling: mat.backFaceCulling
+          });
+        }
+        const pushTex = (t, kind)=>{
+          if(!t) return;
+          const url = t.url || t._texture?.url || '';
+          const key = url || (kind+Math.random());
+          if(!texMap.has(key)) texMap.set(key, { kind, url });
+        };
+        pushTex(mat.albedoTexture || mat.diffuseTexture, 'albedo/diffuse');
+        pushTex(mat.normalTexture || mat.bumpTexture, 'normal');
+        pushTex(mat.metallicTexture, 'metallic/orm');
+        pushTex(mat.opacityTexture, 'opacity');
+        pushTex(mat.emissiveTexture, 'emissive');
+      }
+    });
+    return { meshes, materials: Array.from(matsMap.values()), textures: Array.from(texMap.values()) };
+  }
+
+  function makeTable(rows, cols, onClick){
+    const tbl = document.createElement('table');
+    Object.assign(tbl.style, { width:'100%', borderCollapse:'collapse', fontSize:'12px' });
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    cols.forEach(c=>{
+      const th = document.createElement('th');
+      th.textContent = c; th.style.textAlign = 'left'; th.style.borderBottom = '1px solid #0a3b3f'; th.style.padding = '4px';
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    const tbody = document.createElement('tbody');
+    rows.forEach(r=>{
+      const tr = document.createElement('tr');
+      tr.style.cursor = onClick ? 'pointer' : 'default';
+      cols.forEach(c=>{
+        const td = document.createElement('td');
+        td.textContent = (r[c]!==undefined && r[c]!==null) ? (typeof r[c]==='object'? JSON.stringify(r[c]) : String(r[c])) : '';
+        td.style.borderBottom = '1px solid #082028'; td.style.padding = '4px';
+        tr.appendChild(td);
+      });
+      if(onClick) tr.addEventListener('click', ()=> onClick(r));
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(thead); tbl.appendChild(tbody);
+    return tbl;
+  }
+
+  let lastData = { meshes:[], materials:[], textures:[] };
+  function refreshPivotData(){
+    if(!pivot){ byId('mvMeshes').innerHTML=''; byId('mvMats').innerHTML=''; byId('mvTex').innerHTML=''; return; }
+    lastData = collectPivot();
+    byId('mvCountMeshes').textContent = String(lastData.meshes.length);
+    byId('mvCountMats').textContent   = String(lastData.materials.length);
+    byId('mvCountTex').textContent    = String(lastData.textures.length);
+    renderFiltered();
+  }
+
+  function filterData(q){
+    if(!q) return lastData;
+    const s = q.toLowerCase();
+    const f = (obj)=> JSON.stringify(obj).toLowerCase().includes(s);
+    return {
+      meshes: lastData.meshes.filter(f),
+      materials: lastData.materials.filter(f),
+      textures: lastData.textures.filter(f)
+    };
+  }
+  function renderFiltered(){
+    const q = byId('mvFilter').value || '';
+    const data = filterData(q);
+    const meshesHost = byId('mvMeshes'); meshesHost.innerHTML='';
+    const matsHost   = byId('mvMats');   matsHost.innerHTML='';
+    const texHost    = byId('mvTex');    texHost.innerHTML='';
+
+    const mtbl = makeTable(data.meshes, ['name','vertices','indices','material','pickable','collisions'], (row)=>{
+      // highlight by name
+      const m = pivot.getChildMeshes(true).find(x=> x.name===row.name);
+      if(m){ flash(m); select(m); }
+    });
+    const matbl = makeTable(data.materials, ['name','class','alpha','metallic','roughness','backFaceCulling']);
+    const ttbl = makeTable(data.textures, ['kind','url'], (row)=>{
+      try{ const a=document.createElement('a'); a.href=row.url; a.download=(row.url.split('/').pop()||'texture.png'); a.click(); }catch{}
+    });
+
+    meshesHost.appendChild(mtbl);
+    matsHost.appendChild(matbl);
+    texHost.appendChild(ttbl);
+  }
+
+  byId('mvFilter').addEventListener('input', renderFiltered);
+
+  const giz = ensureGizmo(scene);
+
+  function exportGLB(){
+    try{
+      if(!window.BABYLON?.GLTF2Export){ alert("GLB export requires babylon.glTF2Serializer.min.js"); return; }
+      if(!pivot){ alert('Nothing selected to export'); return; }
+      const meshes = pivot.getChildMeshes(true);
+      const tmp = new BABYLON.TransformNode('tmpExport', scene);
+      meshes.forEach(m=>{ m.setParent(tmp); });
+      BABYLON.GLTF2Export.GLBAsync(scene, 'selection').then(glb=>{
+        glb.downloadFiles();
+        // restore parents
+        meshes.forEach(m=>{ m.setParent(pivot); });
+        tmp.dispose();
+      });
+    }catch(e){ console.error(e); alert('Export failed: '+e); }
+  }
+
+  function exportJSON(){
+    const meta = {
+      name: pivot?.name || 'spawnPivot',
+      position: pivot ? { x:pivot.position.x, y:pivot.position.y, z:pivot.position.z } : null,
+      rotationY: pivot?.rotation?.y || 0,
+      scale: pivot?.scaling?.x || 1,
+      data: lastData
+    };
+    const blob = new Blob([JSON.stringify(meta, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='pivot.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=> URL.revokeObjectURL(url), 0);
+  }
+
+  async function downloadTextures(){
+    if(!pivot){ alert('No selection'); return; }
+    const a = document.createElement('a');
+    const seen = new Set();
+    lastData.textures.forEach(t=>{
+      if(t.url && !seen.has(t.url)){
+        seen.add(t.url);
+        try{ a.href=t.url; a.download=(t.url.split('/').pop()||'texture.png'); a.click(); }catch(e){ console.warn('Download failed for', t.url, e); }
+      }
+    });
+  }
+
+  async function snapshotPNG(){
+    try{
+      const data = await BABYLON.Tools.CreateScreenshotUsingRenderTargetAsync(DT.ctx.engine, DT.ctx.game.camera, { width: 1024, height: 1024 });
+      const a = document.createElement('a'); a.href = data; a.download = 'snapshot.png'; a.click();
+    }catch(e){ console.warn(e); alert('Snapshot failed'); }
+  }
+
+  function setUnlit(on){
+    unlitOn = !!on;
+    const kids = pivot?.getChildMeshes(true) || [];
+    if(unlitOn){
+      kids.forEach(m=>{
+        if(!_storedMats.has(m)) _storedMats.set(m, m.material||null);
+        const mat = new BABYLON.StandardMaterial('unlit', scene);
+        mat.disableLighting = true;
+        // show something meaningful
+        const src = _storedMats.get(m);
+        if(src && (src.albedoTexture||src.diffuseTexture)){
+          mat.emissiveTexture = src.albedoTexture || src.diffuseTexture;
+        }else{
+          mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        }
+        m.material = mat;
+      });
+    }else{
+      kids.forEach(m=>{
+        if(_storedMats.has(m)){
+          m.material = _storedMats.get(m);
+        }
+      });
+    }
+    byId('mvUnlit').textContent = 'Unlit: ' + (unlitOn ? 'ON' : 'OFF');
+  }
+
+  // file input + drop
+  function readFile(file){
+    const url = URL.createObjectURL(file);
+    spawnFromURL(url, file.name.toLowerCase()).then(()=> URL.revokeObjectURL(url));
+  }
+  byId('mvFile').addEventListener('change', (ev)=>{ const f=ev.target.files?.[0]; if(f) readFile(f); ev.target.value=''; });
+  const drop = byId('mvDrop');
+  function over(ev){ ev.preventDefault(); drop.style.background='rgba(0,255,255,0.08)'; }
+  function leave(){ drop.style.background='transparent'; }
+  drop.addEventListener('dragover', over); drop.addEventListener('dragleave', leave);
+  drop.addEventListener('drop', (ev)=>{ ev.preventDefault(); leave(); const f=ev.dataTransfer.files?.[0]; if(f) readFile(f); });
+
+  // pick point for spawn
+  scene.onPointerObservable.add((pi)=>{
+    if(root.style.display!=='flex') return;
+    if(pi.type===BABYLON.PointerEventTypes.POINTERUP){
+      const pick = scene.pick(scene.pointerX, scene.pointerY, (m)=> m && m.isPickable!==false);
+      if(pick?.pickedPoint) lastPickedPoint = pick.pickedPoint.clone();
+    }
+  });
+
+  async function spawnFromURL(url, filename){
+    if(DT.sel && DT.sel.metadata?.phasmaPlaced){ DT.sel = null; }
+    const node = new BABYLON.TransformNode('spawnPivot', scene);
+    node.metadata = Object.assign({}, node.metadata||{}, { phasmaPlaced:true, source: filename||url });
+    DT.placedPivots.push(node);
+    // Import
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "", url, scene).catch(()=> BABYLON.SceneLoader.ImportMeshAsync("", url.replace(/[^\/]+$/, ''), url, scene));
+    res.meshes.forEach(m=>{ if(!m.parent) m.parent = node; });
+    // Place
+    let at = null;
+    if(lastPickedPoint){ at = lastPickedPoint.clone(); }
+    else if(DT.ctx.game.camera){ const f = DT.ctx.game.camera.getDirection(BABYLON.Axis.Z); at = DT.ctx.game.camera.position.add(f.scale(2.5)); }
+    else at = new BABYLON.Vector3(0,1,0);
+    node.position.copyFrom(at); node.rotation = new BABYLON.Vector3(0,0,0); node.scaling.set(1,1,1);
+    setPivot(node);
+    listChildren();
+    return node;
+  }
+
+  // controls
+  function applyFromFields(){
+    if(!pivot) return;
+    const x=parseFloat(byId('mvX').value||'0'), y=parseFloat(byId('mvY').value||'1'), z=parseFloat(byId('mvZ').value||'0');
+    const ry=parseFloat(byId('mvRY').value||'0')*Math.PI/180, s=parseFloat(byId('mvS').value||'1');
+    pivot.position.set(x,y,z); pivot.rotation.y = ry; pivot.scaling.set(s,s,s);
+  }
+  byId('mvApply').onclick = applyFromFields;
+  byId('mvDelete').onclick = ()=>{ if(!pivot) return; pivot.getChildren().forEach(n=> n.dispose && n.dispose()); pivot.dispose(); pivot=null; byId('mvList').textContent='(none)'; refreshPivotData(); };
+  byId('mvMakePick').onclick = ()=>{ if(!pivot) return; pivot.getChildMeshes(true).forEach(n=> n.isPickable=true); refreshPivotData(); };
+  byId('mvMakeCollide').onclick = ()=>{ if(!pivot) return; pivot.getChildMeshes(true).forEach(n=> n.checkCollisions=true); refreshPivotData(); };
+  byId('mvGizmoPos').onclick = ()=> setGizmoMode('pos');
+  byId('mvGizmoRot').onclick = ()=> setGizmoMode('rot');
+  byId('mvGizmoScale').onclick = ()=> setGizmoMode('scl');
+  byId('mvExportGLB').onclick = exportGLB;
+  byId('mvExportJSON').onclick = exportJSON;
+  byId('mvExportTextures').onclick = downloadTextures;
+  byId('mvSnapshot').onclick = snapshotPNG;
+  byId('mvUnlit').onclick = ()=> setUnlit(!unlitOn);
+  byId('mvClose').onclick = close;
+
+  _mv = { open, close, setPivot, spawnFromURL };
+  return _mv;
+}
   document.body.appendChild(root);
 
   const giz = ensureGizmo(scene);
