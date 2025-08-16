@@ -175,6 +175,62 @@
 
   <!-- Babylon and loaders -->
   <script src="./cdn/babylon.js"></script>
+
+  <script>
+    (function(){
+      function showOverlay(msg){
+        var d=document.createElement('div');
+        d.id='babylonDiag';
+        d.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.86);color:#0ff;font:14px/1.4 monospace;padding:16px;overflow:auto;';
+        d.innerHTML='<div style="max-width:900px;margin:0 auto;"><h2 style="margin:0 0 8px 0;color:#0ff;">Babylon Loader Diagnostic</h2><pre style="white-space:pre-wrap">'+msg+'</pre><button id="babylonDiagClose" style="margin-top:10px;background:#001;border:1px solid #0ff;color:#0ff;padding:6px 10px;border-radius:8px;cursor:pointer;">Close</button></div>';
+        document.body.appendChild(d);
+        document.getElementById('babylonDiagClose').onclick=function(){ d.remove(); };
+      }
+      // Surface uncaught errors
+      window.addEventListener('error', function(e){
+        try{
+          var m='Uncaught error: '+(e.message||'')+'\nSource: '+(e.filename||'')+':'+(e.lineno||'')+':'+(e.colno||'')+
+                (e.error && e.error.stack ? '\n\nStack:\n'+e.error.stack : '');
+          if(!document.getElementById('babylonDiag')) showOverlay(m);
+        }catch(_){}
+      });
+
+      function ok(){ return !!(window.BABYLON && BABYLON.Engine); }
+
+      function tryFallback(){
+        var tag = document.querySelector('script[src$="cdn/babylon.js"],script[src$="cdn/babylon.js?"]') ||
+                  document.querySelector('script[src*="babylon.js"]');
+        if(!tag){ showOverlay('Could not find <script src="./cdn/babylon.js"> tag in DOM.'); return; }
+        var alt='./cdn/babylon.max.js';
+        var s=document.createElement('script');
+        s.src=alt; s.onload=function(){
+          if(ok()){ console.log('[Babylon] Fallback loaded:', alt); }
+          else { showOverlay('Tried fallback '+alt+' but BABYLON is still undefined. Check /cdn path or file names.'); }
+        };
+        s.onerror=function(){
+          showOverlay('Failed to load '+alt+' too. Verify files exist.'); 
+        };
+        console.warn('[Babylon] Primary failed, trying fallback:', alt);
+        tag.insertAdjacentElement('afterend', s);
+      }
+
+      // Early check a tick after current scripts
+      setTimeout(function(){
+        if(ok()) return;
+        // If primary didn't set BABYLON, fallback
+        tryFallback();
+        // Re-check after a moment
+        setTimeout(function(){
+          if(!ok()){
+            showOverlay('BABYLON is undefined after trying fallbacks.\n' +
+              'Checked: ./cdn/babylon.js then ./cdn/babylon.max.js\n' +
+              'Make sure your /cdn folder is next to index.html and names match case exactly.');
+          }
+        }, 800);
+      }, 50);
+    })();
+  </script>
+
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
@@ -363,8 +419,8 @@ if (Object.keys(ghostProfiles).length !== 25) { throw new Error('Ghost profile c
     if(('ontouchstart' in window)) enableTouchStick();
 
     // Keyboard movement
-    window.addEventListener('keydown',(e)=>{ game.keys[e.key.toLowerCase()] = true; });
-    window.addEventListener('keyup',(e)=>{ game.keys[e.key.toLowerCase()] = false; });
+    window.addEventListener('keydown',(e)=>{ const k=String(e.key||'').toLowerCase(); if(!k||k==='unidentified'||k==='process') return; game.keys[k]=true; });
+    window.addEventListener('keyup',(e)=>{ const k=String(e.key||'').toLowerCase(); if(!k) return; game.keys[k]=false; });
 
     canvas.addEventListener('pointerdown', ()=>{ useActiveItem(); });
 
