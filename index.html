@@ -1422,29 +1422,65 @@ window.addEventListener('resize', ()=> engine.resize());
 /* ===========================================================
    TITLE / START
    =========================================================== */
+/* ===========================================================
+   TITLE / START  (robust wiring)
+   =========================================================== */
 let __started = false;
+
 function safeStart() {
   if (__started) return;
   __started = true;
-  const scr = $('#title-screen'); if (scr) scr.style.display = 'none';
 
+  const scr = document.getElementById('title-screen');
+  if (scr) scr.style.display = 'none';
+
+  // Weather pick (weighted)
   const r = Math.random();
   const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
   setWeather(w);
 
+  // Pick ghost type (for Myling footstep radius, etc.)
   const keys = Object.keys(GHOSTS);
   currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
   if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
 
   toast(`Investigation started. Weather: ${w}.`, 1600);
 }
-window.addEventListener('DOMContentLoaded', () => {
-  const btn = $('#start-button');
-  const screen = $('#title-screen');
-  if (btn) btn.addEventListener('click', safeStart, { once: true });
-  if (screen) screen.addEventListener('click', (e) => { if (e.target.id !== 'start-button') safeStart(); }, { once: true });
-  window.addEventListener('keydown', (e) => { if (e.key === 'Enter') safeStart(); }, { once: true });
-});
+
+// attach in a single, resilient place
+(function wireStart(){
+  const bind = () => {
+    const btn   = document.getElementById('start-button');
+    const screen= document.getElementById('title-screen');
+
+    if (btn) {
+      btn.onclick = safeStart;            // mouse/touch on the button
+      btn.onkeydown = (e)=>{               // keyboard focus on the button
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); safeStart(); }
+      };
+    }
+    if (screen) {
+      // click/tap the dark background (but not the content block)
+      screen.addEventListener('click', (e)=>{
+        if (e.target === screen) safeStart();
+      });
+    }
+    // global fallback: Enter or Space anywhere
+    window.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter' || e.code === 'Space') safeStart();
+    });
+
+    // make available from console if needed
+    window.safeStart = safeStart;
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind, { once:true });
+  } else {
+    bind();
+  }
+})();
+
 
 /* ===========================================================
    UI WIRING
