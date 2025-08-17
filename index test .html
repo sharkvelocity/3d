@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Babylon Diagnostic — Spinning Cube</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { height:100%; margin:0; background:#111; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif; }
+    #renderCanvas { width:100vw; height:100vh; display:block; background:#222; }
+    #bar {
+      position:fixed; left:10px; bottom:10px; right:10px;
+      background:rgba(0,0,0,0.6); color:#0ff; border:1px solid #066; border-radius:8px;
+      padding:8px 10px; font:12px/1.4 monospace; z-index:10;
+    }
+    #dot { width:10px; height:10px; border-radius:50%; background:#0f0; display:inline-block; margin-right:8px; box-shadow:0 0 8px #0f0; }
+    .btn { border:1px solid #0ff; color:#0ff; background:#111; border-radius:6px; padding:4px 8px; cursor:pointer; margin-left:8px; }
+  </style>
+  <!-- keep your local Babylon include -->
+  <script src="./cdn/babylon.js"></script>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <div id="bar">
+    <span id="dot"></span>
+    <span id="msg">Initializing…</span>
+    <button class="btn" id="toggleClear">Toggle Clear</button>
+    <button class="btn" id="toggleDbg">Debug Layer</button>
+  </div>
+<script>
+(function(){
+  const canvas = document.getElementById('renderCanvas');
+  const msg = document.getElementById('msg');
+  const dot = document.getElementById('dot');
+  const toggleClear = document.getElementById('toggleClear');
+  const toggleDbg = document.getElementById('toggleDbg');
+
+  if(!window.BABYLON || !BABYLON.Engine){
+    msg.textContent = "Babylon not found. Check ./cdn/babylon.js path."; return;
+  }
+
+  let engine, scene, camera, box;
+  try {
+    engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, premultipliedAlpha:false }, true);
+  } catch(e){
+    msg.textContent = "Engine creation failed: " + e.message;
+    console.error(e);
+    return;
+  }
+
+  scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color4(0.02,0.02,0.04,1.0);
+
+  // Camera
+  camera = new BABYLON.ArcRotateCamera("cam", Math.PI/4, Math.PI/3, 6, new BABYLON.Vector3(0,0.5,0), scene);
+  camera.attachControl(canvas, true);
+  camera.lowerRadiusLimit = 2;
+  camera.upperRadiusLimit = 20;
+  camera.wheelDeltaPercentage = 0.01;
+
+  // Lights
+  const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+  hemi.intensity = 1.0;
+  const dir = new BABYLON.DirectionalLight("dir", new BABYLON.Vector3(-0.5,-1,0.5), scene);
+  dir.intensity = 0.6;
+
+  // Meshes
+  const ground = BABYLON.MeshBuilder.CreateGround("ground", {width:10, height:10}, scene);
+  const gMat = new BABYLON.StandardMaterial("gmat", scene);
+  gMat.diffuseColor = new BABYLON.Color3(0.1, 0.15, 0.2);
+  gMat.specularColor = new BABYLON.Color3(0,0,0);
+  ground.material = gMat;
+
+  box = BABYLON.MeshBuilder.CreateBox("box", {size:1.2}, scene);
+  box.position.y = 0.6;
+  const bMat = new BABYLON.StandardMaterial("bmat", scene);
+  bMat.diffuseColor = new BABYLON.Color3(0.1, 0.8, 0.2);
+  box.material = bMat;
+
+  // Engine info
+  const info = engine.getGlInfo ? engine.getGlInfo() : {renderer:"?", version:"?", vendor:"?"};
+  msg.textContent = "Renderer: " + info.renderer + " | Version: " + info.version + " | Vendor: " + info.vendor;
+
+  // UI buttons
+  let bright = false;
+  toggleClear.onclick = ()=>{
+    bright = !bright;
+    scene.clearColor = bright ? new BABYLON.Color4(0.5,0.5,0.0,1) : new BABYLON.Color4(0.02,0.02,0.04,1);
+  };
+  toggleDbg.onclick = ()=>{
+    if (scene.debugLayer.isVisible()) scene.debugLayer.hide();
+    else scene.debugLayer.show({embedMode:true});
+  };
+
+  // Render loop
+  engine.runRenderLoop(()=>{
+    // pulse dot
+    const t = performance.now() * 0.005;
+    const s = (Math.sin(t) * 0.5 + 0.5) * 0.6 + 0.4;
+    dot.style.transform = "scale(" + s.toFixed(2) + ")";
+    box.rotation.y += 0.01;
+    scene.render();
+  });
+  window.addEventListener('resize', ()=> engine.resize());
+
+  // Hard fail guard: if context lost, show message
+  canvas.addEventListener('webglcontextlost', (e)=>{
+    e.preventDefault();
+    msg.textContent = "WebGL context lost. Try reloading or closing GPU-heavy tabs.";
+  }, false);
+})();
+</script>
+</body>
+</html>
