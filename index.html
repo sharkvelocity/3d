@@ -88,9 +88,6 @@
 
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
-
-    /* Bottom status */
-    #status{ position:fixed; left:0; right:0; bottom:0; padding:6px 10px; font:11px/1.2 monospace; color:#0ff; background:rgba(0,0,0,0.5); border-top:1px solid #033; z-index:7000; }
   </style>
 </head>
 
@@ -172,7 +169,7 @@
   </div>
 
   <!-- Dev Tools -->
-  <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
+  <button id="devtools-toggle" class="hud-btn">Dev Tools</button>
 
   <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:460px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -279,14 +276,12 @@
     <div class="tbtn" id="t-right">→</div>
   </div>
   <div id="toast"></div>
-  <div id="status">Ready</div>
 
 <script>
 /* ===========================================================
    GLOBALS / GAME STATE
    =========================================================== */
 const canvas = document.getElementById('renderCanvas');
-const statusEl = document.getElementById('status');
 let engine, scene, camera, skybox;
 
 let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat, cloudScroll = 0;
@@ -389,7 +384,6 @@ let ghostPolygon = [
 /* ===========================================================
    UTILS
    =========================================================== */
-function setStatus(msg){ try{ statusEl.textContent = msg; }catch{} }
 function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
 function inVanZone(pos){ return BABYLON.Vector3.Distance(pos, vanZone.center) <= vanZone.radius; }
 function pickGroundHeightAt(x, z){
@@ -501,29 +495,39 @@ async function boot(){
   camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
   camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
   camera.minZ = 0.1; camera.inertia = 0; camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
-  camera.setTarget(camera.position.add(new BABYLON.Vector3(0,0,1)));
 
   // Atmosphere/lights depend on scene
   setupNightAtmosphere();
 
-  // Map + items + ghost + moon
-  try { await loadMap(); setStatus("Map loaded"); } catch(e){ console.warn("loadMap failed", e); setStatus("Map failed — using fallback"); makeFallbackGround(); }
+  // Map + items + ghost + moon (with fallbacks so the screen never stays black)
+  await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
-  try { await loadItems(); } catch(e){ console.warn("loadItems failed", e); }
-  try { await loadGhost(); } catch(e){ console.warn("loadGhost failed", e); }
-  try { await loadMoon(); } catch(e){ console.warn("loadMoon failed", e); }
-
+  await loadItems().catch(()=>{});
+  await loadGhost().catch(()=>{});
+  await loadMoon().catch(()=>{});
   setupBreathFX();
+
+  // Fallback geometry if map failed (make sure something is visible)
+  if (!houseRoot){
+    const ground = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:120, height:120 }, scene);
+    ground.position.y = 0;
+    ground.checkCollisions = true;
+    const gmat = new BABYLON.StandardMaterial("gmat", scene);
+    gmat.diffuseColor = new BABYLON.Color3(0.05,0.07,0.10);
+    gmat.specularColor = new BABYLON.Color3(0,0,0);
+    ground.material = gmat;
+
+    const lamp = new BABYLON.PointLight("fallbackLamp", new BABYLON.Vector3(0,4,0), scene);
+    lamp.intensity = 0.8;
+    houseLights.push({ light: lamp, mesh: null });
+  }
 
   if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
 
   // UI/inputs last
   initUI();
   updateHUD();
-
-  // Always ensure some visible geometry to avoid full black
-  ensureVisibleFallback();
 
   // Render loop + tickers
   scene.onBeforeRenderObservable.add(()=>{
@@ -564,19 +568,6 @@ async function boot(){
   toast("Atmosphere ready. F=Flash, U=UV, I=IR, L=nearest light, P=power.", 3000);
 }
 
-/* Helper: fallback visible ground in case assets fail */
-function makeFallbackGround(){
-  const g = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:200, height:200, subdivisions:1 }, scene);
-  const m = new BABYLON.StandardMaterial("fallbackMat", scene);
-  m.emissiveColor = new BABYLON.Color3(0.02,0.06,0.1);
-  m.diffuseColor = new BABYLON.Color3(0.05,0.1,0.16);
-  g.material = m; g.checkCollisions = true; g.isPickable = true;
-}
-function ensureVisibleFallback(){
-  const hasAny = scene.meshes.some(m=> m && m.name && m.name!=="skybox");
-  if(!hasAny) makeFallbackGround();
-}
-
 /* ===========================================================
    ATMOSPHERE / SKY / LIGHTS
    =========================================================== */
@@ -586,12 +577,8 @@ function setupNightAtmosphere(){
   cloudMat = new BABYLON.StandardMaterial("cloudSky", scene);
   cloudMat.backFaceCulling = false;
   cloudMat.disableLighting = true;
-  try{
-    cloudMat.diffuseTexture = new BABYLON.Texture("./assets/images/sky/clouds_night.jpg", scene);
-    cloudMat.diffuseTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-  }catch(e){
-    console.warn("Sky texture missing, using color only.");
-  }
+  cloudMat.diffuseTexture = new BABYLON.Texture("./assets/images/sky/clouds_night.jpg", scene);
+  cloudMat.diffuseTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
   cloudMat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.07);
   cloudMat.disableDepthWrite = true;
 
@@ -707,10 +694,7 @@ function setWeather(state){
   if(state === 'Rain'){
     if(!weather.rainPS){
       const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
-      // Note: using a tiny dynamic texture instead of external asset to prevent black screen if path is wrong.
-      const dyn = new BABYLON.DynamicTexture("rainTex",{width:2,height:2},scene,false);
-      const ctx = dyn.getContext(); ctx.fillStyle="#fff"; ctx.fillRect(0,0,2,2); dyn.update(false);
-      ps.particleTexture = dyn;
+      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder
       ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
       ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
       ps.minSize = 0.05; ps.maxSize = 0.1;
@@ -776,28 +760,33 @@ function lightningStrike(){ const overlay=document.getElementById('flash-overlay
    MAP / DOORS
    =========================================================== */
 async function loadMap(){
-  const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
-  houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
-  result.meshes.forEach(m=>{
-    m.checkCollisions = true; m.isPickable = true;
-    const bb = m.getBoundingInfo().boundingBox;
-    const size = bb.maximum.subtract(bb.minimum);
-    const thin = (size.y < 0.12) || (size.x < 0.12) || (size.z < 0.12);
-    if(thin) m.checkCollisions = false;
-    if(m.material && m.material.alpha && m.material.alpha < 0.9) m.checkCollisions = false;
-    if(/door/i.test(m.name||"")) doorMeshes.push(m);
-  });
+  try{
+    const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
+    houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
+    result.meshes.forEach(m=>{
+      m.checkCollisions = true; m.isPickable = true;
+      const bb = m.getBoundingInfo().boundingBox;
+      const size = bb.maximum.subtract(bb.minimum);
+      const thin = (size.y < 0.12) || (size.x < 0.12) || (size.z < 0.12);
+      if(thin) m.checkCollisions = false;
+      if(m.material && m.material.alpha && m.material.alpha < 0.9) m.checkCollisions = false;
+      if(/door/i.test(m.name||"")) doorMeshes.push(m);
+    });
 
-  const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
-  fallbackGround.position.y = 0;
-  fallbackGround.checkCollisions = true;
-  fallbackGround.isPickable = true;
-  fallbackGround.visibility = 0;
+    const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
+    fallbackGround.position.y = 0;
+    fallbackGround.checkCollisions = true;
+    fallbackGround.isPickable = true;
+    fallbackGround.visibility = 0;
 
-  const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
-  camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
+    const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
+    camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
 
-  doorMeshes.forEach(door=>{ door.actionManager = new BABYLON.ActionManager(scene); door.isPickable = true; });
+    doorMeshes.forEach(door=>{ door.actionManager = new BABYLON.ActionManager(scene); door.isPickable = true; });
+  }catch(e){
+    // Will trigger fallback ground in boot()
+    console.warn("Map load failed:", e);
+  }
 }
 function afterMapLoadedForShadows(){
   scene.meshes.forEach(m=>{
@@ -1230,7 +1219,7 @@ function confirmLoadout(){ closeStorage(); }
   const applyTexBtn   = document.getElementById('asset-apply-tex');
 
   function log(msg){
-    const line = `[${new Date().toLocaleTimeString()}] ${msg}\\n`;
+    const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
     logTa.value += line; logTa.scrollTop = logTa.scrollHeight;
     console.debug('%cDEV','color:#8af', msg);
   }
@@ -1245,7 +1234,7 @@ function confirmLoadout(){ closeStorage(); }
     const raw = (window.ROOMS && Array.isArray(window.ROOMS)) ? window.ROOMS : [];
     const names = raw.map(r => typeof r === 'string' ? r : (r?.name || 'Unnamed'));
     if (roomSel && names.length){
-      roomSel.innerHTML = '<option value=\"\">Select room…</option>' + names.map(n=>`<option>${n}</option>`).join('');
+      roomSel.innerHTML = '<option value="">Select room…</option>' + names.map(n=>`<option>${n}</option>`).join('');
     }
   }catch{}
 
@@ -1275,8 +1264,8 @@ function confirmLoadout(){ closeStorage(); }
   setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false);
   mapStartBtn.addEventListener('click', ()=>{ mapping={points:[]}; setEnabled(mapPinBtn,true); setEnabled(mapOkBtn,true); log('Map recording started. Use “Pin”.'); });
   mapPinBtn.addEventListener('click', ()=>{ if(!mapping) return; const p=camera?.position||{x:0,y:0,z:0}; mapping.points.push({x:p.x,y:p.y,z:p.z}); log(`Pinned: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); });
-  mapOkBtn.addEventListener('click', ()=>{ if(!mapping) return; const name=roomSel?.value?.trim(); if(!name){ log('Select a room name before Confirm.'); return; } window.__mappedRooms=window.__mappedRooms||[]; window.__mappedRooms.push({ name, points:mapping.points }); log(`Map \"${name}\" saved (${mapping.points.length} pins).`); mapping=null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false); });
-  exportBtn.addEventListener('click', ()=>{ const data=(window.__mappedRooms&&window.__mappedRooms.length)?window.__mappedRooms:[]; const pretty=JSON.stringify(data,null,2); const content=`// Auto-generated by Dev Tools\\nexport const ROOMS = [\\n  ...${pretty}\\n];`; const blob=new Blob([content],{type:'application/javascript'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms.generated.js'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); log(`Exported ${data.length} room(s) to rooms.generated.js`); });
+  mapOkBtn.addEventListener('click', ()=>{ if(!mapping) return; const name=roomSel?.value?.trim(); if(!name){ log('Select a room name before Confirm.'); return; } window.__mappedRooms=window.__mappedRooms||[]; window.__mappedRooms.push({ name, points:mapping.points }); log(`Map "${name}" saved (${mapping.points.length} pins).`); mapping=null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false); });
+  exportBtn.addEventListener('click', ()=>{ const data=(window.__mappedRooms&&window.__mappedRooms.length)?window.__mappedRooms:[]; const pretty=JSON.stringify(data,null,2); const content=`// Auto-generated by Dev Tools\nexport const ROOMS = [\n  ...${pretty}\n];`; const blob=new Blob([content],{type:'application/javascript'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms.generated.js'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); log(`Exported ${data.length} room(s) to rooms.generated.js`); });
 
   walkRange.value = String(player.speedWalk); runRange.value = String(player.speedRun);
   walkRange.addEventListener('input', e=>{ player.speedWalk=parseFloat(e.target.value); log(`Walk speed: ${player.speedWalk.toFixed(2)}`); });
@@ -1312,253 +1301,292 @@ function confirmLoadout(){ closeStorage(); }
     }catch(e){ log('Replace error: '+e.message); }
   });
   listMeshesBtn.addEventListener('click', ()=>{
-    const list = meshes(); meshSelect.innerHTML = '<option value=\"\">(select a mesh)</option>' + list.map((m,i)=>`<option value=\"${i}\">${i}: ${m.name}</option>`).join('');
+    const list = meshes(); meshSelect.innerHTML = '<option value="">(select a mesh)</option>' + list.map((m,i)=>`<option value="${i}">${i}: ${m.name}</option>`).join('');
     log(`Found ${list.length} meshes.`);
     const mats = scene.materials || [];
-    document.getElementById('asset-mat-select').innerHTML = '<option value=\"\">(material)</option>' + mats.map((m,i)=>`<option value=\"${i}\">${i}: ${m.name||'(unnamed)'} </option>`).join('');
+    document.getElementById('asset-mat-select').innerHTML = '<option value="">(material)</option>' + mats.map((m,i)=>`<option value="${i}">${i}: ${m.name||'(unnamed)'} </option>`).join('');
   });
   focusBtn.addEventListener('click', ()=>{
     const idx=parseInt(meshSelect.value,10); const m=meshes()[idx]; if(!m) return;
     const b=m.getBoundingInfo().boundingBox; const c=b.centerWorld; camera.position = new BABYLON.Vector3(c.x, c.y+3, c.z-6); camera.setTarget(c); log('Camera focused on mesh.');
   });
   chkVisible.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isVisible = chkVisible.checked; } });
-  chkPick.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isPickable = chkPick.checked; } });
-  chkCollide.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.checkCollisions = chkCollide.checked; } });
-  chkBBox.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.showBoundingBox = chkBBox.checked; } });
-  chkWire.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m && m.material){ m.material.wireframe = chkWire.checked; } });
-  document.getElementById('asset-mat-select').addEventListener('change', ()=>{ const i=parseInt(document.getElementById('asset-mat-select').value,10); const mat=scene.materials[i]; if(!mat) return; document.getElementById('asset-alpha').value = String(mat.alpha ?? 1); log(`Selected material: ${mat.name||'(unnamed)'} alpha=${document.getElementById('asset-alpha').value}`); });
-  document.getElementById('asset-alpha').addEventListener('input', ()=>{ const i=parseInt(document.getElementById('asset-mat-select').value,10); const mat=scene.materials[i]; if(mat){ mat.alpha = parseFloat(document.getElementById('asset-alpha').value); } });
-  document.getElementById('asset-apply-tex').addEventListener('click', ()=>{
-    const i=parseInt(document.getElementById('asset-mat-select').value,10); const mat=scene.materials[i]; const url=(document.getElementById('asset-tex-url').value||'').trim();
-    if(!mat){ log('Pick a material first.'); return; }
-    if(!url){ log('Enter a texture URL.'); return; }
-    try{
-      if(mat.albedoTexture !== undefined) mat.albedoTexture = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
-      else mat.diffuseTexture = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
-      log('Applied texture to material.');
-    }catch(e){ log('Texture error: '+e.message); }
+
+  chkPick.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isPickable = chkPick.checked; log(`Pickable(${m.name}): ${m.isPickable}`); } });
+  chkCollide.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.checkCollisions = chkCollide.checked; log(`Collisions(${m.name}): ${m.checkCollisions}`); } });
+  chkBBox.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.showBoundingBox = chkBBox.checked; } });
+  chkWire.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m && m.material){ m.material.wireframe = chkWire.checked; } });
+
+  matSelect.addEventListener('change', ()=>{
+    const idx=parseInt(matSelect.value,10);
+    const mat = scene.materials[idx];
+    if(!mat) return;
+    alphaRange.value = typeof mat.alpha === 'number' ? String(mat.alpha) : '1';
   });
 
-  function ghostLogger(e){ const d=e?.detail||{}; log(`Ghost: state=${d.state??'n/a'} room=${d.room??'n/a'} action=${d.action??'n/a'} speed=${typeof d.speed==='number'?d.speed.toFixed(2):'n/a'} hunt=${!!d.hunt}`); }
-  function evidenceLogger(d){ log(`Evidence: ${d.item} -> ${d.result??'none'} in ${d.room??'unknown'} (${d.success?'ok':'fail'})`); }
-  let xyzTicker=null;
-  function startXYZ(){ stopXYZ(); xyzTicker=setInterval(()=>{ const p=camera?.position||{x:0,y:0,z:0}; log(`XYZ: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); }, 1000); }
-  function stopXYZ(){ if(xyzTicker){ clearInterval(xyzTicker); xyzTicker=null; } }
+  alphaRange.addEventListener('input', ()=>{
+    const idx=parseInt(matSelect.value,10);
+    const mat = scene.materials[idx];
+    if(!mat) return;
+    mat.alpha = parseFloat(alphaRange.value);
+    log(`Material alpha set to ${mat.alpha.toFixed(2)}`);
+  });
 
-  log('Devtools wired.');
-})();
+  applyTexBtn.addEventListener('click', ()=>{
+    const url = (texUrlInput.value||'').trim();
+    if(!url){ log('Enter a texture URL first.'); return; }
+    const idx=parseInt(matSelect.value,10);
+    const mat = scene.materials[idx];
+    if(!mat){ log('Select a material first.'); return; }
+    try{
+      const tex = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE, ()=>log('Texture loaded.'), (msg)=>log('Texture error: '+msg));
+      if (mat.getClassName && /PBR/i.test(mat.getClassName())) mat.albedoTexture = tex;
+      else mat.diffuseTexture = tex;
+      log('Applied texture to material.');
+    }catch(e){ log('Apply texture error: '+e.message); }
+  });
+
+  exportMeshesBtn.addEventListener('click', ()=>{
+    const list = meshes().map(m=>({name:m.name, id:m.id, pos:m.position, vis:m.isVisible, pick:m.isPickable}));
+    const blob = new Blob([JSON.stringify(list,null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mesh-list.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    log(`Exported ${list.length} meshes to mesh-list.json`);
+  });
+
+  // -------- Developer listeners ----------
+  function ghostLogger(e){
+    if(performance.now() - __devGhostLogTimer < 250) return;
+    __devGhostLogTimer = performance.now();
+    const g = ghost.mesh?.position; if(!g) return;
+    log(`Ghost @ x:${g.x.toFixed(2)} y:${g.y.toFixed(2)} z:${g.z.toFixed(2)} hunting:${ghost.hunting}`);
+  }
+  function evidenceLogger(d){
+    log(`EV: ${d.item} in ${d.room} (${d.success?'OK':'FAIL'})`);
+  }
+
+  let xyzTimer=null;
+  function startXYZ(){
+    if (xyzTimer) return;
+    xyzTimer = setInterval(()=>{
+      const p=camera?.position; if(!p) return;
+      log(`XYZ x:${p.x.toFixed(2)} y:${p.y.toFixed(2)} z:${p.z.toFixed(2)}`);
+    }, 1000);
+  }
+  function stopXYZ(){ if(xyzTimer){ clearInterval(xyzTimer); xyzTimer=null; } }
+
+})(); // end setupDevTools IIFE
 
 /* ===========================================================
-   FLASH / UV / IR
+   BREATH FX (Freezing temps visual near ghost)
+   =========================================================== */
+function setupBreathFX(){
+  const ps = new BABYLON.ParticleSystem("breath", 200, scene);
+  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene, true);
+  ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.6);
+  ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.1);
+  ps.minSize = 0.02; ps.maxSize = 0.06;
+  ps.emitRate = 0;
+  ps.minLifeTime = 0.3; ps.maxLifeTime = 0.7;
+  ps.direction1 = new BABYLON.Vector3(0,0.7,0.2);
+  ps.direction2 = new BABYLON.Vector3(0.1,0.8,0.1);
+  ps.gravity = new BABYLON.Vector3(0,0,0);
+  ps.updateSpeed = 0.02;
+  ps.disposeOnStop = false;
+
+  const anchor = new BABYLON.TransformNode("breathAnchor", scene);
+  ps.emitter = anchor; ps.start();
+  breath.ps = ps; breath.anchor = anchor;
+}
+function updateBreath(dt){
+  if (!breath.ps || !breath.anchor) return;
+  breath.anchor.position.copyFrom(camera.position.add(camera.getForwardRay().direction.scale(0.3)).add(new BABYLON.Vector3(0,0.1,0)));
+  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < BREATH_RANGE : false;
+  const targetRate = nearGhost ? 90 : 0;
+  const current = breath.ps.emitRate || 0;
+  breath.ps.emitRate = BABYLON.Scalar.Lerp(current, targetRate, 0.1);
+}
+
+/* ===========================================================
+   GHOST UPDATE / AI
+   =========================================================== */
+let footTimer = 0;
+function updateGhost(dt){
+  if(!ghost.mesh) return;
+
+  // simple roaming when not hunting
+  if(!ghost.hunting){
+    const pos = ghost.mesh.position;
+    if(!ghost.target || BABYLON.Vector3.Distance(pos, ghost.target) < 1){
+      ghost.target = randomPointInPolygonXZ(ghostPolygon);
+    }
+    const dir = ghost.target.subtract(pos); dir.y = 0; const len = dir.length();
+    if (len > 0.001){
+      dir.normalize();
+      ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt * 1.2));
+      lookAtXZ(ghost.mesh, ghost.target);
+    }
+  } else {
+    // hunt: move toward player
+    const target = camera.position.clone();
+    const pos = ghost.mesh.position;
+    const dir = target.subtract(pos); dir.y = 0; const len = dir.length();
+    if(len > 0.001){
+      dir.normalize();
+      ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt * 2.2 * (weather.modHuntPace||1)));
+      lookAtXZ(ghost.mesh, target);
+    }
+  }
+
+  // footstep SFX
+  footTimer -= dt;
+  if (footTimer <= 0){
+    const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+    const audible = dist < ghost.footAudible;
+    if (ghost.hunting && audible){
+      const isMyling = (currentGhostKey||"") === "myling";
+      const clip = isMyling ? (Math.random()<0.5?audio.footMy1:audio.footMy2) : (Math.random()<0.5?audio.foot1:audio.foot2);
+      try{ clip.currentTime=0; clip.play().catch(()=>{}); }catch{}
+    }
+    footTimer = ghost.stepInterval + Math.random()*0.12;
+  }
+
+  // occasional dev event
+  devBus.dispatchEvent(new Event('ghost'));
+}
+
+/* ===========================================================
+   UI / INPUT BINDINGS
    =========================================================== */
 let flashOn=false, uvOn=false, irOn=false;
-const holding = (name) => inventory.slots[activeItemSlot] === name;
-function syncHeldLights(){
-  flashLight.intensity = (flashOn && holding('Flashlight')) ? 1.1 : 0;
-  uvLight.intensity    = (uvOn    && holding('UV Light'))   ? 0.9 : 0;
-  irLight.intensity    = (irOn    && holding('Camera'))     ? 0.4 : 0;
-  refreshCameraOverlay();
-}
-function toggleFlash(){ flashOn=!flashOn; syncHeldLights(); }
-function toggleUV(){    uvOn=!uvOn;       syncHeldLights(); }
-function toggleIR(){    irOn=!irOn;       syncHeldLights(); }
-
-/* ===========================================================
-   INPUT
-   =========================================================== */
 const keysDown = {};
+
+function initUI(){
+  // Storage buttons
+  document.getElementById('storage-button').addEventListener('click', openStorage);
+  document.getElementById('storage-close').addEventListener('click', closeStorage);
+  document.getElementById('storage-confirm').addEventListener('click', confirmLoadout);
+
+  // Notebook
+  document.getElementById('notebook-close').addEventListener('click', closeNotebook);
+
+  // Dev gate on ESC
+  window.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape'){
+      if (!dev.enabled){
+        const gate = document.getElementById('dev-gate');
+        gate.style.display = (gate.style.display==='flex') ? 'none' : 'flex';
+      } else {
+        // toggle panel
+        const t=document.getElementById('devtools-toggle');
+        if (t.style.display!=='none') t.click();
+      }
+    }
+  });
+  // Dev gate controls
+  document.getElementById('dev-yes').addEventListener('click', ()=>{ document.getElementById('dev-pass-wrap').style.display='block'; });
+  document.getElementById('dev-no').addEventListener('click', ()=>{ document.getElementById('dev-gate').style.display='none'; });
+  document.getElementById('dev-pass-submit').addEventListener('click', ()=>{
+    const val = (document.getElementById('dev-pass').value||'').trim();
+    if (val){ // accept any non-empty for now
+      dev.enabled = true;
+      document.getElementById('dev-gate').style.display='none';
+      if (window.DevTools) window.DevTools.showToggle();
+      toast('Developer options enabled.', 1200);
+    } else {
+      toast('Enter a password.', 900);
+    }
+  });
+
+  // Touch controls
+  const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
+  const tbox = document.getElementById('touch-controls');
+  if (hasTouch){ tbox.style.display='grid'; }
+
+  const tUp  = document.getElementById('t-up');
+  const tLeft= document.getElementById('t-left');
+  const tRight=document.getElementById('t-right');
+  const tUse = document.getElementById('t-use');
+  const press = (el, on, off)=>{
+    const start=()=>on();
+    const end=()=>off();
+    el.addEventListener('touchstart', (e)=>{ e.preventDefault(); start(); }, {passive:false});
+    el.addEventListener('touchend',   (e)=>{ e.preventDefault(); end(); },   {passive:false});
+    el.addEventListener('mousedown',  (e)=>{ e.preventDefault(); start(); });
+    el.addEventListener('mouseup',    (e)=>{ e.preventDefault(); end(); });
+    el.addEventListener('mouseleave', (e)=>{ e.preventDefault(); end(); });
+  };
+  press(tUp, ()=>controls.forward=true, ()=>controls.forward=false);
+  press(tLeft, ()=>controls.left=true, ()=>controls.left=false);
+  press(tRight, ()=>controls.right=true, ()=>controls.right=false);
+  press(tUse, ()=>useActiveItem(), ()=>{});
+}
+
+// Keyboard movement + actions
 window.addEventListener('keydown', (e)=>{
   keysDown[e.key] = true;
-  if(e.key==='Shift') player.running = true;
-  if(e.key==='w'||e.key==='W') controls.forward=true;
-  if(e.key==='s'||e.key==='S') controls.back=true;
-  if(e.key==='a'||e.key==='A') controls.left=true;
-  if(e.key==='d'||e.key==='D') controls.right=true;
+  if (e.repeat) return;
 
-  if(e.key==='1') selectSlot(1);
-  if(e.key==='2') selectSlot(2);
-  if(e.key==='3') selectSlot(3);
-  if(e.key==='4') selectSlot(4);
-  if(e.key==='5') selectSlot(5);
+  switch(e.key){
+    case 'w': case 'W': controls.forward=true; break;
+    case 's': case 'S': controls.back=true; break;
+    case 'a': case 'A': controls.left=true; break;
+    case 'd': case 'D': controls.right=true; break;
+    case 'Shift': player.running = true; break;
 
-  if(e.key==='q'||e.key==='Q') useActiveItem();
-  if(e.key==='e'||e.key==='E') openDoorNearby();
+    case '1': case '2': case '3': case '4': case '5':
+      selectSlot(parseInt(e.key,10)); break;
 
-  if(e.key.toLowerCase()==='f') toggleFlash();
-  if(e.key.toLowerCase()==='u') toggleUV();
-  if(e.key.toLowerCase()==='i') toggleIR();
-  if(e.key.toLowerCase()==='l') toggleNearestHouseLight();
-  if(e.key.toLowerCase()==='p'){ setHousePower(!housePower); toast(`Power ${housePower?'ON':'OFF'}`, 800); }
+    case 'n': case 'N': openNotebook(); break;
+    case 'e': case 'E': openDoorNearby(); break;
 
-  if(e.key==='-'||e.key==='_'){ player.speedWalk = Math.max(0.2, player.speedWalk - 0.1); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
-  if(e.key==='='||e.key==='+'){ player.speedWalk = Math.min(3.0, player.speedWalk + 0.1); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
-  if(e.key==='['){ player.speedRun = Math.max(0.4, player.speedRun - 0.1); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
-  if(e.key===']'){ player.speedRun = Math.min(6.0, player.speedRun + 0.1); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
-
-  if(e.key==='h'||e.key==='H') beginHunt();
-  if(e.key==='j'||e.key==='J') endHunt();
-  if(e.key==='g'||e.key==='G'){ setGhostVisible(!ghost.visible); toast(`Ghost ${ghost.visible?'shown':'hidden'}`, 900); }
-
-  if(e.key==='Escape'){ if(dev.enabled){ const dp=document.getElementById('devtools-panel'); dp.style.display=(dp.style.display==='block')?'none':'block'; } else openDevGate(); }
+    case 'f': case 'F': flashOn=!flashOn; uvOn=false; irOn=false; syncHeldLights(); break;
+    case 'u': case 'U': uvOn=!uvOn; flashOn=false; irOn=false; syncHeldLights(); break;
+    case 'i': case 'I': irOn=!irOn; flashOn=false; uvOn=false; syncHeldLights(); refreshCameraOverlay(); break;
+    case 'l': case 'L': toggleNearestHouseLight(); break;
+    case 'p': case 'P': setHousePower(!housePower); break;
+  }
 });
 window.addEventListener('keyup', (e)=>{
   keysDown[e.key] = false;
-  if(e.key==='Shift') player.running = false;
-  if(e.key==='w'||e.key==='W') controls.forward=false;
-  if(e.key==='s'||e.key==='S') controls.back=false;
-  if(e.key==='a'||e.key==='A') controls.left=false;
-  if(e.key==='d'||e.key==='D') controls.right=false;
+  switch(e.key){
+    case 'w': case 'W': controls.forward=false; break;
+    case 's': case 'S': controls.back=false; break;
+    case 'a': case 'A': controls.left=false; break;
+    case 'd': case 'D': controls.right=false; break;
+    case 'Shift': player.running = false; break;
+  }
 });
 
-/* ===========================================================
-   GHOST UPDATE + FOOTSTEPS
-   =========================================================== */
-function updateGhost(dt){
-  if(!ghost.mesh || !ghost.alive) return;
+// Mouse to use active item
+window.addEventListener('mousedown', (e)=>{ if(e.button===0) useActiveItem(); });
 
-  if(!ghost.target || BABYLON.Vector3.Distance(ghost.mesh.position, ghost.target) < 1.5){
-    ghost.target = randomPointInPolygonXZ(ghostPolygon);
-  }
-  const tgt = new BABYLON.Vector3(ghost.target.x, pickGroundHeightAt(ghost.target.x, ghost.target.z), ghost.target.z);
-  let dir = tgt.subtract(ghost.mesh.position);
-  dir.y = 0;
-  const d = dir.length();
+function syncHeldLights(){
+  // Only illuminate when the respective light item is selected
+  const item = inventory.slots[activeItemSlot];
 
-  if(d>0.001){
-    dir.normalize();
-    ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt));
-    ghost.mesh.position.y = pickGroundHeightAt(ghost.mesh.position.x, ghost.mesh.position.z);
-    lookAtXZ(ghost.mesh, tgt);
-    if(ghost.anims.walk && !ghost.anims.walk.isPlaying){ if(ghost.anims.idle) ghost.anims.idle.stop(); ghost.anims.walk.start(true); }
-  } else {
-    if(ghost.anims.idle && !ghost.anims.idle.isPlaying){ if(ghost.anims.walk) ghost.anims.walk.stop(); ghost.anims.idle.start(true); }
-  }
+  // defaults off
+  flashLight.intensity = 0;
+  uvLight.intensity = 0;
+  irLight.intensity = 0;
 
-  const pd = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
-  if(!ghost.hunting && pd < 6 && Math.random()<0.002){ audio.whisper.play().catch(()=>{}); }
-
-  if (ghost.hunting){
-    ghost.nextStep -= dt;
-    if (ghost.nextStep <= 0){
-      ghost.nextStep = ghost.stepInterval + (Math.random()*0.08-0.04);
-      const key = (currentGhostKey||"").toLowerCase();
-      const myling = key.includes("myling");
-      const audible = myling ? 8 : 18;
-      ghost.footAudible = audible;
-      const dist = pd;
-      if (dist <= audible){
-        const vol = Math.max(0, Math.min(1, 1 - (dist/audible)));
-        const bank = myling ? [audio.footMy1, audio.footMy2] : [audio.foot1, audio.foot2];
-        const a = bank[Math.floor(Math.random()*bank.length)];
-        a.volume = vol*0.9;
-        a.currentTime = 0; a.play().catch(()=>{});
-      }
-    }
-  }
-
-  __devGhostLogTimer += dt;
-  if(__devGhostLogTimer > 1){ __devGhostLogTimer=0; devBus.dispatchEvent(new CustomEvent('ghost', { detail:{ state:ghost.hunting?'hunt':'wander', room:player.room, action:'move', speed:ghost.speed, hunt:ghost.hunting }})); }
+  if (item==='Flashlight' && flashOn) flashLight.intensity = 3.0;
+  if (item==='UV Light'   && uvOn)    uvLight.intensity   = 2.0;
+  if (item==='Camera'     && irOn)    irLight.intensity   = 1.6;
 }
 
 /* ===========================================================
-   COLD BREATH FX
+   DOOR / LIGHT SHORTCUTS (mouse wheel slots)
    =========================================================== */
-function setupBreathFX(){
-  breath.anchor = new BABYLON.TransformNode("breathAnchor", scene);
-  breath.anchor.parent = camera;
-  breath.anchor.position = new BABYLON.Vector3(0, -0.12, 0.35);
-
-  const tex = new BABYLON.DynamicTexture("breathTex", {width:64, height:64}, scene, false);
-  const ctx = tex.getContext();
-  const r = 32;
-  const g = ctx.createRadialGradient(r,r,0, r,r,r);
-  g.addColorStop(0, "rgba(255,255,255,0.9)");
-  g.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.clearRect(0,0,64,64);
-  ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
-  tex.update(false);
-
-  const ps = new BABYLON.ParticleSystem("breathPS", 400, scene);
-  ps.particleTexture = tex;
-  ps.emitter = breath.anchor;
-
-  const cone = new BABYLON.ConeParticleEmitter(0.08, 0.6);
-  ps.particleEmitterType = cone;
-
-  ps.minSize = 0.03; ps.maxSize = 0.08;
-  ps.minLifeTime = 0.35; ps.maxLifeTime = 0.75;
-  ps.emitRate = 0;
-  ps.color1 = new BABYLON.Color4(1,1,1,0.9);
-  ps.color2 = new BABYLON.Color4(1,1,1,0.5);
-  ps.colorDead = new BABYLON.Color4(1,1,1,0.0);
-  ps.gravity = new BABYLON.Vector3(0, 0.25, 0);
-  ps.updateSpeed = 0.015;
-  ps.disposeOnStop = false;
-  ps.start();
-
-  breath.ps = ps; breath.pulse = 0; breath.cooldown = 0;
-}
-function updateBreath(dt){
-  if (!breath.ps || !ghost.mesh) return;
-  const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
-  const near = dist < BREATH_RANGE && !inVanZone(camera.position);
-
-  if (near){
-    breath.cooldown -= dt;
-    if (breath.cooldown <= 0){
-      breath.cooldown = 0.9 + Math.random()*0.3;
-      breath.pulse = 0.35;
-      breath.ps.emitRate = 220;
-    }
-  }
-  if (breath.pulse > 0){
-    breath.pulse -= dt;
-    if (breath.pulse <= 0){
-      breath.ps.emitRate = 0;
-    }
-  }
-}
-
-/* ===========================================================
-   DEV GATE + UI WIRING
-   =========================================================== */
-function initUI(){
-  document.getElementById('start-button').onclick = safeStart;
-  document.getElementById('storage-button').onclick = ()=> openStorage();
-  document.getElementById('storage-close').onclick = ()=> closeStorage();
-  document.getElementById('storage-confirm').onclick = ()=> confirmLoadout();
-  document.getElementById('notebook-close').onclick = ()=> closeNotebook();
-
-  document.getElementById('dev-yes').onclick = ()=> { document.getElementById('dev-pass-wrap').style.display='block'; };
-  document.getElementById('dev-no').onclick  = ()=> closeDevGate();
-  document.getElementById('dev-pass-submit').onclick = ()=>{
-    const pw = (document.getElementById('dev-pass').value||'').trim();
-    if(pw === 'devmode'){ dev.enabled=true; closeDevGate(); DevTools.showToggle(); DevTools.open(); DevTools.log('Developer mode enabled.'); }
-    else toast('Wrong password.', 900);
-  };
-
+window.addEventListener('wheel', (e)=>{
+  const dir = Math.sign(e.deltaY);
+  activeItemSlot += dir>0 ? 1 : -1;
+  if (activeItemSlot<1) activeItemSlot=5;
+  if (activeItemSlot>5) activeItemSlot=1;
   rebuildBelt();
+  syncHeldLights();
+}, {passive:true});
 
-  const isTouch = 'ontouchstart' in window; document.getElementById('touch-controls').style.display = isTouch ? 'grid' : 'none';
-  if(isTouch){
-    const hold=(el,down,up)=>{ let id=null; el.addEventListener('touchstart',e=>{e.preventDefault(); down(); id=setInterval(down,32);}); el.addEventListener('touchend',e=>{e.preventDefault(); clearInterval(id); up&&up();}); };
-    hold(document.getElementById('t-up'),   ()=>{ controls.forward=true; }, ()=>{ controls.forward=false; });
-    hold(document.getElementById('t-left'), ()=>{ controls.left=true; },   ()=>{ controls.left=false; });
-    hold(document.getElementById('t-right'),()=>{ controls.right=true; },  ()=>{ controls.right=false; });
-    document.getElementById('t-use').addEventListener('touchstart', e=>{ e.preventDefault(); useActiveItem(); });
-  }
-
-  document.getElementById('devtools-toggle').style.display='none';
-}
-function openDevGate(){ document.getElementById('dev-gate').style.display='flex'; dev.gateOpen=true; }
-function closeDevGate(){ document.getElementById('dev-gate').style.display='none'; dev.gateOpen=false; }
-
-/* ===========================================================
-   CLEANUP
-   =========================================================== */
-window.addEventListener('beforeunload', ()=>{
-  try{ engine && engine.dispose(); }catch{}
-});
 </script>
+
 </body>
 </html>
