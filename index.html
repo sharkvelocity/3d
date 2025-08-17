@@ -285,9 +285,11 @@ const canvas = document.getElementById('renderCanvas');
 let engine, scene, camera, skybox;
 
 let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat, cloudScroll = 0;
+let moonMesh = null, moonMat = null;
+
 let houseLights = []; let housePower = true;
 
-let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false }; // units per second
+let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false };
 let controls = { forward:false, back:false, left:false, right:false };
 let allowFly = false;
 
@@ -296,11 +298,26 @@ let doorMeshes = [];
 let ghost = {
   mesh:null, target:null, speed:0.9, alive:true,
   anims:{ idle:null, walk:null },
-  visible:false, hunting:false, // starts invisible
+  visible:false, hunting:false,
   nextStep:0, stepInterval:0.55, footAudible:18
 };
-let phoenix = { mesh:null, t:0 };
-let weather = { state:'Clear', rainPS:null, lightningTimer:0, nextStrike:0 };
+
+// Cold breath FX
+const BREATH_RANGE = 5.0;
+let breath = { ps:null, anchor:null, pulse:0, cooldown:0 };
+
+/* Weather state + modifiers */
+let weather = {
+  state:'Clear',
+  rainPS:null,
+  snowPS:null,
+  snowTex:null,
+  lightningTimer:0, nextStrike:0,
+  modSanityDrain:1.0,
+  modHuntChance:1.0,
+  modHuntPace:1.0
+};
+
 let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
 
 let storageOpen = false;
@@ -308,7 +325,6 @@ let dev = { enabled:false, gateOpen:false, log:[] };
 let activeItemSlot = 1;
 
 let inventory = { slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'}, models:{}, icons:{} };
-let itemSceneContainer = null;
 const devBus = new EventTarget();
 let __devGhostLogTimer = 0;
 
@@ -357,7 +373,6 @@ const GHOSTS = {
 let discoveredEvidence = new Set();
 let currentGhostKey = null;
 
-// wander polygon (adjust to your map)
 let ghostPolygon = [
   new BABYLON.Vector3(18.404, 0, -96.040),
   new BABYLON.Vector3(57.205, 0, -94.031),
@@ -379,7 +394,7 @@ function pickGroundHeightAt(x, z){
     return /ground|floor|terrain|fallbackground/i.test(n);
   });
   if(hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
-  return 1.2; // fallback
+  return 1.2;
 }
 function randomPointInPolygonXZ(poly){
   let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
@@ -408,7 +423,9 @@ function $(s){ return document.querySelector(s); }
    =========================================================== */
 engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
 scene = new BABYLON.Scene(engine);
-scene.createDefaultEnvironment({ enableGroundShadow:false });
+/* remove default environment to avoid bright “day” look and depth conflicts */
+scene.environmentTexture = null;
+const oldSky = scene.getMeshByName("BackgroundSkybox"); if (oldSky) oldSky.dispose();
 scene.collisionsEnabled = true;
 scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
 
@@ -419,43 +436,33 @@ camera.applyGravity = true;
 camera.checkCollisions = true;
 camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
 camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
-camera.keysUp = [87];   // W
-camera.keysDown = [83]; // S
-camera.keysLeft = [65]; // A
-camera.keysRight = [68]; // D
+camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
 camera.minZ = 0.1;
+/* anti-slide: kill inertia + remove built-in keyboard mover (we drive movement ourselves) */
+camera.inertia = 0;
+camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
 /* ===========================================================
-   ATMOSPHERE: NIGHT + CLOUD SKYBOX + LIGHTS
+   ATMOSPHERE / SKY / LIGHTS
    =========================================================== */
 function setupNightAtmosphere(){
-  // darker baseline
-  scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
-  scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
-  scene.imageProcessingConfiguration.exposure = 0.55;
-  scene.imageProcessingConfiguration.contrast = 1.15;
-  scene.environmentIntensity = 0.15;
+  applyNightPalette();
 
-  // fog for depth
-  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.0045;
-  scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
-
-  // moving-cloud skybox
   cloudMat = new BABYLON.StandardMaterial("cloudSky", scene);
   cloudMat.backFaceCulling = false;
   cloudMat.disableLighting = true;
   cloudMat.diffuseTexture = new BABYLON.Texture("./assets/images/sky/clouds_night.jpg", scene);
   cloudMat.diffuseTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
   cloudMat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.07);
+  cloudMat.disableDepthWrite = true; // never occlude moon
 
   if (skybox) skybox.dispose();
   skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 1500 }, scene);
   skybox.material = cloudMat;
   skybox.infiniteDistance = true;
   skybox.isPickable = false;
+  skybox.renderingGroupId = 0;
 
-  // moon directional light + soft shadows
   moonLight = new BABYLON.DirectionalLight("moonLight", new BABYLON.Vector3(-0.2,-1,0.1), scene);
   moonLight.position = new BABYLON.Vector3(0,200,0);
   moonLight.intensity = 0.45;
@@ -466,10 +473,8 @@ function setupNightAtmosphere(){
   moonShadows.bias = 0.001;
   moonShadows.normalBias = 0.5;
 
-  // Player-held lights OFF by default
   flashLight = new BABYLON.SpotLight("flashLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 10, scene);
   flashLight.parent = camera; flashLight.intensity = 0; flashLight.range = 40;
-
   flashShadows = new BABYLON.ShadowGenerator(1024, flashLight);
   flashShadows.useBlurExponentialShadowMap = true;
 
@@ -481,15 +486,43 @@ function setupNightAtmosphere(){
   irLight.parent = camera; irLight.intensity = 0;
   irLight.diffuse = new BABYLON.Color3(0.4,0.6,0.4); irLight.specular = new BABYLON.Color3(0,0,0);
 }
+function applyNightPalette(){
+  scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
+  scene.imageProcessingConfiguration.exposure = 0.55;
+  scene.imageProcessingConfiguration.contrast = 1.15;
+  scene.environmentIntensity = 0.15;
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+  scene.fogDensity = 0.0045;
+  scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
+  if (cloudMat) cloudMat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.07);
+}
+function applyBloodMoonPalette(){
+  scene.clearColor = new BABYLON.Color4(0.02,0,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.04,0.01,0.02);
+  scene.imageProcessingConfiguration.exposure = 0.5;
+  scene.imageProcessingConfiguration.contrast = 1.2;
+  scene.environmentIntensity = 0.12;
+  scene.fogDensity = 0.005;
+  scene.fogColor = new BABYLON.Color3(0.06,0.01,0.02);
+  if (cloudMat) cloudMat.emissiveColor = new BABYLON.Color3(0.16,0.03,0.03);
+}
+function applyMoonTintForWeather(){
+  if (!moonMat) return;
+  if (weather.state === 'Blood Moon'){
+    moonMat.emissiveColor = new BABYLON.Color3(0.9, 0.16, 0.16);
+  } else {
+    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
+  }
+}
 
-// moving clouds tick
 scene.onBeforeRenderObservable.add(()=>{
   cloudScroll += engine.getDeltaTime()*0.00003;
   if (cloudMat?.diffuseTexture) cloudMat.diffuseTexture.uOffset = cloudScroll;
 });
 
 /* ===========================================================
-   WEATHER (audio + rain + lightning)
+   WEATHER / AUDIO
    =========================================================== */
 const audio = {
   ambient: new Audio("./assets/audio/ambient.mp3"),
@@ -511,43 +544,105 @@ const audio = {
 };
 Object.values(audio).forEach(a=>{ if(a && a.loop !== undefined) a.loop = false; });
 
+function makeSnowTexture(){
+  if (weather.snowTex) return weather.snowTex;
+  const tex = new BABYLON.DynamicTexture("snowTex",{width:32,height:32},scene,false);
+  const ctx = tex.getContext();
+  ctx.clearRect(0,0,32,32);
+  ctx.fillStyle="white";
+  ctx.beginPath(); ctx.arc(16,16,12,0,Math.PI*2); ctx.fill();
+  tex.update(false);
+  weather.snowTex = tex;
+  return tex;
+}
+
+function stopAllWeatherPS(){
+  if (weather.rainPS){ weather.rainPS.stop(); }
+  if (weather.snowPS){ weather.snowPS.stop(); }
+}
+function stopAllWeatherAudio(){
+  try{ audio.rain.pause(); audio.rain.currentTime=0; }catch{}
+  try{ audio.clear.pause(); audio.clear.currentTime=0; }catch{}
+}
+
 function setWeather(state){
   weather.state = state;
   $('#hud-weather').textContent = state;
+  stopAllWeatherPS();
+  stopAllWeatherAudio();
+
+  // default mods
+  weather.modSanityDrain = 1.0;
+  weather.modHuntChance = 1.0;
+  weather.modHuntPace = 1.0;
+
   if(state === 'Rain'){
     if(!weather.rainPS){
       const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
-      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene);
+      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder
       ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
       ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
       ps.minSize = 0.05; ps.maxSize = 0.1;
       ps.minLifeTime = 0.9; ps.maxLifeTime = 1.4;
       ps.emitRate = 1800;
-      ps.direction1 = new BABYLON.Vector3(0, -1.0, 0);
+      ps.direction1 = new BABYLON.Vector3(0, -1.2, 0);
       ps.direction2 = new BABYLON.Vector3(0, -1.0, 0);
       ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.75);
       ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.6);
       ps.gravity = new BABYLON.Vector3(0,-9.8,0);
       ps.disposeOnStop = false;
-      ps.start();
       weather.rainPS = ps;
-    } else weather.rainPS.start();
+    }
+    weather.rainPS.start();
     scheduleNextLightning();
-  }else{
-    if(weather.rainPS) weather.rainPS.stop();
-    weather.nextStrike = 0;
+    applyNightPalette();
+    audio.rain.loop=true; audio.rain.volume=0.35; audio.rain.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.3; audio.ambient.play().catch(()=>{});
+
+  } else if (state === 'Snow'){
+    if (!weather.snowPS){
+      const ps = new BABYLON.ParticleSystem("snow", 2500, scene);
+      ps.particleTexture = makeSnowTexture();
+      ps.minEmitBox = new BABYLON.Vector3(-80, 40, -80);
+      ps.maxEmitBox = new BABYLON.Vector3(80, 40, 80);
+      ps.minSize = 0.06; ps.maxSize = 0.14;
+      ps.minLifeTime = 2.2; ps.maxLifeTime = 3.5;
+      ps.emitRate = 1200;
+      ps.direction1 = new BABYLON.Vector3(-0.2, -0.8, 0.1);
+      ps.direction2 = new BABYLON.Vector3(0.2, -1.0, -0.1);
+      ps.color1 = new BABYLON.Color4(1,1,1,0.9);
+      ps.color2 = new BABYLON.Color4(1,1,1,0.7);
+      ps.gravity = new BABYLON.Vector3(0,-0.2,0);
+      ps.updateSpeed = 0.02;
+      ps.disposeOnStop = false;
+      weather.snowPS = ps;
+    }
+    weather.snowPS.start();
+    applyNightPalette();
+    weather.modSanityDrain = 0.95;
+    audio.clear.loop=true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.28; audio.ambient.play().catch(()=>{});
+
+  } else if (state === 'Blood Moon'){
+    applyBloodMoonPalette();
+    applyMoonTintForWeather();
+    weather.modSanityDrain = 1.25;
+    weather.modHuntChance = 1.4;
+    weather.modHuntPace = 1.2;
+    audio.clear.loop=true; audio.clear.volume=0.22; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.32; audio.ambient.play().catch(()=>{});
+
+  } else { // Clear
+    applyNightPalette();
+    audio.clear.loop=true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.3; audio.ambient.play().catch(()=>{});
   }
-}
-function playWeatherAudio(){
-  if(weather.state==='Rain'){ audio.rain.loop=true; audio.rain.volume=0.35; audio.rain.play().catch(()=>{}); }
-  else { audio.clear.loop=true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{}); }
-  audio.ambient.loop=true; audio.ambient.volume=0.3; audio.ambient.play().catch(()=>{});
 }
 function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
 function lightningStrike(){ const overlay=$('#flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
 
 /* ===========================================================
-   LOAD MAP / DOORS
+   MAP / DOORS
    =========================================================== */
 async function loadMap(){
   const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
@@ -562,7 +657,6 @@ async function loadMap(){
     if(/door/i.test(m.name)) doorMeshes.push(m);
   });
 
-  // Fallback ground
   const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
   fallbackGround.position.y = 0;
   fallbackGround.checkCollisions = true;
@@ -595,7 +689,7 @@ async function loadItems(){
 }
 
 /* ===========================================================
-   GHOST + HUNT SYSTEM
+   GHOST + HUNT
    =========================================================== */
 async function loadGhost(){
   const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
@@ -619,23 +713,21 @@ async function loadGhost(){
   ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
   ghost.target = randomPointInPolygonXZ(ghostPolygon);
 
-  // start invisible
   setGhostVisible(false);
 }
 function setGhostVisible(v){
   ghost.visible = !!v;
   if (!ghost.mesh) return;
   ghost.mesh.getChildMeshes(false).concat([ghost.mesh]).forEach(m=>{
-    m.isVisible = v;
-    m.visibility = v ? 1 : 0;
+    m.isVisible = v; m.visibility = v ? 1 : 0;
   });
 }
-function beginHunt(reason="criteria"){
+function beginHunt(){
   if (!ghost.mesh || ghost.hunting) return;
   ghost.hunting = true;
   $('#hud-hunt-state').textContent = 'HUNTING';
   setGhostVisible(true);
-  ghost.speed = 1.4; // faster during hunt
+  ghost.speed = 1.4;
   ghost.stepInterval = 0.48;
   flickerStart();
   toast('⚠️ Hunt started!', 1200);
@@ -650,38 +742,34 @@ function endHunt(){
   flickerStop();
   toast('Hunt ended.', 900);
 }
-
 let flickerTimer=0, flickerOn=false;
 function flickerStart(){ flickerTimer = 0; flickerOn = true; }
-function flickerStop(){ flickerOn = false; // reset lights to current power/intensity
+function flickerStop(){ flickerOn = false;
   houseLights.forEach(h=>{
     if (!housePower) { h.light.intensity = 0; return; }
     if (h.light.intensity>0) h.light.intensity = 0.8;
   });
 }
 
-// sanity & hunt scheduling
-let huntCooldown = 22 + Math.random()*18; // seconds between hunt tries when eligible
+let huntCooldown = 22 + Math.random()*18;
 let huntClock = 0;
 
 function sanityTick(dt){
-  // passive drain
   const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
-  const base = 0.6/60; // 0.6% per second ~36% per minute (tune)
+  const base = 0.6/60;
   const add = nearGhost ? 1.2/60 : 0;
-  player.sanity = Math.max(0, player.sanity - (base+add)* (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1));
+  const drain = (base+add) * (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1) * (weather.modSanityDrain||1);
+  player.sanity = Math.max(0, player.sanity - drain);
   $('#hud-sanity').textContent = `${player.sanity|0}%`;
 
-  // hunt gating: only when not in van, sanity low, and cooldown passed
   if (!ghost.hunting && !inVanZone(camera.position) && player.sanity <= 65){
-    huntClock += dt;
+    huntClock += dt * (weather.modHuntPace||1);
     if (huntClock >= huntCooldown){
       huntClock = 0; huntCooldown = 22 + Math.random()*18;
-      // roll
-      if (Math.random() < (player.sanity<40 ? 0.85 : 0.55)) beginHunt('sanity');
+      const baseChance = (player.sanity<40 ? 0.85 : 0.55);
+      if (Math.random() < baseChance * (weather.modHuntChance||1)) beginHunt();
     }
   }
-  // auto end if player hides in van or timer
   if (ghost.hunting && (inVanZone(camera.position) || Math.random()<0.0015)) endHunt();
 }
 
@@ -691,24 +779,49 @@ function sanityTick(dt){
 async function loadMoon(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
-    const moon = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-    moon.isPickable=false; moon.checkCollisions=false; moon.applyFog=false;
-    const mat = moon.material || new BABYLON.StandardMaterial("moonMat", scene);
-    mat.emissiveColor = new BABYLON.Color3(1,1,1); mat.disableLighting = true; moon.material = mat;
-    moon.position = new BABYLON.Vector3(0, 350, 380);
+    moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+    if (!moonMesh) throw new Error("moon.glb had no meshes");
+
+    moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+    moonMesh.renderingGroupId = 1;
+
+    const bb = moonMesh.getHierarchyBoundingVectors(true);
+    const size = bb.max.subtract(bb.min).length();
+    if (size < 5) moonMesh.scaling = new BABYLON.Vector3(30,30,30);
+
+    moonMat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
+    moonMesh.material = moonMat;
+
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+    applyMoonTintForWeather();
+
     scene.onBeforeRenderObservable.add(()=>{
       const t = performance.now()*0.00002;
-      moon.position.x = Math.cos(t)*380;
-      moon.position.z = Math.sin(t)*380;
-      moon.position.y = 340 + Math.sin(t*1.7)*10;
+      moonMesh.position.x = Math.cos(t)*380;
+      moonMesh.position.z = Math.sin(t)*380;
+      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
     });
-  }catch(e){ console.warn("loadMoon failed", e); }
+  }catch(e){
+    console.warn("loadMoon failed, using procedural sphere:", e);
+    moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+    moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+    moonMat = new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    try{ moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
+    catch{ moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
+    moonMesh.material = moonMat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+    applyMoonTintForWeather();
+  }
 }
 
 /* ===========================================================
    HOUSE LIGHTS
    =========================================================== */
 const HOUSE_LIGHT_REGEX = /(lamp|light|bulb|ceiling|sconce)/i;
+let houseLightsArrInit = false;
 function adoptExistingGltfLights(){
   let adopted = 0;
   (scene.lights||[]).forEach(l=>{
@@ -754,12 +867,9 @@ function toggleNearestHouseLight(){
 /* ===========================================================
    PLAYER / INPUT
    =========================================================== */
-function updateHUD(){
-  $('#hud-sanity').textContent = `${player.sanity|0}%`;
-  $('#hud-room').textContent   = player.room;
-}
+function updateHUD(){ $('#hud-sanity').textContent = `${player.sanity|0}%`; $('#hud-room').textContent = player.room; }
 function handleMovement(dt){
-  const speed = player.running ? player.speedRun : player.speedWalk; // units per second
+  const speed = player.running ? player.speedRun : player.speedWalk;
   let move = new BABYLON.Vector3(0,0,0);
   if(controls.forward) move.z += 1;
   if(controls.back)    move.z -= 1;
@@ -773,7 +883,7 @@ function handleMovement(dt){
     const desired = fwd.scale(move.z).add(right.scale(move.x)).normalize();
     camera.cameraDirection = desired.scale(speed * dt);
   } else {
-    camera.cameraDirection = new BABYLON.Vector3(0,0,0);
+    camera.cameraDirection = new BABYLON.Vector3(0,0,0); // stop immediately
   }
 
   if(allowFly && dev.enabled){
@@ -930,7 +1040,7 @@ function openStorage(){
   const modal=$('#storage-modal'); const grid=$('#storage-grid'); grid.innerHTML='';
   STORAGE_ITEMS.forEach(it=>{
     const card=document.createElement('div'); card.style.cssText='border:1px solid #066; padding:8px; background:#111; border-radius:6px;';
-    const title=document.createElement('div'); title.style.color='#9ff'; title.style.marginBottom='6px'; title.textContent=it;
+    const title=document.createElement('div'); title.style.color:'#9ff'; title.style.marginBottom='6px'; title.textContent=it;
     const btn=document.createElement('button'); btn.textContent='Add to Slots 1–3'; btn.className='hud-btn'; btn.onclick=()=> addToLoadout(it);
     card.appendChild(title); card.appendChild(btn); grid.appendChild(card);
   });
@@ -942,7 +1052,7 @@ function addToLoadout(item){ for(let i=1;i<=3;i++){ if(!inventory.slots[i]){ inv
 function confirmLoadout(){ closeStorage(); }
 
 /* ===========================================================
-   DEVTOOLS (incl. Assets panel)
+   DEVTOOLS
    =========================================================== */
 (function setupDevTools(){
   const toggleBtn   = $('#devtools-toggle');
@@ -958,7 +1068,6 @@ function confirmLoadout(){ closeStorage(); }
   const exportBtn   = $('#devtools-export-rooms');
   const logTa       = $('#devtools-log');
 
-  // Player/debug controls
   const walkRange = $('#devtools-walk');
   const runRange  = $('#devtools-run');
   const chkGod    = $('#devtools-god');
@@ -971,7 +1080,6 @@ function confirmLoadout(){ closeStorage(); }
   const btnForceHunt = $('#devtools-force-hunt');
   const btnEndHunt = $('#devtools-end-hunt');
 
-  // Assets panel
   const reloadMapBtn  = $('#asset-reload-map');
   const glbFileInput  = $('#asset-glb-file');
   const appendGlbBtn  = $('#asset-append-glb');
@@ -1002,7 +1110,6 @@ function confirmLoadout(){ closeStorage(); }
   toggleBtn.style.display='none';
   toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
 
-  // Prefill rooms if rooms.js exists
   try{
     const raw = (window.ROOMS && Array.isArray(window.ROOMS)) ? window.ROOMS : [];
     const names = raw.map(r => typeof r === 'string' ? r : (r?.name || 'Unnamed'));
@@ -1011,7 +1118,6 @@ function confirmLoadout(){ closeStorage(); }
     }
   }catch{}
 
-  // Enable listen
   enableBtn.addEventListener('click', ()=>{
     const on = enableBtn.dataset.on==='1' ? false : true;
     enableBtn.dataset.on = on ? '1':'0';
@@ -1034,14 +1140,12 @@ function confirmLoadout(){ closeStorage(); }
   chkGhost?.addEventListener('change', ()=>{ if (enableBtn.dataset.on==='1'){ if (chkGhost.checked) devBus.addEventListener('ghost', ghostLogger); else devBus.removeEventListener('ghost', ghostLogger); } });
   chkXYZ?.addEventListener('change',  ()=>{ if (enableBtn.dataset.on==='1'){ if (chkXYZ.checked) startXYZ(); else stopXYZ(); } });
 
-  // Map recorder
   setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false);
   mapStartBtn.addEventListener('click', ()=>{ mapping={points:[]}; setEnabled(mapPinBtn,true); setEnabled(mapOkBtn,true); log('Map recording started. Use “Pin”.'); });
   mapPinBtn.addEventListener('click', ()=>{ if(!mapping) return; const p=camera?.position||{x:0,y:0,z:0}; mapping.points.push({x:p.x,y:p.y,z:p.z}); log(`Pinned: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); });
   mapOkBtn.addEventListener('click', ()=>{ if(!mapping) return; const name=roomSel?.value?.trim(); if(!name){ log('Select a room name before Confirm.'); return; } window.__mappedRooms=window.__mappedRooms||[]; window.__mappedRooms.push({ name, points:mapping.points }); log(`Map "${name}" saved (${mapping.points.length} pins).`); mapping=null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false); });
   exportBtn.addEventListener('click', ()=>{ const data=(window.__mappedRooms&&window.__mappedRooms.length)?window.__mappedRooms:[]; const pretty=JSON.stringify(data,null,2); const content=`// Auto-generated by Dev Tools\nexport const ROOMS = [\n  ...${pretty}\n];`; const blob=new Blob([content],{type:'application/javascript'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms.generated.js'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); log(`Exported ${data.length} room(s) to rooms.generated.js`); });
 
-  // Player/debug controls
   walkRange.value = String(player.speedWalk); runRange.value = String(player.speedRun);
   walkRange.addEventListener('input', e=>{ player.speedWalk=parseFloat(e.target.value); log(`Walk speed: ${player.speedWalk.toFixed(2)}`); });
   runRange .addEventListener('input', e=>{ player.speedRun =parseFloat(e.target.value); log(`Run speed: ${player.speedRun.toFixed(2)}`); });
@@ -1052,11 +1156,11 @@ function confirmLoadout(){ closeStorage(); }
   btnInspect.addEventListener('click', ()=>{ if(scene.debugLayer.isVisible()) scene.debugLayer.hide(); else scene.debugLayer.show({ embedMode:true }); });
 
   btnReveal.addEventListener('click', ()=>{ setGhostVisible(!ghost.visible); log(`Ghost visible: ${ghost.visible}`); });
-  btnForceHunt.addEventListener('click', ()=> beginHunt('dev'));
+  btnForceHunt.addEventListener('click', ()=> beginHunt());
   btnEndHunt.addEventListener('click', ()=> endHunt());
 
-  // Assets panel actions (shortened: same as before)
-  reloadMapBtn.addEventListener('click', async ()=>{ try{ log('Reloading map…'); await loadMap(); afterMapLoadedForShadows(); log('Map reloaded.'); }catch(e){ log('Reload map error: '+e.message); } });
+  const reloadMap = async ()=>{ try{ log('Reloading map…'); await loadMap(); afterMapLoadedForShadows(); log('Map reloaded.'); }catch(e){ log('Reload map error: '+e.message); } };
+  reloadMapBtn.addEventListener('click', reloadMap);
   appendGlbBtn.addEventListener('click', async ()=>{
     const f = glbFileInput.files?.[0]; if(!f){ log('Choose a GLB/GLTF first.'); return; }
     try{ log(`Appending GLB: ${f.name}`); await BABYLON.SceneLoader.AppendAsync("", f, scene); log('Append complete. Use List Meshes to inspect.'); }
@@ -1079,7 +1183,8 @@ function confirmLoadout(){ closeStorage(); }
     const list = meshes(); meshSelect.innerHTML = '<option value="">(select a mesh)</option>' + list.map((m,i)=>`<option value="${i}">${i}: ${m.name}</option>`).join('');
     log(`Found ${list.length} meshes.`);
     const mats = scene.materials || [];
-    $('#asset-mat-select').innerHTML = '<option value="">(material)</option>' + mats.map((m,i)=>`<option value="${i}">${i}: ${m.name||'(unnamed)'}</option>`).join('');
+    // fixed malformed template:
+    $('#asset-mat-select').innerHTML = '<option value="">(material)</option>' + mats.map((m,i)=>`<option value="${i}">${i}: ${m.name||'(unnamed)'} </option>`).join('');
   });
   focusBtn.addEventListener('click', ()=>{
     const idx=parseInt(meshSelect.value,10); const m=meshes()[idx]; if(!m) return;
@@ -1113,11 +1218,10 @@ function confirmLoadout(){ closeStorage(); }
 })();
 
 /* ===========================================================
-   FLASH / UV / IR (only while holding)
+   FLASH / UV / IR
    =========================================================== */
 let flashOn=false, uvOn=false, irOn=false;
 const holding = (name) => inventory.slots[activeItemSlot] === name;
-
 function syncHeldLights(){
   flashLight.intensity = (flashOn && holding('Flashlight')) ? 1.1 : 0;
   uvLight.intensity    = (uvOn    && holding('UV Light'))   ? 0.9 : 0;
@@ -1129,7 +1233,7 @@ function toggleUV(){ uvOn=!uvOn; syncHeldLights(); }
 function toggleIR(){ irOn=!irOn; syncHeldLights(); }
 
 /* ===========================================================
-   INPUT BINDINGS
+   INPUT
    =========================================================== */
 const keysDown = {};
 window.addEventListener('keydown', (e)=>{
@@ -1149,20 +1253,22 @@ window.addEventListener('keydown', (e)=>{
   if(e.key==='q'||e.key==='Q') useActiveItem();
   if(e.key==='e'||e.key==='E') openDoorNearby();
 
-  // lights
   if(e.key.toLowerCase()==='f') toggleFlash();
   if(e.key.toLowerCase()==='u') toggleUV();
   if(e.key.toLowerCase()==='i') toggleIR();
   if(e.key.toLowerCase()==='l') toggleNearestHouseLight();
   if(e.key.toLowerCase()==='p'){ setHousePower(!housePower); toast(`Power ${housePower?'ON':'OFF'}`, 800); }
 
-  // live speed tweaks
   if(e.key==='-'||e.key==='_'){ player.speedWalk = Math.max(0.2, player.speedWalk - 0.1); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
   if(e.key==='='||e.key==='+'){ player.speedWalk = Math.min(3.0, player.speedWalk + 0.1); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
   if(e.key==='['){ player.speedRun = Math.max(0.4, player.speedRun - 0.1); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
   if(e.key===']'){ player.speedRun = Math.min(6.0, player.speedRun + 0.1); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
 
-  // Dev gate (ESC)
+  // quick debug (leave if helpful)
+  if(e.key==='h'||e.key==='H') beginHunt();
+  if(e.key==='j'||e.key==='J') endHunt();
+  if(e.key==='g'||e.key==='G'){ setGhostVisible(!ghost.visible); toast(`Ghost ${ghost.visible?'shown':'hidden'}`, 900); }
+
   if(e.key==='Escape'){ if(dev.enabled){ const dp=$('#devtools-panel'); dp.style.display=(dp.style.display==='block')?'none':'block'; } else openDevGate(); }
 });
 window.addEventListener('keyup', (e)=>{
@@ -1198,16 +1304,13 @@ function updateGhost(dt){
     if(ghost.anims.idle && !ghost.anims.idle.isPlaying){ if(ghost.anims.walk) ghost.anims.walk.stop(); ghost.anims.idle.start(true); }
   }
 
-  // whisper chance when close
   const pd = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
   if(!ghost.hunting && pd < 6 && Math.random()<0.002){ audio.whisper.play().catch(()=>{}); }
 
-  // footsteps during hunt with Myling shorter audible radius
   if (ghost.hunting){
     ghost.nextStep -= dt;
     if (ghost.nextStep <= 0){
       ghost.nextStep = ghost.stepInterval + (Math.random()*0.08-0.04);
-      // audible radius depends on ghost type
       const key = (currentGhostKey||"").toLowerCase();
       const myling = key.includes("myling");
       const audible = myling ? 8 : 18;
@@ -1228,7 +1331,66 @@ function updateGhost(dt){
 }
 
 /* ===========================================================
-   HUNT FLICKER + MAIN LOOP
+   COLD BREATH FX
+   =========================================================== */
+function setupBreathFX(){
+  breath.anchor = new BABYLON.TransformNode("breathAnchor", scene);
+  breath.anchor.parent = camera;
+  breath.anchor.position = new BABYLON.Vector3(0, -0.12, 0.35);
+
+  const tex = new BABYLON.DynamicTexture("breathTex", {width:64, height:64}, scene, false);
+  const ctx = tex.getContext();
+  const r = 32;
+  const g = ctx.createRadialGradient(r,r,0, r,r,r);
+  g.addColorStop(0, "rgba(255,255,255,0.9)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.clearRect(0,0,64,64);
+  ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+  tex.update(false);
+
+  const ps = new BABYLON.ParticleSystem("breathPS", 400, scene);
+  ps.particleTexture = tex;
+  ps.emitter = breath.anchor;
+
+  const cone = new BABYLON.ConeParticleEmitter(0.08, 0.6);
+  ps.particleEmitterType = cone;
+
+  ps.minSize = 0.03; ps.maxSize = 0.08;
+  ps.minLifeTime = 0.35; ps.maxLifeTime = 0.75;
+  ps.emitRate = 0;
+  ps.color1 = new BABYLON.Color4(1,1,1,0.9);
+  ps.color2 = new BABYLON.Color4(1,1,1,0.5);
+  ps.colorDead = new BABYLON.Color4(1,1,1,0.0);
+  ps.gravity = new BABYLON.Vector3(0, 0.25, 0);
+  ps.updateSpeed = 0.015;
+  ps.disposeOnStop = false;
+  ps.start();
+
+  breath.ps = ps; breath.pulse = 0; breath.cooldown = 0;
+}
+function updateBreath(dt){
+  if (!breath.ps || !ghost.mesh) return;
+  const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+  const near = dist < BREATH_RANGE && !inVanZone(camera.position);
+
+  if (near){
+    breath.cooldown -= dt;
+    if (breath.cooldown <= 0){
+      breath.cooldown = 0.9 + Math.random()*0.3;
+      breath.pulse = 0.35;
+      breath.ps.emitRate = 220;
+    }
+  }
+  if (breath.pulse > 0){
+    breath.pulse -= dt;
+    if (breath.pulse <= 0){
+      breath.ps.emitRate = 0;
+    }
+  }
+}
+
+/* ===========================================================
+   MAIN LOOP
    =========================================================== */
 scene.onBeforeRenderObservable.add(()=>{
   const dt = engine.getDeltaTime()/1000;
@@ -1240,7 +1402,6 @@ scene.onBeforeRenderObservable.add(()=>{
     if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
   }
 
-  // house flicker during hunt
   if (ghost.hunting && flickerOn){
     flickerTimer += dt;
     if (flickerTimer > 0.08){
@@ -1253,34 +1414,13 @@ scene.onBeforeRenderObservable.add(()=>{
   }
 
   updateGhost(dt);
-  updatePhoenix(dt);
+  updateBreath(dt);
 });
 engine.runRenderLoop(()=> scene.render());
 window.addEventListener('resize', ()=> engine.resize());
 
 /* ===========================================================
-   PHEONIX (ambient creature)
-   =========================================================== */
-async function loadPhoenix(){
-  try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", "pheonix.glb", scene);
-    phoenix.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-    phoenix.mesh.isPickable=false; phoenix.mesh.checkCollisions=false;
-    phoenix.mesh.scaling = new BABYLON.Vector3(0.8,0.8,0.8);
-    phoenix.mesh.position = new BABYLON.Vector3(0, 50, 0);
-    if(r.animationGroups && r.animationGroups.length) r.animationGroups.forEach(ag=>ag.start(true));
-  }catch(e){ console.warn("Phoenix load failed:", e); }
-}
-function updatePhoenix(dt){
-  if(!phoenix.mesh) return;
-  phoenix.t += dt*0.15;
-  const R=180, x=Math.cos(phoenix.t)*R, z=Math.sin(phoenix.t)*R, y=45+Math.sin(phoenix.t*1.7)*8;
-  phoenix.mesh.position.set(x,y,z);
-  lookAtXZ(phoenix.mesh, new BABYLON.Vector3(0,y,0));
-}
-
-/* ===========================================================
-   TITLE / START (safe)
+   TITLE / START
    =========================================================== */
 let __started = false;
 function safeStart() {
@@ -1288,15 +1428,15 @@ function safeStart() {
   __started = true;
   const scr = $('#title-screen'); if (scr) scr.style.display = 'none';
 
-  const w = Math.random() < 0.5 ? 'Clear' : 'Rain';
+  const r = Math.random();
+  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
   setWeather(w);
-  playWeatherAudio();
 
   const keys = Object.keys(GHOSTS);
   currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
   if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
 
-  toast('Investigation started. Suspected: ???', 1400);
+  toast(`Investigation started. Weather: ${w}.`, 1600);
 }
 window.addEventListener('DOMContentLoaded', () => {
   const btn = $('#start-button');
@@ -1316,7 +1456,6 @@ function initUI(){
   $('#storage-confirm').onclick = ()=> confirmLoadout();
   $('#notebook-close').onclick = ()=> closeNotebook();
 
-  // Dev gate
   $('#dev-yes').onclick = ()=> { $('#dev-pass-wrap').style.display='block'; };
   $('#dev-no').onclick  = ()=> closeDevGate();
   $('#dev-pass-submit').onclick = ()=>{
@@ -1327,7 +1466,6 @@ function initUI(){
 
   rebuildBelt();
 
-  // Touch UI
   const isTouch = 'ontouchstart' in window; $('#touch-controls').style.display = isTouch ? 'grid' : 'none';
   if(isTouch){
     const hold=(el,down,up)=>{ let id=null; el.addEventListener('touchstart',e=>{e.preventDefault(); down(); id=setInterval(down,32);}); el.addEventListener('touchend',e=>{e.preventDefault(); clearInterval(id); up&&up();}); };
@@ -1355,10 +1493,9 @@ function closeDevGate(){ $('#dev-gate').style.display='none'; dev.gateOpen=false
 
   await loadItems();
   await loadGhost();
-  await loadPhoenix();
   await loadMoon();
+  setupBreathFX();
 
-  // shadow casters
   if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
 
   initUI();
