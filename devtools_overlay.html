@@ -2,299 +2,166 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — DevTools Overlay</title>
+  <title>DevTools Overlay</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    html, body { height:100%; margin:0; background:#000; }
-    #wrap { position:fixed; inset:0; }
-    #game { position:absolute; inset:0; width:100%; height:100%; border:0; background:#000; }
-
-    /* Panel */
-    #panel {
-      position:fixed; right:16px; bottom:16px;
-      width:min(420px, 92vw); max-height:80vh; overflow:auto;
-      background:#0c0c0f; color:#d8f6ff;
-      border:1px solid #144; border-radius:10px;
-      box-shadow:0 8px 24px rgba(0,0,0,0.55);
-      font:12px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      z-index:999999;
-      transform-origin: bottom right;
-      transition: transform .15s ease, opacity .15s ease, visibility .15s ease;
-    }
-    #panel.hidden {
-      opacity:0; visibility:hidden; transform:scale(.98);
-      pointer-events:none;
-    }
-    #panel header{
-      cursor:move; user-select:none; position:sticky; top:0; z-index:2;
-      padding:10px 12px; display:flex; align-items:center; gap:8px;
-      background:linear-gradient(180deg,#0f1f25,#0a1216);
-      border-bottom:1px solid #133; border-radius:10px 10px 0 0;
-    }
-    #title { font-weight:700; font-size:13px; letter-spacing:.2px; flex:1; }
-    #mini, #hide {
-      background:#152b33; color:#9ff; border:1px solid #266; border-radius:6px;
-      padding:6px 8px; cursor:pointer;
-    }
-    #mini:hover, #hide:hover { filter:brightness(1.1); }
-    #body { padding:10px 12px; display:grid; gap:10px; }
-
-    fieldset{ margin:0; border:1px solid #133; border-radius:8px; padding:8px; min-width:0; }
-    legend{ padding:0 6px; color:#9ff; }
-    .row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-    button, select, input[type="range"]{
-      background:#0f1f24; color:#def; border:1px solid #244; border-radius:6px;
-      padding:6px 10px; font-size:12px;
-    }
-    button{ cursor:pointer; }
-    button.primary{ border-color:#0bf; color:#0bf; }
-    .fill { flex:1 1 auto; min-width:120px; }
-    .mono{ font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .tiny{ font-size:11px; color:#8ec; opacity:.9; }
-    .pair{ display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
-    .grid3{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:6px; }
-
-    /* Re-open FAB */
-    #reopen {
-      position:fixed; right:16px; bottom:16px; z-index:1000000;
-      display:none;
-      padding:10px 12px; border-radius:999px; font-weight:700;
-      background:#0a2730; color:#9ff; border:1px solid #1d5563;
-      box-shadow:0 6px 14px rgba(0,0,0,.55);
-    }
-    #reopen:active{ transform:translateY(1px); }
-
-    @media (max-width:640px){
-      #panel { right:8px; left:8px; width:auto; }
-      .grid3{ grid-template-columns: repeat(2, minmax(0,1fr)); }
-    }
+    :root { color-scheme: dark; }
+    html, body { margin:0; height:100%; font:14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b0b0d; color:#cfefff; }
+    header { padding:10px 12px; background:#0f1117; border-bottom:1px solid #1e2635; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    header h1 { margin:0; font-size:14px; color:#8dd9ff; letter-spacing:.3px; }
+    header button, header select { background:#111827; color:#d1eaff; border:1px solid #1e2635; border-radius:8px; padding:6px 10px; cursor:pointer; }
+    header button:hover { background:#162132; }
+    main { display:grid; grid-template-columns:1fr; gap:10px; padding:10px; }
+    .grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+    @media (max-width:700px){ .grid { grid-template-columns:1fr; } }
+    .card { background:#0f1421; border:1px solid #1e2635; border-radius:10px; padding:10px; }
+    .card h2 { margin:0 0 8px 0; font-size:13px; color:#98ecff; }
+    .kv { display:grid; grid-template-columns:120px 1fr; gap:6px 8px; }
+    .kv div.key { color:#86b4d4; opacity:.9; }
+    .kv div.val { color:#e8fbff; }
+    .mono { font-family:inherit; white-space:pre-wrap; }
+    #log { height:200px; overflow:auto; background:#0b0f19; border:1px solid #1e2635; border-radius:8px; padding:8px; color:#cbdcf8; }
+    footer { padding:8px 12px; border-top:1px solid #1e2635; color:#86b4d4; font-size:12px; opacity:.85; }
+    .ok { color:#9ff5a0; } .warn { color:#ffd27f; } .bad { color:#ff8a8a; }
+    .pill { display:inline-block; padding:2px 6px; border-radius:999px; background:#172033; border:1px solid #284063; color:#a8d6ff; font-size:12px; margin-left:4px; }
   </style>
 </head>
 <body>
-  <div id="wrap">
-    <iframe id="game" src="index3.html" allow="autoplay; fullscreen"></iframe>
-  </div>
+  <header>
+    <h1>DevTools Overlay <span id="status" class="pill">idle</span></h1>
+    <button id="btnHandshake">Handshake</button>
+    <button id="btnClearLog">Clear log</button>
+  </header>
 
-  <button id="reopen" title="Show DevTools (or press `~`)">DEV</button>
+  <main>
+    <div class="grid">
+      <section class="card">
+        <h2>Player</h2>
+        <div class="kv">
+          <div class="key">Room</div><div class="val" id="p-room">?</div>
+          <div class="key">X</div><div class="val" id="p-x">0</div>
+          <div class="key">Y</div><div class="val" id="p-y">0</div>
+          <div class="key">Z</div><div class="val" id="p-z">0</div>
+        </div>
+      </section>
 
-  <div id="panel" aria-live="polite">
-    <header id="drag">
-      <div id="title">DevTools Overlay · <span class="tiny">for index3.html</span></div>
-      <button id="mini" title="Minimize panel">–</button>
-      <button id="hide" title="Hide panel">Hide</button>
-    </header>
-    <div id="body">
-      <fieldset>
-        <legend>Lifecycle</legend>
-        <div class="row">
-          <button id="btnStart" class="primary">Start Investigation</button>
-          <button id="btnReload">Reload Game</button>
-          <button id="btnHud">Toggle HUD</button>
+      <section class="card">
+        <h2>Ghost</h2>
+        <div class="kv">
+          <div class="key">Hunting</div><div class="val" id="g-hunt">false</div>
+          <div class="key">X</div><div class="val" id="g-x">0</div>
+          <div class="key">Y</div><div class="val" id="g-y">0</div>
+          <div class="key">Z</div><div class="val" id="g-z">0</div>
+          <div class="key">Fast twin</div><div class="val" id="g-fast">—</div>
         </div>
-        <div class="tiny">Tip: if Start doesn’t work, click inside the game once and press Enter.</div>
-      </fieldset>
+      </section>
 
-      <fieldset>
-        <legend>World</legend>
-        <div class="row">
-          <select id="selWeather" class="fill">
-            <option value="Clear">Clear</option>
-            <option value="Rain">Rain</option>
-            <option value="Snow">Snow</option>
-            <option value="Blood Moon">Blood Moon</option>
-          </select>
-          <button id="btnApplyWeather">Apply</button>
-          <button id="btnNearestLight">Nearest Light</button>
-          <button id="btnPower">Toggle Power</button>
-        </div>
-      </fieldset>
+      <section class="card" style="grid-column:1 / -1;">
+        <h2>Evidence</h2>
+        <div id="evidence" class="mono">Awaiting events…</div>
+      </section>
 
-      <fieldset>
-        <legend>Ghost</legend>
-        <div class="row">
-          <button id="btnReveal">Reveal/Hide</button>
-          <button id="btnHunt">Force Hunt</button>
-          <button id="btnEndHunt">End Hunt</button>
-          <button id="btnOrb">Fake Orb</button>
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Player</legend>
-        <div class="pair">
-          <label for="rngWalk">Walk speed</label>
-          <input id="rngWalk" type="range" min="0.20" max="3.00" step="0.05" value="0.90">
-        </div>
-        <div class="pair">
-          <label for="rngRun">Run speed</label>
-          <input id="rngRun" type="range" min="0.40" max="6.00" step="0.05" value="1.80">
-        </div>
-        <div class="grid3">
-          <button data-slot="1">Slot 1</button>
-          <button data-slot="2">Slot 2</button>
-          <button data-slot="3">Slot 3</button>
-          <button data-slot="4">Slot 4</button>
-          <button data-slot="5">Slot 5</button>
-          <button id="btnOpenStorage">Open Storage</button>
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Devices</legend>
-        <div class="row">
-          <button id="btnFlash">Flash (F)</button>
-          <button id="btnUV">UV (U)</button>
-          <button id="btnIR">IR (I)</button>
-          <button id="btnNotebook">Open Notebook (N)</button>
-          <button id="btnDoor">Open Door (E)</button>
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Console</legend>
-        <div class="row">
-          <button id="btnPing">Ping XYZ</button>
-          <button id="btnInspector">Inspector</button>
-          <button id="btnToggleDev">Toggle In-Game Dev Panel</button>
-        </div>
-        <div id="log" class="mono tiny" style="white-space:pre-wrap; background:#071217; border:1px solid #133; padding:8px; border-radius:6px; max-height:120px; overflow:auto;"></div>
-      </fieldset>
+      <section class="card" style="grid-column:1 / -1;">
+        <h2>Log</h2>
+        <div id="log" class="mono"></div>
+      </section>
     </div>
-  </div>
+  </main>
+
+  <footer>
+    Overlay listens for <code>postMessage</code> from the game window. Use the “Open External Overlay” button in Dev Tools.
+  </footer>
 
   <script>
-    // ---------- Helpers ----------
-    const $ = (s, r=document)=>r.querySelector(s);
-    const log = (m)=>{ const el=$("#log"); el.textContent += (m + "\\n"); el.scrollTop = el.scrollHeight; };
-    const frame = $("#game");
+    let lastHandshakeAt = 0;
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const evEl = document.getElementById('evidence');
 
-    const sameOrigin = () => { try { void frame.contentWindow.location.href; return true; } catch { return false; } };
-    function withGame(fn, onErr){ const cw=frame.contentWindow; if(!cw) return onErr?.("contentWindow missing");
-      if(!sameOrigin()) return onErr?.("Cross-origin: cannot access game internals.");
-      try{ return fn(cw); } catch(e){ onErr?.(e?.message||e); }
-    }
-    function sendKey(key){
-      withGame(cw=>{
-        const d=cw.document;
-        d.dispatchEvent(new cw.KeyboardEvent("keydown",{key,bubbles:true}));
-        d.dispatchEvent(new cw.KeyboardEvent("keyup",{key,bubbles:true}));
-      });
+    const $ = id => document.getElementById(id);
+    const setText = (id, v) => $(id).textContent = v;
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = 'pill ' + (cls || '');
     }
 
-    function startGame(){
-      withGame(cw=>{
-        if (typeof cw.safeStart === "function"){ cw.safeStart(); log("Called safeStart()"); return; }
-        const btn=cw.document.getElementById("start-button");
-        const scr=cw.document.getElementById("title-screen");
-        if (btn){ btn.click(); log("Clicked Start button"); return; }
-        if (scr && scr.style.display!=="none"){
-          cw.window.dispatchEvent(new cw.KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
-          log("Sent Enter to game window");
+    function log(line) {
+      const ts = new Date().toLocaleTimeString();
+      logEl.textContent += `[${ts}] ${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function tryHandshake() {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'overlay-hello', overlay: true }, '*');
+        lastHandshakeAt = Date.now();
+        setStatus('handshake→', 'warn');
+        log('Sent handshake to opener.');
+      } else {
+        setStatus('no-opener', 'bad');
+        log('No opener available (open this via the game UI).');
+      }
+    }
+
+    // Buttons
+    $('btnHandshake').addEventListener('click', tryHandshake);
+    $('btnClearLog').addEventListener('click', () => { logEl.textContent = ''; });
+
+    // Handle incoming messages from the game
+    window.addEventListener('message', (ev) => {
+      const d = ev.data || {};
+      if (d.type === 'handshake') {
+        setStatus('connected', 'ok');
+        log('Handshake received from game.');
+        return;
+      }
+
+      if (d.type === 'log') {
+        log(d.text || '(empty log)');
+        return;
+      }
+
+      if (d.type === 'xyz') {
+        setText('p-room', d.room ?? '?');
+        setText('p-x', d.x?.toFixed?.(2) ?? d.x ?? '0');
+        setText('p-y', d.y?.toFixed?.(2) ?? d.y ?? '0');
+        setText('p-z', d.z?.toFixed?.(2) ?? d.z ?? '0');
+        setStatus('streaming', 'ok');
+        return;
+      }
+
+      if (d.type === 'ghost') {
+        setText('g-hunt', String(!!d.hunting));
+        setText('g-x', d.x?.toFixed?.(2) ?? d.x ?? '0');
+        setText('g-y', d.y?.toFixed?.(2) ?? d.y ?? '0');
+        setText('g-z', d.z?.toFixed?.(2) ?? d.z ?? '0');
+        if (d.fast) {
+          const fx = d.fast.x?.toFixed?.(2) ?? d.fast.x;
+          const fy = d.fast.y?.toFixed?.(2) ?? d.fast.y;
+          const fz = d.fast.z?.toFixed?.(2) ?? d.fast.z;
+          setText('g-fast', `(${fx}, ${fy}, ${fz})`);
+        } else {
+          setText('g-fast', '—');
         }
-      }, e=>log("Start failed: "+e));
-    }
-
-    // ---------- UI wires ----------
-    $("#btnStart").onclick = startGame;
-    $("#btnReload").onclick = ()=>{ frame.src="index3.html"; log("Reloaded iframe"); };
-    $("#btnHud").onclick = ()=>withGame(cw=>{
-      const hud=cw.document.getElementById("hud");
-      if(!hud){ log("HUD not found"); return; }
-      hud.style.display = hud.style.display==="none" ? "block" : "none";
-    });
-
-    $("#btnApplyWeather").onclick = ()=>{
-      const w=$("#selWeather").value;
-      withGame(cw=>{ cw.setWeather?.(w); log("Weather → "+w); }, e=>log("Weather error: "+e));
-    };
-    $("#btnNearestLight").onclick = ()=>withGame(cw=>{ cw.toggleNearestHouseLight?.(); });
-    $("#btnPower").onclick       = ()=>withGame(cw=>{ cw.setHousePower?.(!cw.housePower); log("Power toggled"); });
-
-    $("#btnReveal").onclick  = ()=>withGame(cw=>{ cw.setGhostVisible?.(!(cw.ghost?.visible)); });
-    $("#btnHunt").onclick    = ()=>withGame(cw=>{ cw.beginHunt?.(); });
-    $("#btnEndHunt").onclick = ()=>withGame(cw=>{ cw.endHunt?.(); });
-    $("#btnOrb").onclick     = ()=>withGame(cw=>{ cw.showCameraOrb?.(); });
-
-    $("#rngWalk").oninput = (e)=>withGame(cw=>{ if(cw.player){ cw.player.speedWalk=parseFloat(e.target.value); }});
-    $("#rngRun").oninput  = (e)=>withGame(cw=>{ if(cw.player){ cw.player.speedRun =parseFloat(e.target.value); }});
-
-    document.querySelectorAll("[data-slot]").forEach(b=>{
-      b.onclick = ()=>withGame(cw=>{
-        const n=parseInt(b.dataset.slot,10);
-        cw.selectSlot?.(n) ?? sendKey(String(n));
-      });
-    });
-    $("#btnOpenStorage").onclick = ()=>withGame(cw=>{ cw.openStorage?.(); });
-
-    $("#btnFlash").onclick    = ()=>sendKey("f");
-    $("#btnUV").onclick       = ()=>sendKey("u");
-    $("#btnIR").onclick       = ()=>sendKey("i");
-    $("#btnNotebook").onclick = ()=>sendKey("n");
-    $("#btnDoor").onclick     = ()=>sendKey("e");
-
-    $("#btnPing").onclick = ()=>withGame(cw=>{
-      cw.DevTools?.log ? cw.DevTools.log("PING from overlay") : log("Dev log not present");
-    });
-    $("#btnInspector").onclick = ()=>withGame(cw=>{
-      if (cw.scene?.debugLayer){
-        cw.scene.debugLayer.isVisible() ? cw.scene.debugLayer.hide() : cw.scene.debugLayer.show({embedMode:true});
+        setStatus('streaming', 'ok');
+        return;
       }
-    });
-    $("#btnToggleDev").onclick = ()=>withGame(cw=>{
-      cw.document.getElementById("devtools-toggle")?.click();
-    });
 
-    // ---------- Draggable ----------
-    (function dragInit(){
-      const panel=$("#panel"), drag=$("#drag");
-      let sx=0, sy=0, ox=0, oy=0, dragging=false;
-      const onDown=(e)=>{ dragging=true;
-        const r=panel.getBoundingClientRect(); ox=r.left; oy=r.top;
-        sx=("touches" in e ? e.touches[0].clientX : e.clientX);
-        sy=("touches" in e ? e.touches[0].clientY : e.clientY);
-        e.preventDefault();
-      };
-      const onMove=(e)=>{ if(!dragging) return;
-        const x=("touches" in e ? e.touches[0].clientX : e.clientX);
-        const y=("touches" in e ? e.touches[0].clientY : e.clientY);
-        const nx=Math.max(6,Math.min(innerWidth  - panel.offsetWidth  - 6, ox + (x - sx)));
-        const ny=Math.max(6,Math.min(innerHeight - panel.offsetHeight - 6, oy + (y - sy)));
-        panel.style.right="auto"; panel.style.bottom="auto";
-        panel.style.left=nx+"px"; panel.style.top=ny+"px";
-      };
-      const onUp=()=>dragging=false;
-      drag.addEventListener("mousedown",onDown);
-      addEventListener("mousemove",onMove);
-      addEventListener("mouseup",onUp);
-      drag.addEventListener("touchstart",onDown,{passive:false});
-      addEventListener("touchmove",onMove,{passive:false});
-      addEventListener("touchend",onUp);
-    })();
-
-    // ---------- Minimize / Hide / Reopen ----------
-    const panel=$("#panel");
-    const body=$("#body");
-    const mini=$("#mini");
-    const hideBtn=$("#hide");
-    const reopen=$("#reopen");
-
-    function showPanel(){ panel.classList.remove("hidden"); reopen.style.display="none"; }
-    function hidePanel(){ panel.classList.add("hidden"); reopen.style.display="inline-block"; }
-
-    mini.onclick  = ()=>{ body.style.display = (body.style.display==="none" ? "grid" : "none"); mini.textContent = (body.style.display==="none" ? "+" : "–"); };
-    hideBtn.onclick = hidePanel;
-    reopen.onclick  = showPanel;
-
-    // Overlay hotkey: toggle with `
-    addEventListener("keydown", (e)=>{
-      if (e.key === "`"){
-        if (panel.classList.contains("hidden")) showPanel(); else hidePanel();
+      if (d.type === 'evidence') {
+        const line = `• ${d.item} @ ${d.room} ${d.success ? '✓' : '×'}`;
+        evEl.textContent = (evEl.textContent === 'Awaiting events…')
+          ? line
+          : (evEl.textContent + '\n' + line);
+        setStatus('streaming', 'ok');
+        return;
       }
     });
 
-    // Try a gentle auto-start
-    frame.addEventListener("load", ()=>{ setTimeout(startGame, 300); });
-
+    // Auto-handshake shortly after load in case the opener is listening
+    window.addEventListener('load', () => {
+      setTimeout(tryHandshake, 300);
+    });
   </script>
 </body>
 </html>
