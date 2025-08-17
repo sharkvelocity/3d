@@ -1,129 +1,1606 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Phasma-Phoney 3D</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="utf-8" />
+  <title>PhasmaPhoney — 3D Prototype</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="author" content="Shark-Blades" />
+  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
+  <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
+
+  <!-- Babylon core + loaders (local to repo) -->
+  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/earcut.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js"></script>
+  <script src="./cdn/draco_decoder_gltf.js"></script>
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./cdn/gui/babylon.gui.min.js"></script>
+
+  <!-- Optional: room names / zones for the Map Recorder dropdown -->
+  <script src="./rooms.js"></script>
+
   <style>
-    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
-    #renderCanvas { width:100%; height:100%; touch-action:none; display:none; }
-    #menu, #devPanel { position:absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; justify-content:center; flex-direction:column; background:#000; color:#fff; font-family:monospace; }
-    #menu button, #devPanel button { margin:10px; padding:10px 20px; font-size:16px; }
-    #devOptions { display:none; margin-top:20px; }
-    #developerLog { position:absolute; right:0; top:0; width:300px; height:100%; background:rgba(0,0,0,0.8); color:#0f0; font-size:12px; overflow:auto; display:none; padding:5px; }
+    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
+    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
+
+    #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
+
+    /* Title */
+    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
+    #title-content{ text-align:center; max-width:90vw;}
+    #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
+    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
+    #start-button:active{ transform:translateY(1px); }
+
+    /* HUD */
+    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
+    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    #hud .label{ color:#9ff; }
+    #hud .value{ color:#0ff; font-weight:bold; }
+    #weather{ font-size:12px; color:#aff; opacity:0.9; }
+    #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
+
+    /* Storage button + modal */
+    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); }
+    #storage-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
+    #storage-card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:8px; width:min(740px,92vw); max-height:86vh; overflow:auto; padding:12px 14px; }
+    #storage-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:10px; }
+
+    /* Notebook */
+    #notebook-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.82); align-items:center; justify-content:center; }
+    #notebook-card{ background:#0b0b0b; color:#0ff; border:1px solid #066; border-radius:10px; width:min(920px,95vw); max-height:90vh; overflow:auto; padding:14px 16px; box-shadow:0 0 20px rgba(0,255,255,0.2); }
+    #notebook-tabs{ display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+    .tab{ padding:6px 10px; border:1px solid #066; color:#9ff; background:#111; border-radius:6px; cursor:pointer; }
+    .tab.active{ color:#0ff; border-color:#0ff; box-shadow:0 0 10px rgba(0,255,255,0.2) inset; }
+    .page{ display:none; }
+    .page.active{ display:block; }
+    .ev-row{ display:flex; align-items:center; gap:8px; margin:6px 0; }
+    .ev-row input{ transform:scale(1.3); }
+
+    /* Dev gate/panel */
+    #dev-gate, #dev-panel{ display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
+    .card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:10px; padding:14px; width:min(820px,92vw); max-height:88vh; overflow:auto; }
+    #dev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+    #dev-log{ background:#000; border:1px solid #033; min-height:120px; padding:8px; border-radius:6px; color:#8ff; font-size:12px; white-space:pre-wrap; }
+    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
+
+    /* Hand preview */
+    #hand-preview{ position:fixed; right:18px; bottom:110px; width:180px; height:140px; pointer-events:none; z-index:5000; display:none; }
+
+    /* Camera overlay */
+    #camera-overlay{ position:fixed; inset:0; z-index:4000; display:none; pointer-events:none; background:radial-gradient(transparent 70%, rgba(0,0,0,0.45)); }
+    #camera-rec{ position:absolute; top:12px; left:14px; color:#f44; font-size:14px; letter-spacing:1px; text-shadow:0 0 6px rgba(255,0,0,0.5); }
+    #camera-orb{ position:absolute; width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,0.9); filter:blur(0.5px); display:none; box-shadow:0 0 10px rgba(255,255,255,0.8); }
+    #camera-ir { position:absolute; top:12px; right:14px; color:#9f9; font-size:14px; display:none; }
+
+    /* Belt */
+    #belt{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer;}
+    .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
+    .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+    .slot canvas, .slot img{ max-width:60px; max-height:60px; image-rendering:crisp-edges; }
+
+    /* Touch controls */
+    #touch-controls{ position:fixed; right:12px; bottom:12px; display:none; grid-template-columns:repeat(2,64px); gap:8px; z-index:6000; }
+    .tbtn{ width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.5); border:1px solid #066; color:#0ff; display:flex; align-items:center; justify-content:center; user-select:none; }
+    .tbtn:active{ transform:translateY(1px); }
+
+    /* Toast */
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
 </head>
+
 <body>
-  <!-- Start Menu -->
-  <div id="menu">
-    <h1>Phasma-Phoney 3D</h1>
-    <button id="startBtn">Start Investigation</button>
-    <button id="devBtn">Enable Developer Listen</button>
+  <div id="flash-overlay"></div>
+  <div id="camera-overlay">
+    <div id="camera-rec">REC ●</div>
+    <div id="camera-orb"></div>
+    <div id="camera-ir">IR</div>
   </div>
-
-  <!-- Developer Listen Panel -->
-  <div id="devPanel" style="display:none;">
-    <h2>Developer Listen Options</h2>
-    <div id="devOptions">
-      <button id="ghostLogBtn">Toggle Ghost Tracking Log</button>
-      <button id="evidenceLogBtn">Toggle Evidence Log</button>
-      <button id="startMapBtn">Start Map</button>
-      <button id="pinBtn" disabled>Pin Location</button>
-      <button id="confirmMapBtn" disabled>Confirm Map</button>
-    </div>
-    <button onclick="document.getElementById('devPanel').style.display='none'">Close</button>
-  </div>
-
-  <!-- Game canvas -->
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Developer Log Output -->
-  <div id="developerLog"></div>
+  <!-- Start screen -->
+  <div id="title-screen">
+    <div id="title-content">
+      <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
+      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <button id="start-button">Start Investigation</button>
+    </div>
+  </div>
 
-  <script src="https://sharkvelocity.github.io/cdn/babylon.max.js"></script>
-  <script src="https://sharkvelocity.github.io/cdn/gui/babylon.gui.min.js"></script>
-  <script>
-    const startBtn = document.getElementById("startBtn");
-    const menu = document.getElementById("menu");
-    const canvas = document.getElementById("renderCanvas");
-    const devBtn = document.getElementById("devBtn");
-    const devPanel = document.getElementById("devPanel");
-    const devOptions = document.getElementById("devOptions");
-    const devLog = document.getElementById("developerLog");
+  <!-- HUD -->
+  <div id="hud">
+    <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
+    <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
+    <div id="weather">Weather: <span id="hud-weather">Clear</span></div>
+    <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
+  </div>
 
-    // Developer Listen State
-    let ghostLogEnabled = false;
-    let evidenceLogEnabled = false;
-    let mapping = false;
-    let pins = [];
+  <!-- Storage -->
+  <button id="storage-button">STORAGE</button>
+  <div id="storage-modal">
+    <div id="storage-card">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div style="font-weight:bold;color:#9ff;">Van Storage — Pick 3 (slots 1–3)</div>
+        <button id="storage-close" class="hud-btn">Close</button>
+      </div>
+      <div style="margin:6px 0 10px; color:#8ff;">Slot 4 is always Lighter. Slot 5 is always Notebook.</div>
+      <div id="storage-grid"></div>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button id="storage-confirm" class="hud-btn" style="border:1px solid #0ff; color:#0ff;">Confirm Loadout</button>
+        <span id="storage-info" style="color:#8ff;"></span>
+      </div>
+    </div>
+  </div>
 
-    function logDev(message) {
-      if (devLog.style.display !== "block") devLog.style.display = "block";
-      devLog.innerHTML += message + "<br>";
-      devLog.scrollTop = devLog.scrollHeight;
+  <!-- Notebook -->
+  <div id="notebook-modal">
+    <div id="notebook-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="font-weight:bold; color:#9ff;">Investigator's Journal</div>
+        <button id="notebook-close" class="hud-btn">Close</button>
+      </div>
+      <div id="notebook-tabs">
+        <div class="tab active" data-tab="ghosts">Ghosts</div>
+        <div class="tab" data-tab="evidence">Evidence</div>
+        <div class="tab" data-tab="guess">Guess</div>
+      </div>
+      <div id="page-ghosts" class="page active"></div>
+      <div id="page-evidence" class="page"></div>
+      <div id="page-guess" class="page"></div>
+    </div>
+  </div>
+
+  <!-- Dev gate (ESC) -->
+  <div id="dev-gate">
+    <div class="card">
+      <div style="font-weight:bold; color:#9ff; margin-bottom:6px;">Enable Developer Options?</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="dev-yes" class="hud-btn">Yes</button>
+        <button id="dev-no"  class="hud-btn">No</button>
+      </div>
+      <div id="dev-pass-wrap" style="display:none; margin-top:10px;">
+        <div style="color:#8ff; margin-bottom:4px;">Enter password:</div>
+        <input id="dev-pass" type="password" placeholder="password" style="padding:6px 8px; background:#000; color:#0ff; border:1px solid #066; border-radius:4px; width:200px;" />
+        <button id="dev-pass-submit" class="hud-btn" style="margin-left:6px;">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dev Tools -->
+  <button id="devtools-toggle" class="hud-btn">Dev Tools</button>
+
+  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:460px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong>Developer Tools</strong>
+      <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
+    </div>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Listen Groups</legend>
+      <label><input id="devtools-group-ghost" type="checkbox" checked> Ghost tracking</label><br>
+      <label><input id="devtools-group-evidence" type="checkbox"> Evidence item activity</label><br>
+      <label><input id="devtools-group-xyz" type="checkbox"> XYZ tracker (player)</label>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Map Recorder</legend>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button id="devtools-map-start" class="hud-btn">Start Map</button>
+        <button id="devtools-map-pin" class="hud-btn" disabled>Pin</button>
+        <button id="devtools-map-confirm" class="hud-btn" disabled>Confirm</button>
+        <select id="devtools-room-select" style="flex:1;min-width:160px;">
+          <option value="">Select room…</option>
+        </select>
+        <button id="devtools-export-rooms" class="hud-btn" title="Download a rooms.generated.js skeleton">Export Rooms</button>
+      </div>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Player / Debug</legend>
+      <div class="row" style="gap:12px;align-items:center;">
+        <label style="flex:1;">Walk speed
+          <input id="devtools-walk" type="range" min="0.20" max="3.00" step="0.05" value="0.90" style="width:100%;">
+        </label>
+        <label style="flex:1;">Run speed
+          <input id="devtools-run" type="range" min="0.40" max="6.00" step="0.05" value="1.80" style="width:100%;">
+        </label>
+      </div>
+      <div class="row">
+        <label><input id="devtools-god" type="checkbox"> God mode</label>
+        <label><input id="devtools-fly" type="checkbox"> Fly (PageUp/PageDown)</label>
+      </div>
+      <div class="row">
+        <button id="devtools-teleport" class="hud-btn">Teleport to ghost</button>
+        <button id="devtools-inspector" class="hud-btn">Inspector</button>
+        <button id="devtools-ping" class="hud-btn">Ping XYZ</button>
+      </div>
+      <div class="row">
+        <button id="devtools-reveal-ghost" class="hud-btn">Toggle Ghost Visible</button>
+        <button id="devtools-force-hunt" class="hud-btn">Force Hunt</button>
+        <button id="devtools-end-hunt" class="hud-btn">End Hunt</button>
+      </div>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Assets / GLB & Materials</legend>
+      <div class="row" style="gap:6px;">
+        <button id="asset-reload-map" class="hud-btn" title="Re-import the default house GLB">Reload Map</button>
+        <input id="asset-glb-file" type="file" accept=".glb,.gltf,.zip,.bin" class="hud-btn" style="padding:6px;"/>
+        <button id="asset-append-glb" class="hud-btn">Append GLB</button>
+        <button id="asset-replace-map" class="hud-btn">Replace Map</button>
+      </div>
+      <div class="row" style="gap:6px;">
+        <button id="asset-list-meshes" class="hud-btn">List Meshes</button>
+        <button id="asset-export-meshes" class="hud-btn">Export Mesh List</button>
+      </div>
+      <div class="row" style="gap:6px;">
+        <select id="asset-mesh-select" style="flex:1;min-width:140px;">
+          <option value="">(select a mesh)</option>
+        </select>
+        <button id="asset-focus" class="hud-btn">Focus</button>
+      </div>
+      <div class="row" style="gap:12px;">
+        <label><input id="asset-visible" type="checkbox"> visible</label>
+        <label><input id="asset-pick" type="checkbox"> pickable</label>
+        <label><input id="asset-collide" type="checkbox"> collisions</label>
+        <label><input id="asset-bbox" type="checkbox"> bbox</label>
+        <label><input id="asset-wire" type="checkbox"> wireframe</label>
+      </div>
+      <div class="row" style="gap:6px;">
+        <select id="asset-mat-select" style="flex:1;min-width:140px;">
+          <option value="">(material)</option>
+        </select>
+        <label>alpha <input id="asset-alpha" type="range" min="0" max="1" step="0.01" value="1" /></label>
+      </div>
+      <div class="row" style="gap:6px;">
+        <input id="asset-tex-url" type="text" placeholder="albedo/diffuse texture URL…" style="flex:1;min-width:200px;background:#0b0b0b;color:#9ff;border:1px solid #333;border-radius:6px;padding:6px;">
+        <button id="asset-apply-tex" class="hud-btn">Apply Texture</button>
+      </div>
+    </fieldset>
+
+    <div>
+      <label for="devtools-log">Developer Log</label>
+      <textarea id="devtools-log" style="width:100%;height:180px;background:#0b0b0b;color:#a8f;resize:vertical;border:1px solid #333;border-radius:8px;padding:8px;" readonly></textarea>
+    </div>
+  </div>
+
+  <!-- Hand preview, Belt, Touch controls, Toast -->
+  <div id="hand-preview"></div>
+  <div id="belt"></div>
+  <div id="touch-controls">
+    <div class="tbtn" id="t-up">↑</div>
+    <div class="tbtn" id="t-use">USE</div>
+    <div class="tbtn" id="t-left">←</div>
+    <div class="tbtn" id="t-right">→</div>
+  </div>
+  <div id="toast"></div>
+
+<script>
+/* ===========================================================
+   GLOBALS / GAME STATE
+   =========================================================== */
+const canvas = document.getElementById('renderCanvas');
+let engine, scene, camera, skybox;
+
+let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat, cloudScroll = 0;
+let moonMesh = null, moonMat = null;
+
+let houseLights = []; let housePower = true;
+
+let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false };
+let controls = { forward:false, back:false, left:false, right:false };
+let allowFly = false;
+
+let houseRoot = null;
+let doorMeshes = [];
+let ghost = {
+  mesh:null, target:null, speed:0.9, alive:true,
+  anims:{ idle:null, walk:null },
+  visible:false, hunting:false,
+  nextStep:0, stepInterval:0.55, footAudible:18
+};
+
+// Cold breath FX
+const BREATH_RANGE = 5.0;
+let breath = { ps:null, anchor:null, pulse:0, cooldown:0 };
+
+/* Weather state + modifiers */
+let weather = {
+  state:'Clear',
+  rainPS:null,
+  snowPS:null,
+  snowTex:null,
+  lightningTimer:0, nextStrike:0,
+  modSanityDrain:1.0,
+  modHuntChance:1.0,
+  modHuntPace:1.0
+};
+
+let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
+
+let storageOpen = false;
+let dev = { enabled:false, gateOpen:false, log:[] };
+let activeItemSlot = 1;
+
+let inventory = { slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'}, models:{}, icons:{} };
+const devBus = new EventTarget();
+let __devGhostLogTimer = 0;
+
+const STORAGE_ITEMS = ['Flashlight','UV Light','Camera','EMF','Spirit Box','Thermometer','Crucifix','Salt','Smudge','D.O.T.S','Ghost Writing Book','Motion Sensor'];
+const ITEM_MODEL_MAP = {
+  'EMF':'EMF_Detector_EMF_Detector_0',
+  'Spirit Box':'Cone.001_Spirit_Box_0',
+  'Thermometer':'Thermometer_Thermometer_0',
+  'Camera':'Photo_Camera_Photo_Camera_0',
+  'UV Light':'Flashlight_Flashlight_0',
+  'Flashlight':'Flashlight_Poquet_Flashlight_Poquet_0',
+  'Thermal Camera':'Thermal_Camera_Thermal_Camera_0',
+  'Voice Recorder':'Voice_Recorder_Voice_Recorder_0',
+  'Ghost Writing Book':'(book-placeholder)',
+  'D.O.T.S':'(dots-proj)',
+  'Motion Sensor':'(motion-placeholder)'
+};
+const EVIDENCE_TYPES = ["EMF Level 5","Spirit Box","Fingerprints","Ghost Writing","Freezing Temps","D.O.T.S","Orbs"];
+const GHOSTS = {
+  spirit:["Spirit Box","Ghost Writing","EMF Level 5"],
+  wraith:["Spirit Box","D.O.T.S","EMF Level 5"],
+  poltergeist:["Spirit Box","Ghost Writing","Fingerprints"],
+  banshee:["D.O.T.S","Fingerprints","Orbs"],
+  jinn:["EMF Level 5","Freezing Temps","Fingerprints"],
+  mare:["Spirit Box","Ghost Writing","Orbs"],
+  revenant:["Ghost Writing","Orbs","Freezing Temps"],
+  shade:["Ghost Writing","Freezing Temps","EMF Level 5"],
+  demon:["Freezing Temps","Ghost Writing","Fingerprints"],
+  yurei:["Freezing Temps","D.O.T.S","Orbs"],
+  oni:["EMF Level 5","Freezing Temps","D.O.T.S"],
+  yokai:["Spirit Box","D.O.T.S","Orbs"],
+  hantu:["Freezing Temps","Ghost Writing","Fingerprints"],
+  goryo:["EMF Level 5","D.O.T.S","Fingerprints"],
+  myling:["Ghost Writing","EMF Level 5","Fingerprints"],
+  onryo:["Freezing Temps","Spirit Box","Orbs"],
+  "the twins":["Spirit Box","Freezing Temps","EMF Level 5"],
+  raiju:["EMF Level 5","D.O.T.S","Orbs"],
+  obake:["EMF Level 5","Orbs","Fingerprints"],
+  "the mimic":["Spirit Box","Freezing Temps","Fingerprints"],
+  moroi:["Freezing Temps","Ghost Writing","Spirit Box"],
+  deogen:["Spirit Box","Ghost Writing","D.O.T.S"],
+  thaye:["Ghost Writing","Orbs","D.O.T.S"],
+  phantom:["Spirit Box","D.O.T.S","Fingerprints"],
+  succubus:["Ghost Writing","Orbs","Spirit Box"]
+};
+let discoveredEvidence = new Set();
+let currentGhostKey = null;
+
+let ghostPolygon = [
+  new BABYLON.Vector3(18.404, 0, -96.040),
+  new BABYLON.Vector3(57.205, 0, -94.031),
+  new BABYLON.Vector3(62.145, 0, -105.142),
+  new BABYLON.Vector3(61.872, 0, -149.928),
+  new BABYLON.Vector3(18.660, 0, -149.900)
+];
+
+/* ===========================================================
+   UTILS
+   =========================================================== */
+function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
+function inVanZone(pos){ return BABYLON.Vector3.Distance(pos, vanZone.center) <= vanZone.radius; }
+function pickGroundHeightAt(x, z){
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 80, z), new BABYLON.Vector3(0,-1,0), 200);
+  const hit = scene.pickWithRay(ray, m=>{
+    if(!m || !m.isPickable) return false;
+    const n = (m.name||"");
+    return /ground|floor|terrain|fallbackground/i.test(n);
+  });
+  if(hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
+  return 1.2;
+}
+function randomPointInPolygonXZ(poly){
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  poly.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
+  for(let i=0;i<500;i++){
+    const x = minX + Math.random()*(maxX-minX);
+    const z = minZ + Math.random()*(maxZ-minZ);
+    if(pointInPolyXZ(new BABYLON.Vector3(x,0,z), poly)) return new BABYLON.Vector3(x, 0, z);
+  }
+  return poly[0].clone();
+}
+function pointInPolyXZ(p, poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+    const intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
+    if(intersect) inside=!inside;
+  }
+  return inside;
+}
+function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
+function $(s){ return document.querySelector(s); }
+
+/* ===========================================================
+   BOOT / STARTUP (DEFERRED UNTIL START CLICK)
+   =========================================================== */
+let __started = false;
+async function safeStart(){
+  if(__started) return;
+  __started = true;
+
+  // guard: ensure Babylon is present
+  if(!window.BABYLON || !BABYLON.Engine){
+    toast("Engine not ready. Check Babylon includes.", 2200);
+    __started = false;
+    return;
+  }
+
+  // hide title now to satisfy autoplay policies for audio
+  const scr = document.getElementById('title-screen');
+  if (scr) scr.style.display = 'none';
+
+  try{
+    await boot(); // full async init
+  }catch(err){
+    __started = false;
+    console.error(err);
+    toast("Startup failed: " + (err?.message||err), 2800);
+    // show title again on failure
+    if (scr) scr.style.display = 'flex';
+    return;
+  }
+
+  // Choose weather & ghost *after* assets loaded
+  const r = Math.random();
+  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
+  setWeather(w);
+
+  const keys = Object.keys(GHOSTS);
+  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
+
+  toast(`Investigation started. Weather: ${w}.`, 1600);
+}
+
+// bind start (button, backdrop click, Enter/Space)
+(function bindStart(){
+  const btn = document.getElementById('start-button');
+  const screen = document.getElementById('title-screen');
+  if (btn){
+    btn.onclick = safeStart;
+    btn.onkeydown = e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); safeStart(); } };
+  }
+  if (screen){
+    screen.addEventListener('click', e=>{ if(e.target===screen) safeStart(); });
+  }
+  window.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.code==='Space') safeStart(); });
+})();
+
+/* ===========================================================
+   ENGINE & SCENE (created inside boot)
+   =========================================================== */
+async function boot(){
+  // Engine & scene
+  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  scene = new BABYLON.Scene(engine);
+  scene.environmentTexture = null;
+  const oldSky = scene.getMeshByName("BackgroundSkybox"); if (oldSky) oldSky.dispose();
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
+
+  // Camera
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(43.657, 3, -119.008), scene);
+  camera.attachControl(canvas, true);
+  camera.applyGravity = true;
+  camera.checkCollisions = true;
+  camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+  camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
+  camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
+  camera.minZ = 0.1; camera.inertia = 0; camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
+
+  // Atmosphere/lights depend on scene
+  setupNightAtmosphere();
+
+  // Map + items + ghost + moon
+  await loadMap();
+  afterMapLoadedForShadows();
+  if (!adoptExistingGltfLights()) buildHouseLights();
+  await loadItems();
+  await loadGhost();
+  await loadMoon();
+  setupBreathFX();
+
+  if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
+
+  // UI/inputs last
+  initUI();
+  updateHUD();
+
+  // Render loop + tickers
+  scene.onBeforeRenderObservable.add(()=>{
+    const dt = engine.getDeltaTime()/1000;
+    handleMovement(dt);
+    sanityTick(dt);
+
+    // weather lightning
+    if(weather.state==='Rain'){
+      weather.lightningTimer += dt;
+      if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
     }
 
-    // Dev Listen Buttons
-    document.getElementById("ghostLogBtn").onclick = () => {
-      ghostLogEnabled = !ghostLogEnabled;
-      logDev("Ghost Tracking Log " + (ghostLogEnabled ? "ENABLED" : "DISABLED"));
-    };
-    document.getElementById("evidenceLogBtn").onclick = () => {
-      evidenceLogEnabled = !evidenceLogEnabled;
-      logDev("Evidence Log " + (evidenceLogEnabled ? "ENABLED" : "DISABLED"));
-    };
-    document.getElementById("startMapBtn").onclick = () => {
-      mapping = true; pins = [];
-      document.getElementById("pinBtn").disabled = false;
-      document.getElementById("confirmMapBtn").disabled = false;
-      logDev("Mapping started...");
-    };
-    document.getElementById("pinBtn").onclick = () => {
-      let xyz = {x:Math.random()*10, y:0, z:Math.random()*10}; // replace with real player pos
-      pins.push(xyz);
-      logDev("Pinned location: "+JSON.stringify(xyz));
-    };
-    document.getElementById("confirmMapBtn").onclick = () => {
-      if (pins.length === 0) { logDev("No pins placed."); return; }
-      const roomName = prompt("Name this room (choose recognized room): LivingRoom, Kitchen, Basement");
-      logDev("Mapped Room: "+roomName+" with "+pins.length+" pins: "+JSON.stringify(pins));
-      mapping=false; pins=[]; 
-      document.getElementById("pinBtn").disabled = true;
-      document.getElementById("confirmMapBtn").disabled = true;
-    };
-
-    devBtn.onclick = () => {
-      devPanel.style.display = "flex";
-      devOptions.style.display = "block";
-    };
-
-    // Game Startup
-    let engine, scene;
-    async function startInvestigation() {
-      menu.style.display = "none";
-      canvas.style.display = "block";
-      engine = new BABYLON.Engine(canvas, true);
-      scene = new BABYLON.Scene(engine);
-      const camera = new BABYLON.ArcRotateCamera("camera", Math.PI/2, Math.PI/4, 10, BABYLON.Vector3.Zero(), scene);
-      camera.attachControl(canvas, true);
-      const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1,1,0), scene);
-      const sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter:2}, scene);
-
-      engine.runRenderLoop(() => {
-        scene.render();
-      });
-
-      logDev("Investigation started.");
+    // light flicker during hunt
+    if (ghost.hunting && flickerOn){
+      flickerTimer += dt;
+      if (flickerTimer > 0.08){
+        flickerTimer = 0;
+        houseLights.forEach(h=>{
+          if (!housePower) return;
+          h.light.intensity = (Math.random()<0.65) ? 0.2 + Math.random()*0.9 : 0.0;
+        });
+      }
     }
 
-    startBtn.onclick = () => {
-      try { startInvestigation(); }
-      catch (e) { console.error(e); alert("Error starting game. Check console."); }
-    };
+    updateGhost(dt);
+    updateBreath(dt);
+  });
 
-    window.addEventListener("resize", () => {
-      if (engine) engine.resize();
+  engine.runRenderLoop(()=> scene.render());
+  window.addEventListener('resize', ()=> engine.resize());
+
+  // HUD visible now that scene is up
+  document.getElementById("hud").style.display="block";
+  rebuildBelt();
+
+  // Tip
+  toast("Atmosphere ready. F=Flash, U=UV, I=IR, L=nearest light, P=power.", 3000);
+}
+
+/* ===========================================================
+   ATMOSPHERE / SKY / LIGHTS
+   =========================================================== */
+function setupNightAtmosphere(){
+  applyNightPalette();
+
+  cloudMat = new BABYLON.StandardMaterial("cloudSky", scene);
+  cloudMat.backFaceCulling = false;
+  cloudMat.disableLighting = true;
+  cloudMat.diffuseTexture = new BABYLON.Texture("./assets/images/sky/clouds_night.jpg", scene);
+  cloudMat.diffuseTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+  cloudMat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.07);
+  cloudMat.disableDepthWrite = true;
+
+  if (skybox) skybox.dispose();
+  skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 1500 }, scene);
+  skybox.material = cloudMat;
+  skybox.infiniteDistance = true;
+  skybox.isPickable = false;
+  skybox.renderingGroupId = 0;
+
+  moonLight = new BABYLON.DirectionalLight("moonLight", new BABYLON.Vector3(-0.2,-1,0.1), scene);
+  moonLight.position = new BABYLON.Vector3(0,200,0);
+  moonLight.intensity = 0.45;
+
+  moonShadows = new BABYLON.ShadowGenerator(2048, moonLight);
+  moonShadows.useBlurExponentialShadowMap = true;
+  moonShadows.blurKernel = 16;
+  moonShadows.bias = 0.001;
+  moonShadows.normalBias = 0.5;
+
+  flashLight = new BABYLON.SpotLight("flashLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 10, scene);
+  flashLight.parent = camera; flashLight.intensity = 0; flashLight.range = 40;
+  flashShadows = new BABYLON.ShadowGenerator(1024, flashLight);
+  flashShadows.useBlurExponentialShadowMap = true;
+
+  uvLight = new BABYLON.SpotLight("uvLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 8, scene);
+  uvLight.parent = camera; uvLight.intensity = 0; uvLight.range = 30;
+  uvLight.diffuse = new BABYLON.Color3(0.6,0.3,0.9); uvLight.specular = new BABYLON.Color3(0,0,0);
+
+  irLight = new BABYLON.SpotLight("irLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/2, 10, scene);
+  irLight.parent = camera; irLight.intensity = 0;
+  irLight.diffuse = new BABYLON.Color3(0.4,0.6,0.4); irLight.specular = new BABYLON.Color3(0,0,0);
+
+  scene.onBeforeRenderObservable.add(()=>{
+    cloudScroll += engine ? engine.getDeltaTime()*0.00003 : 0.00003;
+    if (cloudMat?.diffuseTexture) cloudMat.diffuseTexture.uOffset = cloudScroll;
+  });
+}
+function applyNightPalette(){
+  scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
+  scene.imageProcessingConfiguration.exposure = 0.55;
+  scene.imageProcessingConfiguration.contrast = 1.15;
+  scene.environmentIntensity = 0.15;
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+  scene.fogDensity = 0.0045;
+  scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
+  if (cloudMat) cloudMat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.07);
+}
+function applyBloodMoonPalette(){
+  scene.clearColor = new BABYLON.Color4(0.02,0,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.04,0.01,0.02);
+  scene.imageProcessingConfiguration.exposure = 0.5;
+  scene.imageProcessingConfiguration.contrast = 1.2;
+  scene.environmentIntensity = 0.12;
+  scene.fogDensity = 0.005;
+  scene.fogColor = new BABYLON.Color3(0.06,0.01,0.02);
+  if (cloudMat) cloudMat.emissiveColor = new BABYLON.Color3(0.16,0.03,0.03);
+}
+function applyMoonTintForWeather(){
+  if (!moonMat) return;
+  if (weather.state === 'Blood Moon'){
+    moonMat.emissiveColor = new BABYLON.Color3(0.9, 0.16, 0.16);
+  } else {
+    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
+  }
+}
+
+/* ===========================================================
+   WEATHER / AUDIO
+   =========================================================== */
+const audio = {
+  ambient: new Audio("./assets/audio/ambient.mp3"),
+  rain: new Audio("./assets/audio/rainstorm.mp3"),
+  clear: new Audio("./assets/audio/clearWeather.mp3"),
+  spiritbox: new Audio("./assets/audio/spiritbox.mp3"),
+  spiritStatic: new Audio("./assets/audio/spiritBoxStatic.mp3"),
+  whisper: new Audio("./assets/audio/whisper.mp3"),
+  doorCreak1: new Audio("./assets/audio/doorCreak1.mp3"),
+  doorCreak2: new Audio("./assets/audio/doorCreak2.mp3"),
+  slam1: new Audio("./assets/audio/doorSlam1.mp3"),
+  slam2: new Audio("./assets/audio/doorSlam2.mp3"),
+  ghostLaugh: new Audio("./assets/audio/ghostLaugh.mp3"),
+  writing: new Audio("./assets/audio/GhostWriting1.mp3"),
+  foot1: new Audio("./assets/audio/foot_hunt1.mp3"),
+  foot2: new Audio("./assets/audio/foot_hunt2.mp3"),
+  footMy1: new Audio("./assets/audio/foot_myling1.mp3"),
+  footMy2: new Audio("./assets/audio/foot_myling2.mp3"),
+};
+Object.values(audio).forEach(a=>{ if(a && a.loop !== undefined) a.loop = false; });
+
+function makeSnowTexture(){
+  if (weather.snowTex) return weather.snowTex;
+  const tex = new BABYLON.DynamicTexture("snowTex",{width:32,height:32},scene,false);
+  const ctx = tex.getContext();
+  ctx.clearRect(0,0,32,32);
+  ctx.fillStyle="white";
+  ctx.beginPath(); ctx.arc(16,16,12,0,Math.PI*2); ctx.fill();
+  tex.update(false);
+  weather.snowTex = tex;
+  return tex;
+}
+function stopAllWeatherPS(){ if (weather.rainPS){ weather.rainPS.stop(); } if (weather.snowPS){ weather.snowPS.stop(); } }
+function stopAllWeatherAudio(){ try{ audio.rain.pause(); audio.rain.currentTime=0; }catch{} try{ audio.clear.pause(); audio.clear.currentTime=0; }catch{} }
+
+function setWeather(state){
+  weather.state = state;
+  $('#hud-weather').textContent = state;
+  stopAllWeatherPS(); stopAllWeatherAudio();
+
+  weather.modSanityDrain = 1.0; weather.modHuntChance = 1.0; weather.modHuntPace = 1.0;
+
+  if(state === 'Rain'){
+    if(!weather.rainPS){
+      const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
+      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder
+      ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
+      ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
+      ps.minSize = 0.05; ps.maxSize = 0.1;
+      ps.minLifeTime = 0.9; ps.maxLifeTime = 1.4;
+      ps.emitRate = 1800;
+      ps.direction1 = new BABYLON.Vector3(0, -1.2, 0);
+      ps.direction2 = new BABYLON.Vector3(0, -1.0, 0);
+      ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.75);
+      ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.6);
+      ps.gravity = new BABYLON.Vector3(0,-9.8,0);
+      ps.disposeOnStop = false;
+      weather.rainPS = ps;
+    }
+    weather.rainPS.start();
+    scheduleNextLightning();
+    applyNightPalette();
+    audio.rain.loop=true; audio.rain.volume=0.35; audio.rain.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.3; audio.ambient.play().catch(()=>{});
+
+  } else if (state === 'Snow'){
+    if (!weather.snowPS){
+      const ps = new BABYLON.ParticleSystem("snow", 2500, scene);
+      ps.particleTexture = makeSnowTexture();
+      ps.minEmitBox = new BABYLON.Vector3(-80, 40, -80);
+      ps.maxEmitBox = new BABYLON.Vector3(80, 40, 80);
+      ps.minSize = 0.06; ps.maxSize = 0.14;
+      ps.minLifeTime = 2.2; ps.maxLifeTime = 3.5;
+      ps.emitRate = 1200;
+      ps.direction1 = new BABYLON.Vector3(-0.2, -0.8, 0.1);
+      ps.direction2 = new BABYLON.Vector3(0.2, -1.0, -0.1);
+      ps.color1 = new BABYLON.Color4(1,1,1,0.9);
+      ps.color2 = new BABYLON.Color4(1,1,1,0.7);
+      <script>
+// (continuation)
+      ps.gravity = new BABYLON.Vector3(0,-0.2,0);
+      ps.updateSpeed = 0.02;
+      ps.disposeOnStop = false;
+      weather.snowPS = ps;
+    }
+    weather.snowPS.start();
+    applyNightPalette();
+    weather.modSanityDrain = 0.95;
+    audio.clear.loop=true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.28; audio.ambient.play().catch(()=>{});
+
+  } else if (state === 'Blood Moon'){
+    applyBloodMoonPalette();
+    applyMoonTintForWeather();
+    weather.modSanityDrain = 1.25;
+    weather.modHuntChance = 1.4;
+    weather.modHuntPace = 1.2;
+    audio.clear.loop=true; audio.clear.volume=0.22; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.32; audio.ambient.play().catch(()=>{});
+
+  } else { // Clear
+    applyNightPalette();
+    audio.clear.loop=true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.3; audio.ambient.play().catch(()=>{});
+  }
+}
+function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
+function lightningStrike(){ const overlay=document.getElementById('flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
+
+/* ===========================================================
+   MAP / DOORS
+   =========================================================== */
+async function loadMap(){
+  const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
+  houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
+  result.meshes.forEach(m=>{
+    m.checkCollisions = true; m.isPickable = true;
+    const bb = m.getBoundingInfo().boundingBox;
+    const size = bb.maximum.subtract(bb.minimum);
+    const thin = (size.y < 0.12) || (size.x < 0.12) || (size.z < 0.12);
+    if(thin) m.checkCollisions = false;
+    if(m.material && m.material.alpha && m.material.alpha < 0.9) m.checkCollisions = false;
+    if(/door/i.test(m.name||"")) doorMeshes.push(m);
+  });
+
+  const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
+  fallbackGround.position.y = 0;
+  fallbackGround.checkCollisions = true;
+  fallbackGround.isPickable = true;
+  fallbackGround.visibility = 0;
+
+  const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
+  camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
+
+  doorMeshes.forEach(door=>{ door.actionManager = new BABYLON.ActionManager(scene); door.isPickable = true; });
+}
+function afterMapLoadedForShadows(){
+  scene.meshes.forEach(m=>{
+    if (!m || m.name==='skybox') return;
+    m.receiveShadows = true;
+  });
+}
+
+/* ===========================================================
+   ITEMS
+   =========================================================== */
+let itemsGlb = null;
+async function loadItems(){
+  const res = await BABYLON.SceneLoader.LoadAssetContainerAsync("", "./assets/models/items/exploration_objects.glb", scene);
+  itemsGlb = res;
+  res.meshes.forEach(m=>{
+    if(!m.name || m.name==="_root" || m.name=="__root__") return;
+    inventory.models[m.name] = m;
+  });
+}
+
+/* ===========================================================
+   GHOST + HUNT
+   =========================================================== */
+async function loadGhost(){
+  const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
+  const pick = list[Math.floor(Math.random()*list.length)];
+  const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
+  ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
+  ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
+
+  const bb = ghost.mesh.getHierarchyBoundingVectors(true);
+  const height = bb.max.y - bb.min.y;
+  const targetHeight = 1.9;
+  const scale = targetHeight / (height || 1);
+  ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
+  ghost.mesh.rotation = new BABYLON.Vector3(0,0,0);
+
+  r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
+  if(ghost.anims.idle) ghost.anims.idle.start(true);
+
+  const p = randomPointInPolygonXZ(ghostPolygon);
+  const gy = pickGroundHeightAt(p.x, p.z);
+  ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
+  ghost.target = randomPointInPolygonXZ(ghostPolygon);
+
+  setGhostVisible(false);
+}
+function setGhostVisible(v){
+  ghost.visible = !!v;
+  if (!ghost.mesh) return;
+  ghost.mesh.getChildMeshes(false).concat([ghost.mesh]).forEach(m=>{
+    m.isVisible = v; m.visibility = v ? 1 : 0;
+  });
+}
+function beginHunt(){
+  if (!ghost.mesh || ghost.hunting) return;
+  ghost.hunting = true;
+  document.getElementById('hud-hunt-state').textContent = 'HUNTING';
+  setGhostVisible(true);
+  ghost.speed = 1.4;
+  ghost.stepInterval = 0.48;
+  flickerStart();
+  toast('⚠️ Hunt started!', 1200);
+}
+function endHunt(){
+  if (!ghost.hunting) return;
+  ghost.hunting = false;
+  document.getElementById('hud-hunt-state').textContent = 'Calm';
+  setGhostVisible(false);
+  ghost.speed = 0.9;
+  ghost.stepInterval = 0.55;
+  flickerStop();
+  toast('Hunt ended.', 900);
+}
+let flickerTimer=0, flickerOn=false;
+function flickerStart(){ flickerTimer = 0; flickerOn = true; }
+function flickerStop(){ flickerOn = false;
+  houseLights.forEach(h=>{
+    if (!housePower) { h.light.intensity = 0; return; }
+    if (h.light.intensity>0) h.light.intensity = 0.8;
+  });
+}
+
+let huntCooldown = 22 + Math.random()*18;
+let huntClock = 0;
+
+function sanityTick(dt){
+  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
+  const base = 0.6/60;
+  const add = nearGhost ? 1.2/60 : 0;
+  const drain = (base+add) * (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1) * (weather.modSanityDrain||1);
+  player.sanity = Math.max(0, player.sanity - drain);
+  document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`;
+
+  if (!ghost.hunting && !inVanZone(camera.position) && player.sanity <= 65){
+    huntClock += dt * (weather.modHuntPace||1);
+    if (huntClock >= huntCooldown){
+      huntClock = 0; huntCooldown = 22 + Math.random()*18;
+      const baseChance = (player.sanity<40 ? 0.85 : 0.55);
+      if (Math.random() < baseChance * (weather.modHuntChance||1)) beginHunt();
+    }
+  }
+  if (ghost.hunting && (inVanZone(camera.position) || Math.random()<0.0015)) endHunt();
+}
+
+/* ===========================================================
+   MOON MODEL
+   =========================================================== */
+async function loadMoon(){
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+    moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+    if (!moonMesh) throw new Error("moon.glb had no meshes");
+
+    moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+    moonMesh.renderingGroupId = 1;
+
+    const bb = moonMesh.getHierarchyBoundingVectors(true);
+    const size = bb.max.subtract(bb.min).length();
+    if (size < 5) moonMesh.scaling = new BABYLON.Vector3(30,30,30);
+
+    moonMat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
+    moonMesh.material = moonMat;
+
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+    applyMoonTintForWeather();
+
+    scene.onBeforeRenderObservable.add(()=>{
+      const t = performance.now()*0.00002;
+      moonMesh.position.x = Math.cos(t)*380;
+      moonMesh.position.z = Math.sin(t)*380;
+      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
     });
-  </script>
-</body>
+  }catch(e){
+    console.warn("loadMoon failed, using procedural sphere:", e);
+    moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+    moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+    moonMat = new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    try{ moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
+    catch{ moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
+    moonMesh.material = moonMat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+    applyMoonTintForWeather();
+  }
+}
+
+/* ===========================================================
+   HOUSE LIGHTS
+   =========================================================== */
+const HOUSE_LIGHT_REGEX = /(lamp|light|bulb|ceiling|sconce)/i;
+function adoptExistingGltfLights(){
+  let adopted = 0;
+  (scene.lights||[]).forEach(l=>{
+    if ([moonLight,flashLight,uvLight,irLight].includes(l)) return;
+    if (HOUSE_LIGHT_REGEX.test(l.name||"")){
+      l.intensity = 0;
+      l.diffuse = new BABYLON.Color3(1.0, 0.95, 0.8);
+      houseLights.push({ light:l, mesh:null });
+      adopted++;
+    }
+  });
+  return adopted>0;
+}
+function buildHouseLights(){
+  const candidates = scene.meshes.filter(m=>HOUSE_LIGHT_REGEX.test(m.name||""));
+  candidates.forEach((mesh, i)=>{
+    const b = mesh.getBoundingInfo().boundingBox;
+    const pos = b.centerWorld.clone(); pos.y += 0.2;
+    const pl = new BABYLON.PointLight("houseLight_"+i, pos, scene);
+    pl.intensity = 0; pl.range = 12; pl.diffuse = new BABYLON.Color3(1.0,0.95,0.8);
+    houseLights.push({ light:pl, mesh });
+    if (mesh.material && mesh.material.emissiveColor) mesh.material.emissiveColor = new BABYLON.Color3(0,0,0);
+  });
+}
+function setHousePower(on){
+  housePower = on;
+  houseLights.forEach(({light,mesh})=>{
+    light.intensity = on ? (light.intensity>0 ? light.intensity : 0.8) : 0;
+    if (mesh?.material?.emissiveColor) mesh.material.emissiveColor = on && light.intensity>0
+      ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
+  });
+}
+function toggleNearestHouseLight(){
+  if (!houseLights.length || !housePower) { toast(housePower? "No lights found." : "Power is OFF", 900); return; }
+  let n=null, best=1e9;
+  houseLights.forEach(h=>{ const d=BABYLON.Vector3.Distance(camera.position, h.light.position); if(d<best){ best=d; n=h; }});
+  if (!n) return;
+  const on = n.light.intensity>0;
+  n.light.intensity = on ? 0 : 0.8;
+  if (n.mesh?.material?.emissiveColor) n.mesh.material.emissiveColor = on ? new BABYLON.Color3(0,0,0) : new BABYLON.Color3(1.4,1.2,0.9);
+}
+
+/* ===========================================================
+   PLAYER / INPUT
+   =========================================================== */
+function updateHUD(){ document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`; document.getElementById('hud-room').textContent = player.room; }
+function handleMovement(dt){
+  const speed = player.running ? player.speedRun : player.speedWalk;
+  let move = new BABYLON.Vector3(0,0,0);
+  if(controls.forward) move.z += 1;
+  if(controls.back)    move.z -= 1;
+  if(controls.left)    move.x -= 1;
+  if(controls.right)   move.x += 1;
+
+  if(move.lengthSquared() > 0){
+    move.normalize();
+    const fwd = camera.getForwardRay().direction; fwd.y = 0; fwd.normalize();
+    const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+    const desired = fwd.scale(move.z).add(right.scale(move.x)).normalize();
+    camera.cameraDirection = desired.scale(speed * dt);
+  } else {
+    camera.cameraDirection = new BABYLON.Vector3(0,0,0);
+  }
+
+  if(allowFly && dev.enabled){
+    if(keysDown["PageUp"])   camera.position.y += 0.6 * dt * 60;
+    if(keysDown["PageDown"]) camera.position.y -= 0.6 * dt * 60;
+  }
+
+  player.room = inVanZone(camera.position) ? "Van" : "Grounds";
+  document.getElementById('storage-button').style.display = (player.room==="Van") ? "block" : "none";
+  updateHUD();
+}
+function openDoorNearby(){
+  const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
+  const pick = scene.pickWithRay(ray, m => /door/i.test(m.name||""));
+  if(pick.hit && pick.pickedMesh){
+    const d = BABYLON.Vector3.Distance(pick.pickedPoint, camera.position);
+    if(d < 3.0){
+      const door = pick.pickedMesh;
+      const open = !door.metadata?.open;
+      const baseRot = door.metadata?.baseRot ?? door.rotation.y;
+      if(open){
+        door.rotation = new BABYLON.Vector3(door.rotation.x, baseRot + Math.PI/2, door.rotation.z);
+        door.checkCollisions = false;
+        (Math.random()>0.5?audio.doorCreak1:audio.doorCreak2).play().catch(()=>{});
+      } else {
+        door.rotation = new BABYLON.Vector3(door.rotation.x, baseRot, door.rotation.z);
+        door.checkCollisions = true;
+      }
+      door.metadata = { baseRot, open };
+    }
+  }
+}
+
+/* ===========================================================
+   BELT / PREVIEW / CAMERA OVERLAY
+   =========================================================== */
+function rebuildBelt(){
+  const belt = document.getElementById('belt'); belt.innerHTML='';
+  for(let i=1;i<=5;i++){
+    const slotDiv = document.createElement('div');
+    slotDiv.className = 'slot' + (i===activeItemSlot?' active':''); slotDiv.dataset.slot = i;
+    const key = document.createElement('div'); key.className='key'; key.textContent=i; slotDiv.appendChild(key);
+    const label = inventory.slots[i] || '-';
+    const span = document.createElement('div'); span.style.fontSize='11px'; span.style.color='#8ff'; span.style.textAlign='center'; span.textContent=label;
+    slotDiv.appendChild(span);
+    slotDiv.onclick = ()=>selectSlot(i);
+    belt.appendChild(slotDiv);
+  }
+  refreshHandPreview(); refreshCameraOverlay();
+}
+function selectSlot(n){ activeItemSlot = n; rebuildBelt(); syncHeldLights(); }
+function refreshHandPreview(){
+  const wrap = document.getElementById('hand-preview'); wrap.innerHTML = '';
+  const item = inventory.slots[activeItemSlot];
+  if(!item || !itemsGlb){ wrap.style.display='none'; return; }
+  const c = document.createElement('canvas'); c.width=180; c.height=140; c.style.width='100%'; c.style.height='100%'; wrap.appendChild(c);
+
+  const pv = new BABYLON.Engine(c, true);
+  const pvScene = new BABYLON.Scene(pv);
+  const pvCam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), pvScene);
+  pvCam.attachControl(c, false); pvCam.panningSensibility=0; pvCam.wheelPrecision=50;
+  pvScene.clearColor = new BABYLON.Color4(0,0,0,0);
+  const hem = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), pvScene); hem.intensity=1.2;
+
+  const meshName = ITEM_MODEL_MAP[item]; const src = meshName && inventory.models[meshName];
+  if(!src){ wrap.style.display='none'; pv.dispose(); return; }
+  const clone = src.clone("pv-"+meshName, null, true); pvScene.addMesh(clone);
+  clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0); clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
+  wrap.style.display='block'; pv.runRenderLoop(()=>pvScene.render()); window.addEventListener('resize', ()=> pv.resize());
+}
+function refreshCameraOverlay(){
+  const item = inventory.slots[activeItemSlot];
+  const show = (item==='Camera');
+  document.getElementById('camera-overlay').style.display = show ? 'block' : 'none';
+  document.getElementById('camera-ir').style.display = (show && irOn) ? 'block' : 'none';
+}
+
+/* ===========================================================
+   EVIDENCE & ITEMS
+   =========================================================== */
+function logEvidence(type){
+  if(!EVIDENCE_TYPES.includes(type)) return;
+  if(!discoveredEvidence.has(type)){
+    discoveredEvidence.add(type);
+    toast(`Evidence: ${type}`, 1800);
+    const cb = document.querySelector(`input[data-ev="${type}"]`); if(cb) cb.checked = true;
+  }
+  if (window.__onEvidenceLogged) window.__onEvidenceLogged({ item:type, result:type, room:player.room, success:true });
+}
+function useActiveItem(){
+  const item = inventory.slots[activeItemSlot]; if(!item) return;
+  const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
+  switch(item){
+    case 'EMF':
+      if(dist < 5){ if(Math.random()<0.5) logEvidence("EMF Level 5"); toast("EMF spikes!", 1000); } else toast("EMF quiet.", 800); break;
+    case 'Spirit Box':
+      if(player.room!=='Van' && dist<4){ if(Math.random()<0.55){ audio.spiritbox.play().catch(()=>{}); logEvidence("Spirit Box"); } else { audio.spiritStatic.play().catch(()=>{}); toast("...static...", 900); } }
+      else toast("No response.", 800); break;
+    case 'Thermometer':
+      if(dist<6 && Math.random()<0.5){ logEvidence("Freezing Temps"); toast("It’s unnaturally cold here.", 900); } else toast("Temp normal.", 900); break;
+    case 'UV Light':
+      if(Math.random()<0.4){ logEvidence("Fingerprints"); toast("A latent mark glows faintly.", 1000); } else toast("Nothing glows.", 900); break;
+    case 'Ghost Writing Book':
+      audio.writing.play().catch(()=>{}); setTimeout(()=>logEvidence("Ghost Writing"), 1200); toast("You place the book down...", 900); break;
+    case 'D.O.T.S':
+      if(Math.random()<0.45){ logEvidence("D.O.T.S"); toast("Something flickers through your setup...", 1000); } else toast("Nothing passes through.", 900); break;
+    case 'Camera':
+      showCameraOrb(); if(Math.random()<0.4) logEvidence("Orbs"); break;
+    case 'Smudge': toast("Air thickens—and clears.", 900); break;
+    case 'Crucifix': toast("You hold the crucifix ready.", 900); break;
+    case 'Salt': toast("You sprinkle a thin line.", 900); break;
+    case 'Motion Sensor': toast("Sensor armed.", 800); break;
+    case 'Lighter': toast("Flame lit.", 700); break;
+    case 'Notebook': openNotebook(true); break;
+    default: toast(`${item}...`, 700);
+  }
+}
+function showCameraOrb(){
+  const dot = document.getElementById('camera-orb');
+  dot.style.display='block';
+  const w=window.innerWidth,h=window.innerHeight; const x=60+Math.random()*(w-120), y=60+Math.random()*(h-180);
+  dot.style.transform = `translate(${x}px, ${y}px)`; setTimeout(()=> dot.style.display='none', 1000);
+}
+
+/* ===========================================================
+   NOTEBOOK
+   =========================================================== */
+function openNotebook(){ document.getElementById('notebook-modal').style.display='flex'; renderNotebook(); }
+function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
+function renderNotebook(){
+  const tabs = Array.from(document.querySelectorAll('#notebook-tabs .tab'));
+  const pages = { ghosts:document.getElementById('page-ghosts'), evidence:document.getElementById('page-evidence'), guess:document.getElementById('page-guess') };
+  tabs.forEach(t=>{ t.onclick = ()=>{ tabs.forEach(x=>x.classList.remove('active')); t.classList.add('active'); document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); pages[t.dataset.tab].classList.add('active'); }; });
+
+  const gPage=pages.ghosts; gPage.innerHTML=''; const gp=document.createElement('div');
+  gp.innerHTML='<div style="color:#9ff; margin-bottom:6px;">Ghost Types & Required Evidence:</div>';
+  Object.entries(GHOSTS).forEach(([name,evs])=>{ const row=document.createElement('div'); row.style.margin='4px 0'; row.textContent=name.toUpperCase()+' — '+evs.join(', '); gp.appendChild(row); });
+  gPage.appendChild(gp);
+
+  const ePage=pages.evidence; ePage.innerHTML=''; const ewrap=document.createElement('div');
+  ewrap.innerHTML = '<div style="color:#9ff; margin-bottom:6px;">Check what you have found:</div>';
+  EVIDENCE_TYPES.forEach(ev=>{ const r=document.createElement('div'); r.className='ev-row'; const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.ev=ev; cb.checked=discoveredEvidence.has(ev); cb.onchange=()=>{ if(cb.checked) discoveredEvidence.add(ev); else discoveredEvidence.delete(ev); }; const l=document.createElement('label'); l.textContent=ev; l.style.color='#8ff'; r.appendChild(cb); r.appendChild(l); ewrap.appendChild(r); });
+  ePage.appendChild(ewrap);
+
+  const gg=pages.guess; gg.innerHTML=''; const glabel=document.createElement('div'); glabel.style.color='#9ff'; glabel.textContent='Who do you think it is?'; gg.appendChild(glabel);
+  const grid=document.createElement('div'); grid.style.display='grid'; grid.style.gridTemplateColumns='repeat(auto-fit, minmax(140px,1fr))'; grid.style.gap='6px'; grid.style.marginTop='6px';
+  Object.keys(GHOSTS).forEach(k=>{ const btn=document.createElement('button'); btn.textContent=k.toUpperCase(); btn.style.cssText='border:1px solid #066; color:#9ff; background:#111; padding:8px 10px; cursor:pointer;'; btn.onclick=()=>{ const req=GHOSTS[k]; const allFound=req.every(e=>discoveredEvidence.has(e)); toast(allFound?`✅ Correct set matches: ${k.toUpperCase()}`:`❌ Not all evidence matches ${k.toUpperCase()}`, 1600); }; grid.appendChild(btn); });
+  gg.appendChild(grid);
+}
+
+/* ===========================================================
+   STORAGE
+   =========================================================== */
+function openStorage(){
+  const modal=document.getElementById('storage-modal'); const grid=document.getElementById('storage-grid'); grid.innerHTML='';
+  STORAGE_ITEMS.forEach(it=>{
+    const card=document.createElement('div'); card.style.cssText='border:1px solid #066; padding:8px; background:#111; border-radius:6px;';
+    const title=document.createElement('div'); title.style.color='#9ff'; title.style.marginBottom='6px'; title.textContent=it;
+    const btn=document.createElement('button'); btn.textContent='Add to Slots 1–3'; btn.className='hud-btn'; btn.onclick=()=> addToLoadout(it);
+    card.appendChild(title); card.appendChild(btn); grid.appendChild(card);
+  });
+  document.getElementById('storage-info').textContent = `Current: [${inventory.slots[1]||'-'}, ${inventory.slots[2]||'-'}, ${inventory.slots[3]||'-'}] — (4:Lighter, 5:Notebook)`;
+  modal.style.display='flex'; storageOpen=true;
+}
+function closeStorage(){ document.getElementById('storage-modal').style.display='none'; storageOpen=false; }
+function addToLoadout(item){ for(let i=1;i<=3;i++){ if(!inventory.slots[i]){ inventory.slots[i]=item; toast(`Added ${item} to slot ${i}`, 900); rebuildBelt(); return; } } toast('Slots 1–3 full. Remove one first.', 1200); }
+function confirmLoadout(){ closeStorage(); }
+
+/* ===========================================================
+   DEVTOOLS (Enable Developer Listen + Map Recorder, XYZ etc.)
+   =========================================================== */
+(function setupDevTools(){
+  const toggleBtn   = document.getElementById('devtools-toggle');
+  const panel       = document.getElementById('devtools-panel');
+  const enableBtn   = document.getElementById('devtools-enable');
+  const chkGhost    = document.getElementById('devtools-group-ghost');
+  const chkEv       = document.getElementById('devtools-group-evidence');
+  const chkXYZ      = document.getElementById('devtools-group-xyz');
+  const mapStartBtn = document.getElementById('devtools-map-start');
+  const mapPinBtn   = document.getElementById('devtools-map-pin');
+  const mapOkBtn    = document.getElementById('devtools-map-confirm');
+  const roomSel     = document.getElementById('devtools-room-select');
+  const exportBtn   = document.getElementById('devtools-export-rooms');
+  const logTa       = document.getElementById('devtools-log');
+
+  const walkRange = document.getElementById('devtools-walk');
+  const runRange  = document.getElementById('devtools-run');
+  const chkGod    = document.getElementById('devtools-god');
+  const chkFly    = document.getElementById('devtools-fly');
+  const btnTp     = document.getElementById('devtools-teleport');
+  const btnPing   = document.getElementById('devtools-ping');
+  const btnInspect= document.getElementById('devtools-inspector');
+
+  const btnReveal = document.getElementById('devtools-reveal-ghost');
+  const btnForceHunt = document.getElementById('devtools-force-hunt');
+  const btnEndHunt = document.getElementById('devtools-end-hunt');
+
+  const reloadMapBtn  = document.getElementById('asset-reload-map');
+  const glbFileInput  = document.getElementById('asset-glb-file');
+  const appendGlbBtn  = document.getElementById('asset-append-glb');
+  const replaceMapBtn = document.getElementById('asset-replace-map');
+  const listMeshesBtn = document.getElementById('asset-list-meshes');
+  const exportMeshesBtn = document.getElementById('asset-export-meshes');
+  const meshSelect    = document.getElementById('asset-mesh-select');
+  const matSelect     = document.getElementById('asset-mat-select');
+  const focusBtn      = document.getElementById('asset-focus');
+  const chkVisible    = document.getElementById('asset-visible');
+  const chkPick       = document.getElementById('asset-pick');
+  const chkCollide    = document.getElementById('asset-collide');
+  const chkBBox       = document.getElementById('asset-bbox');
+  const chkWire       = document.getElementById('asset-wire');
+  const alphaRange    = document.getElementById('asset-alpha');
+  const texUrlInput   = document.getElementById('asset-tex-url');
+  const applyTexBtn   = document.getElementById('asset-apply-tex');
+
+  function log(msg){
+    const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+    logTa.value += line; logTa.scrollTop = logTa.scrollHeight;
+    console.debug('%cDEV','color:#8af', msg);
+  }
+  function setEnabled(el,on){ if(!el) return; el.disabled=!on; el.style.opacity=on?'1':'0.6'; }
+  function meshes(){ return scene.meshes.filter(m=>m && m.name && m.name!=='skybox'); }
+
+  window.DevTools = { showToggle(){ toggleBtn.style.display='block'; }, open(){ panel.style.display='block'; }, log };
+  toggleBtn.style.display='none';
+  toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
+
+  try{
+    const raw = (window.ROOMS && Array.isArray(window.ROOMS)) ? window.ROOMS : [];
+    const names = raw.map(r => typeof r === 'string' ? r : (r?.name || 'Unnamed'));
+    if (roomSel && names.length){
+      roomSel.innerHTML = '<option value="">Select room…</option>' + names.map(n=>`<option>${n}</option>`).join('');
+    }
+  }catch{}
+
+  enableBtn.addEventListener('click', ()=>{
+    const on = enableBtn.dataset.on==='1' ? false : true;
+    enableBtn.dataset.on = on ? '1':'0';
+    enableBtn.textContent = on ? 'Disable Developer Listen' : 'Enable Developer Listen';
+    log(on ? 'Developer Listen: ON' : 'Developer Listen: OFF');
+
+    if (chkGhost) {
+      if (on && chkGhost.checked) devBus.addEventListener('ghost', ghostLogger);
+      else                         devBus.removeEventListener('ghost', ghostLogger);
+    }
+    if (chkEv) {
+      if (on && chkEv.checked) window.__onEvidenceLogged = d=> evidenceLogger(d);
+      else                     window.__onEvidenceLogged = null;
+    }
+    if (chkXYZ) {
+      if (on && chkXYZ.checked) startXYZ();
+      else                      stopXYZ();
+    }
+  });
+  chkGhost?.addEventListener('change', ()=>{ if (enableBtn.dataset.on==='1'){ if (chkGhost.checked) devBus.addEventListener('ghost', ghostLogger); else devBus.removeEventListener('ghost', ghostLogger); } });
+  chkXYZ?.addEventListener('change',  ()=>{ if (enableBtn.dataset.on==='1'){ if (chkXYZ.checked) startXYZ(); else stopXYZ(); } });
+
+  let mapping=null;
+  setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false);
+  mapStartBtn.addEventListener('click', ()=>{ mapping={points:[]}; setEnabled(mapPinBtn,true); setEnabled(mapOkBtn,true); log('Map recording started. Use “Pin”.'); });
+  mapPinBtn.addEventListener('click', ()=>{ if(!mapping) return; const p=camera?.position||{x:0,y:0,z:0}; mapping.points.push({x:p.x,y:p.y,z:p.z}); log(`Pinned: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); });
+  mapOkBtn.addEventListener('click', ()=>{ if(!mapping) return; const name=roomSel?.value?.trim(); if(!name){ log('Select a room name before Confirm.'); return; } window.__mappedRooms=window.__mappedRooms||[]; window.__mappedRooms.push({ name, points:mapping.points }); log(`Map "${name}" saved (${mapping.points.length} pins).`); mapping=null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false); });
+  exportBtn.addEventListener('click', ()=>{ const data=(window.__mappedRooms&&window.__mappedRooms.length)?window.__mappedRooms:[]; const pretty=JSON.stringify(data,null,2); const content=`// Auto-generated by Dev Tools\nexport const ROOMS = [\n  ...${pretty}\n];`; const blob=new Blob([content],{type:'application/javascript'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms.generated.js'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); log(`Exported ${data.length} room(s) to rooms.generated.js`); });
+
+  walkRange.value = String(player.speedWalk); runRange.value = String(player.speedRun);
+  walkRange.addEventListener('input', e=>{ player.speedWalk=parseFloat(e.target.value); log(`Walk speed: ${player.speedWalk.toFixed(2)}`); });
+  runRange .addEventListener('input', e=>{ player.speedRun =parseFloat(e.target.value); log(`Run speed: ${player.speedRun.toFixed(2)}`); });
+  chkGod.addEventListener('change', e=>{ player.god=e.target.checked; log(`God mode: ${player.god}`); });
+  chkFly.addEventListener('change', e=>{ allowFly=e.target.checked; log(`Fly enabled: ${allowFly}`); });
+  btnTp.addEventListener('click', ()=>{ if(ghost.mesh){ camera.position = ghost.mesh.position.add(new BABYLON.Vector3(0,1.7,-2)); log('Teleported to ghost.'); } else log('No ghost mesh yet.'); });
+  btnPing.addEventListener('click', ()=>{ const p=camera.position; log(`PING @ x:${p.x.toFixed(3)} y:${p.y.toFixed(3)} z:${p.z.toFixed(3)}`); });
+  btnInspect.addEventListener('click', ()=>{ if(scene.debugLayer.isVisible()) scene.debugLayer.hide(); else scene.debugLayer.show({ embedMode:true }); });
+
+  btnReveal.addEventListener('click', ()=>{ setGhostVisible(!ghost.visible); log(`Ghost visible: ${ghost.visible}`); });
+  btnForceHunt.addEventListener('click', ()=> beginHunt());
+  btnEndHunt.addEventListener('click', ()=> endHunt());
+
+  const reloadMap = async ()=>{ try{ log('Reloading map…'); await loadMap(); afterMapLoadedForShadows(); log('Map reloaded.'); }catch(e){ log('Reload map error: '+e.message); } };
+  reloadMapBtn.addEventListener('click', reloadMap);
+  appendGlbBtn.addEventListener('click', async ()=>{
+    const f = glbFileInput.files?.[0]; if(!f){ log('Choose a GLB/GLTF first.'); return; }
+    try{ log(`Appending GLB: ${f.name}`); await BABYLON.SceneLoader.AppendAsync("", f, scene); log('Append complete. Use List Meshes to inspect.'); }
+    catch(e){ log('Append error: '+e.message); }
+  });
+  replaceMapBtn.addEventListener('click', async ()=>{
+    const f = glbFileInput.files?.[0]; if(!f){ log('Choose a GLB/GLTF first.'); return; }
+    try{
+      log(`Replacing map with: ${f.name}`);
+      scene.meshes.slice().forEach(m=>{
+        if(m && m.name && m.name!=='skybox' && m.name!=='fallbackGround' && m!==camera){ try{ m.dispose(); }catch{} }
+      });
+      const r = await BABYLON.SceneLoader.ImportMeshAsync("", "", f, scene);
+      houseRoot = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
+      afterMapLoadedForShadows();
+      log('Replace complete.');
+    }catch(e){ log('Replace error: '+e.message); }
+  });
+  listMeshesBtn.addEventListener('click', ()=>{
+    const list = meshes(); meshSelect.innerHTML = '<option value="">(select a mesh)</option>' + list.map((m,i)=>`<option value="${i}">${i}: ${m.name}</option>`).join('');
+    log(`Found ${list.length} meshes.`);
+    const mats = scene.materials || [];
+    document.getElementById('asset-mat-select').innerHTML = '<option value="">(material)</option>' + mats.map((m,i)=>`<option value="${i}">${i}: ${m.name||'(unnamed)'} </option>`).join('');
+  });
+  focusBtn.addEventListener('click', ()=>{
+    const idx=parseInt(meshSelect.value,10); const m=meshes()[idx]; if(!m) return;
+    const b=m.getBoundingInfo().boundingBox; const c=b.centerWorld; camera.position = new BABYLON.Vector3(c.x, c.y+3, c.z-6); camera.setTarget(c); log('Camera focused on mesh.');
+  });
+  chkVisible.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isVisible = chkVisible.checked; } });
+  chkPick.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isPickable = chkPick.checked; } });
+  chkCollide.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.checkCollisions = chkCollide.checked; } });
+  chkBBox.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.showBoundingBox = chkBBox.checked; } });
+  chkWire.addEventListener('change',    ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m && m.material){ m.material.wireframe = chkWire.checked; } });
+  document.getElementById('asset-mat-select').addEventListener('change', ()=>{ const i=parseInt(document.getElementById('asset-mat-select').value,10); const mat=scene.materials[i]; if(!mat) return; document.getElementById('asset-alpha').value = String(mat.alpha ?? 1); log(`Selected material: ${mat.name||'(unnamed)'} alpha=${document.getElementById('asset-alpha').value}`); });
+  document.getElementById('asset-alpha').addEventListener('input', ()=>{ const i=parseInt(document.getElementById('asset-mat-select').value,10); const mat=scene.materials[i]; if(mat){ mat.alpha = parseFloat(document.getElementById('asset-alpha').value); } });
+  document.getElementById('asset-apply-tex').addEventListener('click', ()=>{
+    const i=parseInt(document.getElementById('asset-mat-select').value,10); const mat=scene.materials[i]; const url=(document.getElementById('asset-tex-url').value||'').trim();
+    if(!mat){ log('Pick a material first.'); return; }
+    if(!url){ log('Enter a texture URL.'); return; }
+    try{
+      if(mat.albedoTexture !== undefined) mat.albedoTexture = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+      else mat.diffuseTexture = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+      log('Applied texture to material.');
+    }catch(e){ log('Texture error: '+e.message); }
+  });
+
+  function ghostLogger(e){ const d=e?.detail||{}; log(`Ghost: state=${d.state??'n/a'} room=${d.room??'n/a'} action=${d.action??'n/a'} speed=${typeof d.speed==='number'?d.speed.toFixed(2):'n/a'} hunt=${!!d.hunt}`); }
+  function evidenceLogger(d){ log(`Evidence: ${d.item} -> ${d.result??'none'} in ${d.room??'unknown'} (${d.success?'ok':'fail'})`); }
+  let xyzTicker=null;
+  function startXYZ(){ stopXYZ(); xyzTicker=setInterval(()=>{ const p=camera?.position||{x:0,y:0,z:0}; log(`XYZ: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); }, 1000); }
+  function stopXYZ(){ if(xyzTicker){ clearInterval(xyzTicker); xyzTicker=null; } }
+
+  log('Devtools wired.');
+})();
+
+/* ===========================================================
+   FLASH / UV / IR
+   =========================================================== */
+let flashOn=false, uvOn=false, irOn=false;
+const holding = (name) => inventory.slots[activeItemSlot] === name;
+function syncHeldLights(){
+  flashLight.intensity = (flashOn && holding('Flashlight')) ? 1.1 : 0;
+  uvLight.intensity    = (uvOn    && holding('UV Light'))   ? 0.9 : 0;
+  irLight.intensity    = (irOn    && holding('Camera'))     ? 0.4 : 0;
+  refreshCameraOverlay();
+}
+function toggleFlash(){ flashOn=!flashOn; syncHeldLights(); }
+function toggleUV(){    uvOn=!uvOn;       syncHeldLights(); }
+function toggleIR(){    irOn=!irOn;       syncHeldLights(); }
+
+/* ===========================================================
+   INPUT
+   =========================================================== */
+const keysDown = {};
+window.addEventListener('keydown', (e)=>{
+  keysDown[e.key] = true;
+  if(e.key==='Shift') player.running = true;
+  if(e.key==='w'||e.key==='W') controls.forward=true;
+  if(e.key==='s'||e.key==='S') controls.back=true;
+  if(e.key==='a'||e.key==='A') controls.left=true;
+  if(e.key==='d'||e.key==='D') controls.right=true;
+
+  if(e.key==='1') selectSlot(1);
+  if(e.key==='2') selectSlot(2);
+  if(e.key==='3') selectSlot(3);
+  if(e.key==='4') selectSlot(4);
+  if(e.key==='5') selectSlot(5);
+
+  if(e.key==='q'||e.key==='Q') useActiveItem();
+  if(e.key==='e'||e.key==='E') openDoorNearby();
+
+  if(e.key.toLowerCase()==='f') toggleFlash();
+  if(e.key.toLowerCase()==='u') toggleUV();
+  if(e.key.toLowerCase()==='i') toggleIR();
+  if(e.key.toLowerCase()==='l') toggleNearestHouseLight();
+  if(e.key.toLowerCase()==='p'){ setHousePower(!housePower); toast(`Power ${housePower?'ON':'OFF'}`, 800); }
+
+  if(e.key==='-'||e.key==='_'){ player.speedWalk = Math.max(0.2, player.speedWalk - 0.1); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
+  if(e.key==='='||e.key==='+'){ player.speedWalk = Math.min(3.0, player.speedWalk + 0.1); toast(`Walk ${player.speedWalk.toFixed(2)}`, 800); }
+  if(e.key==='['){ player.speedRun = Math.max(0.4, player.speedRun - 0.1); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
+  if(e.key===']'){ player.speedRun = Math.min(6.0, player.speedRun + 0.1); toast(`Run ${player.speedRun.toFixed(2)}`, 800); }
+
+  if(e.key==='h'||e.key==='H') beginHunt();
+  if(e.key==='j'||e.key==='J') endHunt();
+  if(e.key==='g'||e.key==='G'){ setGhostVisible(!ghost.visible); toast(`Ghost ${ghost.visible?'shown':'hidden'}`, 900); }
+
+  if(e.key==='Escape'){ if(dev.enabled){ const dp=document.getElementById('devtools-panel'); dp.style.display=(dp.style.display==='block')?'none':'block'; } else openDevGate(); }
+});
+window.addEventListener('keyup', (e)=>{
+  keysDown[e.key] = false;
+  if(e.key==='Shift') player.running = false;
+  if(e.key==='w'||e.key==='W') controls.forward=false;
+  if(e.key==='s'||e.key==='S') controls.back=false;
+  if(e.key==='a'||e.key==='A') controls.left=false;
+  if(e.key==='d'||e.key==='D') controls.right=false;
+});
+
+/* ===========================================================
+   GHOST UPDATE + FOOTSTEPS
+   =========================================================== */
+function updateGhost(dt){
+  if(!ghost.mesh || !ghost.alive) return;
+
+  if(!ghost.target || BABYLON.Vector3.Distance(ghost.mesh.position, ghost.target) < 1.5){
+    ghost.target = randomPointInPolygonXZ(ghostPolygon);
+  }
+  const tgt = new BABYLON.Vector3(ghost.target.x, pickGroundHeightAt(ghost.target.x, ghost.target.z), ghost.target.z);
+  let dir = tgt.subtract(ghost.mesh.position);
+  dir.y = 0;
+  const d = dir.length();
+
+  if(d>0.001){
+    dir.normalize();
+    ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt));
+    ghost.mesh.position.y = pickGroundHeightAt(ghost.mesh.position.x, ghost.mesh.position.z);
+    lookAtXZ(ghost.mesh, tgt);
+    if(ghost.anims.walk && !ghost.anims.walk.isPlaying){ if(ghost.anims.idle) ghost.anims.idle.stop(); ghost.anims.walk.start(true); }
+  } else {
+    if(ghost.anims.idle && !ghost.anims.idle.isPlaying){ if(ghost.anims.walk) ghost.anims.walk.stop(); ghost.anims.idle.start(true); }
+  }
+
+  const pd = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+  if(!ghost.hunting && pd < 6 && Math.random()<0.002){ audio.whisper.play().catch(()=>{}); }
+
+  if (ghost.hunting){
+    ghost.nextStep -= dt;
+    if (ghost.nextStep <= 0){
+      ghost.nextStep = ghost.stepInterval + (Math.random()*0.08-0.04);
+      const key = (currentGhostKey||"").toLowerCase();
+      const myling = key.includes("myling");
+      const audible = myling ? 8 : 18;
+      ghost.footAudible = audible;
+      const dist = pd;
+      if (dist <= audible){
+        const vol = Math.max(0, Math.min(1, 1 - (dist/audible)));
+        const bank = myling ? [audio.footMy1, audio.footMy2] : [audio.foot1, audio.foot2];
+        const a = bank[Math.floor(Math.random()*bank.length)];
+        a.volume = vol*0.9;
+        a.currentTime = 0; a.play().catch(()=>{});
+      }
+    }
+  }
+
+  __devGhostLogTimer += dt;
+  if(__devGhostLogTimer > 1){ __devGhostLogTimer=0; devBus.dispatchEvent(new CustomEvent('ghost', { detail:{ state:ghost.hunting?'hunt':'wander', room:player.room, action:'move', speed:ghost.speed, hunt:ghost.hunting }})); }
+}
+
+/* ===========================================================
+   COLD BREATH FX
+   =========================================================== */
+function setupBreathFX(){
+  breath.anchor = new BABYLON.TransformNode("breathAnchor", scene);
+  breath.anchor.parent = camera;
+  breath.anchor.position = new BABYLON.Vector3(0, -0.12, 0.35);
+
+  const tex = new BABYLON.DynamicTexture("breathTex", {width:64, height:64}, scene, false);
+  const ctx = tex.getContext();
+  const r = 32;
+  const g = ctx.createRadialGradient(r,r,0, r,r,r);
+  g.addColorStop(0, "rgba(255,255,255,0.9)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.clearRect(0,0,64,64);
+  ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+  tex.update(false);
+
+  const ps = new BABYLON.ParticleSystem("breathPS", 400, scene);
+  ps.particleTexture = tex;
+  ps.emitter = breath.anchor;
+
+  const cone = new BABYLON.ConeParticleEmitter(0.08, 0.6);
+  ps.particleEmitterType = cone;
+
+  ps.minSize = 0.03; ps.maxSize = 0.08;
+  ps.minLifeTime = 0.35; ps.maxLifeTime = 0.75;
+  ps.emitRate = 0;
+  ps.color1 = new BABYLON.Color4(1,1,1,0.9);
+  ps.color2 = new BABYLON.Color4(1,1,1,0.5);
+  ps.colorDead = new BABYLON.Color4(1,1,1,0.0);
+  ps.gravity = new BABYLON.Vector3(0, 0.25, 0);
+  ps.updateSpeed = 0.015;
+  ps.disposeOnStop = false;
+  ps.start();
+
+  breath.ps = ps; breath.pulse = 0; breath.cooldown = 0;
+}
+function updateBreath(dt){
+  if (!breath.ps || !ghost.mesh) return;
+  const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+  const near = dist < BREATH_RANGE && !inVanZone(camera.position);
+
+  if (near){
+    breath.cooldown -= dt;
+    if (breath.cooldown <= 0){
+      breath.cooldown = 0.9 + Math.random()*0.3;
+      breath.pulse = 0.35;
+      breath.ps.emitRate = 220;
+    }
+  }
+  if (breath.pulse > 0){
+    breath.pulse -= dt;
+    if (breath.pulse <= 0){
+      breath.ps.emitRate = 0;
+    }
+  }
+}
+
+/* ===========================================================
+   DEV GATE + UI WIRING
+   =========================================================== */
+function initUI(){
+  document.getElementById('start-button').onclick = safeStart;
+  document.getElementById('storage-button').onclick = ()=> openStorage();
+  document.getElementById('storage-close').onclick = ()=> closeStorage();
+  document.getElementById('storage-confirm').onclick = ()=> confirmLoadout();
+  document.getElementById('notebook-close').onclick = ()=> closeNotebook();
+
+  document.getElementById('dev-yes').onclick = ()=> { document.getElementById('dev-pass-wrap').style.display='block'; };
+  document.getElementById('dev-no').onclick  = ()=> closeDevGate();
+  document.getElementById('dev-pass-submit').onclick = ()=>{
+    const pw = (document.getElementById('dev-pass').value||'').trim();
+    if(pw === 'devmode'){ dev.enabled=true; closeDevGate(); DevTools.showToggle(); DevTools.open(); DevTools.log('Developer mode enabled.'); }
+    else toast('Wrong password.', 900);
+  };
+
+  rebuildBelt();
+
+  const isTouch = 'ontouchstart' in window; document.getElementById('touch-controls').style.display = isTouch ? 'grid' : 'none';
+  if(isTouch){
+    const hold=(el,down,up)=>{ let id=null; el.addEventListener('touchstart',e=>{e.preventDefault(); down(); id=setInterval(down,32);}); el.addEventListener('touchend',e=>{e.preventDefault(); clearInterval(id); up&&up();}); };
+    hold(document.getElementById('t-up'),   ()=>{ controls.forward=true; }, ()=>{ controls.forward=false; });
+    hold(document.getElementById('t-left'), ()=>{ controls.left=true; },   ()=>{ controls.left=false; });
+    hold(document.getElementById('t-right'),()=>{ controls.right=true; },  ()=>{ controls.right=false; });
+    document.getElementById('t-use').addEventListener('touchstart', e=>{ e.preventDefault(); useActiveItem(); });
+  }
+
+  document.getElementById('devtools-toggle').style.display='none';
+}
+function openDevGate(){ document.getElementById('dev-gate').style.display='flex'; dev.gateOpen=true; }
+function closeDevGate(){ document.getElementById('dev-gate').style.display='none'; dev.gateOpen=false; }
+
+</script>
+<script>
+/* ===========================================================
+   SAFE STARTUP + MAIN LOOP
+   =========================================================== */
+async function safeStart(){
+  try{
+    document.getElementById('title-screen').style.display = 'none';
+    if(!engine){
+      engine = new BABYLON.Engine(document.getElementById('renderCanvas'), true);
+    }
+    scene = new BABYLON.Scene(engine);
+    scene.collisionsEnabled = true;
+    scene.enablePhysics();
+
+    camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.7,0), scene);
+    camera.attachControl(document.getElementById('renderCanvas'), true);
+    camera.applyGravity = true;
+    camera.checkCollisions = true;
+    camera.ellipsoid = new BABYLON.Vector3(0.4, 0.9, 0.4);
+
+    // Lights
+    flashLight = new BABYLON.SpotLight("flash", new BABYLON.Vector3(0,1.7,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 2, scene);
+    flashLight.parent = camera; flashLight.intensity = 0;
+    uvLight    = new BABYLON.SpotLight("uv", new BABYLON.Vector3(0,1.7,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 2, scene);
+    uvLight.parent = camera; uvLight.diffuse = new BABYLON.Color3(0.4,0.7,1.2); uvLight.intensity = 0;
+    irLight    = new BABYLON.SpotLight("ir", new BABYLON.Vector3(0,1.7,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 2, scene);
+    irLight.parent = camera; irLight.diffuse = new BABYLON.Color3(0.3,0.3,0.3); irLight.intensity = 0;
+
+    moonLight  = new BABYLON.HemisphericLight("moonHemi", new BABYLON.Vector3(0,1,0), scene);
+    moonLight.intensity = 0.3;
+
+    // Skybox
+    const skybox = BABYLON.MeshBuilder.CreateBox("skybox", {size:1000}, scene);
+    const skyMat = new BABYLON.StandardMaterial("skyMat", scene);
+    skyMat.backFaceCulling = false;
+    skyMat.disableLighting = true;
+    skyMat.emissiveColor = new BABYLON.Color3(0.05,0.05,0.1);
+    skybox.material = skyMat;
+
+    // Subsystems
+    await loadMap();
+    afterMapLoadedForShadows();
+    await loadItems();
+    await loadGhost();
+    await loadMoon();
+    setupBreathFX();
+    initUI();
+
+    setWeatherState('Clear');
+    rebuildBelt();
+
+    // Main loop
+    let last = performance.now();
+    engine.runRenderLoop(()=>{
+      const now = performance.now();
+      const dt = (now-last)/1000; last = now;
+      if(scene) scene.render();
+      handleMovement(dt);
+      updateGhost(dt);
+      sanityTick(dt);
+      updateBreath(dt);
+    });
+
+    window.addEventListener('resize', ()=> engine.resize());
+    toast("Investigation started", 1200);
+  }catch(err){
+    console.error(err);
+    toast("Startup error: "+err.message, 3000);
+  }
+}
+
+/* ===========================================================
+   CLEANUP
+   =========================================================== */
+window.addEventListener('beforeunload', ()=>{
+  try{ engine && engine.dispose(); }catch{}
+});
+</script>
 </html>
