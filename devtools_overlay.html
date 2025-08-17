@@ -6,48 +6,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { height:100%; margin:0; background:#000; }
-    /* Game frame */
     #wrap { position:fixed; inset:0; }
-    #game {
-      position:absolute; inset:0;
-      width:100%; height:100%;
-      border:0; background:#000;
-    }
+    #game { position:absolute; inset:0; width:100%; height:100%; border:0; background:#000; }
 
-    /* Floating panel */
+    /* Panel */
     #panel {
       position:fixed; right:16px; bottom:16px;
-      width:min(420px, 92vw);
-      max-height:80vh; overflow:auto;
+      width:min(420px, 92vw); max-height:80vh; overflow:auto;
       background:#0c0c0f; color:#d8f6ff;
       border:1px solid #144; border-radius:10px;
       box-shadow:0 8px 24px rgba(0,0,0,0.55);
-      font:12px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font:12px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial;
       z-index:999999;
+      transform-origin: bottom right;
+      transition: transform .15s ease, opacity .15s ease, visibility .15s ease;
+    }
+    #panel.hidden {
+      opacity:0; visibility:hidden; transform:scale(.98);
+      pointer-events:none;
     }
     #panel header{
-      cursor:move; user-select:none;
+      cursor:move; user-select:none; position:sticky; top:0; z-index:2;
       padding:10px 12px; display:flex; align-items:center; gap:8px;
       background:linear-gradient(180deg,#0f1f25,#0a1216);
-      border-bottom:1px solid #133;
-      border-radius:10px 10px 0 0;
-      position:sticky; top:0; z-index:2;
+      border-bottom:1px solid #133; border-radius:10px 10px 0 0;
     }
     #title { font-weight:700; font-size:13px; letter-spacing:.2px; flex:1; }
-    #mini, #close {
+    #mini, #hide {
       background:#152b33; color:#9ff; border:1px solid #266; border-radius:6px;
       padding:6px 8px; cursor:pointer;
     }
-    #mini:hover, #close:hover { filter:brightness(1.1); }
+    #mini:hover, #hide:hover { filter:brightness(1.1); }
     #body { padding:10px 12px; display:grid; gap:10px; }
 
-    fieldset{
-      margin:0; border:1px solid #133; border-radius:8px;
-      padding:8px; min-width:0;
-    }
+    fieldset{ margin:0; border:1px solid #133; border-radius:8px; padding:8px; min-width:0; }
     legend{ padding:0 6px; color:#9ff; }
     .row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-    .row > * { flex:0 0 auto; }
     button, select, input[type="range"]{
       background:#0f1f24; color:#def; border:1px solid #244; border-radius:6px;
       padding:6px 10px; font-size:12px;
@@ -58,10 +52,18 @@
     .mono{ font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .tiny{ font-size:11px; color:#8ec; opacity:.9; }
     .pair{ display:grid; grid-template-columns: 1fr auto; gap:6px; align-items:center; }
-    .grid2{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:6px; }
     .grid3{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:6px; }
 
-    /* Small screen niceties */
+    /* Re-open FAB */
+    #reopen {
+      position:fixed; right:16px; bottom:16px; z-index:1000000;
+      display:none;
+      padding:10px 12px; border-radius:999px; font-weight:700;
+      background:#0a2730; color:#9ff; border:1px solid #1d5563;
+      box-shadow:0 6px 14px rgba(0,0,0,.55);
+    }
+    #reopen:active{ transform:translateY(1px); }
+
     @media (max-width:640px){
       #panel { right:8px; left:8px; width:auto; }
       .grid3{ grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -70,16 +72,16 @@
 </head>
 <body>
   <div id="wrap">
-    <!-- Your original game stays untouched and is loaded here -->
     <iframe id="game" src="index3.html" allow="autoplay; fullscreen"></iframe>
   </div>
 
-  <!-- Floating DevTools panel -->
+  <button id="reopen" title="Show DevTools (or press `~`)">DEV</button>
+
   <div id="panel" aria-live="polite">
     <header id="drag">
       <div id="title">DevTools Overlay · <span class="tiny">for index3.html</span></div>
       <button id="mini" title="Minimize panel">–</button>
-      <button id="close" title="Hide panel">Hide</button>
+      <button id="hide" title="Hide panel">Hide</button>
     </header>
     <div id="body">
       <fieldset>
@@ -89,7 +91,7 @@
           <button id="btnReload">Reload Game</button>
           <button id="btnHud">Toggle HUD</button>
         </div>
-        <div class="tiny">Tip: if Start doesn’t work, click inside the game once (browser autoplay focus) and press Enter.</div>
+        <div class="tiny">Tip: if Start doesn’t work, click inside the game once and press Enter.</div>
       </fieldset>
 
       <fieldset>
@@ -153,7 +155,7 @@
         <div class="row">
           <button id="btnPing">Ping XYZ</button>
           <button id="btnInspector">Inspector</button>
-          <button id="btnToggleDev">Toggle Dev Panel</button>
+          <button id="btnToggleDev">Toggle In-Game Dev Panel</button>
         </div>
         <div id="log" class="mono tiny" style="white-space:pre-wrap; background:#071217; border:1px solid #133; padding:8px; border-radius:6px; max-height:120px; overflow:auto;"></div>
       </fieldset>
@@ -161,211 +163,138 @@
   </div>
 
   <script>
-    // --------------- Helpers ----------------
+    // ---------- Helpers ----------
     const $ = (s, r=document)=>r.querySelector(s);
     const log = (m)=>{ const el=$("#log"); el.textContent += (m + "\\n"); el.scrollTop = el.scrollHeight; };
-
     const frame = $("#game");
-    const sameOrigin = () => {
-      try { void frame.contentWindow.location.href; return true; }
-      catch { return false; }
-    };
 
-    function withGame(fn, fallback){
-      const cw = frame.contentWindow;
-      if (!cw){ fallback?.("contentWindow missing"); return; }
-      // ensure same-origin to access globals
-      if (!sameOrigin()){ fallback?.("Cross-origin: cannot access game internals."); return; }
-      try { return fn(cw); }
-      catch (e){ fallback?.(e?.message || e); }
+    const sameOrigin = () => { try { void frame.contentWindow.location.href; return true; } catch { return false; } };
+    function withGame(fn, onErr){ const cw=frame.contentWindow; if(!cw) return onErr?.("contentWindow missing");
+      if(!sameOrigin()) return onErr?.("Cross-origin: cannot access game internals.");
+      try{ return fn(cw); } catch(e){ onErr?.(e?.message||e); }
     }
-
-    // Fire a key into the iframe (for actions that rely on keyboard hooks)
     function sendKey(key){
       withGame(cw=>{
-        const evDown  = new cw.KeyboardEvent("keydown", { key, bubbles:true });
-        const evUp    = new cw.KeyboardEvent("keyup",   { key, bubbles:true });
-        cw.document.activeElement?.dispatchEvent(evDown);
-        cw.document.activeElement?.dispatchEvent(evUp);
+        const d=cw.document;
+        d.dispatchEvent(new cw.KeyboardEvent("keydown",{key,bubbles:true}));
+        d.dispatchEvent(new cw.KeyboardEvent("keyup",{key,bubbles:true}));
       });
     }
 
-    // Click Start Investigation
     function startGame(){
       withGame(cw=>{
-        const scr = cw.document.getElementById("title-screen");
-        const btn = cw.document.getElementById("start-button");
         if (typeof cw.safeStart === "function"){ cw.safeStart(); log("Called safeStart()"); return; }
+        const btn=cw.document.getElementById("start-button");
+        const scr=cw.document.getElementById("title-screen");
         if (btn){ btn.click(); log("Clicked Start button"); return; }
-        if (scr && scr.style.display !== "none"){ // simulate Enter
-          const e = new cw.KeyboardEvent("keydown", { key:"Enter", bubbles:true });
-          cw.window.dispatchEvent(e);
+        if (scr && scr.style.display!=="none"){
+          cw.window.dispatchEvent(new cw.KeyboardEvent("keydown",{key:"Enter",bubbles:true}));
           log("Sent Enter to game window");
-          return;
         }
-        log("Start controls not found; click inside the game then try again.");
-      }, (err)=>log("Start failed: " + err));
+      }, e=>log("Start failed: "+e));
     }
 
-    // HUD show/hide
-    let hudShown = true;
-    function toggleHUD(){
-      withGame(cw=>{
-        const hud = cw.document.getElementById("hud");
-        if (!hud) return log("HUD element not found.");
-        hudShown = !hudShown;
-        hud.style.display = hudShown ? "block" : "none";
-      }, (e)=>log("HUD error: " + e));
-    }
-
-    // --------------- Wire UI ----------------
+    // ---------- UI wires ----------
     $("#btnStart").onclick = startGame;
-    $("#btnReload").onclick = ()=>{ frame.src = "index3.html"; log("Reloaded iframe"); };
-    $("#btnHud").onclick = toggleHUD;
+    $("#btnReload").onclick = ()=>{ frame.src="index3.html"; log("Reloaded iframe"); };
+    $("#btnHud").onclick = ()=>withGame(cw=>{
+      const hud=cw.document.getElementById("hud");
+      if(!hud){ log("HUD not found"); return; }
+      hud.style.display = hud.style.display==="none" ? "block" : "none";
+    });
 
     $("#btnApplyWeather").onclick = ()=>{
-      const w = $("#selWeather").value;
-      withGame(cw=>{
-        if (typeof cw.setWeather === "function"){ cw.setWeather(w); log("Weather → " + w); }
-        else log("setWeather() missing in game.");
-      }, (e)=>log("Weather error: " + e));
+      const w=$("#selWeather").value;
+      withGame(cw=>{ cw.setWeather?.(w); log("Weather → "+w); }, e=>log("Weather error: "+e));
     };
+    $("#btnNearestLight").onclick = ()=>withGame(cw=>{ cw.toggleNearestHouseLight?.(); });
+    $("#btnPower").onclick       = ()=>withGame(cw=>{ cw.setHousePower?.(!cw.housePower); log("Power toggled"); });
 
-    $("#btnNearestLight").onclick = ()=>withGame(cw=>{
-      cw.toggleNearestHouseLight?.() ?? log("toggleNearestHouseLight() missing.");
-    });
-    $("#btnPower").onclick = ()=>withGame(cw=>{
-      cw.setHousePower?.(!cw.housePower);
-      log("Power toggled");
-    });
+    $("#btnReveal").onclick  = ()=>withGame(cw=>{ cw.setGhostVisible?.(!(cw.ghost?.visible)); });
+    $("#btnHunt").onclick    = ()=>withGame(cw=>{ cw.beginHunt?.(); });
+    $("#btnEndHunt").onclick = ()=>withGame(cw=>{ cw.endHunt?.(); });
+    $("#btnOrb").onclick     = ()=>withGame(cw=>{ cw.showCameraOrb?.(); });
 
-    $("#btnReveal").onclick = ()=>withGame(cw=>{
-      const v = !(cw.ghost?.visible);
-      cw.setGhostVisible?.(v);
-      log("Ghost visible: " + v);
-    });
-    $("#btnHunt").onclick = ()=>withGame(cw=>{ cw.beginHunt?.(); log("Begin hunt"); });
-    $("#btnEndHunt").onclick = ()=>withGame(cw=>{ cw.endHunt?.(); log("End hunt"); });
+    $("#rngWalk").oninput = (e)=>withGame(cw=>{ if(cw.player){ cw.player.speedWalk=parseFloat(e.target.value); }});
+    $("#rngRun").oninput  = (e)=>withGame(cw=>{ if(cw.player){ cw.player.speedRun =parseFloat(e.target.value); }});
 
-    $("#btnOrb").onclick = ()=>withGame(cw=>{
-      cw.showCameraOrb?.(); log("Fake orb shown (if camera overlay visible)");
-    });
-
-    $("#rngWalk").oninput = (e)=>withGame(cw=>{
-      if (!cw.player) return log("player missing");
-      cw.player.speedWalk = parseFloat(e.target.value);
-      log("Walk → " + cw.player.speedWalk.toFixed(2));
-    });
-    $("#rngRun").oninput = (e)=>withGame(cw=>{
-      if (!cw.player) return log("player missing");
-      cw.player.speedRun = parseFloat(e.target.value);
-      log("Run → " + cw.player.speedRun.toFixed(2));
-    });
-
-    // Slots 1–5
-    document.querySelectorAll('[data-slot]').forEach(b=>{
+    document.querySelectorAll("[data-slot]").forEach(b=>{
       b.onclick = ()=>withGame(cw=>{
-        const n = parseInt(b.dataset.slot,10);
-        if (typeof cw.selectSlot === "function"){ cw.selectSlot(n); log("Slot " + n); }
-        else { // fallback: send mouse wheel or number key
-          const key = String(n);
-          const kd = new cw.KeyboardEvent("keydown", { key, bubbles:true });
-          cw.window.dispatchEvent(kd);
-          log("Sent key " + key);
-        }
+        const n=parseInt(b.dataset.slot,10);
+        cw.selectSlot?.(n) ?? sendKey(String(n));
       });
     });
+    $("#btnOpenStorage").onclick = ()=>withGame(cw=>{ cw.openStorage?.(); });
 
-    $("#btnOpenStorage").onclick = ()=>withGame(cw=>{
-      cw.openStorage?.() ?? log("openStorage() missing.");
-    });
+    $("#btnFlash").onclick    = ()=>sendKey("f");
+    $("#btnUV").onclick       = ()=>sendKey("u");
+    $("#btnIR").onclick       = ()=>sendKey("i");
+    $("#btnNotebook").onclick = ()=>sendKey("n");
+    $("#btnDoor").onclick     = ()=>sendKey("e");
 
-    // Devices via existing keybindings
-    $("#btnFlash").onclick   = ()=>sendKey("f");
-    $("#btnUV").onclick      = ()=>sendKey("u");
-    $("#btnIR").onclick      = ()=>sendKey("i");
-    $("#btnNotebook").onclick= ()=>sendKey("n");
-    $("#btnDoor").onclick    = ()=>sendKey("e");
-
-    // Console-ish helpers (use your in-game DevTools if present)
     $("#btnPing").onclick = ()=>withGame(cw=>{
-      if (cw.DevTools?.log){ cw.DevTools.log("PING from overlay"); }
-      else log("DevTools.log not present; using overlay log.");
+      cw.DevTools?.log ? cw.DevTools.log("PING from overlay") : log("Dev log not present");
     });
     $("#btnInspector").onclick = ()=>withGame(cw=>{
-      try {
-        // Your game already exposes a button that toggles inspector; call the same internal toggle:
-        if (cw.scene?.debugLayer) {
-          if (cw.scene.debugLayer.isVisible()) cw.scene.debugLayer.hide();
-          else cw.scene.debugLayer.show({ embedMode:true });
-          log("Toggled Babylon Inspector");
-        } else {
-          log("scene.debugLayer not found.");
-        }
-      } catch(e){ log("Inspector error: " + e.message); }
+      if (cw.scene?.debugLayer){
+        cw.scene.debugLayer.isVisible() ? cw.scene.debugLayer.hide() : cw.scene.debugLayer.show({embedMode:true});
+      }
     });
     $("#btnToggleDev").onclick = ()=>withGame(cw=>{
-      const btn = cw.document.getElementById("devtools-toggle");
-      if (btn){ btn.click(); log("Toggled in-game DevTools panel"); }
-      else log("Game DevTools toggle not found.");
+      cw.document.getElementById("devtools-toggle")?.click();
     });
 
-    // --------------- Draggable Panel ----------------
-    (function makeDraggable(){
-      const panel = $("#panel");
-      const drag = $("#drag");
+    // ---------- Draggable ----------
+    (function dragInit(){
+      const panel=$("#panel"), drag=$("#drag");
       let sx=0, sy=0, ox=0, oy=0, dragging=false;
-
-      const onDown = (e)=>{
-        dragging = true;
-        const r = panel.getBoundingClientRect();
-        ox = r.left; oy = r.top;
-        sx = ("touches" in e ? e.touches[0].clientX : e.clientX);
-        sy = ("touches" in e ? e.touches[0].clientY : e.clientY);
+      const onDown=(e)=>{ dragging=true;
+        const r=panel.getBoundingClientRect(); ox=r.left; oy=r.top;
+        sx=("touches" in e ? e.touches[0].clientX : e.clientX);
+        sy=("touches" in e ? e.touches[0].clientY : e.clientY);
         e.preventDefault();
       };
-      const onMove = (e)=>{
-        if (!dragging) return;
-        const x = ("touches" in e ? e.touches[0].clientX : e.clientX);
-        const y = ("touches" in e ? e.touches[0].clientY : e.clientY);
-        const nx = Math.max(6, Math.min(window.innerWidth  - panel.offsetWidth  - 6, ox + (x - sx)));
-        const ny = Math.max(6, Math.min(window.innerHeight - panel.offsetHeight - 6, oy + (y - sy)));
-        panel.style.right = "auto"; panel.style.bottom = "auto";
-        panel.style.left = nx + "px"; panel.style.top = ny + "px";
+      const onMove=(e)=>{ if(!dragging) return;
+        const x=("touches" in e ? e.touches[0].clientX : e.clientX);
+        const y=("touches" in e ? e.touches[0].clientY : e.clientY);
+        const nx=Math.max(6,Math.min(innerWidth  - panel.offsetWidth  - 6, ox + (x - sx)));
+        const ny=Math.max(6,Math.min(innerHeight - panel.offsetHeight - 6, oy + (y - sy)));
+        panel.style.right="auto"; panel.style.bottom="auto";
+        panel.style.left=nx+"px"; panel.style.top=ny+"px";
       };
-      const onUp = ()=> dragging=false;
-
-      drag.addEventListener("mousedown", onDown);
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-
-      drag.addEventListener("touchstart", onDown, {passive:false});
-      window.addEventListener("touchmove", onMove, {passive:false});
-      window.addEventListener("touchend", onUp);
+      const onUp=()=>dragging=false;
+      drag.addEventListener("mousedown",onDown);
+      addEventListener("mousemove",onMove);
+      addEventListener("mouseup",onUp);
+      drag.addEventListener("touchstart",onDown,{passive:false});
+      addEventListener("touchmove",onMove,{passive:false});
+      addEventListener("touchend",onUp);
     })();
 
-    // Minimize & hide panel
-    $("#mini").onclick = ()=>{
-      const body = $("#body");
-      body.style.display = (body.style.display === "none" ? "grid" : "none");
-      $("#mini").textContent = (body.style.display === "none" ? "+" : "–");
-    };
-    $("#close").onclick = ()=>{
-      $("#panel").style.display = "none";
-      // Re-open with `~` key in overlay
-      log("Panel hidden. Press `~` to show again.");
-    };
-    // Overlay key to re-open panel
-    window.addEventListener("keydown", (e)=>{
-      if (e.key === "`"){ $("#panel").style.display = "block"; }
+    // ---------- Minimize / Hide / Reopen ----------
+    const panel=$("#panel");
+    const body=$("#body");
+    const mini=$("#mini");
+    const hideBtn=$("#hide");
+    const reopen=$("#reopen");
+
+    function showPanel(){ panel.classList.remove("hidden"); reopen.style.display="none"; }
+    function hidePanel(){ panel.classList.add("hidden"); reopen.style.display="inline-block"; }
+
+    mini.onclick  = ()=>{ body.style.display = (body.style.display==="none" ? "grid" : "none"); mini.textContent = (body.style.display==="none" ? "+" : "–"); };
+    hideBtn.onclick = hidePanel;
+    reopen.onclick  = showPanel;
+
+    // Overlay hotkey: toggle with `
+    addEventListener("keydown", (e)=>{
+      if (e.key === "`"){
+        if (panel.classList.contains("hidden")) showPanel(); else hidePanel();
+      }
     });
 
-    // Let the overlay send clicks to iframe if user taps the game area
-    frame.addEventListener("load", ()=>{
-      log("Game loaded in iframe.");
-      // Try to auto-start if autoplay allows
-      setTimeout(()=>{ startGame(); }, 300);
-    });
+    // Try a gentle auto-start
+    frame.addEventListener("load", ()=>{ setTimeout(startGame, 300); });
+
   </script>
 </body>
 </html>
