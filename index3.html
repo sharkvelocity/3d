@@ -193,6 +193,7 @@
       <strong>Developer Tools</strong>
       <div style="display:flex;gap:6px;">
         <button id="devtools-open-overlay" class="hud-btn" title="Open devtools_overlay.html">Open External Overlay</button>
+        <a id="devtools-open-overlay-link" href="./devtools_overlay.html" target="_blank" class="hud-btn">Open Overlay (link)</a>
         <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
       </div>
     </div>
@@ -445,6 +446,9 @@ function pointInPolyXZ(p, poly){
     const intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
     if(intersect) inside=!inside;
   }
+function isInsideHouseXZ(pos){
+  return pointInPolyXZ(new BABYLON.Vector3(pos.x,0,pos.z), ghostPolygon);
+}
   return inside;
 }
 function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
@@ -972,14 +976,29 @@ function flickerStop(){ flickerOn = false;
 let huntCooldown = 22 + Math.random()*18;
 let huntClock = 0;
 function sanityTick(dt){
-  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
-  const base = 0.6/60;
-  const add = nearGhost ? 1.2/60 : 0;
-  const drain = (base+add) * (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1) * (weather.modSanityDrain||1);
-  player.sanity = Math.max(0, player.sanity - drain);
+  const inVan = inVanZone(camera.position);
+  const insideHouse = pointInPolyXZ(camera.position, ghostPolygon) && !inVan;
+
+  // base drain only when *inside* the house
+  let drain = 0;
+  if (insideHouse){
+    const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
+    const base = 0.6/60;           // ~0.6% per minute
+    const add  = nearGhost ? 1.2/60 : 0; // +1.2% per minute near ghost
+    drain = (base + add) * (storageOpen?0.2:1) * (weather.modSanityDrain||1);
+  }
+
+  // Gentle regeneration when outside or in van
+  let regen = 0;
+  if (!insideHouse || inVan){
+    regen = (inVan ? 1.0/60 : 0.5/60); // +1%/min in van, +0.5%/min outside
+  }
+
+  player.sanity = Math.max(0, Math.min(100, player.sanity - drain + regen));
   $('#hud-sanity').textContent = `${player.sanity|0}%`;
 
-  if (!ghost.hunting && !inVanZone(camera.position) && player.sanity <= 65){
+  // Hunt logic only when inside house
+  if (!ghost.hunting && insideHouse && player.sanity <= 65){
     huntClock += dt * (weather.modHuntPace||1);
     if (huntClock >= huntCooldown){
       huntClock = 0; huntCooldown = 22 + Math.random()*18;
@@ -987,6 +1006,8 @@ function sanityTick(dt){
       if (Math.random() < baseChance * (weather.modHuntChance||1)) beginHunt();
     }
   }
+  if (ghost.hunting && (!insideHouse || inVan || Math.random()<0.0015)) endHunt();
+}  }
   if (ghost.hunting && (inVanZone(camera.position) || Math.random()<0.0015)) endHunt();
 }
 
@@ -1355,6 +1376,9 @@ let footTimer = 0;
 function updateGhost(dt){
   if(!ghost.mesh) return;
 
+  // Ensure visibility during hunts
+  if (ghost.hunting && !ghost.visible) setGhostVisible(true);
+
   function moveActor(actorMesh, speed, targetVec){
     const pos = actorMesh.position;
     const target = targetVec ? targetVec.clone() : (ghost.target || randomPointInPolygonXZ(ghostPolygon));
@@ -1622,6 +1646,13 @@ function confirmLoadout(){ closeStorage(); }
   const logTa       = document.getElementById('devtools-log');
 
   let overlayWin = null;
+  function ensureOverlayWindow(){
+    try{
+      if (!overlayWin || overlayWin.closed){
+        overlayWin = window.open('./devtools_overlay.html','devtools_overlay','width=520,height=680');
+      }
+    }catch(e){ /* popup may be blocked */ }
+  }
   function postToOverlay(payload){
     if (overlayWin && !overlayWin.closed){
       overlayWin.postMessage(payload, "*");
@@ -1653,6 +1684,7 @@ function confirmLoadout(){ closeStorage(); }
   }catch{}
 
   enableBtn.addEventListener('click', ()=>{
+    ensureOverlayWindow();
     const on = enableBtn.dataset.on==='1' ? false : true;
     enableBtn.dataset.on = on ? '1':'0';
     enableBtn.textContent = on ? 'Disable Developer Listen' : 'Enable Developer Listen';
