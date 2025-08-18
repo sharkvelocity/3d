@@ -63,6 +63,7 @@
     .card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:10px; padding:14px; width:min(820px,92vw); max-height:88vh; overflow:auto; }
     #dev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
     #dev-log{ background:#000; border:1px solid #033; min-height:120px; padding:8px; border-radius:6px; color:#8ff; font-size:12px; white-space:pre-wrap; }
+
     .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
 
     /* Hand preview */
@@ -88,6 +89,13 @@
 
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+    /* ===== Pill toggles (NEW) ===== */
+    .pill-wrap{ display:flex; flex-wrap:wrap; gap:8px; }
+    .pill{ padding:6px 10px; border:1px solid #066; color:#9ff; background:#111; border-radius:999px; cursor:pointer; user-select:none; }
+    .pill.active{ color:#001015; background:#7ff; border-color:#0ff; box-shadow:0 0 8px rgba(0,255,255,0.35) inset; }
+    /* keep spacing if other .ev-row exist */
+    .ev-row{ margin:6px 0; }
   </style>
 </head>
 
@@ -144,10 +152,12 @@
       <div id="notebook-tabs">
         <div class="tab active" data-tab="ghosts">Ghosts</div>
         <div class="tab" data-tab="evidence">Evidence</div>
+        <div class="tab" data-tab="weather">Weather</div> <!-- NEW -->
         <div class="tab" data-tab="guess">Guess</div>
       </div>
       <div id="page-ghosts" class="page active"></div>
       <div id="page-evidence" class="page"></div>
+      <div id="page-weather" class="page"></div> <!-- NEW -->
       <div id="page-guess" class="page"></div>
     </div>
   </div>
@@ -1088,8 +1098,11 @@ function logEvidence(type){
   if(!discoveredEvidence.has(type)){
     discoveredEvidence.add(type);
     toast(`Evidence: ${type}`, 1800);
-    const cb = document.querySelector(`input[data-ev="${type}"]`); if(cb) cb.checked = true;
   }
+  // Sync UI (pills, if visible)
+  const pill = document.querySelector(`.pill[data-ev="${CSS.escape(type)}"]`);
+  if (pill) pill.classList.add('active');
+
   if (window.__onEvidenceLogged) window.__onEvidenceLogged({ item:type, result:type, room:player.room, success:true });
 }
 function useActiveItem(){
@@ -1128,28 +1141,118 @@ function showCameraOrb(){
 }
 
 /* ===========================================================
-   NOTEBOOK
+   NOTEBOOK (UPDATED: Weather tab + pill evidence)
    =========================================================== */
 function openNotebook(){ document.getElementById('notebook-modal').style.display='flex'; renderNotebook(); }
 function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
 function renderNotebook(){
   const tabs = Array.from(document.querySelectorAll('#notebook-tabs .tab'));
-  const pages = { ghosts:document.getElementById('page-ghosts'), evidence:document.getElementById('page-evidence'), guess:document.getElementById('page-guess') };
-  tabs.forEach(t=>{ t.onclick = ()=>{ tabs.forEach(x=>x.classList.remove('active')); t.classList.add('active'); document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); pages[t.dataset.tab].classList.add('active'); }; });
+  const pages = {
+    ghosts  : document.getElementById('page-ghosts'),
+    evidence: document.getElementById('page-evidence'),
+    weather : document.getElementById('page-weather'),
+    guess   : document.getElementById('page-guess')
+  };
 
+  // Tab switching
+  tabs.forEach(t=>{
+    t.onclick = ()=>{
+      tabs.forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+      pages[t.dataset.tab].classList.add('active');
+    };
+  });
+
+  /* -------- Ghosts page -------- */
   const gPage=pages.ghosts; gPage.innerHTML=''; const gp=document.createElement('div');
   gp.innerHTML='<div style="color:#9ff; margin-bottom:6px;">Ghost Types & Required Evidence:</div>';
-  Object.entries(GHOSTS).forEach(([name,evs])=>{ const row=document.createElement('div'); row.style.margin='4px 0'; row.textContent=name.toUpperCase()+' — '+evs.join(', '); gp.appendChild(row); });
+  Object.entries(GHOSTS).forEach(([name,evs])=>{
+    const row=document.createElement('div'); row.style.margin='4px 0';
+    row.textContent=name.toUpperCase()+' — '+evs.join(', ');
+    gp.appendChild(row);
+  });
   gPage.appendChild(gp);
 
-  const ePage=pages.evidence; ePage.innerHTML=''; const ewrap=document.createElement('div');
-  ewrap.innerHTML = '<div style="color:#9ff; margin-bottom:6px;">Check what you have found:</div>';
-  EVIDENCE_TYPES.forEach(ev=>{ const r=document.createElement('div'); r.className='ev-row'; const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.ev=ev; cb.checked=discoveredEvidence.has(ev); cb.onchange=()=>{ if(cb.checked) discoveredEvidence.add(ev); else discoveredEvidence.delete(ev); }; const l=document.createElement('label'); l.textContent=ev; l.style.color='#8ff'; r.appendChild(cb); r.appendChild(l); ewrap.appendChild(r); });
-  ePage.appendChild(ewrap);
+  /* -------- Evidence page: PILL TOGGLES -------- */
+  const ePage=pages.evidence; ePage.innerHTML='';
+  const eHead=document.createElement('div');
+  eHead.style.color='#9ff'; eHead.style.marginBottom='6px';
+  eHead.textContent='Tap to toggle evidence found:';
+  const eWrap=document.createElement('div'); eWrap.className='pill-wrap';
+  EVIDENCE_TYPES.forEach(ev=>{
+    const pill=document.createElement('button');
+    pill.type='button';
+    pill.className='pill' + (discoveredEvidence.has(ev)?' active':'');
+    pill.dataset.ev=ev;
+    pill.textContent=ev;
+    pill.onclick=()=>{
+      const isOn = pill.classList.toggle('active');
+      if (isOn){
+        if (!discoveredEvidence.has(ev)) { discoveredEvidence.add(ev); logEvidence(ev); }
+      }else{
+        discoveredEvidence.delete(ev);
+      }
+    };
+    eWrap.appendChild(pill);
+  });
+  ePage.appendChild(eHead);
+  ePage.appendChild(eWrap);
 
-  const gg=pages.guess; gg.innerHTML=''; const glabel=document.createElement('div'); glabel.style.color='#9ff'; glabel.textContent='Who do you think it is?'; gg.appendChild(glabel);
+  /* -------- Weather page: tap-to-set -------- */
+  const wPage=pages.weather; wPage.innerHTML='';
+  const wHead=document.createElement('div');
+  wHead.style.color='#9ff'; wHead.style.marginBottom='6px';
+  wHead.textContent='Set current weather:';
+  const wWrap=document.createElement('div'); wWrap.className='pill-wrap';
+
+  const choices=['Clear','Rain','Snow','Blood Moon','Auto'];
+  const highlight = (sel)=>{
+    Array.from(wWrap.children).forEach(btn=>{
+      const match = (btn.dataset.choice===sel) ||
+                    (sel==='Auto' && btn.dataset.choice===weather.state);
+      btn.classList.toggle('active', match);
+    });
+  };
+
+  choices.forEach(name=>{
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='pill';
+    btn.dataset.choice=name;
+    btn.textContent=name;
+    if (name===weather.state) btn.classList.add('active');
+    btn.onclick=()=>{
+      if (name==='Auto'){
+        const pool=['Clear','Rain','Snow','Blood Moon'];
+        setWeather(pool[(Math.random()*pool.length)|0]);
+      } else {
+        setWeather(name);
+      }
+      highlight(name);
+      toast('Weather set to ' + weather.state, 900);
+    };
+    wWrap.appendChild(btn);
+  });
+
+  wPage.appendChild(wHead);
+  wPage.appendChild(wWrap);
+
+  /* -------- Guess page -------- */
+  const gg=pages.guess; gg.innerHTML='';
+  const glabel=document.createElement('div'); glabel.style.color='#9ff'; glabel.textContent='Who do you think it is?'; gg.appendChild(glabel);
   const grid=document.createElement('div'); grid.style.display='grid'; grid.style.gridTemplateColumns='repeat(auto-fit, minmax(140px,1fr))'; grid.style.gap='6px'; grid.style.marginTop='6px';
-  Object.keys(GHOSTS).forEach(k=>{ const btn=document.createElement('button'); btn.textContent=k.toUpperCase(); btn.style.cssText='border:1px solid #066; color:#9ff; background:#111; padding:8px 10px; cursor:pointer;'; btn.onclick=()=>{ const req=GHOSTS[k]; const allFound=req.every(e=>discoveredEvidence.has(e)); toast(allFound?`✅ Correct set matches: ${k.toUpperCase()}`:`❌ Not all evidence matches ${k.toUpperCase()}`, 1600); }; grid.appendChild(btn); });
+  Object.keys(GHOSTS).forEach(k=>{
+    const btn=document.createElement('button');
+    btn.textContent=k.toUpperCase();
+    btn.style.cssText='border:1px solid #066; color:#9ff; background:#111; padding:8px 10px; cursor:pointer;';
+    btn.onclick=()=>{
+      const req=GHOSTS[k];
+      const allFound=req.every(e=>discoveredEvidence.has(e));
+      toast(allFound?`✅ Correct set matches: ${k.toUpperCase()}`:`❌ Not all evidence matches ${k.toUpperCase()}`, 1600);
+    };
+    grid.appendChild(btn);
+  });
   gg.appendChild(grid);
 }
 
