@@ -1791,5 +1791,136 @@ function toggleNearestHouseLight(){ // already declared above, noop placeholder 
 }
 
 </script>
+  <!-- === Minimal Dual Joysticks: drop-in block (paste before </body>) === -->
+<style>
+  /* JOYSTICKS — tiny, self-contained */
+  .joystick{
+    position:fixed;
+    width:120px; height:120px;
+    border-radius:50%;
+    background:rgba(0,0,0,0.35);
+    border:1px solid #066;
+    backdrop-filter: blur(2px);
+    z-index:6001;
+    touch-action:none;
+    user-select:none;
+    display:none; /* shown on touch devices by JS */
+  }
+  .joystick .knob{
+    position:absolute; left:50%; top:50%;
+    width:62px; height:62px; transform:translate(-50%,-50%);
+    border-radius:50%;
+    background:rgba(0,20,20,0.65);
+    border:2px solid #0aa;
+    box-shadow:0 0 10px rgba(0,255,255,0.25) inset;
+  }
+  #joystick-left  { left:16px;  bottom:16px; }
+  #joystick-right { right:16px; bottom:16px; }
+  @media (pointer: coarse) { .joystick { display:block; } }
+</style>
+
+<!-- containers (created if missing, but included here for clarity) -->
+<div id="joystick-left"  class="joystick"><div class="knob"></div></div>
+<div id="joystick-right" class="joystick"><div class="knob"></div></div>
+
+<script>
+/* JOYSTICKS — tiny helper (idempotent) */
+(function(){
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
+  function ensure(id){
+    let el = document.getElementById(id);
+    if(!el){
+      el = document.createElement('div');
+      el.id = id; el.className='joystick';
+      el.innerHTML = '<div class="knob"></div>';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  const left  = ensure('joystick-left');
+  const right = ensure('joystick-right');
+  if(!isTouch){ left.style.display='none'; right.style.display='none'; }
+
+  function initJoysticks(cam, controls, opts={}){
+    if(!isTouch) return;
+    const cfg = { dead:0.12, look:0.045, snap:0.35, ...opts };
+    [left,right].forEach(el=>{
+      el.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+      el.addEventListener('touchmove',  e=>e.preventDefault(), {passive:false});
+    });
+
+    function makeStick(container, onMove, onEnd){
+      const knob = container.querySelector('.knob');
+      const radius = container.clientWidth*0.5;
+      let active=false;
+
+      function setKnob(x,y){ knob.style.left=(x+radius)+'px'; knob.style.top=(y+radius)+'px'; }
+      function reset(){ setKnob(0,0); }
+      function pt(e){
+        const t = e.touches ? e.touches[0] : e;
+        const r = container.getBoundingClientRect();
+        return { x: t.clientX-(r.left+r.width/2), y: t.clientY-(r.top+r.height/2) };
+      }
+      function clamp(x,y,maxR){
+        const len = Math.hypot(x,y); if(len<=maxR) return {x,y};
+        const k = maxR/(len||1); return {x:x*k, y:y*k};
+      }
+      function start(e){ active=true; move(e); }
+      function move(e){
+        if(!active) return;
+        const p = pt(e), c = clamp(p.x,p.y,radius);
+        setKnob(c.x,c.y);
+        onMove(c.x/radius, c.y/radius);
+      }
+      function end(){ active=false; reset(); onEnd(); }
+
+      container.addEventListener('touchstart',start,{passive:false});
+      container.addEventListener('touchmove', move,{passive:false});
+      container.addEventListener('touchend',  end, {passive:false});
+      container.addEventListener('mousedown', start);
+      window.addEventListener('mousemove',    move);
+      window.addEventListener('mouseup',      end);
+      reset();
+    }
+
+    // LEFT: movement -> toggles your existing WASD booleans
+    makeStick(left, (nx, ny)=>{
+      const x = nx, z = -ny;
+      const mag = Math.hypot(x,z);
+      controls.forward = controls.back = controls.left = controls.right = false;
+      if (mag < cfg.dead) return;
+      const ux = x/mag, uz = z/mag;
+      if (uz >  cfg.snap) controls.forward = true;
+      if (uz < -cfg.snap) controls.back    = true;
+      if (ux < -cfg.snap) controls.left    = true;
+      if (ux >  cfg.snap) controls.right   = true;
+    }, ()=>{
+      controls.forward = controls.back = controls.left = controls.right = false;
+    });
+
+    // RIGHT: look -> adjusts camera.rotation.x/y (clamped pitch)
+    makeStick(right, (nx, ny)=>{
+      const mag = Math.hypot(nx, ny);
+      if (mag < cfg.dead) return;
+      if (!cam) return;
+      cam.rotation.y += nx * cfg.look;
+      const minPitch = -Math.PI/2 + 0.15;
+      const maxPitch =  Math.PI/2 - 0.15;
+      cam.rotation.x = Math.min(maxPitch, Math.max(minPitch, cam.rotation.x + (-ny * cfg.look)));
+    }, ()=>{});
+  }
+
+  // auto-init when your globals exist; otherwise expose a helper
+  function tryInit(){
+    if (window.camera && window.controls) { initJoysticks(window.camera, window.controls); return true; }
+    return false;
+  }
+  if (!tryInit()){
+    window.addEventListener('load', ()=> setTimeout(tryInit, 0));
+  }
+  window.initJoysticks = (cam, ctrls, opts)=> initJoysticks(cam, ctrls, opts);
+})();
+</script>
+<!-- === /Minimal Dual Joysticks === -->
 </body>
 </html>
