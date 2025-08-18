@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>PhasmaPhoney — 3D Prototype</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
   <meta name="author" content="Shark-Blades" />
   <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
   <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
@@ -17,7 +17,7 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
 
-  <!-- Optional: room names / zones for the Map Recorder dropdown -->
+  <!-- Optional: room names -->
   <script src="./rooms.js"></script>
 
   <style>
@@ -33,6 +33,14 @@
     #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
     #start-button:active{ transform:translateY(1px); }
 
+    /* Loading overlay (hidden by default, but here if you want to re-use) */
+    #loading-overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.9); display:none; align-items:center; justify-content:center; z-index:10050; }
+    #loading-card{ width:min(520px,92vw); background:#0a0a0a; border:1px solid #066; border-radius:12px; padding:16px; box-shadow:0 0 24px rgba(0,255,255,0.15); }
+    #loading-title{ color:#9ff; font-weight:bold; margin:0 0 8px 0; text-align:center; }
+    #loading-bar-wrap{ height:14px; background:#051416; border:1px solid #0a3c3f; border-radius:8px; overflow:hidden; }
+    #loading-bar{ height:100%; width:0%; background:linear-gradient(90deg, #0ff, #08a); transition:width 160ms ease; }
+    #loading-text{ color:#8ff; font-size:12px; margin-top:8px; text-align:center; opacity:0.95; }
+
     /* HUD */
     #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
     #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
@@ -42,7 +50,7 @@
     #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
 
     /* Storage button + modal */
-    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); }
+    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
     #storage-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
     #storage-card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:8px; width:min(740px,92vw); max-height:86vh; overflow:auto; padding:12px 14px; }
     #storage-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:10px; }
@@ -76,7 +84,7 @@
 
     /* Belt */
     #belt{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
-    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer;}
+    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
     .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
     .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
     .slot canvas, .slot img{ max-width:60px; max-height:60px; image-rendering:crisp-edges; }
@@ -106,6 +114,15 @@
       <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
       <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
       <button id="start-button">Start Investigation</button>
+    </div>
+  </div>
+
+  <!-- (optional) Loading overlay -->
+  <div id="loading-overlay" aria-hidden="true">
+    <div id="loading-card">
+      <div id="loading-title">Loading assets…</div>
+      <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+      <div id="loading-text">0%</div>
     </div>
   </div>
 
@@ -169,12 +186,16 @@
   </div>
 
   <!-- Dev Tools -->
-  <button id="devtools-toggle" class="hud-btn">Dev Tools</button>
+  <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
 
-  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:460px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:480px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
       <strong>Developer Tools</strong>
-      <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
+      <div style="display:flex;gap:6px;">
+        <button id="devtools-open-overlay" class="hud-btn" title="Open devtools_overlay.html">Open External Overlay</button>
+        <a id="devtools-open-overlay-link" href="./devtools_overlay.html" target="_blank" class="hud-btn">Open Overlay (link)</a>
+        <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
+      </div>
     </div>
 
     <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
@@ -211,12 +232,10 @@
         <label><input id="devtools-god" type="checkbox"> God mode</label>
         <label><input id="devtools-fly" type="checkbox"> Fly (PageUp/PageDown)</label>
       </div>
-      <div class="row">
+      <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;">
         <button id="devtools-teleport" class="hud-btn">Teleport to ghost</button>
         <button id="devtools-inspector" class="hud-btn">Inspector</button>
         <button id="devtools-ping" class="hud-btn">Ping XYZ</button>
-      </div>
-      <div class="row">
         <button id="devtools-reveal-ghost" class="hud-btn">Toggle Ghost Visible</button>
         <button id="devtools-force-hunt" class="hud-btn">Force Hunt</button>
         <button id="devtools-end-hunt" class="hud-btn">End Hunt</button>
@@ -286,6 +305,7 @@ let engine, scene, camera, skybox;
 
 let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat, cloudScroll = 0;
 let moonMesh = null, moonMat = null;
+let hemiLight = null;
 
 let houseLights = []; let housePower = true;
 
@@ -296,10 +316,11 @@ let allowFly = false;
 let houseRoot = null;
 let doorMeshes = [];
 let ghost = {
-  mesh:null, target:null, speed:0.9, alive:true,
+  mesh:null, target:null, speed:1.4, slowSpeed:0.9, fastSpeed:1.4, alive:true,
   anims:{ idle:null, walk:null },
   visible:false, hunting:false,
-  nextStep:0, stepInterval:0.55, footAudible:18
+  nextStep:0, stepInterval:0.55, footAudible:18,
+  isTwins:false, meshFast:null
 };
 
 // Cold breath FX
@@ -324,7 +345,12 @@ let storageOpen = false;
 let dev = { enabled:false, gateOpen:false, log:[] };
 let activeItemSlot = 1;
 
-let inventory = { slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'}, models:{}, icons:{} };
+let inventory = {
+  slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'},
+  models:{}, icons:{},
+  slotCharges:{1:0,2:0,3:0,4:Infinity,5:Infinity}
+};
+const ITEM_DEFAULT_CHARGES = { 'Smudge':1, 'Salt':3 };
 const devBus = new EventTarget();
 let __devGhostLogTimer = 0;
 
@@ -381,6 +407,13 @@ let ghostPolygon = [
   new BABYLON.Vector3(18.660, 0, -149.900)
 ];
 
+/* Placeables / rules */
+const CRUCIFIX_BASE_RADIUS = 3.0;
+const CRUCIFIX_DEMON_RADIUS = 5.0;
+const TWINS_SEP_MIN = 10.0, TWINS_SEP_MAX = 12.0;
+
+const placeables = { motionSensors: [], crucifixes: [] };
+
 /* ===========================================================
    UTILS
    =========================================================== */
@@ -413,54 +446,60 @@ function pointInPolyXZ(p, poly){
     const intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
     if(intersect) inside=!inside;
   }
+function isInsideHouseXZ(pos){
+  return pointInPolyXZ(new BABYLON.Vector3(pos.x,0,pos.z), ghostPolygon);
+}
   return inside;
 }
 function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
 function $(s){ return document.querySelector(s); }
 
+function playFootstep(){
+  const arr = [audio.step1,audio.step2,audio.step3];
+  const s = arr[Math.floor(Math.random()*arr.length)];
+  if(s){ s.currentTime=0; s.volume=0.6; s.play().catch(()=>{}); }
+}
+
 /* ===========================================================
-   BOOT / STARTUP (DEFERRED UNTIL START CLICK)
+   BOOT / STARTUP
    =========================================================== */
 let __started = false;
 async function safeStart(){
   if(__started) return;
   __started = true;
 
-  // guard: ensure Babylon is present
   if(!window.BABYLON || !BABYLON.Engine){
     toast("Engine not ready. Check Babylon includes.", 2200);
     __started = false;
     return;
   }
 
-  // hide title now to satisfy autoplay policies for audio
+  // hide title to satisfy user-gesture for audio
   const scr = document.getElementById('title-screen');
   if (scr) scr.style.display = 'none';
 
   try{
-    await boot(); // full async init
+    await boot();
   }catch(err){
     __started = false;
     console.error(err);
     toast("Startup failed: " + (err?.message||err), 2800);
-    // show title again on failure
     if (scr) scr.style.display = 'flex';
     return;
   }
 
-  // Choose weather & ghost *after* assets loaded
+  // Weather + ghost
   const r = Math.random();
   const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
   setWeather(w);
 
   const keys = Object.keys(GHOSTS);
   currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
-  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
+  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; } // harder to hear
 
   toast(`Investigation started. Weather: ${w}.`, 1600);
 }
 
-// bind start (button, backdrop click, Enter/Space)
 (function bindStart(){
   const btn = document.getElementById('start-button');
   const screen = document.getElementById('title-screen');
@@ -475,11 +514,11 @@ async function safeStart(){
 })();
 
 /* ===========================================================
-   ENGINE & SCENE (created inside boot)
+   ENGINE & SCENE
    =========================================================== */
 async function boot(){
-  // Engine & scene
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
   scene = new BABYLON.Scene(engine);
   scene.environmentTexture = null;
   const oldSky = scene.getMeshByName("BackgroundSkybox"); if (oldSky) oldSky.dispose();
@@ -494,12 +533,17 @@ async function boot(){
   camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
   camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
-  camera.minZ = 0.1; camera.inertia = 0; camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
+  camera.minZ = 0.1; camera.inertia = 0;
+  camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  // Atmosphere/lights depend on scene
+  // Atmosphere/lights
   setupNightAtmosphere();
 
-  // Map + items + ghost + moon (with fallbacks so the screen never stays black)
+  // Hemispheric low-level fill to avoid total-black edge cases
+  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+  hemiLight.intensity = 0.06;
+
+  // Map + items + ghost + moon
   await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
@@ -508,24 +552,21 @@ async function boot(){
   await loadMoon().catch(()=>{});
   setupBreathFX();
 
-  // Fallback geometry if map failed (make sure something is visible)
   if (!houseRoot){
     const ground = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:120, height:120 }, scene);
-    ground.position.y = 0;
-    ground.checkCollisions = true;
+    ground.position.y = 0; ground.checkCollisions = true;
     const gmat = new BABYLON.StandardMaterial("gmat", scene);
-    gmat.diffuseColor = new BABYLON.Color3(0.05,0.07,0.10);
-    gmat.specularColor = new BABYLON.Color3(0,0,0);
+    gmat.diffuseColor = new BABYLON.Color3(0.06,0.08,0.12); gmat.specularColor = new BABYLON.Color3(0,0,0);
     ground.material = gmat;
 
     const lamp = new BABYLON.PointLight("fallbackLamp", new BABYLON.Vector3(0,4,0), scene);
-    lamp.intensity = 0.8;
-    houseLights.push({ light: lamp, mesh: null });
+    lamp.intensity = 0.8; houseLights.push({ light: lamp, mesh: null });
   }
 
   if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
+  if (ghost.meshFast){ moonShadows.addShadowCaster(ghost.meshFast, true); flashShadows.addShadowCaster(ghost.meshFast, true); }
 
-  // UI/inputs last
+  // UI/inputs
   initUI();
   updateHUD();
 
@@ -533,9 +574,15 @@ async function boot(){
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
     handleMovement(dt);
+    updatePlayerFootsteps(dt);
     sanityTick(dt);
 
-    // weather lightning
+    // Rain hidden while in van
+    if (weather.state==='Rain' && weather.rainPS){
+      weather.rainPS.emitRate = inVanZone(camera.position) ? 0 : 1800;
+    }
+
+    // lightning
     if(weather.state==='Rain'){
       weather.lightningTimer += dt;
       if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
@@ -560,12 +607,16 @@ async function boot(){
   engine.runRenderLoop(()=> scene.render());
   window.addEventListener('resize', ()=> engine.resize());
 
-  // HUD visible now that scene is up
+  // HUD visible now
   document.getElementById("hud").style.display="block";
   rebuildBelt();
 
-  // Tip
+  if (!houseRoot) ensureDebugCube();
+
   toast("Atmosphere ready. F=Flash, U=UV, I=IR, L=nearest light, P=power.", 3000);
+
+  canvas.addEventListener("webglcontextlost", (e)=>{ e.preventDefault(); toast("WebGL context lost. Restoring…", 1800); });
+  canvas.addEventListener("webglcontextrestored", ()=>{ toast("WebGL restored.", 1200); });
 }
 
 /* ===========================================================
@@ -589,6 +640,8 @@ function setupNightAtmosphere(){
   skybox.isPickable = false;
   skybox.renderingGroupId = 0;
 
+  const fillLight = new BABYLON.HemisphericLight('fillLight', new BABYLON.Vector3(0,1,0), scene);
+  fillLight.intensity=0.15;
   moonLight = new BABYLON.DirectionalLight("moonLight", new BABYLON.Vector3(-0.2,-1,0.1), scene);
   moonLight.position = new BABYLON.Vector3(0,200,0);
   moonLight.intensity = 0.45;
@@ -601,6 +654,9 @@ function setupNightAtmosphere(){
 
   flashLight = new BABYLON.SpotLight("flashLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 10, scene);
   flashLight.parent = camera; flashLight.intensity = 0; flashLight.range = 40;
+  flashLight.diffuse = new BABYLON.Color3(1, 0.98, 0.92);
+  flashLight.specular = new BABYLON.Color3(0.8, 0.8, 0.8);
+  flashLight.shadowEnabled = true;
   flashShadows = new BABYLON.ShadowGenerator(1024, flashLight);
   flashShadows.useBlurExponentialShadowMap = true;
 
@@ -620,9 +676,9 @@ function setupNightAtmosphere(){
 function applyNightPalette(){
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
-  scene.imageProcessingConfiguration.exposure = 0.55;
+  scene.imageProcessingConfiguration.exposure = 0.8;
   scene.imageProcessingConfiguration.contrast = 1.15;
-  scene.environmentIntensity = 0.15;
+  scene.environmentIntensity = 0.25;
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
@@ -633,7 +689,7 @@ function applyBloodMoonPalette(){
   scene.ambientColor = new BABYLON.Color3(0.04,0.01,0.02);
   scene.imageProcessingConfiguration.exposure = 0.5;
   scene.imageProcessingConfiguration.contrast = 1.2;
-  scene.environmentIntensity = 0.12;
+  scene.environmentIntensity = 0.25;
   scene.fogDensity = 0.005;
   scene.fogColor = new BABYLON.Color3(0.06,0.01,0.02);
   if (cloudMat) cloudMat.emissiveColor = new BABYLON.Color3(0.16,0.03,0.03);
@@ -663,13 +719,27 @@ const audio = {
   slam2: new Audio("./assets/audio/doorSlam2.mp3"),
   ghostLaugh: new Audio("./assets/audio/ghostLaugh.mp3"),
   writing: new Audio("./assets/audio/GhostWriting1.mp3"),
-  foot1: new Audio("./assets/audio/foot_hunt1.mp3"),
-  foot2: new Audio("./assets/audio/foot_hunt2.mp3"),
-  footMy1: new Audio("./assets/audio/foot_myling1.mp3"),
-  footMy2: new Audio("./assets/audio/foot_myling2.mp3"),
-};
-Object.values(audio).forEach(a=>{ if(a && a.loop !== undefined) a.loop = false; });
 
+  // Shared footstep pool (player + ghost/myling)
+  steps: [
+    new Audio("./assets/audio/step1.mp3"),
+    new Audio("./assets/audio/step2.mp3"),
+    new Audio("./assets/audio/step3.mp3")
+  ]
+};
+Object.values(audio).forEach(a=>{
+  if (Array.isArray(a)) a.forEach(x=>{ if(x && x.loop!==undefined) x.loop=false; });
+  else if(a && a.loop !== undefined) a.loop = false;
+});
+function playStep(volume=0.45){
+  const pool = audio.steps;
+  const s = pool[(Math.random()*pool.length)|0];
+  try{ s.currentTime = 0; s.volume = volume; s.play().catch(()=>{}); }catch{}
+}
+
+/* ===========================================================
+   WEATHER HELPERS
+   =========================================================== */
 function makeSnowTexture(){
   if (weather.snowTex) return weather.snowTex;
   const tex = new BABYLON.DynamicTexture("snowTex",{width:32,height:32},scene,false);
@@ -694,7 +764,7 @@ function setWeather(state){
   if(state === 'Rain'){
     if(!weather.rainPS){
       const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
-      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder
+      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder thin streak
       ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
       ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
       ps.minSize = 0.05; ps.maxSize = 0.1;
@@ -773,18 +843,16 @@ async function loadMap(){
       if(/door/i.test(m.name||"")) doorMeshes.push(m);
     });
 
+    // invisible catch ground
     const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
-    fallbackGround.position.y = 0;
-    fallbackGround.checkCollisions = true;
-    fallbackGround.isPickable = true;
-    fallbackGround.visibility = 0;
+    fallbackGround.position.y = 0; fallbackGround.checkCollisions = true; fallbackGround.isPickable = true; fallbackGround.visibility = 0;
 
+    // spawn at van height
     const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
     camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
 
     doorMeshes.forEach(door=>{ door.actionManager = new BABYLON.ActionManager(scene); door.isPickable = true; });
   }catch(e){
-    // Will trigger fallback ground in boot()
     console.warn("Map load failed:", e);
   }
 }
@@ -796,56 +864,90 @@ function afterMapLoadedForShadows(){
 }
 
 /* ===========================================================
-   ITEMS
+   ITEMS (hand preview assets)
    =========================================================== */
 let itemsGlb = null;
 async function loadItems(){
-  const res = await BABYLON.SceneLoader.LoadAssetContainerAsync("", "./assets/models/items/exploration_objects.glb", scene);
-  itemsGlb = res;
-  res.meshes.forEach(m=>{
-    if(!m.name || m.name==="_root" || m.name=="__root__") return;
-    inventory.models[m.name] = m;
-  });
+  try{
+    const res = await BABYLON.SceneLoader.LoadAssetContainerAsync("", "./assets/models/items/exploration_objects.glb", scene);
+    itemsGlb = res;
+    res.meshes.forEach(m=>{
+      if(!m.name || m.name==="_root" || m.name=="__root__") return;
+      inventory.models[m.name] = m;
+    });
+  }catch(e){ console.warn("Items load failed:", e); }
 }
 
 /* ===========================================================
    GHOST + HUNT
    =========================================================== */
 async function loadGhost(){
-  const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
-  const pick = list[Math.floor(Math.random()*list.length)];
-  const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
-  ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-  ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
+  try{
+    const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
+    const pick = list[Math.floor(Math.random()*list.length)];
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
+    ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
+    ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
 
-  const bb = ghost.mesh.getHierarchyBoundingVectors(true);
-  const height = bb.max.y - bb.min.y;
-  const targetHeight = 1.9;
-  const scale = targetHeight / (height || 1);
-  ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
-  ghost.mesh.rotation = new BABYLON.Vector3(0,0,0);
+    const bb = ghost.mesh.getHierarchyBoundingVectors(true);
+    const height = bb.max.y - bb.min.y;
+    const scale = (1.9 / (height || 1));
+    ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
+    ghost.mesh.rotation = new BABYLON.Vector3(0,0,0);
 
-  r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
-  if(ghost.anims.idle) ghost.anims.idle.start(true);
+    r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
+    if(ghost.anims.idle) ghost.anims.idle.start(true);
 
-  const p = randomPointInPolygonXZ(ghostPolygon);
-  const gy = pickGroundHeightAt(p.x, p.z);
-  ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
-  ghost.target = randomPointInPolygonXZ(ghostPolygon);
+    const p = randomPointInPolygonXZ(ghostPolygon);
+    const gy = pickGroundHeightAt(p.x, p.z);
+    ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
+    ghost.target = randomPointInPolygonXZ(ghostPolygon);
 
-  setGhostVisible(false);
+    setGhostVisible(false);
+
+    // Twins
+    ghost.isTwins = (currentGhostKey || "").toLowerCase() === "the twins";
+    if (ghost.isTwins) {
+      ghost.meshFast = ghost.mesh.clone("ghostFast", null, true);
+      ghost.meshFast.isPickable = false;
+      ghost.meshFast.checkCollisions = false;
+      ghost.meshFast.visibility = ghost.visible ? 1 : 0;
+
+      const sep = TWINS_SEP_MIN + Math.random() * (TWINS_SEP_MAX - TWINS_SEP_MIN);
+      const dir = new BABYLON.Vector3(1, 0, 0).rotateByQuaternionToRef(
+        BABYLON.Quaternion.FromEulerAngles(0, Math.random()*Math.PI*2, 0),
+        new BABYLON.Vector3()
+      );
+      const basePos = ghost.mesh.position.clone();
+      const fp = basePos.add(dir.scale(sep));
+      fp.y = pickGroundHeightAt(fp.x, fp.z);
+      ghost.meshFast.position.copyFrom(fp);
+
+      try {
+        moonShadows.addShadowCaster(ghost.meshFast, true);
+        flashShadows.addShadowCaster(ghost.meshFast, true);
+      } catch {}
+    }
+  }catch(e){ console.warn("Ghost load failed:", e); }
 }
 function setGhostVisible(v){
   ghost.visible = !!v;
   if (!ghost.mesh) return;
-  ghost.mesh.getChildMeshes(false).concat([ghost.mesh]).forEach(m=>{
-    m.isVisible = v; m.visibility = v ? 1 : 0;
-  });
+  ghost.mesh.getChildMeshes(false).concat([ghost.mesh]).forEach(m=>{ m.isVisible = v; m.visibility = v ? 1 : 0; });
+  if (ghost.meshFast){ ghost.meshFast.getChildMeshes(false).concat([ghost.meshFast]).forEach(m=>{ m.isVisible = v; m.visibility = v?1:0; }); }
 }
+
 function beginHunt(){
   if (!ghost.mesh || ghost.hunting) return;
+
+  // Check crucifix protection BEFORE starting a hunt.
+  if (tryBlockHuntByCrucifix()){
+    huntClock = 0; huntCooldown = 14 + Math.random()*16;
+    return; // blocked!
+  }
+
   ghost.hunting = true;
-  document.getElementById('hud-hunt-state').textContent = 'HUNTING';
+  $('#hud-hunt-state').textContent = 'HUNTING';
   setGhostVisible(true);
   ghost.speed = 1.4;
   ghost.stepInterval = 0.48;
@@ -855,9 +957,9 @@ function beginHunt(){
 function endHunt(){
   if (!ghost.hunting) return;
   ghost.hunting = false;
-  document.getElementById('hud-hunt-state').textContent = 'Calm';
+  $('#hud-hunt-state').textContent = 'Calm';
   setGhostVisible(false);
-  ghost.speed = 0.9;
+  ghost.speed = 1.4;
   ghost.stepInterval = 0.55;
   flickerStop();
   toast('Hunt ended.', 900);
@@ -873,16 +975,30 @@ function flickerStop(){ flickerOn = false;
 
 let huntCooldown = 22 + Math.random()*18;
 let huntClock = 0;
-
 function sanityTick(dt){
-  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
-  const base = 0.6/60;
-  const add = nearGhost ? 1.2/60 : 0;
-  const drain = (base+add) * (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1) * (weather.modSanityDrain||1);
-  player.sanity = Math.max(0, player.sanity - drain);
-  document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`;
+  const inVan = inVanZone(camera.position);
+  const insideHouse = pointInPolyXZ(camera.position, ghostPolygon) && !inVan;
 
-  if (!ghost.hunting && !inVanZone(camera.position) && player.sanity <= 65){
+  // base drain only when *inside* the house
+  let drain = 0;
+  if (insideHouse){
+    const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
+    const base = 0.6/60;           // ~0.6% per minute
+    const add  = nearGhost ? 1.2/60 : 0; // +1.2% per minute near ghost
+    drain = (base + add) * (storageOpen?0.2:1) * (weather.modSanityDrain||1);
+  }
+
+  // Gentle regeneration when outside or in van
+  let regen = 0;
+  if (!insideHouse || inVan){
+    regen = (inVan ? 1.0/60 : 0.5/60); // +1%/min in van, +0.5%/min outside
+  }
+
+  player.sanity = Math.max(0, Math.min(100, player.sanity - drain + regen));
+  $('#hud-sanity').textContent = `${player.sanity|0}%`;
+
+  // Hunt logic only when inside house
+  if (!ghost.hunting && insideHouse && player.sanity <= 65){
     huntClock += dt * (weather.modHuntPace||1);
     if (huntClock >= huntCooldown){
       huntClock = 0; huntCooldown = 22 + Math.random()*18;
@@ -890,11 +1006,13 @@ function sanityTick(dt){
       if (Math.random() < baseChance * (weather.modHuntChance||1)) beginHunt();
     }
   }
+  if (ghost.hunting && (!insideHouse || inVan || Math.random()<0.0015)) endHunt();
+}  }
   if (ghost.hunting && (inVanZone(camera.position) || Math.random()<0.0015)) endHunt();
 }
 
 /* ===========================================================
-   MOON MODEL
+   MOON
    =========================================================== */
 async function loadMoon(){
   try{
@@ -924,7 +1042,7 @@ async function loadMoon(){
       moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
     });
   }catch(e){
-    console.warn("loadMoon failed, using procedural sphere:", e);
+    console.warn("loadMoon failed, using sphere:", e);
     moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
     moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
     moonMat = new BABYLON.StandardMaterial("moonMat", scene);
@@ -944,7 +1062,7 @@ const HOUSE_LIGHT_REGEX = /(lamp|light|bulb|ceiling|sconce)/i;
 function adoptExistingGltfLights(){
   let adopted = 0;
   (scene.lights||[]).forEach(l=>{
-    if ([moonLight,flashLight,uvLight,irLight].includes(l)) return;
+    if ([moonLight,flashLight,uvLight,irLight,hemiLight].includes(l)) return;
     if (HOUSE_LIGHT_REGEX.test(l.name||"")){
       l.intensity = 0;
       l.diffuse = new BABYLON.Color3(1.0, 0.95, 0.8);
@@ -973,20 +1091,11 @@ function setHousePower(on){
       ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
   });
 }
-function toggleNearestHouseLight(){
-  if (!houseLights.length || !housePower) { toast(housePower? "No lights found." : "Power is OFF", 900); return; }
-  let n=null, best=1e9;
-  houseLights.forEach(h=>{ const d=BABYLON.Vector3.Distance(camera.position, h.light.position); if(d<best){ best=d; n=h; }});
-  if (!n) return;
-  const on = n.light.intensity>0;
-  n.light.intensity = on ? 0 : 0.8;
-  if (n.mesh?.material?.emissiveColor) n.mesh.material.emissiveColor = on ? new BABYLON.Color3(0,0,0) : new BABYLON.Color3(1.4,1.2,0.9);
-}
 
 /* ===========================================================
-   PLAYER / INPUT
+   PLAYER / MOVEMENT / INPUT
    =========================================================== */
-function updateHUD(){ document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`; document.getElementById('hud-room').textContent = player.room; }
+function updateHUD(){ $('#hud-sanity').textContent = `${player.sanity|0}%`; $('#hud-room').textContent = player.room; }
 function handleMovement(dt){
   const speed = player.running ? player.speedRun : player.speedWalk;
   let move = new BABYLON.Vector3(0,0,0);
@@ -1037,23 +1146,57 @@ function openDoorNearby(){
 }
 
 /* ===========================================================
+   PLAYER FOOTSTEPS (step1/2/3)
+   =========================================================== */
+const stepState = { lastPos:null, acc:0, strideWalk:1.2, strideRun:0.8 };
+function updatePlayerFootsteps(dt){
+  if (!stepState.lastPos) { stepState.lastPos = camera.position.clone(); return; }
+  const now = camera.position;
+  const d = BABYLON.Vector3.Distance(now, stepState.lastPos);
+  stepState.lastPos = now.clone();
+  // only count when actually moving via controls
+  if(!(controls.forward||controls.back||controls.left||controls.right)) return;
+
+  stepState.acc += d;
+  const stride = player.running ? stepState.strideRun : stepState.strideWalk;
+  if (stepState.acc >= stride){
+    stepState.acc = 0;
+    playStep(0.42); // player step volume
+  }
+}
+
+/* ===========================================================
    BELT / PREVIEW / CAMERA OVERLAY
    =========================================================== */
+let notebookOpen = false;
+function labelForSlot(i){
+  const item = inventory.slots[i] || '-';
+  if (item==='Smudge' || item==='Salt'){
+    const left = inventory.slotCharges[i] ?? 0;
+    return `${item} (${left})`;
+  }
+  return item;
+}
 function rebuildBelt(){
   const belt = document.getElementById('belt'); belt.innerHTML='';
   for(let i=1;i<=5;i++){
     const slotDiv = document.createElement('div');
     slotDiv.className = 'slot' + (i===activeItemSlot?' active':''); slotDiv.dataset.slot = i;
     const key = document.createElement('div'); key.className='key'; key.textContent=i; slotDiv.appendChild(key);
-    const label = inventory.slots[i] || '-';
-    const span = document.createElement('div'); span.style.fontSize='11px'; span.style.color='#8ff'; span.style.textAlign='center'; span.textContent=label;
+    const span = document.createElement('div'); span.style.fontSize='11px'; span.style.color='#8ff'; span.style.textAlign='center'; span.textContent=labelForSlot(i);
     slotDiv.appendChild(span);
-    slotDiv.onclick = ()=>selectSlot(i);
+    slotDiv.onclick = (ev)=>{ ev.stopPropagation(); selectSlot(i); };
     belt.appendChild(slotDiv);
   }
   refreshHandPreview(); refreshCameraOverlay();
 }
-function selectSlot(n){ activeItemSlot = n; rebuildBelt(); syncHeldLights(); }
+function selectSlot(n){
+  activeItemSlot = n;
+  // if notebook is open and we switch to a non-notebook slot, close it
+  if (notebookOpen && inventory.slots[n] !== 'Notebook') closeNotebook();
+  rebuildBelt();
+  syncHeldLights();
+}
 function refreshHandPreview(){
   const wrap = document.getElementById('hand-preview'); wrap.innerHTML = '';
   const item = inventory.slots[activeItemSlot];
@@ -1092,33 +1235,16 @@ function logEvidence(type){
   }
   if (window.__onEvidenceLogged) window.__onEvidenceLogged({ item:type, result:type, room:player.room, success:true });
 }
-function useActiveItem(){
-  const item = inventory.slots[activeItemSlot]; if(!item) return;
-  const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
-  switch(item){
-    case 'EMF':
-      if(dist < 5){ if(Math.random()<0.5) logEvidence("EMF Level 5"); toast("EMF spikes!", 1000); } else toast("EMF quiet.", 800); break;
-    case 'Spirit Box':
-      if(player.room!=='Van' && dist<4){ if(Math.random()<0.55){ audio.spiritbox.play().catch(()=>{}); logEvidence("Spirit Box"); } else { audio.spiritStatic.play().catch(()=>{}); toast("...static...", 900); } }
-      else toast("No response.", 800); break;
-    case 'Thermometer':
-      if(dist<6 && Math.random()<0.5){ logEvidence("Freezing Temps"); toast("It’s unnaturally cold here.", 900); } else toast("Temp normal.", 900); break;
-    case 'UV Light':
-      if(Math.random()<0.4){ logEvidence("Fingerprints"); toast("A latent mark glows faintly.", 1000); } else toast("Nothing glows.", 900); break;
-    case 'Ghost Writing Book':
-      audio.writing.play().catch(()=>{}); setTimeout(()=>logEvidence("Ghost Writing"), 1200); toast("You place the book down...", 900); break;
-    case 'D.O.T.S':
-      if(Math.random()<0.45){ logEvidence("D.O.T.S"); toast("Something flickers through your setup...", 1000); } else toast("Nothing passes through.", 900); break;
-    case 'Camera':
-      showCameraOrb(); if(Math.random()<0.4) logEvidence("Orbs"); break;
-    case 'Smudge': toast("Air thickens—and clears.", 900); break;
-    case 'Crucifix': toast("You hold the crucifix ready.", 900); break;
-    case 'Salt': toast("You sprinkle a thin line.", 900); break;
-    case 'Motion Sensor': toast("Sensor armed.", 800); break;
-    case 'Lighter': toast("Flame lit.", 700); break;
-    case 'Notebook': openNotebook(true); break;
-    default: toast(`${item}...`, 700);
-  }
+function decChargeForActive(){
+  const i = activeItemSlot;
+  let c = inventory.slotCharges[i] ?? 0;
+  if (c===Infinity) return true;
+  if (c<=0) return false;
+  c -= 1;
+  inventory.slotCharges[i] = c;
+  if (c<=0){ toast(`${inventory.slots[i]} depleted.`, 1100); inventory.slots[i] = null; }
+  rebuildBelt();
+  return true;
 }
 function showCameraOrb(){
   const dot = document.getElementById('camera-orb');
@@ -1127,11 +1253,334 @@ function showCameraOrb(){
   dot.style.transform = `translate(${x}px, ${y}px)`; setTimeout(()=> dot.style.display='none', 1000);
 }
 
+/* Placeables: Motion Sensor (not consumable) */
+function placeMotionSensor(){
+  const nearIdx = placeables.motionSensors.findIndex(ms => BABYLON.Vector3.Distance(ms.node.position, camera.position) < 2.0);
+  if (nearIdx >= 0){
+    const ms = placeables.motionSensors.splice(nearIdx,1)[0];
+    ms.node.dispose(); ms.plate?.dispose();
+    toast("Motion sensor picked up.", 900);
+    return;
+  }
+  const node = new BABYLON.TransformNode("motionSensor", scene);
+  const fp = camera.position.add(camera.getForwardRay().direction.scale(1.0));
+  const y = pickGroundHeightAt(fp.x, fp.z);
+  node.position = new BABYLON.Vector3(fp.x, y+0.05, fp.z);
+
+  const m = BABYLON.MeshBuilder.CreatePlane("msPlate", {size:0.2}, scene);
+  m.rotation.x = Math.PI/2; m.position = node.position.clone();
+  const mat = new BABYLON.StandardMaterial("msMat", scene);
+  mat.emissiveColor = new BABYLON.Color3(0.1,0.8,0.4);
+  mat.disableLighting = true; m.material = mat;
+
+  placeables.motionSensors.push({node, cooldown:0, plate:m});
+  toast("Motion sensor placed. (Click again near it to pick up.)", 1400);
+}
+function tickMotionSensors(dt){
+  for (const ms of placeables.motionSensors){
+    ms.cooldown = Math.max(0, ms.cooldown - dt);
+    const targets = [ghost.mesh].concat(ghost.meshFast ? [ghost.meshFast] : []);
+    const hit = targets.some(t => t && BABYLON.Vector3.Distance(t.position, ms.node.position) < 2.5);
+    if (hit && ms.cooldown === 0){
+      ms.cooldown = 4.0; // anti-spam
+      toast("Motion sensor tripped!", 900);
+      if (ms.plate?.material){
+        const old = ms.plate.material.emissiveColor.clone();
+        ms.plate.material.emissiveColor = new BABYLON.Color3(1,1,1);
+        setTimeout(()=>{ if(ms.plate?.material) ms.plate.material.emissiveColor = old; }, 250);
+      }
+    }
+  }
+}
+
+/* Placeables: Crucifix (consumes only when blocking a hunt) */
+function placeCrucifix(){
+  const nearIdx = placeables.crucifixes.findIndex(c => BABYLON.Vector3.Distance(c.node.position, camera.position) < 2.0);
+  if (nearIdx >= 0){
+    const c = placeables.crucifixes.splice(nearIdx,1)[0];
+    c.node.dispose(); c.mesh?.dispose();
+    toast(`Crucifix picked up (${c.uses} use(s) left).`, 1100);
+    return;
+  }
+  const node = new BABYLON.TransformNode("crucifix", scene);
+  const fp = camera.position.add(camera.getForwardRay().direction.scale(1.0));
+  const y = pickGroundHeightAt(fp.x, fp.z);
+  node.position = new BABYLON.Vector3(fp.x, y+0.02, fp.z);
+
+  const mesh = BABYLON.MeshBuilder.CreateCylinder("crx", {diameter:0.12, height:0.02, tessellation:6}, scene);
+  mesh.position = node.position.clone();
+  const mat = new BABYLON.StandardMaterial("crxMat", scene);
+  mat.emissiveColor = new BABYLON.Color3(0.9,0.6,0.2); mat.disableLighting = true; mesh.material = mat;
+
+  placeables.crucifixes.push({node, uses:2, mesh});
+  toast("Crucifix placed. (Pick up by clicking near it.)", 1200);
+}
+function tryBlockHuntByCrucifix(){
+  if (!placeables.crucifixes.length) return false;
+  const isDemon = (currentGhostKey||"").toLowerCase() === "demon";
+  const evalPos = ghost.mesh?.position; if(!evalPos) return false; // Twins: only slow twin (ghost.mesh)
+  let idx = -1;
+  for (let i=0;i<placeables.crucifixes.length;i++){
+    const c = placeables.crucifixes[i];
+    const r = isDemon ? CRUCIFIX_DEMON_RADIUS : CRUCIFIX_BASE_RADIUS;
+    if (BABYLON.Vector3.Distance(evalPos, c.node.position) <= r){ idx = i; break; }
+  }
+  if (idx === -1) return false;
+
+  const crx = placeables.crucifixes[idx];
+  crx.uses -= 1;
+  if (crx.mesh?.material){
+    const m = crx.mesh.material, old = m.emissiveColor.clone();
+    m.emissiveColor = new BABYLON.Color3(1,0.2,0.2);
+    setTimeout(()=>{ if(crx.mesh?.material) crx.mesh.material.emissiveColor = old; }, 220);
+  }
+  toast(`Crucifix warded the hunt! (${Math.max(crx.uses,0)} use(s) left)`, 1400);
+  if (crx.uses <= 0){ crx.node.dispose(); crx.mesh?.dispose(); placeables.crucifixes.splice(idx,1); }
+  return true;
+}
+
+/* ===========================================================
+   BREATH FX
+   =========================================================== */
+function setupBreathFX(){
+  const ps = new BABYLON.ParticleSystem("breath", 200, scene);
+  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene, true);
+  ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.6);
+  ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.1);
+  ps.minSize = 0.02; ps.maxSize = 0.06;
+  ps.emitRate = 0;
+  ps.minLifeTime = 0.3; ps.maxLifeTime = 0.7;
+  ps.direction1 = new BABYLON.Vector3(0,0.7,0.2);
+  ps.direction2 = new BABYLON.Vector3(0.1,0.8,0.1);
+  ps.gravity = new BABYLON.Vector3(0,0,0);
+  ps.updateSpeed = 0.02;
+  ps.disposeOnStop = false;
+
+  const anchor = new BABYLON.TransformNode("breathAnchor", scene);
+  ps.emitter = anchor; ps.start();
+  breath.ps = ps; breath.anchor = anchor;
+}
+function updateBreath(dt){
+  if (!breath.ps || !breath.anchor) return;
+  breath.anchor.position.copyFrom(camera.position.add(camera.getForwardRay().direction.scale(0.3)).add(new BABYLON.Vector3(0,0.1,0)));
+  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < BREATH_RANGE : false;
+  const targetRate = nearGhost ? 90 : 0;
+  const current = breath.ps.emitRate || 0;
+  breath.ps.emitRate = BABYLON.Scalar.Lerp(current, targetRate, 0.1);
+}
+
+/* ===========================================================
+   GHOST UPDATE / AI  (uses shared step sounds; Myling quieter/harder to hear)
+   =========================================================== */
+let footTimer = 0;
+function updateGhost(dt){
+  if(!ghost.mesh) return;
+
+  // Ensure visibility during hunts
+  if (ghost.hunting && !ghost.visible) setGhostVisible(true);
+
+  function moveActor(actorMesh, speed, targetVec){
+    const pos = actorMesh.position;
+    const target = targetVec ? targetVec.clone() : (ghost.target || randomPointInPolygonXZ(ghostPolygon));
+    if (!targetVec && (!ghost.target || BABYLON.Vector3.Distance(pos, ghost.target) < 1)) {
+      ghost.target = randomPointInPolygonXZ(ghostPolygon);
+    }
+    const dir = target.subtract(pos); dir.y = 0;
+    const len = dir.length();
+    if (len > 0.001){
+      dir.normalize();
+      actorMesh.moveWithCollisions(dir.scale(speed * dt * (ghost.hunting ? 2.2 * (weather.modHuntPace||1) : 1.2)));
+      lookAtXZ(actorMesh, target);
+    }
+  }
+
+  if (!ghost.isTwins) {
+    const chase = ghost.hunting ? camera.position : null;
+    moveActor(ghost.mesh, ghost.hunting ? ghost.speed : ghost.slowSpeed, chase);
+  } else {
+    const slowChase = ghost.hunting ? camera.position : null;
+    const fastChase = ghost.hunting ? camera.position : null;
+    moveActor(ghost.mesh,     ghost.hunting ? ghost.speed     : ghost.slowSpeed, slowChase);
+    moveActor(ghost.meshFast, ghost.hunting ? ghost.speed*1.1 : ghost.fastSpeed, fastChase);
+
+    // keep twins separated 10–12m
+    const a = ghost.mesh.position, b = ghost.meshFast.position;
+    const d = BABYLON.Vector3.Distance(a, b);
+    if (d < TWINS_SEP_MIN || d > TWINS_SEP_MAX){
+      const dir = b.subtract(a); dir.y = 0;
+      const need = BABYLON.Scalar.Clamp(TWINS_SEP_MIN + (TWINS_SEP_MAX - TWINS_SEP_MIN)*0.5, TWINS_SEP_MIN, TWINS_SEP_MAX);
+      if (dir.lengthSquared() < 0.0001) dir.copyFromFloats(1,0,0); else dir.normalize();
+      const targetB = a.add(dir.scale(need));
+      targetB.y = pickGroundHeightAt(targetB.x, targetB.z);
+      const adjust = targetB.subtract(b).scale(0.25);
+      ghost.meshFast.moveWithCollisions(adjust);
+    }
+  }
+
+  // footsteps (shared step files; Myling quieter + smaller radius)
+  footTimer -= dt;
+  if (footTimer <= 0){
+    const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+    const audible = dist < ghost.footAudible;
+    if (ghost.hunting && audible){
+      const isMyling = ((currentGhostKey||"").toLowerCase()==="myling");
+      playStep(isMyling ? 0.22 : 0.38);
+    }
+    footTimer = ghost.stepInterval + Math.random()*0.12;
+  }
+
+  devBus.dispatchEvent(new Event('ghost'));
+  tickMotionSensors(dt);
+}
+
+/* ===========================================================
+   UI / INPUT
+   =========================================================== */
+let flashOn=false, uvOn=false, irOn=false;
+const keysDown = {};
+
+function initUI(){
+  // Storage
+  $('#storage-button').addEventListener('click', openStorage);
+  $('#storage-close').addEventListener('click', closeStorage);
+  $('#storage-confirm').addEventListener('click', confirmLoadout);
+
+  // Notebook
+  $('#notebook-close').addEventListener('click', closeNotebook);
+
+  // Dev gate on ESC
+  window.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape'){
+      if (!dev.enabled){
+        const gate = document.getElementById('dev-gate');
+        gate.style.display = (gate.style.display==='flex') ? 'none' : 'flex';
+      } else {
+        const t=document.getElementById('devtools-toggle');
+        if (t.style.display!=='none') t.click();
+      }
+    }
+  });
+  // Dev gate controls
+  $('#dev-yes').addEventListener('click', ()=>{ $('#dev-pass-wrap').style.display='block'; });
+  $('#dev-no').addEventListener('click', ()=>{ $('#dev-gate').style.display='none'; });
+  $('#dev-pass-submit').addEventListener('click', ()=>{
+    const val = ($('#dev-pass').value||'').trim();
+    if (val){
+      dev.enabled = true;
+      $('#dev-gate').style.display='none';
+      if (window.DevTools) window.DevTools.showToggle();
+      toast('Developer options enabled.', 1200);
+    } else {
+      toast('Enter a password.', 900);
+    }
+  });
+
+  // Touch controls
+  const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
+  const tbox = document.getElementById('touch-controls');
+  if (hasTouch){ tbox.style.display='grid'; }
+
+  const tUp  = document.getElementById('t-up');
+  const tLeft= document.getElementById('t-left');
+  const tRight=document.getElementById('t-right');
+  const tUse = document.getElementById('t-use');
+  const press = (el, on, off)=>{
+    const start=()=>on();
+    const end=()=>off();
+    el.addEventListener('touchstart', (e)=>{ e.preventDefault(); start(); }, {passive:false});
+    el.addEventListener('touchend',   (e)=>{ e.preventDefault(); end(); },   {passive:false});
+    el.addEventListener('mousedown',  (e)=>{ e.preventDefault(); start(); });
+    el.addEventListener('mouseup',    (e)=>{ e.preventDefault(); end(); });
+    el.addEventListener('mouseleave', (e)=>{ e.preventDefault(); end(); });
+  };
+  press(tUp, ()=>controls.forward=true, ()=>controls.forward=false);
+  press(tLeft, ()=>controls.left=true, ()=>controls.left=false);
+  press(tRight, ()=>controls.right=true, ()=>controls.right=false);
+  press(tUse, ()=>useActiveItem(), ()=>{});
+
+  // Dev tools open
+  const toggleBtn   = document.getElementById('devtools-toggle');
+  const panel       = document.getElementById('devtools-panel');
+  toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
+}
+
+/* Keys */
+window.addEventListener('keydown', (e)=>{
+  keysDown[e.key] = true;
+  if (e.repeat) return;
+
+  switch(e.key){
+    case 'w': case 'W': controls.forward=true; break;
+    case 's': case 'S': controls.back=true; break;
+    case 'a': case 'A': controls.left=true; break;
+    case 'd': case 'D': controls.right=true; break;
+    case 'Shift': player.running = true; break;
+
+    case '1': case '2': case '3': case '4': case '5':
+      selectSlot(parseInt(e.key,10)); break;
+
+    case 'n': case 'N': openNotebook(); break;
+    case 'e': case 'E': openDoorNearby(); break;
+
+    case 'f': case 'F': flashOn=!flashOn; uvOn=false; irOn=false; syncHeldLights(); break;
+    case 'u': case 'U': uvOn=!uvOn; flashOn=false; irOn=false; syncHeldLights(); break;
+    case 'i': case 'I': irOn=!irOn; flashOn=false; uvOn=false; syncHeldLights(); refreshCameraOverlay(); break;
+    case 'l': case 'L': toggleNearestHouseLight(); break;
+    case 'p': case 'P': setHousePower(!housePower); break;
+    case ' ':
+      useActiveItem(); break;
+  }
+});
+window.addEventListener('keyup', (e)=>{
+  keysDown[e.key] = false;
+  switch(e.key){
+    case 'w': case 'W': controls.forward=false; break;
+    case 's': case 'S': controls.back=false; break;
+    case 'a': case 'A': controls.left=false; break;
+    case 'd': case 'D': controls.right=false; break;
+    case 'Shift': player.running = false; break;
+  }
+});
+window.addEventListener('mousedown', (e)=>{ if(e.button===0) useActiveItem(); });
+window.addEventListener('wheel', (e)=>{
+  const dir = Math.sign(e.deltaY);
+  activeItemSlot += dir>0 ? 1 : -1;
+  if (activeItemSlot<1) activeItemSlot=5;
+  if (activeItemSlot>5) activeItemSlot=1;
+  rebuildBelt();
+  syncHeldLights();
+}, {passive:true});
+
+/* ===========================================================
+   LIGHT TOGGLES
+   =========================================================== */
+function syncHeldLights(){
+  const item = inventory.slots[activeItemSlot];
+  flashLight.intensity = 0; uvLight.intensity = 0; irLight.intensity = 0;
+
+  if (item==='Flashlight' && flashOn) flashLight.intensity = 3.0;
+  if (item==='UV Light'   && uvOn)    uvLight.intensity   = 2.0;
+  if (item==='Camera'     && irOn)    irLight.intensity   = 1.6;
+}
+function toggleNearestHouseLight(){
+  if (!housePower) return toast("Power is off.", 900);
+  let best=null, bestD=9e9;
+  houseLights.forEach(h=>{
+    const d = BABYLON.Vector3.Distance(h.light.position||h.mesh?.position||BABYLON.Vector3.Zero(), camera.position);
+    if (d<bestD){ bestD=d; best=h; }
+  });
+  if (!best) return;
+  best.light.intensity = best.light.intensity>0 ? 0 : 0.8;
+  if (best.mesh?.material?.emissiveColor){
+    best.mesh.material.emissiveColor = best.light.intensity>0 ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
+  }
+}
+
 /* ===========================================================
    NOTEBOOK
    =========================================================== */
-function openNotebook(){ document.getElementById('notebook-modal').style.display='flex'; renderNotebook(); }
-function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
+function openNotebook(){ document.getElementById('notebook-modal').style.display='flex'; renderNotebook(); notebookOpen=true; }
+function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; notebookOpen=false; }
 function renderNotebook(){
   const tabs = Array.from(document.querySelectorAll('#notebook-tabs .tab'));
   const pages = { ghosts:document.getElementById('page-ghosts'), evidence:document.getElementById('page-evidence'), guess:document.getElementById('page-guess') };
@@ -1168,67 +1617,63 @@ function openStorage(){
   modal.style.display='flex'; storageOpen=true;
 }
 function closeStorage(){ document.getElementById('storage-modal').style.display='none'; storageOpen=false; }
-function addToLoadout(item){ for(let i=1;i<=3;i++){ if(!inventory.slots[i]){ inventory.slots[i]=item; toast(`Added ${item} to slot ${i}`, 900); rebuildBelt(); return; } } toast('Slots 1–3 full. Remove one first.', 1200); }
+function addToLoadout(item){
+  for(let i=1;i<=3;i++){
+    if(!inventory.slots[i]){
+      inventory.slots[i]=item;
+      inventory.slotCharges[i] = (ITEM_DEFAULT_CHARGES[item] ?? Infinity);
+      toast(`Added ${item} to slot ${i}`, 900);
+      rebuildBelt();
+      return;
+    }
+  }
+  toast('Slots 1–3 full. Remove one first.', 1200);
+}
 function confirmLoadout(){ closeStorage(); }
 
 /* ===========================================================
-   DEVTOOLS (Enable Developer Listen + Map Recorder, XYZ etc.)
+   DEVTOOLS (panel + external overlay)
    =========================================================== */
 (function setupDevTools(){
   const toggleBtn   = document.getElementById('devtools-toggle');
   const panel       = document.getElementById('devtools-panel');
   const enableBtn   = document.getElementById('devtools-enable');
+  const openOverlay = document.getElementById('devtools-open-overlay');
   const chkGhost    = document.getElementById('devtools-group-ghost');
   const chkEv       = document.getElementById('devtools-group-evidence');
   const chkXYZ      = document.getElementById('devtools-group-xyz');
-  const mapStartBtn = document.getElementById('devtools-map-start');
-  const mapPinBtn   = document.getElementById('devtools-map-pin');
-  const mapOkBtn    = document.getElementById('devtools-map-confirm');
   const roomSel     = document.getElementById('devtools-room-select');
-  const exportBtn   = document.getElementById('devtools-export-rooms');
   const logTa       = document.getElementById('devtools-log');
 
-  const walkRange = document.getElementById('devtools-walk');
-  const runRange  = document.getElementById('devtools-run');
-  const chkGod    = document.getElementById('devtools-god');
-  const chkFly    = document.getElementById('devtools-fly');
-  const btnTp     = document.getElementById('devtools-teleport');
-  const btnPing   = document.getElementById('devtools-ping');
-  const btnInspect= document.getElementById('devtools-inspector');
-
-  const btnReveal = document.getElementById('devtools-reveal-ghost');
-  const btnForceHunt = document.getElementById('devtools-force-hunt');
-  const btnEndHunt = document.getElementById('devtools-end-hunt');
-
-  const reloadMapBtn  = document.getElementById('asset-reload-map');
-  const glbFileInput  = document.getElementById('asset-glb-file');
-  const appendGlbBtn  = document.getElementById('asset-append-glb');
-  const replaceMapBtn = document.getElementById('asset-replace-map');
-  const listMeshesBtn = document.getElementById('asset-list-meshes');
-  const exportMeshesBtn = document.getElementById('asset-export-meshes');
-  const meshSelect    = document.getElementById('asset-mesh-select');
-  const matSelect     = document.getElementById('asset-mat-select');
-  const focusBtn      = document.getElementById('asset-focus');
-  const chkVisible    = document.getElementById('asset-visible');
-  const chkPick       = document.getElementById('asset-pick');
-  const chkCollide    = document.getElementById('asset-collide');
-  const chkBBox       = document.getElementById('asset-bbox');
-  const chkWire       = document.getElementById('asset-wire');
-  const alphaRange    = document.getElementById('asset-alpha');
-  const texUrlInput   = document.getElementById('asset-tex-url');
-  const applyTexBtn   = document.getElementById('asset-apply-tex');
+  let overlayWin = null;
+  function ensureOverlayWindow(){
+    try{
+      if (!overlayWin || overlayWin.closed){
+        overlayWin = window.open('./devtools_overlay.html','devtools_overlay','width=520,height=680');
+      }
+    }catch(e){ /* popup may be blocked */ }
+  }
+  function postToOverlay(payload){
+    if (overlayWin && !overlayWin.closed){
+      overlayWin.postMessage(payload, "*");
+    }
+  }
 
   function log(msg){
     const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
     logTa.value += line; logTa.scrollTop = logTa.scrollHeight;
     console.debug('%cDEV','color:#8af', msg);
+    postToOverlay({ type:'log', text: msg });
   }
-  function setEnabled(el,on){ if(!el) return; el.disabled=!on; el.style.opacity=on?'1':'0.6'; }
-  function meshes(){ return scene.meshes.filter(m=>m && m.name && m.name!=='skybox'); }
-
   window.DevTools = { showToggle(){ toggleBtn.style.display='block'; }, open(){ panel.style.display='block'; }, log };
-  toggleBtn.style.display='none';
+
   toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
+  openOverlay.addEventListener('click', ()=>{
+    try{
+      overlayWin = window.open('./devtools_overlay.html','devtools_overlay','width=520,height=680');
+      setTimeout(()=>postToOverlay({type:'handshake', hello:true}), 400);
+    }catch(e){ toast('Popup blocked: allow popups for this site.', 1800); }
+  });
 
   try{
     const raw = (window.ROOMS && Array.isArray(window.ROOMS)) ? window.ROOMS : [];
@@ -1239,6 +1684,7 @@ function confirmLoadout(){ closeStorage(); }
   }catch{}
 
   enableBtn.addEventListener('click', ()=>{
+    ensureOverlayWindow();
     const on = enableBtn.dataset.on==='1' ? false : true;
     enableBtn.dataset.on = on ? '1':'0';
     enableBtn.textContent = on ? 'Disable Developer Listen' : 'Enable Developer Listen';
@@ -1257,336 +1703,125 @@ function confirmLoadout(){ closeStorage(); }
       else                      stopXYZ();
     }
   });
-  chkGhost?.addEventListener('change', ()=>{ if (enableBtn.dataset.on==='1'){ if (chkGhost.checked) devBus.addEventListener('ghost', ghostLogger); else devBus.removeEventListener('ghost', ghostLogger); } });
-  chkXYZ?.addEventListener('change',  ()=>{ if (enableBtn.dataset.on==='1'){ if (chkXYZ.checked) startXYZ(); else stopXYZ(); } });
 
-  let mapping=null;
-  setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false);
-  mapStartBtn.addEventListener('click', ()=>{ mapping={points:[]}; setEnabled(mapPinBtn,true); setEnabled(mapOkBtn,true); log('Map recording started. Use “Pin”.'); });
-  mapPinBtn.addEventListener('click', ()=>{ if(!mapping) return; const p=camera?.position||{x:0,y:0,z:0}; mapping.points.push({x:p.x,y:p.y,z:p.z}); log(`Pinned: (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`); });
-  mapOkBtn.addEventListener('click', ()=>{ if(!mapping) return; const name=roomSel?.value?.trim(); if(!name){ log('Select a room name before Confirm.'); return; } window.__mappedRooms=window.__mappedRooms||[]; window.__mappedRooms.push({ name, points:mapping.points }); log(`Map "${name}" saved (${mapping.points.length} pins).`); mapping=null; setEnabled(mapPinBtn,false); setEnabled(mapOkBtn,false); });
-  exportBtn.addEventListener('click', ()=>{ const data=(window.__mappedRooms&&window.__mappedRooms.length)?window.__mappedRooms:[]; const pretty=JSON.stringify(data,null,2); const content=`// Auto-generated by Dev Tools\nexport const ROOMS = [\n  ...${pretty}\n];`; const blob=new Blob([content],{type:'application/javascript'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='rooms.generated.js'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); log(`Exported ${data.length} room(s) to rooms.generated.js`); });
-
-  walkRange.value = String(player.speedWalk); runRange.value = String(player.speedRun);
-  walkRange.addEventListener('input', e=>{ player.speedWalk=parseFloat(e.target.value); log(`Walk speed: ${player.speedWalk.toFixed(2)}`); });
-  runRange .addEventListener('input', e=>{ player.speedRun =parseFloat(e.target.value); log(`Run speed: ${player.speedRun.toFixed(2)}`); });
-  chkGod.addEventListener('change', e=>{ player.god=e.target.checked; log(`God mode: ${player.god}`); });
-  chkFly.addEventListener('change', e=>{ allowFly=e.target.checked; log(`Fly enabled: ${allowFly}`); });
-  btnTp.addEventListener('click', ()=>{ if(ghost.mesh){ camera.position = ghost.mesh.position.add(new BABYLON.Vector3(0,1.7,-2)); log('Teleported to ghost.'); } else log('No ghost mesh yet.'); });
-  btnPing.addEventListener('click', ()=>{ const p=camera.position; log(`PING @ x:${p.x.toFixed(3)} y:${p.y.toFixed(3)} z:${p.z.toFixed(3)}`); });
-  btnInspect.addEventListener('click', ()=>{ if(scene.debugLayer.isVisible()) scene.debugLayer.hide(); else scene.debugLayer.show({ embedMode:true }); });
-
-  btnReveal.addEventListener('click', ()=>{ setGhostVisible(!ghost.visible); log(`Ghost visible: ${ghost.visible}`); });
-  btnForceHunt.addEventListener('click', ()=> beginHunt());
-  btnEndHunt.addEventListener('click', ()=> endHunt());
-
-  const reloadMap = async ()=>{ try{ log('Reloading map…'); await loadMap(); afterMapLoadedForShadows(); log('Map reloaded.'); }catch(e){ log('Reload map error: '+e.message); } };
-  reloadMapBtn.addEventListener('click', reloadMap);
-  appendGlbBtn.addEventListener('click', async ()=>{
-    const f = glbFileInput.files?.[0]; if(!f){ log('Choose a GLB/GLTF first.'); return; }
-    try{ log(`Appending GLB: ${f.name}`); await BABYLON.SceneLoader.AppendAsync("", f, scene); log('Append complete. Use List Meshes to inspect.'); }
-    catch(e){ log('Append error: '+e.message); }
-  });
-  replaceMapBtn.addEventListener('click', async ()=>{
-    const f = glbFileInput.files?.[0]; if(!f){ log('Choose a GLB/GLTF first.'); return; }
-    try{
-      log(`Replacing map with: ${f.name}`);
-      scene.meshes.slice().forEach(m=>{
-        if(m && m.name && m.name!=='skybox' && m.name!=='fallbackGround' && m!==camera){ try{ m.dispose(); }catch{} }
-      });
-      const r = await BABYLON.SceneLoader.ImportMeshAsync("", "", f, scene);
-      houseRoot = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-      afterMapLoadedForShadows();
-      log('Replace complete.');
-    }catch(e){ log('Replace error: '+e.message); }
-  });
-  listMeshesBtn.addEventListener('click', ()=>{
-    const list = meshes(); meshSelect.innerHTML = '<option value="">(select a mesh)</option>' + list.map((m,i)=>`<option value="${i}">${i}: ${m.name}</option>`).join('');
-    log(`Found ${list.length} meshes.`);
-    const mats = scene.materials || [];
-    document.getElementById('asset-mat-select').innerHTML = '<option value="">(material)</option>' + mats.map((m,i)=>`<option value="${i}">${i}: ${m.name||'(unnamed)'} </option>`).join('');
-  });
-  focusBtn.addEventListener('click', ()=>{
-    const idx=parseInt(meshSelect.value,10); const m=meshes()[idx]; if(!m) return;
-    const b=m.getBoundingInfo().boundingBox; const c=b.centerWorld; camera.position = new BABYLON.Vector3(c.x, c.y+3, c.z-6); camera.setTarget(c); log('Camera focused on mesh.');
-  });
-  chkVisible.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isVisible = chkVisible.checked; } });
-
-  chkPick.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.isPickable = chkPick.checked; log(`Pickable(${m.name}): ${m.isPickable}`); } });
-  chkCollide.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.checkCollisions = chkCollide.checked; log(`Collisions(${m.name}): ${m.checkCollisions}`); } });
-  chkBBox.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m){ m.showBoundingBox = chkBBox.checked; } });
-  chkWire.addEventListener('change', ()=>{ const m=meshes()[parseInt(meshSelect.value,10)]; if(m && m.material){ m.material.wireframe = chkWire.checked; } });
-
-  matSelect.addEventListener('change', ()=>{
-    const idx=parseInt(matSelect.value,10);
-    const mat = scene.materials[idx];
-    if(!mat) return;
-    alphaRange.value = typeof mat.alpha === 'number' ? String(mat.alpha) : '1';
-  });
-
-  alphaRange.addEventListener('input', ()=>{
-    const idx=parseInt(matSelect.value,10);
-    const mat = scene.materials[idx];
-    if(!mat) return;
-    mat.alpha = parseFloat(alphaRange.value);
-    log(`Material alpha set to ${mat.alpha.toFixed(2)}`);
-  });
-
-  applyTexBtn.addEventListener('click', ()=>{
-    const url = (texUrlInput.value||'').trim();
-    if(!url){ log('Enter a texture URL first.'); return; }
-    const idx=parseInt(matSelect.value,10);
-    const mat = scene.materials[idx];
-    if(!mat){ log('Select a material first.'); return; }
-    try{
-      const tex = new BABYLON.Texture(url, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE, ()=>log('Texture loaded.'), (msg)=>log('Texture error: '+msg));
-      if (mat.getClassName && /PBR/i.test(mat.getClassName())) mat.albedoTexture = tex;
-      else mat.diffuseTexture = tex;
-      log('Applied texture to material.');
-    }catch(e){ log('Apply texture error: '+e.message); }
-  });
-
-  exportMeshesBtn.addEventListener('click', ()=>{
-    const list = meshes().map(m=>({name:m.name, id:m.id, pos:m.position, vis:m.isVisible, pick:m.isPickable}));
-    const blob = new Blob([JSON.stringify(list,null,2)],{type:'application/json'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mesh-list.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-    log(`Exported ${list.length} meshes to mesh-list.json`);
-  });
-
-  // -------- Developer listeners ----------
-  function ghostLogger(e){
+  function ghostLogger(){
+    const g = ghost.mesh?.position; if(!g) return;
+    const fast = ghost.meshFast?.position;
+    const data = { type:'ghost', x:g.x,y:g.y,z:g.z, hunting:ghost.hunting };
+    if (fast) data.fast = { x:fast.x,y:fast.y,z:fast.z };
+    postToOverlay(data);
     if(performance.now() - __devGhostLogTimer < 250) return;
     __devGhostLogTimer = performance.now();
-    const g = ghost.mesh?.position; if(!g) return;
     log(`Ghost @ x:${g.x.toFixed(2)} y:${g.y.toFixed(2)} z:${g.z.toFixed(2)} hunting:${ghost.hunting}`);
   }
-  function evidenceLogger(d){
-    log(`EV: ${d.item} in ${d.room} (${d.success?'OK':'FAIL'})`);
-  }
+  function evidenceLogger(d){ log(`EV: ${d.item} in ${d.room} (${d.success?'OK':'FAIL'})`); postToOverlay({type:'evidence', ...d}); }
 
   let xyzTimer=null;
   function startXYZ(){
     if (xyzTimer) return;
     xyzTimer = setInterval(()=>{
       const p=camera?.position; if(!p) return;
+      const d = { type:'xyz', x:p.x,y:p.y,z:p.z, room:player.room };
+      postToOverlay(d);
       log(`XYZ x:${p.x.toFixed(2)} y:${p.y.toFixed(2)} z:${p.z.toFixed(2)}`);
     }, 1000);
   }
   function stopXYZ(){ if(xyzTimer){ clearInterval(xyzTimer); xyzTimer=null; } }
-
-})(); // end setupDevTools IIFE
-
-/* ===========================================================
-   BREATH FX (Freezing temps visual near ghost)
-   =========================================================== */
-function setupBreathFX(){
-  const ps = new BABYLON.ParticleSystem("breath", 200, scene);
-  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene, true);
-  ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.6);
-  ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.1);
-  ps.minSize = 0.02; ps.maxSize = 0.06;
-  ps.emitRate = 0;
-  ps.minLifeTime = 0.3; ps.maxLifeTime = 0.7;
-  ps.direction1 = new BABYLON.Vector3(0,0.7,0.2);
-  ps.direction2 = new BABYLON.Vector3(0.1,0.8,0.1);
-  ps.gravity = new BABYLON.Vector3(0,0,0);
-  ps.updateSpeed = 0.02;
-  ps.disposeOnStop = false;
-
-  const anchor = new BABYLON.TransformNode("breathAnchor", scene);
-  ps.emitter = anchor; ps.start();
-  breath.ps = ps; breath.anchor = anchor;
-}
-function updateBreath(dt){
-  if (!breath.ps || !breath.anchor) return;
-  breath.anchor.position.copyFrom(camera.position.add(camera.getForwardRay().direction.scale(0.3)).add(new BABYLON.Vector3(0,0.1,0)));
-  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < BREATH_RANGE : false;
-  const targetRate = nearGhost ? 90 : 0;
-  const current = breath.ps.emitRate || 0;
-  breath.ps.emitRate = BABYLON.Scalar.Lerp(current, targetRate, 0.1);
-}
+})();
 
 /* ===========================================================
-   GHOST UPDATE / AI
+   USE ITEMS
    =========================================================== */
-let footTimer = 0;
-function updateGhost(dt){
-  if(!ghost.mesh) return;
+function useActiveItem(){
+  const item = inventory.slots[activeItemSlot]; if(!item) return;
+  const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
+  switch(item){
+    case 'EMF':
+      if(dist < 5){ if(Math.random()<0.5) logEvidence("EMF Level 5"); toast("EMF spikes!", 1000); } else toast("EMF quiet.", 800); break;
 
-  // simple roaming when not hunting
-  if(!ghost.hunting){
-    const pos = ghost.mesh.position;
-    if(!ghost.target || BABYLON.Vector3.Distance(pos, ghost.target) < 1){
-      ghost.target = randomPointInPolygonXZ(ghostPolygon);
-    }
-    const dir = ghost.target.subtract(pos); dir.y = 0; const len = dir.length();
-    if (len > 0.001){
-      dir.normalize();
-      ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt * 1.2));
-      lookAtXZ(ghost.mesh, ghost.target);
-    }
-  } else {
-    // hunt: move toward player
-    const target = camera.position.clone();
-    const pos = ghost.mesh.position;
-    const dir = target.subtract(pos); dir.y = 0; const len = dir.length();
-    if(len > 0.001){
-      dir.normalize();
-      ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt * 2.2 * (weather.modHuntPace||1)));
-      lookAtXZ(ghost.mesh, target);
-    }
+    case 'Spirit Box':
+      if(player.room!=='Van' && dist<4){
+        if(Math.random()<0.55){ audio.spiritbox.play().catch(()=>{}); logEvidence("Spirit Box"); }
+        else { audio.spiritStatic.play().catch(()=>{}); toast("...static...", 900); }
+      } else toast("No response.", 800);
+      break;
+
+    case 'Thermometer':
+      if(dist<6 && Math.random()<0.5){ logEvidence("Freezing Temps"); toast("It’s unnaturally cold here.", 900); }
+      else toast("Temp normal.", 900);
+      break;
+
+    case 'UV Light':
+      if(Math.random()<0.4){ logEvidence("Fingerprints"); toast("A latent mark glows faintly.", 1000); } else toast("Nothing glows.", 900);
+      break;
+
+    case 'Ghost Writing Book':
+      audio.writing.play().catch(()=>{}); setTimeout(()=>logEvidence("Ghost Writing"), 1200); toast("You place the book down...", 900);
+      break;
+
+    case 'D.O.T.S':
+      if(Math.random()<0.45){ logEvidence("D.O.T.S"); toast("Something flickers through your setup...", 1000); } else toast("Nothing passes through.", 900);
+      break;
+
+    case 'Camera':
+      if (inVanZone(camera.position)) { toast("Too far. Try setting up indoors.", 1000); break; }
+      showCameraOrb();
+      if (dist < 15 && Math.random()<0.4) logEvidence("Orbs");
+      break;
+
+    case 'Smudge':
+      toast("Air thickens—and clears.", 900);
+      decChargeForActive(); // consume
+      break;
+
+    case 'Salt':
+      toast("You sprinkle a thin line.", 900);
+      decChargeForActive(); // consume
+      break;
+
+    case 'Crucifix':
+      placeCrucifix();
+      break;
+
+    case 'Motion Sensor':
+      placeMotionSensor();
+      break;
+
+    case 'Lighter':
+      toast("Flame lit.", 700);
+      break;
+
+    case 'Notebook':
+      openNotebook();
+      break;
+
+    default:
+      toast(`${item}...`, 700);
   }
-
-  // footstep SFX
-  footTimer -= dt;
-  if (footTimer <= 0){
-    const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
-    const audible = dist < ghost.footAudible;
-    if (ghost.hunting && audible){
-      const isMyling = (currentGhostKey||"") === "myling";
-      const clip = isMyling ? (Math.random()<0.5?audio.footMy1:audio.footMy2) : (Math.random()<0.5?audio.foot1:audio.foot2);
-      try{ clip.currentTime=0; clip.play().catch(()=>{}); }catch{}
-    }
-    footTimer = ghost.stepInterval + Math.random()*0.12;
-  }
-
-  // occasional dev event
-  devBus.dispatchEvent(new Event('ghost'));
 }
 
 /* ===========================================================
-   UI / INPUT BINDINGS
+   DEBUG CUBE
    =========================================================== */
-let flashOn=false, uvOn=false, irOn=false;
-const keysDown = {};
-
-function initUI(){
-  // Storage buttons
-  document.getElementById('storage-button').addEventListener('click', openStorage);
-  document.getElementById('storage-close').addEventListener('click', closeStorage);
-  document.getElementById('storage-confirm').addEventListener('click', confirmLoadout);
-
-  // Notebook
-  document.getElementById('notebook-close').addEventListener('click', closeNotebook);
-
-  // Dev gate on ESC
-  window.addEventListener('keydown', (e)=>{
-    if (e.key === 'Escape'){
-      if (!dev.enabled){
-        const gate = document.getElementById('dev-gate');
-        gate.style.display = (gate.style.display==='flex') ? 'none' : 'flex';
-      } else {
-        // toggle panel
-        const t=document.getElementById('devtools-toggle');
-        if (t.style.display!=='none') t.click();
-      }
-    }
-  });
-  // Dev gate controls
-  document.getElementById('dev-yes').addEventListener('click', ()=>{ document.getElementById('dev-pass-wrap').style.display='block'; });
-  document.getElementById('dev-no').addEventListener('click', ()=>{ document.getElementById('dev-gate').style.display='none'; });
-  document.getElementById('dev-pass-submit').addEventListener('click', ()=>{
-    const val = (document.getElementById('dev-pass').value||'').trim();
-    if (val){ // accept any non-empty for now
-      dev.enabled = true;
-      document.getElementById('dev-gate').style.display='none';
-      if (window.DevTools) window.DevTools.showToggle();
-      toast('Developer options enabled.', 1200);
-    } else {
-      toast('Enter a password.', 900);
-    }
-  });
-
-  // Touch controls
-  const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
-  const tbox = document.getElementById('touch-controls');
-  if (hasTouch){ tbox.style.display='grid'; }
-
-  const tUp  = document.getElementById('t-up');
-  const tLeft= document.getElementById('t-left');
-  const tRight=document.getElementById('t-right');
-  const tUse = document.getElementById('t-use');
-  const press = (el, on, off)=>{
-    const start=()=>on();
-    const end=()=>off();
-    el.addEventListener('touchstart', (e)=>{ e.preventDefault(); start(); }, {passive:false});
-    el.addEventListener('touchend',   (e)=>{ e.preventDefault(); end(); },   {passive:false});
-    el.addEventListener('mousedown',  (e)=>{ e.preventDefault(); start(); });
-    el.addEventListener('mouseup',    (e)=>{ e.preventDefault(); end(); });
-    el.addEventListener('mouseleave', (e)=>{ e.preventDefault(); end(); });
-  };
-  press(tUp, ()=>controls.forward=true, ()=>controls.forward=false);
-  press(tLeft, ()=>controls.left=true, ()=>controls.left=false);
-  press(tRight, ()=>controls.right=true, ()=>controls.right=false);
-  press(tUse, ()=>useActiveItem(), ()=>{});
-}
-
-// Keyboard movement + actions
-window.addEventListener('keydown', (e)=>{
-  keysDown[e.key] = true;
-  if (e.repeat) return;
-
-  switch(e.key){
-    case 'w': case 'W': controls.forward=true; break;
-    case 's': case 'S': controls.back=true; break;
-    case 'a': case 'A': controls.left=true; break;
-    case 'd': case 'D': controls.right=true; break;
-    case 'Shift': player.running = true; break;
-
-    case '1': case '2': case '3': case '4': case '5':
-      selectSlot(parseInt(e.key,10)); break;
-
-    case 'n': case 'N': openNotebook(); break;
-    case 'e': case 'E': openDoorNearby(); break;
-
-    case 'f': case 'F': flashOn=!flashOn; uvOn=false; irOn=false; syncHeldLights(); break;
-    case 'u': case 'U': uvOn=!uvOn; flashOn=false; irOn=false; syncHeldLights(); break;
-    case 'i': case 'I': irOn=!irOn; flashOn=false; uvOn=false; syncHeldLights(); refreshCameraOverlay(); break;
-    case 'l': case 'L': toggleNearestHouseLight(); break;
-    case 'p': case 'P': setHousePower(!housePower); break;
-  }
-});
-window.addEventListener('keyup', (e)=>{
-  keysDown[e.key] = false;
-  switch(e.key){
-    case 'w': case 'W': controls.forward=false; break;
-    case 's': case 'S': controls.back=false; break;
-    case 'a': case 'A': controls.left=false; break;
-    case 'd': case 'D': controls.right=false; break;
-    case 'Shift': player.running = false; break;
-  }
-});
-
-// Mouse to use active item
-window.addEventListener('mousedown', (e)=>{ if(e.button===0) useActiveItem(); });
-
-function syncHeldLights(){
-  // Only illuminate when the respective light item is selected
-  const item = inventory.slots[activeItemSlot];
-
-  // defaults off
-  flashLight.intensity = 0;
-  uvLight.intensity = 0;
-  irLight.intensity = 0;
-
-  if (item==='Flashlight' && flashOn) flashLight.intensity = 3.0;
-  if (item==='UV Light'   && uvOn)    uvLight.intensity   = 2.0;
-  if (item==='Camera'     && irOn)    irLight.intensity   = 1.6;
+function ensureDebugCube(){
+  if (scene.getMeshByName("dbgCube")) return;
+  const m = BABYLON.MeshBuilder.CreateBox("dbgCube",{size:2},scene);
+  m.position = new BABYLON.Vector3(43.657, 2, -112);
+  const mat = new BABYLON.StandardMaterial("dbgMat", scene);
+  mat.diffuseColor = new BABYLON.Color3(0.1,0.6,0.8);
+  m.material = mat;
+  scene.onBeforeRenderObservable.add(()=>{ m.rotation.y += 0.01; });
 }
 
 /* ===========================================================
-   DOOR / LIGHT SHORTCUTS (mouse wheel slots)
+   START
    =========================================================== */
-window.addEventListener('wheel', (e)=>{
-  const dir = Math.sign(e.deltaY);
-  activeItemSlot += dir>0 ? 1 : -1;
-  if (activeItemSlot<1) activeItemSlot=5;
-  if (activeItemSlot>5) activeItemSlot=1;
-  rebuildBelt();
-  syncHeldLights();
-}, {passive:true});
+document.getElementById('start-button').addEventListener('click', safeStart);
+
+/* Helper: nearest house light toggle key "L" */
+function toggleNearestHouseLight(){ // already declared above, noop placeholder to keep reference valid
+}
 
 </script>
-
 </body>
 </html>
