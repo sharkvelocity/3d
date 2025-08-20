@@ -1864,234 +1864,175 @@ function ensureDebugCube(){
    START
    =========================================================== */
 </script>
-  <!-- === Minimal Dual Joysticks: drop-in block (paste before 
-<!-- === DEV CONSOLE OVERLAY === -->
-<div id="dev-console" style="
-  position:fixed;
-  bottom:0;
-  left:0;
-  width:100%;
-  max-height:40%;
-  overflow-y:auto;
-  background:rgba(0,0,0,0.85);
-  color:#9f9;
-  font-family:monospace, ui-monospace, Consolas;
-  font-size:12px;
-  line-height:1.35;
-  padding:6px 8px;
-  display:none;
-  z-index:2147483647;
-  box-shadow:0 -8px 24px rgba(0,0,0,0.6);
-  border-top:1px solid rgba(0,255,128,0.2);
-"></div>
+  
 
-
-<script>
-// === DEV CONSOLE HELPERS ===
-(function(){
-  function showDevConsole(show=true){
-    var div = document.getElementById('dev-console');
-    if (div) div.style.display = show ? 'block' : 'none';
-  }
-  function appendLine(msg){
-    var div = document.getElementById('dev-console');
-    if (!div) return;
-    var line = document.createElement('div');
-    var t = (new Date()).toLocaleTimeString();
-    line.textContent = "[" + t + "] " + String(msg);
-    div.appendChild(line);
-    div.scrollTop = div.scrollHeight;
-  }
-  // Public logger
-  window.devLog = function(msg){
-    appendLine(msg);
-    try { console.log("[DEV]", msg); } catch(e){}
-    return msg;
-  };
-  // Toggle / enable helpers
-  window.enableDevConsole = function(){
-    try {
-      if (window.dev && typeof dev.enabled !== 'undefined') dev.enabled = true;
-    } catch(e){}
-    showDevConsole(true);
-    devLog("=== DEV CONSOLE ENABLED ===");
-  };
-  window.toggleDevConsole = function(){
-    var div = document.getElementById('dev-console');
-    var visible = div && div.style.display !== 'none';
-    showDevConsole(!visible);
-    if (!visible) devLog("=== DEV CONSOLE OPENED ===");
-  };
-
-  // Wrap dev.enabled so console auto-opens when switched true
-  try {
-    if (window.dev && !dev.__wrappedEnabled) {
-      var _enabled = dev.enabled;
-      Object.defineProperty(dev, 'enabled', {
-        configurable: true,
-        enumerable: true,
-        get: function(){ return _enabled; },
-        set: function(v){
-          _enabled = !!v;
-          if (_enabled) showDevConsole(true);
-        }
-      });
-      dev.__wrappedEnabled = true;
-    }
-  } catch(e){}
-
-  // Monkey-patch dev.log.push so existing push() calls print to overlay
-  try {
-    if (window.dev && Array.isArray(dev.log) && !dev.__wrappedPush) {
-      var _push = dev.log.push.bind(dev.log);
-      dev.log.push = function(){
-        for (var i=0;i<arguments.length;i++) appendLine(arguments[i]);
-        return _push.apply(null, arguments);
-      };
-      dev.__wrappedPush = true;
-    }
-  } catch(e){}
-
-  // Hotkey: Shift + D to toggle console
-  window.addEventListener('keydown', function(e){
-    if (e.shiftKey && (e.code === 'KeyD' || e.key === 'D')) {
-      e.preventDefault();
-      window.toggleDevConsole();
-    }
-  });
-})();
-</script>
-
-</body>) === -->
+<!-- === TOUCH CONTROLS (Hit Areas + Run Toggle) === -->
 <style>
-  /* JOYSTICKS — tiny, self-contained */
-  .joystick{
-    position:fixed;
-    width:120px; height:120px;
-    border-radius:50%;
-    background:rgba(0,0,0,0.35);
-    border:1px solid #066;
-    backdrop-filter: blur(2px);
-    z-index:6001;
-    touch-action:none;
-    user-select:none;
-    display:none; /* shown on touch devices by JS */
+  #touch-left, #touch-right {
+    position: fixed;
+    top: 0; bottom: 0;
+    width: 50vw;
+    z-index: 9998;
+    touch-action: none; /* prevent browser gestures */
   }
-  .joystick .knob{
-    position:absolute; left:50%; top:50%;
-    width:62px; height:62px; transform:translate(-50%,-50%);
-    border-radius:50%;
-    background:rgba(0,20,20,0.65);
-    border:2px solid #0aa;
-    box-shadow:0 0 10px rgba(0,255,255,0.25) inset;
+  #touch-left  { left: 0; }
+  #touch-right { right: 0; }
+  #run-toggle {
+    position: fixed;
+    right: 12px;
+    bottom: 56px;
+    z-index: 10000;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-family: system-ui, sans-serif;
+    font-size: 14px;
+    border: 1px solid rgba(255,255,255,0.18);
+    user-select: none;
+    -webkit-user-select: none;
   }
-  #joystick-left  { left:16px;  bottom:16px; }
-  #joystick-right { right:16px; bottom:16px; }
-  @media (pointer: coarse) { .joystick { display:block; } }
+  #run-toggle.active { background: rgba(0,128,255,0.6); }
 </style>
+<div id="touch-left"></div>
+<div id="touch-right"></div>
+<button id="run-toggle" type="button">Run: OFF</button>
 
-<!-- containers (created if missing, but included here for clarity) -->
-<div id="joystick-left"  class="joystick"><div class="knob"></div></div>
-<div id="joystick-right" class="joystick"><div class="knob"></div></div>
 
 <script>
-/* JOYSTICKS — tiny helper (idempotent) */
+// === TOUCH CONTROLS LOGIC ===
 (function(){
-  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
-  function ensure(id){
-    let el = document.getElementById(id);
-    if(!el){
-      el = document.createElement('div');
-      el.id = id; el.className='joystick';
-      el.innerHTML = '<div class="knob"></div>';
-      document.body.appendChild(el);
-    }
-    return el;
-  }
-  const left  = ensure('joystick-left');
-  const right = ensure('joystick-right');
-  if(!isTouch){ left.style.display='none'; right.style.display='none'; }
+  var left = document.getElementById('touch-left');
+  var right = document.getElementById('touch-right');
+  var runBtn = document.getElementById('run-toggle');
 
-  function initJoysticks(cam, controls, opts={}){
-    if(!isTouch) return;
-    const cfg = { dead:0.12, look:0.045, snap:0.35, ...opts };
-    [left,right].forEach(el=>{
-      el.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
-      el.addEventListener('touchmove',  e=>e.preventDefault(), {passive:false});
-    });
+  if (!left || !right || !runBtn) return;
 
-    function makeStick(container, onMove, onEnd){
-      const knob = container.querySelector('.knob');
-      const radius = container.clientWidth*0.5;
-      let active=false;
+  // Sensitivity & deadzone
+  var MOVE_DEAD = 14;     // px
+  var LOOK_DEAD = 8;      // px
+  var LOOK_SENS = 0.0045; // radians per px
+  var PITCH_MIN = -Math.PI/2 + 0.12;
+  var PITCH_MAX =  Math.PI/2 - 0.12;
 
-      function setKnob(x,y){ knob.style.left=(x+radius)+'px'; knob.style.top=(y+radius)+'px'; }
-      function reset(){ setKnob(0,0); }
-      function pt(e){
-        const t = e.touches ? e.touches[0] : e;
-        const r = container.getBoundingClientRect();
-        return { x: t.clientX-(r.left+r.width/2), y: t.clientY-(r.top+r.height/2) };
-      }
-      function clamp(x,y,maxR){
-        const len = Math.hypot(x,y); if(len<=maxR) return {x,y};
-        const k = maxR/(len||1); return {x:x*k, y:y*k};
-      }
-      function start(e){ active=true; move(e); }
-      function move(e){
-        if(!active) return;
-        const p = pt(e), c = clamp(p.x,p.y,radius);
-        setKnob(c.x,c.y);
-        onMove(c.x/radius, c.y/radius);
-      }
-      function end(){ active=false; reset(); onEnd(); }
+  // Movement tracking
+  var lActive = false, lId = null, lStartX = 0, lStartY = 0;
+  // Look tracking
+  var rActive = false, rId = null, rLastX = 0, rLastY = 0;
 
-      container.addEventListener('touchstart',start,{passive:false});
-      container.addEventListener('touchmove', move,{passive:false});
-      container.addEventListener('touchend',  end, {passive:false});
-      container.addEventListener('mousedown', start);
-      window.addEventListener('mousemove',    move);
-      window.addEventListener('mouseup',      end);
-      reset();
-    }
-
-    // LEFT: movement -> toggles your existing WASD booleans
-    makeStick(left, (nx, ny)=>{
-      const x = nx, z = -ny;
-      const mag = Math.hypot(x,z);
+  function resetMove(){
+    lActive = false; lId = null;
+    if (window.controls){
       controls.forward = controls.back = controls.left = controls.right = false;
-      if (mag < cfg.dead) return;
-      const ux = x/mag, uz = z/mag;
-      if (uz >  cfg.snap) controls.forward = true;
-      if (uz < -cfg.snap) controls.back    = true;
-      if (ux < -cfg.snap) controls.left    = true;
-      if (ux >  cfg.snap) controls.right   = true;
-    }, ()=>{
+    }
+  }
+
+  // LEFT: forward/back/strafe from swipe direction
+  left.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (lActive) return;
+    var t = e.changedTouches[0];
+    lActive = true; lId = t.identifier; lStartX = t.clientX; lStartY = t.clientY;
+  }, {passive:false});
+
+  left.addEventListener('touchmove', function(e){
+    if (!lActive || lId===null) return;
+    for (var i=0;i<e.changedTouches.length;i++){
+      var t = e.changedTouches[i];
+      if (t.identifier !== lId) continue;
+      var dx = t.clientX - lStartX;
+      var dy = t.clientY - lStartY;
+      if (!window.controls) return;
+      // Reset
       controls.forward = controls.back = controls.left = controls.right = false;
-    });
+      // Horizontal
+      if (Math.abs(dx) > MOVE_DEAD){
+        if (dx < 0) controls.left = true;
+        if (dx > 0) controls.right = true;
+      }
+      // Vertical (note: up swipe = negative dy)
+      if (Math.abs(dy) > MOVE_DEAD){
+        if (dy < 0) controls.forward = true;
+        if (dy > 0) controls.back = true;
+      }
+      break;
+    }
+  }, {passive:false});
 
-    // RIGHT: look -> adjusts camera.rotation.x/y (clamped pitch)
-    makeStick(right, (nx, ny)=>{
-      const mag = Math.hypot(nx, ny);
-      if (mag < cfg.dead) return;
-      if (!cam) return;
-      cam.rotation.y += nx * cfg.look;
-      const minPitch = -Math.PI/2 + 0.15;
-      const maxPitch =  Math.PI/2 - 0.15;
-      cam.rotation.x = Math.min(maxPitch, Math.max(minPitch, cam.rotation.x + (-ny * cfg.look)));
-    }, ()=>{});
-  }
+  left.addEventListener('touchend', function(e){
+    for (var i=0;i<e.changedTouches.length;i++){
+      if (e.changedTouches[i].identifier === lId){
+        resetMove(); break;
+      }
+    }
+  }, {passive:false});
+  left.addEventListener('touchcancel', function(){ resetMove(); }, {passive:false});
 
-  // auto-init when your globals exist; otherwise expose a helper
-  function tryInit(){
-    if (window.camera && window.controls) { initJoysticks(window.camera, window.controls); return true; }
-    return false;
+  // RIGHT: camera look
+  right.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (rActive) return;
+    var t = e.changedTouches[0];
+    rActive = true; rId = t.identifier; rLastX = t.clientX; rLastY = t.clientY;
+  }, {passive:false});
+
+  right.addEventListener('touchmove', function(e){
+    if (!rActive || rId===null) return;
+    for (var i=0;i<e.changedTouches.length;i++){
+      var t = e.changedTouches[i];
+      if (t.identifier !== rId) continue;
+      var dx = t.clientX - rLastX;
+      var dy = t.clientY - rLastY;
+      if (Math.abs(dx) > LOOK_DEAD || Math.abs(dy) > LOOK_DEAD){
+        var cam = window.camera;
+        if (cam){
+          cam.rotation.y += dx * LOOK_SENS;
+          cam.rotation.x = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.rotation.x + (-dy * LOOK_SENS)));
+        }
+        rLastX = t.clientX; rLastY = t.clientY;
+      }
+      break;
+    }
+  }, {passive:false});
+
+  right.addEventListener('touchend', function(e){
+    for (var i=0;i<e.changedTouches.length;i++){
+      if (e.changedTouches[i].identifier === rId){
+        rActive = false; rId = null; break;
+      }
+    }
+  }, {passive:false});
+  right.addEventListener('touchcancel', function(){ rActive = false; rId = null; }, {passive:false});
+
+  // Prevent page scroll on the whole doc while touching either half
+  ['touchmove','touchstart'].forEach(function(ev){
+    document.addEventListener(ev, function(e){
+      if (e.target===left || e.target===right) e.preventDefault();
+    }, {passive:false});
+  });
+
+  // Run toggle button
+  function updateRunBtn(){
+    var on = !!(window.player && player.running);
+    runBtn.textContent = "Run: " + (on ? "ON" : "OFF");
+    runBtn.classList.toggle('active', on);
   }
-  if (!tryInit()){
-    window.addEventListener('load', ()=> setTimeout(tryInit, 0));
-  }
-  window.initJoysticks = (cam, ctrls, opts)=> initJoysticks(cam, ctrls, opts);
+  runBtn.addEventListener('click', function(){
+    if (!window.player) return;
+    player.running = !player.running;
+    updateRunBtn();
+  });
+  runBtn.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (!window.player) return;
+    player.running = !player.running;
+    updateRunBtn();
+  }, {passive:false});
+
+  // Initialize button state
+  updateRunBtn();
 })();
 </script>
-<!-- === /Minimal Dual Joysticks === -->
+
 </body>
 </html>
