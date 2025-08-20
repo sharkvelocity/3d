@@ -178,7 +178,7 @@
   </div>
 
   <!-- (optional) Loading overlay -->
-  <div id="loading-overlay-old1" aria-hidden="true">
+  <div id="loading-overlay" aria-hidden="true">
     <div id="loading-card">
       <div id="loading-title">Loading assets…</div>
       <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
@@ -355,64 +355,1343 @@
   </div>
   <div id="toast"></div>
 
-
 <script>
-// === Robust loadMoon with absolute/relative fallbacks + sphere fallback ===
-(function(){
-  async function importFullPath(scene, fullPath){
-    // Split into root and filename for Babylon ImportMeshAsync
-    var idx = fullPath.lastIndexOf('/');
-    var root = fullPath.slice(0, idx+1);
-    var file = fullPath.slice(idx+1);
-    var res = await BABYLON.SceneLoader.ImportMeshAsync("", root, file, scene);
-    var mesh = res.meshes.find(function(m){ return m && m.name && m.name.toLowerCase().includes('moon'); }) || res.meshes[0];
-    return mesh;
-  }
-  window.loadMoon = async function(scene, parent){
-    scene = scene || window.scene;
-    if (!scene) throw new Error("No scene");
-    var rig = parent || window.skyRig || new BABYLON.TransformNode("skyRig", scene);
+/* ===========================================================
+   GLOBALS / GAME STATE
+   =========================================================== */
+const canvas = document.getElementById('renderCanvas');
+let engine, scene, camera, skybox;
 
-    var candidates = [
-      "./assets/models/sky/moon.glb",
-      "/3d/assets/models/sky/moon.glb"
-    ];
-    for (var i=0;i<candidates.length;i++){
-      try {
-        var mesh = await importFullPath(scene, candidates[i]);
-        mesh.parent = rig;
-        mesh.scaling.scaleInPlace(1);
-        return mesh;
-      } catch(e){
-        try { if (typeof devLog === 'function') devLog("loadMoon attempt failed: " + candidates[i]); } catch(_) {}
+let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat, cloudScroll = 0;
+let moonMesh = null, moonMat = null;
+let hemiLight = null;
+
+let houseLights = []; let housePower = true;
+
+let player = { sanity:100, room:'Van', speedWalk:1.8, speedRun:3.6, running:false, god:false };
+let controls = { forward:false, back:false, left:false, right:false };
+let allowFly = false;
+
+let houseRoot = null;
+let doorMeshes = [];
+let ghost = {
+  mesh:null, target:null, speed:1.4, slowSpeed:0.9, fastSpeed:1.4, alive:true,
+  anims:{ idle:null, walk:null },
+  visible:false, hunting:false,
+  nextStep:0, stepInterval:0.55, footAudible:18,
+  isTwins:false, meshFast:null
+};
+
+/* Minimal ghost updater to keep loop stable */
+function updateGhost(dt){
+  // Dispatch dev event if devBus exists
+  try { if (typeof devBus !== 'undefined') devBus.dispatchEvent(new Event('ghost')); } catch(e){}
+  // Call motion sensors if available
+  try { if (typeof tickMotionSensors === 'function') tickMotionSensors(dt); } catch(e){}
+}
+
+
+
+// Cold breath FX
+const BREATH_RANGE = 5.0;
+let breath = { ps:null, anchor:null, pulse:0, cooldown:0 };
+
+/* Weather state + modifiers */
+let weather = {
+  state:'Clear',
+  rainPS:null,
+  snowPS:null,
+  snowTex:null,
+  lightningTimer:0, nextStrike:0,
+  modSanityDrain:1.0,
+  modHuntChance:1.0,
+  modHuntPace:1.0
+};
+
+let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
+
+let storageOpen = false;
+let dev = { enabled:false, gateOpen:false, log:[] };
+let activeItemSlot = 1;
+
+let inventory = {
+  slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'},
+  models:{}, icons:{},
+  slotCharges:{1:0,2:0,3:0,4:Infinity,5:Infinity}
+};
+const ITEM_DEFAULT_CHARGES = { 'Smudge':1, 'Salt':3 };
+const devBus = new EventTarget();
+let __devGhostLogTimer = 0;
+
+const STORAGE_ITEMS = ['Flashlight','UV Light','Camera','EMF','Spirit Box','Thermometer','Crucifix','Salt','Smudge','D.O.T.S','Ghost Writing Book','Motion Sensor'];
+const ITEM_MODEL_MAP = {
+  'EMF':'EMF_Detector_EMF_Detector_0',
+  'Spirit Box':'Cone.001_Spirit_Box_0',
+  'Thermometer':'Thermometer_Thermometer_0',
+  'Camera':'Photo_Camera_Photo_Camera_0',
+  'UV Light':'Flashlight_Flashlight_0',
+  'Flashlight':'Flashlight_Poquet_Flashlight_Poquet_0',
+  'Thermal Camera':'Thermal_Camera_Thermal_Camera_0',
+  'Voice Recorder':'Voice_Recorder_Voice_Recorder_0',
+  'Ghost Writing Book':'(book-placeholder)',
+  'D.O.T.S':'(dots-proj)',
+  'Motion Sensor':'(motion-placeholder)'
+};
+const EVIDENCE_TYPES = ["EMF Level 5","Spirit Box","Fingerprints","Ghost Writing","Freezing Temps","D.O.T.S","Orbs"];
+const GHOSTS = {
+  spirit:["Spirit Box","Ghost Writing","EMF Level 5"],
+  wraith:["Spirit Box","D.O.T.S","EMF Level 5"],
+  poltergeist:["Spirit Box","Ghost Writing","Fingerprints"],
+  banshee:["D.O.T.S","Fingerprints","Orbs"],
+  jinn:["EMF Level 5","Freezing Temps","Fingerprints"],
+  mare:["Spirit Box","Ghost Writing","Orbs"],
+  revenant:["Ghost Writing","Orbs","Freezing Temps"],
+  shade:["Ghost Writing","Freezing Temps","EMF Level 5"],
+  demon:["Freezing Temps","Ghost Writing","Fingerprints"],
+  yurei:["Freezing Temps","D.O.T.S","Orbs"],
+  oni:["EMF Level 5","Freezing Temps","D.O.T.S"],
+  yokai:["Spirit Box","D.O.T.S","Orbs"],
+  hantu:["Freezing Temps","Ghost Writing","Fingerprints"],
+  goryo:["EMF Level 5","D.O.T.S","Fingerprints"],
+  myling:["Ghost Writing","EMF Level 5","Fingerprints"],
+  onryo:["Freezing Temps","Spirit Box","Orbs"],
+  "the twins":["Spirit Box","Freezing Temps","EMF Level 5"],
+  raiju:["EMF Level 5","D.O.T.S","Orbs"],
+  obake:["EMF Level 5","Orbs","Fingerprints"],
+  "the mimic":["Spirit Box","Freezing Temps","Fingerprints"],
+  moroi:["Freezing Temps","Ghost Writing","Spirit Box"],
+  deogen:["Spirit Box","Ghost Writing","D.O.T.S"],
+  thaye:["Ghost Writing","Orbs","D.O.T.S"],
+  phantom:["Spirit Box","D.O.T.S","Fingerprints"],
+  succubus:["Ghost Writing","Orbs","Spirit Box"]
+};
+let discoveredEvidence = new Set();
+let currentGhostKey = null;
+
+let ghostPolygon = [
+  new BABYLON.Vector3(18.404, 0, -96.040),
+  new BABYLON.Vector3(57.205, 0, -94.031),
+  new BABYLON.Vector3(62.145, 0, -105.142),
+  new BABYLON.Vector3(61.872, 0, -149.928),
+  new BABYLON.Vector3(18.660, 0, -149.900)
+];
+
+/* Placeables / rules */
+const CRUCIFIX_BASE_RADIUS = 3.0;
+const CRUCIFIX_DEMON_RADIUS = 5.0;
+const TWINS_SEP_MIN = 10.0, TWINS_SEP_MAX = 12.0;
+
+const placeables = { motionSensors: [], crucifixes: [] };
+
+/* ===========================================================
+   UTILS
+   =========================================================== */
+function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
+function inVanZone(pos){ return BABYLON.Vector3.Distance(pos, vanZone.center) <= vanZone.radius; }
+function pickGroundHeightAt(x, z){
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 80, z), new BABYLON.Vector3(0,-1,0), 200);
+  const hit = scene.pickWithRay(ray, m=>{
+    if(!m || !m.isPickable) return false;
+    const n = (m.name||"");
+    return /ground|floor|terrain|fallbackground/i.test(n);
+  });
+  if(hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
+  return 1.2;
+}
+function randomPointInPolygonXZ(poly){
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  poly.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
+  for(let i=0;i<500;i++){
+    const x = minX + Math.random()*(maxX-minX);
+    const z = minZ + Math.random()*(maxZ-minZ);
+    if(pointInPolyXZ(new BABYLON.Vector3(x,0,z), poly)) return new BABYLON.Vector3(x, 0, z);
+  }
+  return poly[0].clone();
+}
+function pointInPolyXZ(p, poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+    const intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
+    if(intersect) inside=!inside;
+  }
+  return inside;
+}
+function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
+function $(s){ return document.querySelector(s); }
+
+function playFootstep(){
+  const arr = [audio.step1,audio.step2,audio.step3];
+  const s = arr[Math.floor(Math.random()*arr.length)];
+  if(s){ s.currentTime=0; s.volume=0.6; s.play().catch(()=>{}); }
+}
+
+/* ===========================================================
+   BOOT / STARTUP
+   =========================================================== */
+let __started = false;
+async function safeStart(){
+  if(__started) return;
+  __started = true;
+
+  if(!window.BABYLON || !BABYLON.Engine){
+    toast("Engine not ready. Check Babylon includes.", 2200);
+    __started = false;
+    return;
+  }
+
+  // hide title to satisfy user-gesture for audio
+  const scr = document.getElementById('title-screen');
+  if (scr) scr.style.display = 'none';
+
+  try{
+    await boot();
+  }catch(err){
+    __started = false;
+    console.error(err);
+    toast("Startup failed: " + (err?.message||err), 2800);
+    if (scr) scr.style.display = 'flex';
+    return;
+  }
+
+  // Weather + ghost
+  const r = Math.random();
+  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
+  setWeather(w);
+
+  const keys = Object.keys(GHOSTS);
+  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; } // harder to hear
+
+  toast(`Investigation started. Weather: ${w}.`, 1600);
+}
+
+(function bindStart(){
+  const btn = document.getElementById('start-button');
+  const screen = document.getElementById('title-screen');
+  if (btn){
+    btn.onclick = safeStart;
+    btn.onkeydown = e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); safeStart(); } };
+  }
+  if (screen){
+    screen.addEventListener('click', e=>{ if(e.target===screen) safeStart(); });
+  }
+  window.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.code==='Space') safeStart(); });
+})();
+
+/* ===========================================================
+   ENGINE & SCENE
+   =========================================================== */
+async function boot(){
+  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
+  scene = new BABYLON.Scene(engine);
+  scene.environmentTexture = null;
+  const oldSky = scene.getMeshByName("BackgroundSkybox"); if (oldSky) oldSky.dispose();
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
+
+  // Camera
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(43.657, 3, -119.008), scene);
+  camera.attachControl(canvas, true);
+  camera.applyGravity = true;
+  camera.checkCollisions = true;
+  camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+  camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
+  camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
+  camera.minZ = 0.1; camera.inertia = 0;
+  camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
+
+  // Atmosphere/lights
+  setupNightAtmosphere();
+    // Orbiting cloud sky
+    window.__clouds = addOrbitingClouds(scene, camera, { orbitSpeed: 0.00008 });
+
+  // Hemispheric low-level fill to avoid total-black edge cases
+  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+  hemiLight.intensity = 0.06;
+
+  // Map + items + ghost + moon
+  await loadMap().catch(()=>{});
+  afterMapLoadedForShadows();
+  if (!adoptExistingGltfLights()) buildHouseLights();
+  await loadItems().catch(()=>{});
+  await loadGhost().catch(()=>{});
+  await loadMoon().catch(()=>{});
+  setupBreathFX();
+
+  if (!houseRoot){
+    const ground = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:120, height:120 }, scene);
+    ground.position.y = 0; ground.checkCollisions = true;
+    const gmat = new BABYLON.StandardMaterial("gmat", scene);
+    gmat.diffuseColor = new BABYLON.Color3(0.06,0.08,0.12); gmat.specularColor = new BABYLON.Color3(0,0,0);
+    ground.material = gmat;
+
+    const lamp = new BABYLON.PointLight("fallbackLamp", new BABYLON.Vector3(0,4,0), scene);
+    lamp.intensity = 0.8; houseLights.push({ light: lamp, mesh: null });
+  }
+
+  if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
+  if (ghost.meshFast){ moonShadows.addShadowCaster(ghost.meshFast, true); flashShadows.addShadowCaster(ghost.meshFast, true); }
+
+  // UI/inputs
+  initUI();
+  updateHUD();
+
+  // Render loop + tickers
+  scene.onBeforeRenderObservable.add(()=>{
+    const dt = engine.getDeltaTime()/1000;
+    handleMovement(dt);
+    updatePlayerFootsteps(dt);
+    sanityTick(dt);
+
+    // Rain hidden while in van
+    if (weather.state==='Rain' && weather.rainPS){
+      weather.rainPS.emitRate = inVanZone(camera.position) ? 0 : 1800;
+    }
+
+    // lightning
+    if(weather.state==='Rain'){
+      weather.lightningTimer += dt;
+      if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
+    }
+
+    // light flicker during hunt
+    if (ghost.hunting && flickerOn){
+      flickerTimer += dt;
+      if (flickerTimer > 0.08){
+        flickerTimer = 0;
+        houseLights.forEach(h=>{
+          if (!housePower) return;
+          h.light.intensity = (Math.random()<0.65) ? 0.2 + Math.random()*0.9 : 0.0;
+        });
       }
     }
-    // Fallback: sphere with moon texture if found
-    var moon = BABYLON.MeshBuilder.CreateSphere("moonSphere", {diameter: 40, segments: 32}, scene);
-    moon.parent = rig;
-    var mat = new BABYLON.StandardMaterial("moonMat", scene);
-    mat.diffuseColor = new BABYLON.Color3(0.86,0.86,0.9);
-    mat.emissiveColor = new BABYLON.Color3(0.08,0.08,0.1);
-    var texCandidates = [
-      "./assets/textures/moon.jpg",
-      "./assets/textures/moon.png",
-      "/3d/assets/textures/moon.jpg",
-      "/3d/assets/textures/moon.png"
-    ];
-    for (var j=0;j<texCandidates.length;j++){
-      try {
-        mat.diffuseTexture = new BABYLON.Texture(texCandidates[j], scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
-        break;
-      } catch(e){}
-    }
-    mat.specularColor = BABYLON.Color3.Black();
-    moon.material = mat;
-    try { if (typeof devLog === 'function') devLog("loadMoon: using fallback sphere"); } catch(_) {}
-    return moon;
-  };
-})();
-</script>
 
+    updateGhost(dt);
+    updateBreath(dt);
+  });
+
+  engine.runRenderLoop(()=> scene.render());
+  window.addEventListener('resize', ()=> engine.resize());
+
+  // HUD visible now
+  document.getElementById("hud").style.display="block";
+  rebuildBelt();
+
+  if (!houseRoot) ensureDebugCube();
+
+  toast("Atmosphere ready. F=Flash, U=UV, I=IR, L=nearest light, P=power.", 3000);
+
+  canvas.addEventListener("webglcontextlost", (e)=>{ e.preventDefault(); toast("WebGL context lost. Restoring…", 1800); });
+  canvas.addEventListener("webglcontextrestored", ()=>{ toast("WebGL restored.", 1200); });
+}
+
+/* ===========================================================
+   ATMOSPHERE / SKY / LIGHTS
+   =========================================================== */
+function setupNightAtmosphere(){
+  applyNightPalette();
+
+  cloudMat = new BABYLON.StandardMaterial("cloudSky", scene);
+  cloudMat.backFaceCulling = false;
+  cloudMat.disableLighting = true;
+  cloudMat.diffuseTexture = new BABYLON.Texture("./assets/images/sky/clouds_night.jpg", scene);
+  cloudMat.diffuseTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+  cloudMat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.07);
+  cloudMat.disableDepthWrite = true;
+
+  if (skybox) skybox.dispose();
+  skybox = BABYLON.MeshBuilder.CreateBox("skybox", { size: 1500 }, scene);
+  skybox.material = cloudMat;
+  skybox.infiniteDistance = true;
+  skybox.isPickable = false;
+  skybox.renderingGroupId = 0;
+
+  const fillLight = new BABYLON.HemisphericLight('fillLight', new BABYLON.Vector3(0,1,0), scene);
+  fillLight.intensity=0.15;
+  moonLight = new BABYLON.DirectionalLight("moonLight", new BABYLON.Vector3(-0.2,-1,0.1), scene);
+  moonLight.position = new BABYLON.Vector3(0,200,0);
+  moonLight.intensity = 0.45;
+
+  moonShadows = new BABYLON.ShadowGenerator(2048, moonLight);
+  moonShadows.useBlurExponentialShadowMap = true;
+  moonShadows.blurKernel = 16;
+  moonShadows.bias = 0.001;
+  moonShadows.normalBias = 0.5;
+
+  flashLight = new BABYLON.SpotLight("flashLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 10, scene);
+  flashLight.parent = camera; flashLight.intensity = 0; flashLight.range = 40;
+  flashLight.diffuse = new BABYLON.Color3(1, 0.98, 0.92);
+  flashLight.specular = new BABYLON.Color3(0.8, 0.8, 0.8);
+  flashLight.shadowEnabled = true;
+  flashShadows = new BABYLON.ShadowGenerator(1024, flashLight);
+  flashShadows.useBlurExponentialShadowMap = true;
+
+  uvLight = new BABYLON.SpotLight("uvLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 8, scene);
+  uvLight.parent = camera; uvLight.intensity = 0; uvLight.range = 30;
+  uvLight.diffuse = new BABYLON.Color3(0.6,0.3,0.9); uvLight.specular = new BABYLON.Color3(0,0,0);
+
+  irLight = new BABYLON.SpotLight("irLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/2, 10, scene);
+  irLight.parent = camera; irLight.intensity = 0;
+  irLight.diffuse = new BABYLON.Color3(0.4,0.6,0.4); irLight.specular = new BABYLON.Color3(0,0,0);
+
+  scene.onBeforeRenderObservable.add(()=>{
+    cloudScroll += engine ? engine.getDeltaTime()*0.00003 : 0.00003;
+    if (cloudMat?.diffuseTexture) cloudMat.diffuseTexture.uOffset = cloudScroll;
+  });
+}
+function applyNightPalette(){
+  scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
+  scene.imageProcessingConfiguration.exposure = 0.8;
+  scene.imageProcessingConfiguration.contrast = 1.15;
+  scene.environmentIntensity = 0.25;
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+  scene.fogDensity = 0.0045;
+  scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
+  if (cloudMat) cloudMat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.07);
+}
+function applyBloodMoonPalette(){
+  scene.clearColor = new BABYLON.Color4(0.02,0,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.04,0.01,0.02);
+  scene.imageProcessingConfiguration.exposure = 0.5;
+  scene.imageProcessingConfiguration.contrast = 1.2;
+  scene.environmentIntensity = 0.25;
+  scene.fogDensity = 0.005;
+  scene.fogColor = new BABYLON.Color3(0.06,0.01,0.02);
+  if (cloudMat) cloudMat.emissiveColor = new BABYLON.Color3(0.16,0.03,0.03);
+}
+function applyMoonTintForWeather(){
+  if (!moonMat) return;
+  if (weather.state === 'Blood Moon'){
+    moonMat.emissiveColor = new BABYLON.Color3(0.9, 0.16, 0.16);
+  } else {
+    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
+  }
+}
+
+
+/* ===========================================================
+   ORBITING CLOUD SKY (DOME + PARTICLE BELT)
+   =========================================================== */
+function addOrbitingClouds(scene, camera, opts={}){
+  const texURL = opts.textureURL || "https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png";
+  const domeDiam = opts.domeDiameter || 2000;
+  const orbitSpeed = (opts.orbitSpeed !== undefined ? opts.orbitSpeed : 0.0001);
+
+  const skyDome = BABYLON.MeshBuilder.CreateSphere(
+    "skyDome",
+    { diameter: domeDiam, sideOrientation: BABYLON.Mesh.BACKSIDE },
+    scene
+  );
+  skyDome.isPickable = false;
+  skyDome.checkCollisions = false;
+  skyDome.applyFog = false;
+
+  const skyMat = new BABYLON.StandardMaterial("skyMat", scene);
+  skyMat.disableLighting = true;
+  skyMat.emissiveColor = new BABYLON.Color3(0.05, 0.06, 0.10);
+  skyMat.diffuseColor = new BABYLON.Color3(0.01, 0.015, 0.03);
+  skyDome.material = skyMat;
+
+  const rig = new BABYLON.TransformNode("cloudRig", scene);
+  skyDome.parent = rig;
+
+  const emitter = new BABYLON.TransformNode("cloudEmitter", scene);
+  emitter.parent = rig;
+  emitter.position.set(0, domeDiam * 0.12, domeDiam * 0.28);
+
+  let ps;
+  const useGPU = BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported;
+  if (useGPU) {
+    ps = new BABYLON.GPUParticleSystem("cloudsGPU", { capacity: 50000 }, scene);
+    ps.activeParticleCount = 22000;
+    ps.manualEmitCount    = ps.activeParticleCount;
+    ps.isLocal = true; // follow emitter transform
+ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
+  } else {
+    ps = new BABYLON.ParticleSystem("cloudsCPU", 2500, scene);
+    ps.manualEmitCount = ps.getCapacity();
+    ps.isLocal = true; // follow emitter transform
+ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
+  }
+
+  ps.particleTexture = new BABYLON.Texture(texURL, scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+  ps.emitter = emitter;
+  ps.isBillboardBased = true;
+
+  ps.gravity = new BABYLON.Vector3(0,0,0);
+  ps.direction1 = new BABYLON.Vector3(-0.01, 0.0, -0.005);
+  ps.direction2 = new BABYLON.Vector3( 0.01, 0.0,  0.005);
+  ps.minAngularSpeed = -0.2;
+  ps.maxAngularSpeed =  0.2;
+
+  ps.color1 = new BABYLON.Color4(0.35, 0.40, 0.45, 0.10);
+  ps.color2 = new BABYLON.Color4(0.55, 0.60, 0.65, 0.12);
+  ps.colorDead = new BABYLON.Color4(0.30, 0.35, 0.40, 0.08);
+
+  ps.minSize = 3.5;
+  ps.maxSize = 6.0;
+  ps.minLifeTime = Number.MAX_SAFE_INTEGER;
+  ps.updateSpeed = 0.0045;
+  ps.blendMode   = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  ps.minEmitPower = 0.2;
+  ps.maxEmitPower = 0.6;
+  ps.start();
+
+  scene.onBeforeRenderObservable.add(() => {
+    if (camera) rig.position.copyFrom(camera.position);
+    rig.rotation.y += orbitSpeed;
+  });
+
+  return { skyDome, particleSystem: ps, rig, emitter };
+}
+
+/* ===========================================================
+   WEATHER / AUDIO
+   =========================================================== */
+const audio = {
+  ambient: new Audio("./assets/audio/ambient.mp3"),
+  rain: new Audio("./assets/audio/rainstorm.mp3"),
+  clear: new Audio("./assets/audio/clearWeather.mp3"),
+  spiritbox: new Audio("./assets/audio/spiritbox.mp3"),
+  spiritStatic: new Audio("./assets/audio/spiritBoxStatic.mp3"),
+  whisper: new Audio("./assets/audio/whisper.mp3"),
+  doorCreak1: new Audio("./assets/audio/doorCreak1.mp3"),
+  doorCreak2: new Audio("./assets/audio/doorCreak2.mp3"),
+  slam1: new Audio("./assets/audio/doorSlam1.mp3"),
+  slam2: new Audio("./assets/audio/doorSlam2.mp3"),
+  ghostLaugh: new Audio("./assets/audio/ghostLaugh.mp3"),
+  writing: new Audio("./assets/audio/GhostWriting1.mp3"),
+
+  // Shared footstep pool (player + ghost/myling)
+  steps: [
+    new Audio("./assets/audio/step1.wav"),
+    new Audio("./assets/audio/step2.wav"),
+    new Audio("./assets/audio/step3.wav")
+  ]
+};
+Object.values(audio).forEach(a=>{
+  if (Array.isArray(a)) a.forEach(x=>{ if(x && x.loop!==undefined) x.loop=false; });
+  else if(a && a.loop !== undefined) a.loop = false;
+});
+function playStep(volume=0.45){
+  const pool = audio.steps;
+  const s = pool[(Math.random()*pool.length)|0];
+  try{ s.currentTime = 0; s.volume = volume; s.play().catch(()=>{}); }catch{}
+}
+
+/* ===========================================================
+   WEATHER HELPERS
+   =========================================================== */
+function makeSnowTexture(){
+  if (weather.snowTex) return weather.snowTex;
+  const tex = new BABYLON.DynamicTexture("snowTex",{width:32,height:32},scene,false);
+  const ctx = tex.getContext();
+  ctx.clearRect(0,0,32,32);
+  ctx.fillStyle="white";
+  ctx.beginPath(); ctx.arc(16,16,12,0,Math.PI*2); ctx.fill();
+  tex.update(false);
+  weather.snowTex = tex;
+  return tex;
+}
+function stopAllWeatherPS(){ if (weather.rainPS){ weather.rainPS.stop(); } if (weather.snowPS){ weather.snowPS.stop(); } }
+function stopAllWeatherAudio(){ try{ audio.rain.pause(); audio.rain.currentTime=0; }catch{} try{ audio.clear.pause(); audio.clear.currentTime=0; }catch{} }
+
+function setWeather(state){
+  weather.state = state;
+  $('#hud-weather').textContent = state;
+  stopAllWeatherPS(); stopAllWeatherAudio();
+
+  weather.modSanityDrain = 1.0; weather.modHuntChance = 1.0; weather.modHuntPace = 1.0;
+
+  if(state === 'Rain'){
+    if(!weather.rainPS){
+      const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
+      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder thin streak
+      ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
+      ps.minSize = 0.05; ps.maxSize = 0.1;
+      ps.minLifeTime = 0.9; ps.maxLifeTime = 1.4;
+      ps.emitRate = 1800;
+      ps.direction1 = new BABYLON.Vector3(0, -1.2, 0);
+      ps.direction2 = new BABYLON.Vector3(0, -1.0, 0);
+      ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.75);
+      ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.6);
+      ps.gravity = new BABYLON.Vector3(0,-9.8,0);
+      ps.disposeOnStop = false;
+      weather.rainPS = ps;
+    }
+    weather.rainPS.start();
+    scheduleNextLightning();
+    applyNightPalette();
+    audio.rain.loop=true; audio.rain.volume=0.35; audio.rain.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.3; audio.ambient.play().catch(()=>{});
+
+  } else if (state === 'Snow'){
+    if (!weather.snowPS){
+      const ps = new BABYLON.ParticleSystem("snow", 2500, scene);
+      ps.particleTexture = makeSnowTexture();
+      ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
+      ps.minSize = 0.06; ps.maxSize = 0.14;
+      ps.minLifeTime = 2.2; ps.maxLifeTime = 3.5;
+      ps.emitRate = 1200;
+      ps.direction1 = new BABYLON.Vector3(-0.2, -0.8, 0.1);
+      ps.direction2 = new BABYLON.Vector3(0.2, -1.0, -0.1);
+      ps.color1 = new BABYLON.Color4(1,1,1,0.9);
+      ps.color2 = new BABYLON.Color4(1,1,1,0.7);
+      ps.gravity = new BABYLON.Vector3(0,-0.2,0);
+      ps.updateSpeed = 0.02;
+      ps.disposeOnStop = false;
+      weather.snowPS = ps;
+    }
+    weather.snowPS.start();
+    applyNightPalette();
+    weather.modSanityDrain = 0.95;
+    audio.clear.loop=true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.28; audio.ambient.play().catch(()=>{});
+
+  } else if (state === 'Blood Moon'){
+    applyBloodMoonPalette();
+    applyMoonTintForWeather();
+    weather.modSanityDrain = 1.25;
+    weather.modHuntChance = 1.4;
+    weather.modHuntPace = 1.2;
+    audio.clear.loop=true; audio.clear.volume=0.22; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.32; audio.ambient.play().catch(()=>{});
+
+  } else { // Clear
+    applyNightPalette();
+    audio.clear.loop=true; audio.clear.volume=0.25; audio.clear.play().catch(()=>{});
+    audio.ambient.loop=true; audio.ambient.volume=0.3; audio.ambient.play().catch(()=>{});
+  }
+}
+function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
+function lightningStrike(){ const overlay=document.getElementById('flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
+
+/* ===========================================================
+   MAP / DOORS
+   =========================================================== */
+async function loadMap(){
+  try{
+    const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
+    houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
+    result.meshes.forEach(m=>{
+      m.checkCollisions = true; m.isPickable = true;
+      const bb = m.getBoundingInfo().boundingBox;
+      const size = bb.maximum.subtract(bb.minimum);
+      const thin = (size.y < 0.12) || (size.x < 0.12) || (size.z < 0.12);
+      if(thin) m.checkCollisions = false;
+      if(m.material && m.material.alpha && m.material.alpha < 0.9) m.checkCollisions = false;
+      if(/door/i.test(m.name||"")) doorMeshes.push(m);
+    });
+
+    // invisible catch ground
+    const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
+    fallbackGround.position.y = 0; fallbackGround.checkCollisions = true; fallbackGround.isPickable = true; fallbackGround.visibility = 0;
+
+    // spawn at van height
+    const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
+    camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
+
+    doorMeshes.forEach(door=>{ door.actionManager = new BABYLON.ActionManager(scene); door.isPickable = true; });
+  }catch(e){
+    console.warn("Map load failed:", e);
+  }
+}
+function afterMapLoadedForShadows(){
+  scene.meshes.forEach(m=>{
+    if (!m || m.name==='skybox') return;
+    m.receiveShadows = true;
+  });
+}
+
+/* ===========================================================
+   ITEMS (hand preview assets)
+   =========================================================== */
+let itemsGlb = null;
+async function loadItems(){
+  try{
+    const res = await BABYLON.SceneLoader.LoadAssetContainerAsync("", "./assets/models/items/exploration_objects.glb", scene);
+    itemsGlb = res;
+    res.meshes.forEach(m=>{
+      if(!m.name || m.name==="_root" || m.name=="__root__") return;
+      inventory.models[m.name] = m;
+    });
+  }catch(e){ console.warn("Items load failed:", e); }
+}
+
+/* ===========================================================
+   GHOST + HUNT
+   =========================================================== */
+async function loadGhost(){
+  try{
+    const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
+    const pick = list[Math.floor(Math.random()*list.length)];
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
+    ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
+    ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
+
+    const bb = ghost.mesh.getHierarchyBoundingVectors(true);
+    const height = bb.max.y - bb.min.y;
+    const scale = (1.9 / (height || 1));
+    ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
+    ghost.mesh.rotation = new BABYLON.Vector3(0,0,0);
+
+    r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
+    if(ghost.anims.idle) ghost.anims.idle.start(true);
+
+    const p = randomPointInPolygonXZ(ghostPolygon);
+    const gy = pickGroundHeightAt(p.x, p.z);
+    ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
+    ghost.target = randomPointInPolygonXZ(ghostPolygon);
+
+    setGhostVisible(false);
+
+    // Twins
+    ghost.isTwins = (currentGhostKey || "").toLowerCase() === "the twins";
+    if (ghost.isTwins) {
+      ghost.meshFast = ghost.mesh.clone("ghostFast", null, true);
+      ghost.meshFast.isPickable = false;
+      ghost.meshFast.checkCollisions = false;
+      ghost.meshFast.visibility = ghost.visible ? 1 : 0;
+
+      const sep = TWINS_SEP_MIN + Math.random() * (TWINS_SEP_MAX - TWINS_SEP_MIN);
+      const dir = new BABYLON.Vector3(1, 0, 0).rotateByQuaternionToRef(
+        BABYLON.Quaternion.FromEulerAngles(0, Math.random()*Math.PI*2, 0),
+        new BABYLON.Vector3()
+      );
+      const basePos = ghost.mesh.position.clone();
+      const fp = basePos.add(dir.scale(sep));
+      fp.y = pickGroundHeightAt(fp.x, fp.z);
+      ghost.meshFast.position.copyFrom(fp);
+
+      try {
+        moonShadows.addShadowCaster(ghost.meshFast, true);
+        flashShadows.addShadowCaster(ghost.meshFast, true);
+      } catch {}
+    }
+  }catch(e){ console.warn("Ghost load failed:", e); }
+}
+function setGhostVisible(v){
+  ghost.visible = !!v;
+  if (!ghost.mesh) return;
+  ghost.mesh.getChildMeshes(false).concat([ghost.mesh]).forEach(m=>{ m.isVisible = v; m.visibility = v ? 1 : 0; });
+  if (ghost.meshFast){ ghost.meshFast.getChildMeshes(false).concat([ghost.meshFast]).forEach(m=>{ m.isVisible = v; m.visibility = v?1:0; }); }
+}
+
+function beginHunt(){
+  if (!ghost.mesh || ghost.hunting) return;
+
+  // Check crucifix protection BEFORE starting a hunt.
+  if (tryBlockHuntByCrucifix()){
+    huntClock = 0; huntCooldown = 14 + Math.random()*16;
+    return; // blocked!
+  }
+
+  ghost.hunting = true;
+  $('#hud-hunt-state').textContent = 'HUNTING';
+  setGhostVisible(true);
+  ghost.speed = 1.4;
+  ghost.stepInterval = 0.48;
+  flickerStart();
+  toast('⚠️ Hunt started!', 1200);
+}
+function endHunt(){
+  if (!ghost.hunting) return;
+  ghost.hunting = false;
+  $('#hud-hunt-state').textContent = 'Calm';
+  setGhostVisible(false);
+  ghost.speed = 1.4;
+  ghost.stepInterval = 0.55;
+  flickerStop();
+  toast('Hunt ended.', 900);
+}
+let flickerTimer=0, flickerOn=false;
+function flickerStart(){ flickerTimer = 0; flickerOn = true; }
+function flickerStop(){ flickerOn = false;
+  houseLights.forEach(h=>{
+    if (!housePower) { h.light.intensity = 0; return; }
+    if (h.light.intensity>0) h.light.intensity = 0.8;
+  });
+}
+
+let huntCooldown = 22 + Math.random()*18;
+let huntClock = 0;
+function sanityTick(dt){
+  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
+  const base = 0.6/60;
+  const add = nearGhost ? 1.2/60 : 0;
+  const drain = (base+add) * (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1) * (weather.modSanityDrain||1);
+  player.sanity = Math.max(0, player.sanity - drain);
+  $('#hud-sanity').textContent = `${player.sanity|0}%`;
+
+  if (!ghost.hunting && !inVanZone(camera.position) && player.sanity <= 65){
+    huntClock += dt * (weather.modHuntPace||1);
+    if (huntClock >= huntCooldown){
+      huntClock = 0; huntCooldown = 22 + Math.random()*18;
+      const baseChance = (player.sanity<40 ? 0.85 : 0.55);
+      if (Math.random() < baseChance * (weather.modHuntChance||1)) beginHunt();
+    }
+  }
+  if (ghost.hunting && (inVanZone(camera.position) || Math.random()<0.0015)) endHunt();
+}
+
+/* ===========================================================
+   MOON
+   =========================================================== */
+async function loadMoon(){
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+    moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+    if (!moonMesh) throw new Error("moon.glb had no meshes");
+
+    moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+    moonMesh.renderingGroupId = 1;
+
+    const bb = moonMesh.getHierarchyBoundingVectors(true);
+    const size = bb.max.subtract(bb.min).length();
+    if (size < 5) moonMesh.scaling = new BABYLON.Vector3(30,30,30);
+
+    moonMat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
+    moonMesh.material = moonMat;
+
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+    applyMoonTintForWeather();
+
+    scene.onBeforeRenderObservable.add(()=>{
+      const t = performance.now()*0.00002;
+      moonMesh.position.x = Math.cos(t)*380;
+      moonMesh.position.z = Math.sin(t)*380;
+      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
+    });
+  }catch(e){
+    console.warn("loadMoon failed, using sphere:", e);
+    moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+    moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+    moonMat = new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    try{ moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
+    catch{ moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
+    moonMesh.material = moonMat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+    applyMoonTintForWeather();
+  }
+}
+
+/* ===========================================================
+   HOUSE LIGHTS
+   =========================================================== */
+const HOUSE_LIGHT_REGEX = /(lamp|light|bulb|ceiling|sconce)/i;
+function adoptExistingGltfLights(){
+  let adopted = 0;
+  (scene.lights||[]).forEach(l=>{
+    if ([moonLight,flashLight,uvLight,irLight,hemiLight].includes(l)) return;
+    if (HOUSE_LIGHT_REGEX.test(l.name||"")){
+      l.intensity = 0;
+      l.diffuse = new BABYLON.Color3(1.0, 0.95, 0.8);
+      houseLights.push({ light:l, mesh:null });
+      adopted++;
+    }
+  });
+  return adopted>0;
+}
+function buildHouseLights(){
+  const candidates = scene.meshes.filter(m=>HOUSE_LIGHT_REGEX.test(m.name||""));
+  candidates.forEach((mesh, i)=>{
+    const b = mesh.getBoundingInfo().boundingBox;
+    const pos = b.centerWorld.clone(); pos.y += 0.2;
+    const pl = new BABYLON.PointLight("houseLight_"+i, pos, scene);
+    pl.intensity = 0; pl.range = 12; pl.diffuse = new BABYLON.Color3(1.0,0.95,0.8);
+    houseLights.push({ light:pl, mesh });
+    if (mesh.material && mesh.material.emissiveColor) mesh.material.emissiveColor = new BABYLON.Color3(0,0,0);
+  });
+}
+function setHousePower(on){
+  housePower = on;
+  houseLights.forEach(({light,mesh})=>{
+    light.intensity = on ? (light.intensity>0 ? light.intensity : 0.8) : 0;
+    if (mesh?.material?.emissiveColor) mesh.material.emissiveColor = on && light.intensity>0
+      ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
+  });
+}
+
+/* ===========================================================
+   PLAYER / MOVEMENT / INPUT
+   =========================================================== */
+function updateHUD(){ $('#hud-sanity').textContent = `${player.sanity|0}%`; $('#hud-room').textContent = player.room; }
+function handleMovement(dt){
+  const speed = player.running ? player.speedRun : player.speedWalk;
+  let move = new BABYLON.Vector3(0,0,0);
+  if(controls.forward) move.z += 1;
+  if(controls.back)    move.z -= 1;
+  if(controls.left)    move.x -= 1;
+  if(controls.right)   move.x += 1;
+
+  if(move.lengthSquared() > 0){
+    move.normalize();
+    const fwd = camera.getForwardRay().direction; fwd.y = 0; fwd.normalize();
+    const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+    const desired = fwd.scale(move.z).add(right.scale(move.x)).normalize();
+    camera.cameraDirection = desired.scale(speed * dt);
+  } else {
+    camera.cameraDirection = new BABYLON.Vector3(0,0,0);
+  }
+
+  if(allowFly && dev.enabled){
+    if(keysDown["PageUp"])   camera.position.y += 0.6 * dt * 60;
+    if(keysDown["PageDown"]) camera.position.y -= 0.6 * dt * 60;
+  }
+
+  player.room = inVanZone(camera.position) ? "Van" : "Grounds";
+  document.getElementById('storage-button').style.display = (player.room==="Van") ? "block" : "none";
+  updateHUD();
+}
+function openDoorNearby(){
+  const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
+  const pick = scene.pickWithRay(ray, m => /door/i.test(m.name||""));
+  if(pick.hit && pick.pickedMesh){
+    const d = BABYLON.Vector3.Distance(pick.pickedPoint, camera.position);
+    if(d < 3.0){
+      const door = pick.pickedMesh;
+      const open = !door.metadata?.open;
+      const baseRot = door.metadata?.baseRot ?? door.rotation.y;
+      if(open){
+        door.rotation = new BABYLON.Vector3(door.rotation.x, baseRot + Math.PI/2, door.rotation.z);
+        door.checkCollisions = false;
+        (Math.random()>0.5?audio.doorCreak1:audio.doorCreak2).play().catch(()=>{});
+      } else {
+        door.rotation = new BABYLON.Vector3(door.rotation.x, baseRot, door.rotation.z);
+        door.checkCollisions = true;
+      }
+      door.metadata = { baseRot, open };
+    }
+  }
+}
+
+/* ===========================================================
+   PLAYER FOOTSTEPS (step1/2/3)
+   =========================================================== */
+const stepState = {
+  lastPos: null,
+  lastT: 0,
+  distSinceStep: 0,
+  intervalWalk: 1500,  // ms between steps when walking
+  intervalRun: 1000,   // ms between steps when running
+  minMove: 0.05        // meters required since last step to allow a new one
+};
+function updatePlayerFootsteps(dt){
+  if (!stepState.lastPos) {
+    stepState.lastPos = camera.position.clone();
+    stepState.lastT = performance.now();
+    stepState.distSinceStep = 0;
+    return;
+  }
+
+  // Only when actually pressing movement
+  if (!(typeof controls !== 'undefined' && (controls.forward || controls.back || controls.left || controls.right))) return;
+
+  // Accumulate distance moved
+  const nowPos = camera.position;
+  const d = BABYLON.Vector3.Distance(nowPos, stepState.lastPos);
+  stepState.lastPos = nowPos.clone();
+  stepState.distSinceStep += d;
+
+  // Time gate
+  const now = performance.now();
+  const running = (typeof player !== 'undefined' && player.running);
+  const interval = running ? stepState.intervalRun : stepState.intervalWalk;
+
+  if ((now - stepState.lastT) >= interval && stepState.distSinceStep >= stepState.minMove){
+    stepState.lastT = now;
+    stepState.distSinceStep = 0;
+    if (typeof playStep === 'function') {
+      playStep(0.30, running);
+    }
+  }
+}
+/* ===========================================================
+   UI / INPUT
+   =========================================================== */
+let flashOn=false, uvOn=false, irOn=false;
+const keysDown = {};
+
+function initUI(){
+  // Storage
+  $('#storage-button').addEventListener('click', openStorage);
+  $('#storage-close').addEventListener('click', closeStorage);
+  $('#storage-confirm').addEventListener('click', confirmLoadout);
+
+  // Notebook
+  $('#notebook-close').addEventListener('click', closeNotebook);
+
+  // Dev gate on ESC
+  window.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape'){
+      if (!dev.enabled){
+        const gate = document.getElementById('dev-gate');
+        gate.style.display = (gate.style.display==='flex') ? 'none' : 'flex';
+      } else {
+        const t=document.getElementById('devtools-toggle');
+        if (t.style.display!=='none') t.click();
+      }
+    }
+  });
+  // Dev gate controls
+  $('#dev-yes').addEventListener('click', ()=>{ $('#dev-pass-wrap').style.display='block'; });
+  $('#dev-no').addEventListener('click', ()=>{ $('#dev-gate').style.display='none'; });
+  $('#dev-pass-submit').addEventListener('click', ()=>{
+    const val = ($('#dev-pass').value||'').trim();
+    if (val){
+      dev.enabled = true;
+      $('#dev-gate').style.display='none';
+      if (window.DevTools) window.DevTools.showToggle();
+      toast('Developer options enabled.', 1200);
+    } else {
+      toast('Enter a password.', 900);
+    }
+  });
+
+  // Touch controls
+  const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
+  const tbox = document.getElementById('touch-controls');
+  if (hasTouch){ tbox.style.display='grid'; }
+
+  const tUp  = document.getElementById('t-up');
+  const tLeft= document.getElementById('t-left');
+  const tRight=document.getElementById('t-right');
+  const tUse = document.getElementById('t-use');
+  const press = (el, on, off)=>{
+    const start=()=>on();
+    const end=()=>off();
+    el.addEventListener('touchstart', (e)=>{ e.preventDefault(); start(); }, {passive:false});
+    el.addEventListener('touchend',   (e)=>{ e.preventDefault(); end(); },   {passive:false});
+    el.addEventListener('mousedown',  (e)=>{ e.preventDefault(); start(); });
+    el.addEventListener('mouseup',    (e)=>{ e.preventDefault(); end(); });
+    el.addEventListener('mouseleave', (e)=>{ e.preventDefault(); end(); });
+  };
+  press(tUp, ()=>controls.forward=true, ()=>controls.forward=false);
+  press(tLeft, ()=>controls.left=true, ()=>controls.left=false);
+  press(tRight, ()=>controls.right=true, ()=>controls.right=false);
+  press(tUse, ()=>useActiveItem(), ()=>{});
+
+  // Dev tools open
+  const toggleBtn   = document.getElementById('devtools-toggle');
+  const panel       = document.getElementById('devtools-panel');
+  toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
+}
+
+/* Keys */
+window.addEventListener('keydown', (e)=>{
+  keysDown[e.key] = true;
+  if (e.repeat) return;
+
+  switch(e.key){
+    case 'w': case 'W': controls.forward=true; break;
+    case 's': case 'S': controls.back=true; break;
+    case 'a': case 'A': controls.left=true; break;
+    case 'd': case 'D': controls.right=true; break;
+    case 'Shift': player.running = true; break;
+
+    case '1': case '2': case '3': case '4': case '5':
+      selectSlot(parseInt(e.key,10)); break;
+
+    case 'n': case 'N': openNotebook(); break;
+    case 'e': case 'E': openDoorNearby(); break;
+
+    case 'f': case 'F': flashOn=!flashOn; uvOn=false; irOn=false; syncHeldLights(); break;
+    case 'u': case 'U': uvOn=!uvOn; flashOn=false; irOn=false; syncHeldLights(); break;
+    case 'i': case 'I': irOn=!irOn; flashOn=false; uvOn=false; syncHeldLights(); refreshCameraOverlay(); break;
+    case 'l': case 'L': toggleNearestHouseLight(); break;
+    case 'p': case 'P': setHousePower(!housePower); break;
+    case ' ':
+      useActiveItem(); break;
+  }
+});
+window.addEventListener('keyup', (e)=>{
+  keysDown[e.key] = false;
+  switch(e.key){
+    case 'w': case 'W': controls.forward=false; break;
+    case 's': case 'S': controls.back=false; break;
+    case 'a': case 'A': controls.left=false; break;
+    case 'd': case 'D': controls.right=false; break;
+    case 'Shift': player.running = false; break;
+  }
+});
+window.addEventListener('mousedown', (e)=>{ if(e.button===0) useActiveItem(); });
+window.addEventListener('wheel', (e)=>{
+  const dir = Math.sign(e.deltaY);
+  activeItemSlot += dir>0 ? 1 : -1;
+  if (activeItemSlot<1) activeItemSlot=5;
+  if (activeItemSlot>5) activeItemSlot=1;
+  rebuildBelt();
+  syncHeldLights();
+}, {passive:true});
+
+/* ===========================================================
+   LIGHT TOGGLES
+   =========================================================== */
+function syncHeldLights(){
+  const item = inventory.slots[activeItemSlot];
+  flashLight.intensity = 0; uvLight.intensity = 0; irLight.intensity = 0;
+
+  if (item==='Flashlight' && flashOn) flashLight.intensity = 3.0;
+  if (item==='UV Light'   && uvOn)    uvLight.intensity   = 2.0;
+  if (item==='Camera'     && irOn)    irLight.intensity   = 1.6;
+}
+function toggleNearestHouseLight(){
+  if (!housePower) return toast("Power is off.", 900);
+  let best=null, bestD=9e9;
+  houseLights.forEach(h=>{
+    const d = BABYLON.Vector3.Distance(h.light.position||h.mesh?.position||BABYLON.Vector3.Zero(), camera.position);
+    if (d<bestD){ bestD=d; best=h; }
+  });
+  if (!best) return;
+  best.light.intensity = best.light.intensity>0 ? 0 : 0.8;
+  if (best.mesh?.material?.emissiveColor){
+    best.mesh.material.emissiveColor = best.light.intensity>0 ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
+  }
+}
+
+/* ===========================================================
+   NOTEBOOK
+   =========================================================== */
+function openNotebook(){ document.getElementById('notebook-modal').style.display='flex'; renderNotebook(); notebookOpen=true; }
+function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; notebookOpen=false; }
+function renderNotebook(){
+  const tabs = Array.from(document.querySelectorAll('#notebook-tabs .tab'));
+  const pages = { ghosts:document.getElementById('page-ghosts'), evidence:document.getElementById('page-evidence'), guess:document.getElementById('page-guess') };
+  tabs.forEach(t=>{ t.onclick = ()=>{ tabs.forEach(x=>x.classList.remove('active')); t.classList.add('active'); document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); pages[t.dataset.tab].classList.add('active'); }; });
+
+  const gPage=pages.ghosts; gPage.innerHTML=''; const gp=document.createElement('div');
+  gp.innerHTML='<div style="color:#9ff; margin-bottom:6px;">Ghost Types & Required Evidence:</div>';
+  Object.entries(GHOSTS).forEach(([name,evs])=>{ const row=document.createElement('div'); row.style.margin='4px 0'; row.textContent=name.toUpperCase()+' — '+evs.join(', '); gp.appendChild(row); });
+  gPage.appendChild(gp);
+
+  const ePage=pages.evidence; ePage.innerHTML=''; const ewrap=document.createElement('div');
+  ewrap.innerHTML = '<div style="color:#9ff; margin-bottom:6px;">Check what you have found:</div>';
+  EVIDENCE_TYPES.forEach(ev=>{ const r=document.createElement('div'); r.className='ev-row'; const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.ev=ev; cb.checked=discoveredEvidence.has(ev); cb.onchange=()=>{ if(cb.checked) discoveredEvidence.add(ev); else discoveredEvidence.delete(ev); }; const l=document.createElement('label'); l.textContent=ev; l.style.color='#8ff'; r.appendChild(cb); r.appendChild(l); ewrap.appendChild(r); });
+  ePage.appendChild(ewrap);
+
+  const gg=pages.guess; gg.innerHTML=''; const glabel=document.createElement('div'); glabel.style.color='#9ff'; glabel.textContent='Who do you think it is?'; gg.appendChild(glabel);
+  const grid=document.createElement('div'); grid.style.display='grid'; grid.style.gridTemplateColumns='repeat(auto-fit, minmax(140px,1fr))'; grid.style.gap='6px'; grid.style.marginTop='6px';
+  Object.keys(GHOSTS).forEach(k=>{ const btn=document.createElement('button'); btn.textContent=k.toUpperCase(); btn.style.cssText='border:1px solid #066; color:#9ff; background:#111; padding:8px 10px; cursor:pointer;'; btn.onclick=()=>{ const req=GHOSTS[k]; const allFound=req.every(e=>discoveredEvidence.has(e)); toast(allFound?`✅ Correct set matches: ${k.toUpperCase()}`:`❌ Not all evidence matches ${k.toUpperCase()}`, 1600); }; grid.appendChild(btn); });
+  gg.appendChild(grid);
+}
+
+/* ===========================================================
+   STORAGE
+   =========================================================== */
+function openStorage(){
+  const modal=document.getElementById('storage-modal'); const grid=document.getElementById('storage-grid'); grid.innerHTML='';
+  STORAGE_ITEMS.forEach(it=>{
+    const card=document.createElement('div'); card.style.cssText='border:1px solid #066; padding:8px; background:#111; border-radius:6px;';
+    const title=document.createElement('div'); title.style.color='#9ff'; title.style.marginBottom='6px'; title.textContent=it;
+    const btn=document.createElement('button'); btn.textContent='Add to Slots 1–3'; btn.className='hud-btn'; btn.onclick=()=> addToLoadout(it);
+    card.appendChild(title); card.appendChild(btn); grid.appendChild(card);
+  });
+  document.getElementById('storage-info').textContent = `Current: [${inventory.slots[1]||'-'}, ${inventory.slots[2]||'-'}, ${inventory.slots[3]||'-'}] — (4:Lighter, 5:Notebook)`;
+  modal.style.display='flex'; storageOpen=true;
+}
+function closeStorage(){ document.getElementById('storage-modal').style.display='none'; storageOpen=false; }
+function addToLoadout(item){
+  for(let i=1;i<=3;i++){
+    if(!inventory.slots[i]){
+      inventory.slots[i]=item;
+      inventory.slotCharges[i] = (ITEM_DEFAULT_CHARGES[item] ?? Infinity);
+      toast(`Added ${item} to slot ${i}`, 900);
+      rebuildBelt();
+      return;
+    }
+  }
+  toast('Slots 1–3 full. Remove one first.', 1200);
+}
+function confirmLoadout(){ closeStorage(); }
+
+/* ===========================================================
+   DEVTOOLS (panel + external overlay)
+   =========================================================== */
+(function setupDevTools(){
+  const toggleBtn   = document.getElementById('devtools-toggle');
+  const panel       = document.getElementById('devtools-panel');
+  const enableBtn   = document.getElementById('devtools-enable');
+  const openOverlay = document.getElementById('devtools-open-overlay');
+  const chkGhost    = document.getElementById('devtools-group-ghost');
+  const chkEv       = document.getElementById('devtools-group-evidence');
+  const chkXYZ      = document.getElementById('devtools-group-xyz');
+  const roomSel     = document.getElementById('devtools-room-select');
+  const logTa       = document.getElementById('devtools-log');
+
+  let overlayWin = null;
+  function postToOverlay(payload){
+    if (overlayWin && !overlayWin.closed){
+      overlayWin.postMessage(payload, "*");
+    }
+  }
+
+  function log(msg){
+    const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+    logTa.value += line; logTa.scrollTop = logTa.scrollHeight;
+    console.debug('%cDEV','color:#8af', msg);
+    postToOverlay({ type:'log', text: msg });
+  }
+  window.DevTools = { showToggle(){ toggleBtn.style.display='block'; }, open(){ panel.style.display='block'; }, log };
+
+  toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
+  openOverlay.addEventListener('click', ()=>{
+    try{
+      overlayWin = window.open('./devtools_overlay.html','devtools_overlay','width=520,height=680');
+      setTimeout(()=>postToOverlay({type:'handshake', hello:true}), 400);
+    }catch(e){ toast('Popup blocked: allow popups for this site.', 1800); }
+  });
+
+  try{
+    const raw = (window.ROOMS && Array.isArray(window.ROOMS)) ? window.ROOMS : [];
+    const names = raw.map(r => typeof r === 'string' ? r : (r?.name || 'Unnamed'));
+    if (roomSel && names.length){
+      roomSel.innerHTML = '<option value="">Select room…</option>' + names.map(n=>`<option>${n}</option>`).join('');
+    }
+  }catch{}
+
+  enableBtn.addEventListener('click', ()=>{
+    const on = enableBtn.dataset.on==='1' ? false : true;
+    enableBtn.dataset.on = on ? '1':'0';
+    enableBtn.textContent = on ? 'Disable Developer Listen' : 'Enable Developer Listen';
+    log(on ? 'Developer Listen: ON' : 'Developer Listen: OFF');
+
+    if (chkGhost) {
+      if (on && chkGhost.checked) devBus.addEventListener('ghost', ghostLogger);
+      else                         devBus.removeEventListener('ghost', ghostLogger);
+    }
+    if (chkEv) {
+      if (on && chkEv.checked) window.__onEvidenceLogged = d=> evidenceLogger(d);
+      else                     window.__onEvidenceLogged = null;
+    }
+    if (chkXYZ) {
+      if (on && chkXYZ.checked) startXYZ();
+      else                      stopXYZ();
+    }
+  });
+
+  function ghostLogger(){
+    const g = ghost.mesh?.position; if(!g) return;
+    const fast = ghost.meshFast?.position;
+    const data = { type:'ghost', x:g.x,y:g.y,z:g.z, hunting:ghost.hunting };
+    if (fast) data.fast = { x:fast.x,y:fast.y,z:fast.z };
+    postToOverlay(data);
+    if(performance.now() - __devGhostLogTimer < 250) return;
+    __devGhostLogTimer = performance.now();
+    log(`Ghost @ x:${g.x.toFixed(2)} y:${g.y.toFixed(2)} z:${g.z.toFixed(2)} hunting:${ghost.hunting}`);
+  }
+  function evidenceLogger(d){ log(`EV: ${d.item} in ${d.room} (${d.success?'OK':'FAIL'})`); postToOverlay({type:'evidence', ...d}); }
+
+  let xyzTimer=null;
+  function startXYZ(){
+    if (xyzTimer) return;
+    xyzTimer = setInterval(()=>{
+      const p=camera?.position; if(!p) return;
+      const d = { type:'xyz', x:p.x,y:p.y,z:p.z, room:player.room };
+      postToOverlay(d);
+      log(`XYZ x:${p.x.toFixed(2)} y:${p.y.toFixed(2)} z:${p.z.toFixed(2)}`);
+    }, 1000);
+  }
+  function stopXYZ(){ if(xyzTimer){ clearInterval(xyzTimer); xyzTimer=null; } }
+})();
+
+/* ===========================================================
+   USE ITEMS
+   =========================================================== */
+function useActiveItem(){
+  const item = inventory.slots[activeItemSlot]; if(!item) return;
+  const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
+  switch(item){
+    case 'EMF':
+      if(dist < 5){ if(Math.random()<0.5) logEvidence("EMF Level 5"); toast("EMF spikes!", 1000); } else toast("EMF quiet.", 800); break;
+
+    case 'Spirit Box':
+      if(player.room!=='Van' && dist<4){
+        if(Math.random()<0.55){ audio.spiritbox.play().catch(()=>{}); logEvidence("Spirit Box"); }
+        else { audio.spiritStatic.play().catch(()=>{}); toast("...static...", 900); }
+      } else toast("No response.", 800);
+      break;
+
+    case 'Thermometer':
+      if(dist<6 && Math.random()<0.5){ logEvidence("Freezing Temps"); toast("It’s unnaturally cold here.", 900); }
+      else toast("Temp normal.", 900);
+      break;
+
+    case 'UV Light':
+      if(Math.random()<0.4){ logEvidence("Fingerprints"); toast("A latent mark glows faintly.", 1000); } else toast("Nothing glows.", 900);
+      break;
+
+    case 'Ghost Writing Book':
+      audio.writing.play().catch(()=>{}); setTimeout(()=>logEvidence("Ghost Writing"), 1200); toast("You place the book down...", 900);
+      break;
+
+    case 'D.O.T.S':
+      if(Math.random()<0.45){ logEvidence("D.O.T.S"); toast("Something flickers through your setup...", 1000); } else toast("Nothing passes through.", 900);
+      break;
+
+    case 'Camera':
+      if (inVanZone(camera.position)) { toast("Too far. Try setting up indoors.", 1000); break; }
+      showCameraOrb();
+      if (dist < 15 && Math.random()<0.4) logEvidence("Orbs");
+      break;
+
+    case 'Smudge':
+      toast("Air thickens—and clears.", 900);
+      decChargeForActive(); // consume
+      break;
+
+    case 'Salt':
+      toast("You sprinkle a thin line.", 900);
+      decChargeForActive(); // consume
+      break;
+
+    case 'Crucifix':
+      placeCrucifix();
+      break;
+
+    case 'Motion Sensor':
+      placeMotionSensor();
+      break;
+
+    case 'Lighter':
+      toast("Flame lit.", 700);
+      break;
+
+    case 'Notebook':
+      openNotebook();
+      break;
+
+    default:
+      toast(`${item}...`, 700);
+  }
+}
+
+/* ===========================================================
+   DEBUG CUBE
+   =========================================================== */
+function ensureDebugCube(){
+  if (scene.getMeshByName("dbgCube")) return;
+  const m = BABYLON.MeshBuilder.CreateBox("dbgCube",{size:2},scene);
+  m.position = new BABYLON.Vector3(43.657, 2, -112);
+  const mat = new BABYLON.StandardMaterial("dbgMat", scene);
+  mat.diffuseColor = new BABYLON.Color3(0.1,0.6,0.8);
+  m.material = mat;
+  scene.onBeforeRenderObservable.add(()=>{ m.rotation.y += 0.01; });
+}
+
+/* ===========================================================
+   START
+   =========================================================== */
+</script>
   
 
 <!-- === TOUCH CONTROLS (Hit Areas + Run Toggle) === -->
@@ -1127,7 +2406,7 @@
   window.setupBreathFX = function(scene, cam){
     scene = scene || window.scene;
     cam   = cam   || window.camera;
-    if (!scene || !cam) { try{console.warn("BreathFX deferred");}catch(e){} return breathFX; }
+    if (!scene || !cam) { try{console.warn("setupBreathFX: missing scene or camera");}catch(e){} return breathFX; }
 
     // Mouth transform, slightly forward and a bit down from the camera
     var mouth = new BABYLON.TransformNode("breathMouth", scene);
@@ -1254,944 +2533,5 @@
 })();
 </script>
 
-
-<script>
-/* ===========================================================
-   WEATHER: Rain/Snow (camera-following) + RING CLOUDS (non-square)
-   =========================================================== */
-(function(){
-  // ---------- Weather ----------
-  function ensureWeatherSystems(scene){
-    scene = scene || window.scene;
-    var cam = window.camera;
-    if (!scene || !cam) return null;
-
-    if (window.__weather && __weather.__ready) return __weather;
-
-    var emitter = new BABYLON.TransformNode("weatherEmitter", scene);
-    emitter.position = cam.position.clone();
-    scene.onBeforeRenderObservable.add(function(){
-      try {
-        // Follow camera with a slight overhead so precipitation falls around player
-        emitter.position.copyFrom(cam.position);
-        emitter.position.y += 12;
-      } catch(e){}
-    });
-
-    // Helper to create PS (GPU if available)
-    function makePS(name, capacity){
-      var useGPU = BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported;
-      if (useGPU){
-        var gps = new BABYLON.GPUParticleSystem(name+"GPU", { capacity: capacity || 8000 }, scene);
-        gps.activeParticleCount = Math.min(gps.getCapacity ? gps.getCapacity() : 8000, 8000);
-        return gps;
-      } else {
-        return new BABYLON.ParticleSystem(name+"CPU", capacity || 2000, scene);
-      }
-    }
-
-    // RAIN
-    var rain = makePS("rain", 8000);
-    rain.particleTexture = new BABYLON.Texture("https://assets.babylonjs.com/textures/flare.png", scene);
-    rain.emitter = emitter;
-    rain.isLocal = true;
-    rain.isBillboardBased = true;
-    rain.minEmitBox = new BABYLON.Vector3(-22, 6, -22);
-    rain.maxEmitBox = new BABYLON.Vector3( 22, 10,  22);
-    rain.minSize = 0.03;
-    rain.maxSize = 0.06;
-    rain.minLifeTime = 0.6;
-    rain.maxLifeTime = 0.9;
-    rain.emitRate = 0; // off by default
-    rain.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-    rain.gravity = new BABYLON.Vector3(0, -18.0, 0);
-    rain.direction1 = new BABYLON.Vector3(-0.8, -10.0, -0.6);
-    rain.direction2 = new BABYLON.Vector3( 0.8, -14.0,  0.6);
-    rain.minEmitPower = 8;
-    rain.maxEmitPower = 16;
-    rain.updateSpeed = 0.008;
-    rain.color1 = new BABYLON.Color4(0.7, 0.8, 1.0, 0.35);
-    rain.color2 = new BABYLON.Color4(0.6, 0.7, 0.9, 0.25);
-    rain.colorDead = new BABYLON.Color4(0.6, 0.7, 0.9, 0.00);
-    rain.start();
-
-    // SNOW
-    var snow = makePS("snow", 4000);
-    snow.particleTexture = new BABYLON.Texture("https://assets.babylonjs.com/textures/flare.png", scene);
-    snow.emitter = emitter;
-    snow.isLocal = true;
-    snow.isBillboardBased = true;
-    snow.minEmitBox = new BABYLON.Vector3(-18, 8, -18);
-    snow.maxEmitBox = new BABYLON.Vector3( 18, 12,  18);
-    snow.minSize = 0.12;
-    snow.maxSize = 0.22;
-    snow.minLifeTime = 2.2;
-    snow.maxLifeTime = 3.6;
-    snow.emitRate = 0; // off by default
-    snow.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-    snow.gravity = new BABYLON.Vector3(0, -2.0, 0);
-    snow.direction1 = new BABYLON.Vector3(-0.4, -1.2, -0.3);
-    snow.direction2 = new BABYLON.Vector3( 0.4, -1.8,  0.3);
-    snow.minAngularSpeed = -0.6;
-    snow.maxAngularSpeed =  0.6;
-    snow.minEmitPower = 0.5;
-    snow.maxEmitPower = 1.2;
-    snow.updateSpeed = 0.008;
-    snow.color1 = new BABYLON.Color4(0.95, 0.98, 1.0, 0.60);
-    snow.color2 = new BABYLON.Color4(0.95, 0.98, 1.0, 0.50);
-    snow.colorDead = new BABYLON.Color4(0.95, 0.98, 1.0, 0.00);
-    snow.start();
-
-    window.__weather = {
-      emitter: emitter,
-      rain: rain,
-      snow: snow,
-      mode: "Clear",
-      set: function(name){
-        var s = String(name||"").toLowerCase();
-        if (s === "rain"){
-          rain.emitRate = 2400;
-          snow.emitRate = 0;
-          this.mode = "Rain";
-        } else if (s === "snow"){
-          snow.emitRate = 900;
-          rain.emitRate = 0;
-          this.mode = "Snow";
-        } else {
-          rain.emitRate = 0;
-          snow.emitRate = 0;
-          this.mode = "Clear";
-        }
-      },
-      __ready: true
-    };
-
-    // Watch for external weather.mode/name flips
-    var last = null;
-    scene.onBeforeRenderObservable.add(function(){
-      try {
-        var w = window.weather;
-        var m = w && (w.mode || w.name || w.current);
-        if (m && m !== last){
-          __weather.set(m);
-          last = m;
-        }
-      } catch(e){}
-    });
-
-    // Expose shorthand
-    window.setWeather = function(name){
-      ensureWeatherSystems(scene);
-      __weather.set(name);
-    };
-
-    return __weather;
-  }
-
-  // ---------- Ring Clouds (non-square emitter with ring sampling) ----------
-  function installRingClouds(scene){
-    scene = scene || window.scene;
-    if (!scene) return;
-
-    // Dispose old clouds if we made any
-    if (window.__ringClouds){
-      try {
-        __ringClouds.systems.forEach(function(ps){ ps.dispose(); });
-        __ringClouds.rigs.forEach(function(r){ r.dispose(); });
-      } catch(e){}
-    }
-
-    var skyRig = new BABYLON.TransformNode("ringCloudRig", scene);
-
-    function makeRingSystem(name, innerR, outerR, height, capacity, colorA, colorB, alphaA, alphaB, speedY){
-      var useGPU = BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported;
-      var ps = useGPU ? new BABYLON.GPUParticleSystem(name+"GPU", { capacity: capacity }, scene)
-                      : new BABYLON.ParticleSystem(name+"CPU", capacity, scene);
-
-      ps.emitter = skyRig;
-      ps.isLocal = true;
-      ps.particleTexture = new BABYLON.Texture(
-        "https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png", scene
-      );
-      ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-      ps.minSize = 6;
-      ps.maxSize = 12;
-      ps.minLifeTime = 9999;
-      ps.maxLifeTime = 9999;
-      ps.emitRate = 0;
-      ps.manualEmitCount = ps.getCapacity ? ps.getCapacity() : capacity;
-      ps.color1 = new BABYLON.Color4(colorA.r, colorA.g, colorA.b, alphaA);
-      ps.color2 = new BABYLON.Color4(colorB.r, colorB.g, colorB.b, alphaB);
-      ps.colorDead = new BABYLON.Color4(colorB.r, colorB.g, colorB.b, 0.0);
-      ps.updateSpeed = 0.004;
-      ps.gravity = new BABYLON.Vector3(0, 0, 0);
-      ps.direction1 = new BABYLON.Vector3(0, 0, 0);
-      ps.direction2 = new BABYLON.Vector3(0, 0, 0);
-
-      // Non-square ring sampling for starts
-      ps.startPositionFunction = function(worldMatrix, position){
-        var r = innerR + Math.random() * (outerR - innerR);
-        var theta = Math.random() * Math.PI * 2;
-        var local = new BABYLON.Vector3(
-          r * Math.cos(theta),
-          height + (Math.random() - 0.5) * 40.0, // some vertical thickness
-          r * Math.sin(theta)
-        );
-        BABYLON.Vector3.TransformCoordinatesToRef(local, worldMatrix, position);
-      };
-
-      // Gentle vertical wobble
-      ps.startDirectionFunction = function(worldMatrix, directionToUpdate){
-        var dir = new BABYLON.Vector3(0, (Math.random()-0.5) * speedY, 0);
-        BABYLON.Vector3.TransformNormalToRef(dir, worldMatrix, directionToUpdate);
-      };
-
-      ps.start();
-      return ps;
-    }
-
-    // Two rings with different radii & alphas to avoid obvious shapes
-    var ps1 = makeRingSystem("ringCloudsA", 350, 750, 180, 5000,
-      {r:0.65,g:0.68,b:0.72}, {r:0.78,g:0.82,b:0.86}, 0.09, 0.06, 0.25);
-    var ps2 = makeRingSystem("ringCloudsB", 700, 1200, 220, 6000,
-      {r:0.60,g:0.64,b:0.70}, {r:0.74,g:0.78,b:0.82}, 0.07, 0.05, 0.15);
-
-    // Slow rotation to simulate sky motion
-    scene.onBeforeRenderObservable.add(function(){
-      skyRig.rotation.y += 0.00003 * scene.getEngine().getDeltaTime();
-    });
-
-    window.__ringClouds = { systems: [ps1, ps2], rigs: [skyRig] };
-  }
-
-  // Export to window and initialize on scene ready
-  window.ensureWeatherSystems = ensureWeatherSystems;
-  window.installRingClouds = installRingClouds;
-
-  // Auto-init if scene exists
-  (function tryInit(){
-    var s = window.scene;
-    if (!s) { setTimeout(tryInit, 300); return; }
-    ensureWeatherSystems(s);
-    installRingClouds(s);
-  })();
-})();
-</script>
-
-
-<style>
-  /* === Item Belt UI === */
-  #belt {
-    position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: 12px;
-    display: none; /* hidden until game start */
-    z-index: 10020;
-    gap: 8px;
-    pointer-events: auto;
-  }
-  body.game-started #belt { display: flex; }
-  .belt-slot {
-    width: 54px; height: 54px;
-    border-radius: 10px;
-    background: rgba(20,20,24,0.7);
-    border: 1px solid rgba(255,255,255,0.15);
-    box-shadow: 0 2px 10px rgba(0,0,0,0.4);
-    display: grid;
-    place-items: center;
-    color: #fff;
-    font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif;
-    user-select: none; -webkit-user-select: none;
-  }
-  .belt-slot .label { opacity: 0.9; pointer-events: none; }
-  .belt-slot.selected {
-    outline: 2px solid rgba(0,180,255,0.9);
-    box-shadow: 0 0 0 2px rgba(0,180,255,0.25), 0 4px 18px rgba(0,180,255,0.25);
-  }
-</style>
-<div id="belt" aria-label="Item belt"></div>
-
-
-<script>
-// === Item Belt logic (rebuild + selection adapters) ===
-(function(){
-  function beltSource(){
-    try {
-      if (typeof getBeltItems === 'function') return getBeltItems();
-      if (window.inventory && Array.isArray(inventory.belt)) return inventory.belt;
-      if (window.player && Array.isArray(player.belt)) return player.belt;
-    } catch(e){}
-    return []; // fallback
-  }
-
-  function callSelect(idx){
-    // Try a few common selectors; fallback to event
-    try { if (typeof setHeldIndex === 'function') { setHeldIndex(idx); return true; } } catch(e){}
-    try { if (typeof selectBeltIndex === 'function') { selectBeltIndex(idx); return true; } } catch(e){}
-    try { if (window.inventory && typeof inventory.select === 'function') { inventory.select(idx); return true; } } catch(e){}
-    try { if (window.player) { player.heldIndex = idx; return true; } } catch(e){}
-    window.dispatchEvent(new CustomEvent('belt:select', { detail: { index: idx } }));
-    return false;
-  }
-
-  function describe(item, i){
-    if (!item) return "Empty";
-    if (item.name) return item.name;
-    if (item.id) return String(item.id);
-    return "Slot " + (i+1);
-  }
-
-  function iconFor(item){
-    if (!item) return null;
-    if (item.icon) return item.icon;
-    if (item.img) return item.img;
-    // optional mapping by item.name could go here
-    return null;
-  }
-
-  function setSelected(idx){
-    var belt = document.getElementById('belt');
-    if (!belt) return;
-    [].forEach.call(belt.children, function(el, i){
-      el.classList.toggle('selected', i === idx);
-    });
-  }
-
-  window.rebuildBelt = function(){
-    var belt = document.getElementById('belt');
-    if (!belt) return;
-
-    // Clear existing
-    belt.textContent = '';
-
-    var items = beltSource();
-    var count = Math.max(items.length, 5); // show at least 5 slots
-    for (var i = 0; i < count; i++){
-      var it = items[i] || null;
-      var slot = document.createElement('div');
-      slot.className = 'belt-slot';
-      slot.dataset.index = i;
-
-      var icon = iconFor(it);
-      if (icon){
-        var img = document.createElement('img');
-        img.src = icon; img.alt = describe(it, i);
-        img.style.maxWidth = '80%'; img.style.maxHeight = '80%';
-        slot.appendChild(img);
-      } else {
-        var label = document.createElement('div');
-        label.className = 'label';
-        label.textContent = describe(it, i);
-        slot.appendChild(label);
-      }
-
-      slot.addEventListener('click', function(ev){
-        var idx = parseInt(ev.currentTarget.dataset.index, 10);
-        callSelect(idx); setSelected(idx);
-      });
-      belt.appendChild(slot);
-    }
-
-    // Try to highlight current selection
-    try {
-      var idx = (typeof getHeldIndex === 'function') ? getHeldIndex()
-               : (window.player && typeof player.heldIndex !== 'undefined' ? player.heldIndex : 0);
-      setSelected(idx|0);
-    } catch(e){ setSelected(0); }
-  };
-
-  // Keyboard shortcuts for belt (1..9)
-  window.addEventListener('keydown', function(e){
-    if (!document.body.classList.contains('game-started')) return;
-    var n = -1;
-    if (e.key >= '1' && e.key <= '9') n = (e.key.charCodeAt(0) - '1'.charCodeAt(0));
-    if (n >= 0){
-      e.preventDefault();
-      callSelect(n); setSelected(n);
-    }
-  }, true);
-
-  // Rebuild on common signals
-  window.addEventListener('inventory:update', function(){ rebuildBelt(); });
-  window.addEventListener('game:started', function(){ rebuildBelt(); });
-  // If your code calls rebuildBelt elsewhere, this is idempotent.
-
-})();
-</script>
-
-
-<script>
-// === Prevent Space from re-triggering Start / buttons during game ===
-(function(){
-  function disableSpaceDuringPlay(e){
-    if (e.code === 'Space' || e.key === ' '){
-      if (document.body.classList.contains('game-loading') || document.body.classList.contains('game-started')){
-        e.preventDefault(); e.stopPropagation();
-      }
-    }
-  }
-  window.addEventListener('keydown', disableSpaceDuringPlay, true);
-
-  function onStart(){
-    // Blur any focused element so space won't activate it
-    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch(e){}
-    var btn = document.getElementById('start-button');
-    if (btn){ try { btn.blur(); btn.tabIndex = -1; } catch(e){} }
-  }
-  window.addEventListener('game:starting', onStart);
-  try {
-    if (typeof window.safeStart === 'function' && !window.safeStart.__spaceGuard){
-      var _old = window.safeStart;
-      window.safeStart = function(){
-        onStart();
-        return _old.apply(this, arguments);
-      };
-      window.safeStart.__spaceGuard = true;
-    }
-  } catch(e){}
-})();
-</script>
-
-
-<script>
-// Ensure Breath FX initializes after camera/scene exist
-(function(){
-  function ensure(){
-    var tries = 0;
-    var iv = setInterval(function(){
-      tries++;
-      if (window.scene && window.camera && typeof setupBreathFX === 'function'){
-        try { setupBreathFX(scene, camera); } catch(e){}
-        clearInterval(iv);
-      }
-      if (tries > 300) clearInterval(iv); // ~30s max
-    }, 100);
-  }
-  window.addEventListener('game:starting', function(){ setTimeout(ensure, 0); }, { once: true });
-  try {
-    if (typeof window.safeStart === 'function' && !window.safeStart.__breathEnsure){
-      var _old = window.safeStart;
-      window.safeStart = function(){
-        var r = _old.apply(this, arguments);
-        setTimeout(ensure, 0);
-        return r;
-      };
-      window.safeStart.__breathEnsure = true;
-    }
-  } catch(e){}
-})();
-</script>
-
-
-<script>
-// === Minimal engine/scene bootstrap + safeStart (fallback) ===
-(function(){
-  function ensureEngineScene(){
-    var canvas = document.getElementById('renderCanvas');
-    if (!window.engine && canvas){
-      window.engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true, antialias: true });
-      window.addEventListener('resize', function(){ try { engine.resize(); } catch(e){} });
-    }
-    if (!window.scene && window.engine){
-      var s = new BABYLON.Scene(engine);
-      s.clearColor = new BABYLON.Color4(0.02, 0.02, 0.03, 1.0);
-      // Basic light
-      var hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.2, 1, 0.2), s);
-      hemi.intensity = 0.9;
-      // Camera
-      var cam = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 1.7, -6), s);
-      cam.minZ = 0.05;
-      cam.speed = 0.45;
-      cam.inertia = 0.85;
-      cam.setTarget(BABYLON.Vector3.Zero());
-      cam.attachControl(canvas, true);
-      window.scene = s;
-      window.camera = cam;
-
-      // Simple ground so screen isn't empty if content missing
-      var ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 40, height: 40}, s);
-      var gmat = new BABYLON.StandardMaterial("gmat", s);
-      gmat.diffuseColor = new BABYLON.Color3(0.1, 0.12, 0.14);
-      gmat.specularColor = BABYLON.Color3.Black();
-      ground.material = gmat;
-    }
-    if (window.engine && !engine.__loop){
-      engine.runRenderLoop(function(){
-        try { if (window.scene) scene.render(); } catch(e){}
-      });
-      engine.__loop = true;
-    }
-  }
-
-  async function fallbackBoot(){
-    ensureEngineScene();
-    // optional sky ring clouds / weather / moon / breath
-    try { if (typeof ensureWeatherSystems === 'function') ensureWeatherSystems(scene); } catch(e){}
-    try { if (typeof installRingClouds === 'function') installRingClouds(scene); } catch(e){}
-    try { if (typeof loadMoon === 'function') await loadMoon(scene); } catch(e){}
-    try { if (typeof setupBreathFX === 'function') setupBreathFX(scene, camera); } catch(e){}
-  }
-
-  // Define safeStart only if not defined already
-  if (typeof window.safeStart !== 'function'){
-    window.safeStart = async function(){
-      // Start loader + hide title
-      try { window.dispatchEvent(new Event('game:starting')); } catch(e){}
-      var t = document.getElementById('title-screen'); if (t) t.style.display = 'none';
-
-      await fallbackBoot();
-
-      // Mark started
-      window.__started = true;
-      document.body.classList.add('game-started');
-      try { window.dispatchEvent(new Event('game:started')); } catch(e){}
-    };
-  }
-
-  // Bind Start button to safeStart
-  var btn = document.getElementById('start-button');
-  if (btn && !btn.__boundStart){
-    btn.addEventListener('click', function(ev){ try{ev.preventDefault();}catch(e){} window.safeStart(); });
-    btn.addEventListener('touchstart', function(ev){ try{ev.preventDefault();}catch(e){} window.safeStart(); }, {passive:true});
-    btn.__boundStart = true;
-  }
-
-  // If engine/scene are totally missing at page load, prep them (won't display until Start hides menu)
-  ensureEngineScene();
-})();
-</script>
-
-
-<script>
-/* ===========================================================
-   BREATH MIST (conditional: cold & near-ghost) + BLOODMOON weather
-   - Breath shows when: (A) environment is cold  OR (B) near the ghost.
-   - Indoors is cold only if power is OFF and outside weather is cold.
-   - Adds Weather 'BloodMoon': crimson sky, crimson moon, rainy.
-   =========================================================== */
-(function(){
-  // --- Power stub so you can wire house lights later ---
-  if (!window.powerGrid){
-    window.powerGrid = {
-      on: true,
-      set: function(on){
-        this.on = !!on;
-        try { window.dispatchEvent(new CustomEvent('power:changed', {detail:{on:this.on}})); } catch(e){}
-      }
-    };
-  }
-
-  // --- Helpers for color ---
-  function col3(r,g,b){ return new BABYLON.Color3(r,g,b); }
-  function col4(r,g,b,a){ return new BABYLON.Color4(r,g,b,a); }
-
-  // --- Breath FX gating extensions ---
-  window.breathFX = window.breathFX || {};
-  breathFX.config = Object.assign({
-    coldTempC: 7,           // ≤ this is "cold"
-    ghostRadius: 12,        // meters
-    appearNearGhostIfNotCold: true, // breath visible near ghost even if temp not cold
-    requireBothColdAndGhost: false   // set true if you want BOTH required
-  }, breathFX.config || {});
-
-  function getGhostPos(){
-    try {
-      if (window.ghost && ghost.position) return ghost.position;
-      if (window.ghost && ghost.mesh && ghost.mesh.position) return ghost.mesh.position;
-      if (Array.isArray(window.ghosts) && ghosts[0] && ghosts[0].position) return ghosts[0].position;
-    } catch(e){}
-    return null;
-  }
-  function playerPos(){
-    try { return (window.camera && camera.position) || (window.player && player.position) || null; } catch(e){ return null; }
-  }
-  function dist(a,b){ return BABYLON.Vector3.Distance(a,b); }
-
-  function isOutsideCold(){
-    try {
-      var w = window.weather || {};
-      // Prefer numeric temp if provided
-      if (typeof w.tempC === 'number') return w.tempC <= breathFX.config.coldTempC;
-      var s = (w.mode || w.name || w.current || '').toLowerCase();
-      if (/snow|blizzard|hail|freez|ice|winter/.test(s)) return true;
-      if (/rain/.test(s)) return !!(w.isColdRain || (typeof w.feelsLikeC === 'number' && w.feelsLikeC <= (breathFX.config.coldTempC+1)));
-      if (/blood\s*moon|bloodmoon/.test(s)) return false; // not implicitly cold
-    } catch(e){}
-    return false;
-  }
-  function isIndoors(){
-    try {
-      if (typeof window.getPlayerIsIndoors === 'function') return !!getPlayerIsIndoors();
-      if (window.player && typeof player.indoors !== 'undefined') return !!player.indoors;
-      // Fallback heuristic: if y < 3 and a "house" flag exists
-      if (window.level && level.isIndoorsAt) return !!level.isIndoorsAt(playerPos());
-    } catch(e){}
-    return false;
-  }
-  function isPowerOff(){
-    try { return window.powerGrid && powerGrid.on === false; } catch(e){ return false; }
-  }
-  function nearGhost(){
-    var gp = getGhostPos(), pp = playerPos();
-    if (!gp || !pp) return false;
-    return dist(gp, pp) <= breathFX.config.ghostRadius;
-  }
-
-  function shouldShowBreath(){
-    var outsideCold = isOutsideCold();
-    var indoors = isIndoors();
-    var envCold = outdoorsColdOrIndoorsCold(outsideCold, indoors);
-    var ghostProx = nearGhost();
-
-    if (breathFX.config.requireBothColdAndGhost){
-      return envCold && ghostProx;
-    }
-    // Default: show if cold OR near ghost
-    if (envCold) return true;
-    if (breathFX.config.appearNearGhostIfNotCold && ghostProx) return true;
-    return false;
-  }
-
-  function outdoorsColdOrIndoorsCold(outsideCold, indoors){
-    if (!indoors) return outsideCold;
-    // Indoors is cold only if power is off AND outside weather is cold
-    return isPowerOff() && outsideCold;
-  }
-
-  // Hook into existing updateBreath, but gate emission
-  // We keep your previous particle setup (breathFX.ps etc.)
-  var _updateBreath = window.updateBreath;
-  window.updateBreath = function(dt){
-    if (!breathFX || !breathFX.ps){ try { if (_updateBreath) _updateBreath(dt); } catch(e){} return; }
-    var show = shouldShowBreath();
-    if (!show){
-      breathFX.ps.emitRate = 0;
-      // Still advance any timers to avoid a "bursty" start next frame
-      try { if (_updateBreath) _updateBreath(dt); } catch(e){}
-      return;
-    }
-    // Otherwise run the actual emitter update (bursts & direction)
-    try { if (_updateBreath) _updateBreath(dt); } catch(e){}
-  };
-
-  // --- BLOODMOON WEATHER ---
-  // Extend ensureWeatherSystems/setWeather if present
-  function installBloodMoon(){
-    if (!window.ensureWeatherSystems) return;
-    var W = ensureWeatherSystems(window.scene);
-    if (!W) return;
-
-    // Keep refs for tinting
-    window.__skyTint = window.__skyTint || { active:false, prev:{ clouds:[], clear: null, moon: null } };
-
-    function tintCloudsCrimson(on){
-      if (!window.__ringClouds || !__ringClouds.systems) return;
-      if (on && !__skyTint.active){
-        __skyTint.prev.clouds = __ringClouds.systems.map(function(ps){
-          return { ps: ps, c1: ps.color1 && ps.color1.clone(), c2: ps.color2 && ps.color2.clone() };
-        });
-      }
-      __ringClouds.systems.forEach(function(ps){
-        if (!ps) return;
-        if (on){
-          ps.color1 = col4(0.55,0.12,0.12, 0.05);
-          ps.color2 = col4(0.48,0.08,0.08, 0.04);
-        } else {
-          // restore
-          var prev = (__skyTint.prev.clouds||[]).find(function(e){ return e.ps === ps; });
-          if (prev && prev.c1 && prev.c2){ ps.color1 = prev.c1; ps.color2 = prev.c2; }
-        }
-      });
-    }
-
-    function tintMoonCrimson(on){
-      // Try to find moon mesh or material
-      var moon = window.__moonRef || (window.scene && scene.getMeshByName && scene.getMeshByName("moon")) || null;
-      if (!moon){
-        try {
-          // fallback: any mesh with 'moon' in name
-          var matches = scene.meshes.filter(function(m){ return m.name && /moon/i.test(m.name); });
-          if (matches.length) moon = matches[0];
-        } catch(e){}
-      }
-      if (!moon) return;
-      var mat = moon.material;
-      if (!mat){
-        mat = new BABYLON.StandardMaterial("moonMatAuto", scene);
-        moon.material = mat;
-      }
-      if (on){
-        if (!__skyTint.prev.moon) __skyTint.prev.moon = {
-          diffuse: mat.diffuseColor && mat.diffuseColor.clone ? mat.diffuseColor.clone() : col3(1,1,1),
-          emissive: mat.emissiveColor && mat.emissiveColor.clone ? mat.emissiveColor.clone() : col3(0,0,0)
-        };
-        mat.diffuseColor = col3(0.75, 0.08, 0.08);
-        mat.emissiveColor = col3(0.28, 0.02, 0.02);
-      } else if (__skyTint.prev.moon){
-        mat.diffuseColor = __skyTint.prev.moon.diffuse;
-        mat.emissiveColor = __skyTint.prev.moon.emissive;
-      }
-    }
-
-    function tintSkyClearColor(on){
-      var s = window.scene;
-      if (!s) return;
-      if (on){
-        if (!__skyTint.prev.clear) __skyTint.prev.clear = s.clearColor.clone();
-        s.clearColor = new BABYLON.Color4(0.04, 0.01, 0.01, 1.0);
-      } else if (__skyTint.prev.clear){
-        s.clearColor = __skyTint.prev.clear.clone();
-      }
-    }
-
-    // Monkey-patch set to handle BloodMoon
-    if (!W.__patchedBloodMoon){
-      var _set = W.set.bind(W);
-      W.set = function(name){
-        var s = String(name||"").toLowerCase();
-        if (s === 'bloodmoon' || s === 'blood moon'){
-          _set('Rain');
-          tintCloudsCrimson(true);
-          tintMoonCrimson(true);
-          tintSkyClearColor(true);
-          this.mode = 'BloodMoon';
-          // Mark weather for "not implicitly cold"
-          window.weather = window.weather || {}; window.weather.mode = 'BloodMoon';
-        } else {
-          // restore sky/mood
-          tintCloudsCrimson(false);
-          tintMoonCrimson(false);
-          tintSkyClearColor(false);
-          _set(name);
-        }
-      };
-      W.__patchedBloodMoon = true;
-    }
-  }
-
-  // Defer install until scene exists
-  function tryInstall(){
-    if (window.scene){
-      installBloodMoon();
-    } else {
-      setTimeout(tryInstall, 250);
-    }
-  }
-  tryInstall();
-})();
-</script>
-
-
-<script>
-(function loaderHideOnStarted(){
-  var overlay = document.getElementById('loading-overlay');
-  function finish(){ try{ document.body.classList.remove('game-loading'); }catch(e){} if (overlay) overlay.style.display='none'; }
-  window.addEventListener('game:started', finish, {once:false});
-})();
-</script>
-
-
-<script>
-// === BREATH: small camera‑anchored puffs (and disable giant sky mist) ===
-(function(){
-  // Soft switch to kill the heavy sky rings by default (you can re-enable with setCloudQuality('low'|'med'|'high'))
-  try {
-    if (window.setCloudQuality) setCloudQuality('off');
-    if (window.__ringClouds && __ringClouds.systems && __ringClouds.systems.length) {
-      __ringClouds.systems.forEach(function(ps){ try{ ps.stop(); ps.dispose(); }catch(e){} });
-      __ringClouds.systems.length = 0;
-    }
-  } catch(e){}
-
-  // Wrap setupBreathFX to enforce small, near-camera particles
-  var _setup = window.setupBreathFX;
-  window.setupBreathFX = function(scene, cam){
-    var fx = _setup ? _setup(scene, cam) : (window.breathFX || (window.breathFX = {}));
-    try {
-      var mouth = (fx && fx.mouth) ? fx.mouth : null;
-      if (mouth){
-        // Slightly lower and further so it doesn't fill the screen
-        mouth.position = new BABYLON.Vector3(0, -0.08, 0.90);
-      }
-      var ps = fx.ps;
-      if (ps){
-        // Small sprite size and short life so it reads as breath, not fog
-        ps.minSize = 0.02;
-        ps.maxSize = 0.06;
-        ps.minLifeTime = 0.45;
-        ps.maxLifeTime = 0.90;
-        ps.updateSpeed = 0.01;
-        ps.isBillboardBased = true;
-        ps.isLocal = true;
-
-        // Subtle alpha
-        ps.color1 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.14);
-        ps.color2 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.08);
-        ps.colorDead = new BABYLON.Color4(1,1,1,0);
-
-        // Keep gravity light and add a tiny upward bias via direction (set each frame below)
-        ps.gravity = new BABYLON.Vector3(0, 0.04, 0);
-      }
-      // Set burst emit caps based on GPU/CPU
-      breathFX.__burstEmit = (ps && ps.getClassName && ps.getClassName().includes('GPU')) ? 140 : 45;
-      // Shorter puffs
-      breathFX.burst = 0;
-    } catch(e){}
-    return window.breathFX;
-  };
-
-  // Wrap updateBreath to clamp emit and ensure forward/up direction
-  var _update = window.updateBreath;
-  window.updateBreath = function(dt){
-    if (!_update) return;
-    _update(dt);
-
-    var fx = window.breathFX;
-    if (!fx || !fx.ps || !window.camera) return;
-    var ps = fx.ps;
-
-    // Direction: forward with a hint upward, small spread
-    try {
-      var fwd = camera.getDirection(BABYLON.Axis.Z).scale(1.2).add(new BABYLON.Vector3(0, 0.12, 0));
-      ps.direction1 = fwd.add(new BABYLON.Vector3(-0.02, -0.01, -0.02));
-      ps.direction2 = fwd.add(new BABYLON.Vector3( 0.02,  0.01,  0.02));
-    } catch(e){}
-
-    // Clamp emit to small bursts only (never constant fog)
-    var want = (fx.burst && fx.burst > 0) ? (fx.__burstEmit || 90) : 0;
-    ps.emitRate = want;
-  };
-
-  // If breath was already initialized before this patch ran, re-run setup to apply small settings
-  try { if (typeof window.scene !== 'undefined' && typeof window.camera !== 'undefined' && typeof window.setupBreathFX === 'function') { window.setupBreathFX(scene, camera); } } catch(e){}
-})();
-</script>
-
 </body>
 </html>
-
-<script>
-// === PERF PATCH: lighter ring clouds & mist (reduces overdraw and CPU cost) ===
-(function(){
-  function optimizeRingClouds(scene){
-    scene = scene || window.scene;
-    if (!scene) return;
-
-    var engine = scene.getEngine();
-    var isGPU = !!(BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported);
-
-    // Dispose any existing heavy clouds
-    try {
-      if (window.__ringClouds){
-        (__ringClouds.systems||[]).forEach(function(ps){ try{ ps.stop(); ps.dispose(); }catch(e){} });
-        (__ringClouds.rigs||[]).forEach(function(r){ try{ r.dispose(); }catch(e){} });
-      }
-    } catch(e){}
-
-    var skyRig = new BABYLON.TransformNode("ringCloudRigLite", scene);
-
-    function makeRing(name, innerR, outerR, height, capGPU, capCPU, sizeMin, sizeMax, alpha, speedY){
-      var cap = isGPU ? capGPU : capCPU;
-      // If CPU path and capCPU is 0, skip ring entirely
-      if (!isGPU && cap <= 0) return null;
-
-      var ps = isGPU ? new BABYLON.GPUParticleSystem(name+"GPU", { capacity: cap }, scene)
-                     : new BABYLON.ParticleSystem(name+"CPU", cap, scene);
-
-      ps.emitter = skyRig;
-      ps.isLocal = true;
-      ps.particleTexture = new BABYLON.Texture("https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png", scene);
-      ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-
-      // Smaller sprites, higher up (looks like clouds, not ground fog)
-      ps.minSize = sizeMin;
-      ps.maxSize = sizeMax;
-      ps.minLifeTime = 45;
-      ps.maxLifeTime = 65;
-      ps.emitRate = Math.max(20, Math.round(cap * 0.35)); // fill gradually, then stop
-      ps.color1 = new BABYLON.Color4(0.72,0.76,0.80, alpha);
-      ps.color2 = new BABYLON.Color4(0.80,0.84,0.88, alpha*0.8);
-      ps.colorDead = new BABYLON.Color4(0.80,0.84,0.88, 0);
-      ps.updateSpeed = 0.006;
-      ps.gravity = new BABYLON.Vector3(0, 0, 0);
-      ps.direction1 = new BABYLON.Vector3(0, 0, 0);
-      ps.direction2 = new BABYLON.Vector3(0, 0, 0);
-
-      // Ring sampling around the map at a higher altitude
-      ps.startPositionFunction = function(worldMatrix, position){
-        var r = innerR + Math.random() * (outerR - innerR);
-        var theta = Math.random() * Math.PI * 2;
-        var local = new BABYLON.Vector3(
-          r * Math.cos(theta),
-          height + (Math.random() - 0.5) * 30.0,
-          r * Math.sin(theta)
-        );
-        BABYLON.Vector3.TransformCoordinatesToRef(local, worldMatrix, position);
-      };
-      // Gentle vertical wobble
-      ps.startDirectionFunction = function(worldMatrix, directionToUpdate){
-        var dir = new BABYLON.Vector3(0, (Math.random()-0.5) * speedY, 0);
-        BABYLON.Vector3.TransformNormalToRef(dir, worldMatrix, directionToUpdate);
-      };
-
-      ps.start();
-      // Stop emission after a short fill to cap active particle count
-      setTimeout(function(){ try{ ps.emitRate = 0; }catch(e){} }, 8000);
-      return ps;
-    }
-
-    // Choose capacities based on GPU support (CPU path uses much fewer or disables outer ring)
-    var ps1 = makeRing("ringCloudsLiteA",
-      400, 900, 520,  // inner/outer/height (raised from ~200 to ~520)
-      1600, 420,      // capacity GPU / CPU
-      3.0, 6.0,       // size range (smaller than 6–12)
-      0.035,          // alpha
-      0.15            // vertical wobble
-    );
-    var ps2 = makeRing("ringCloudsLiteB",
-      950, 1500, 680,
-      2000, 0,        // disable second ring on CPU (0), keep on GPU at reduced cap
-      4.0, 7.5,
-      0.030,
-      0.12
-    );
-
-    // Slow rotation (reduced speed for subtle motion)
-    scene.onBeforeRenderObservable.add(function(){
-      skyRig.rotation.y += 0.000012 * engine.getDeltaTime();
-    });
-
-    window.__ringClouds = { systems: [ps1, ps2].filter(Boolean), rigs: [skyRig] };
-
-    // Expose a quick toggle for you
-    window.setCloudQuality = function(q){
-      q = String(q||'').toLowerCase();
-      if (q === 'off'){
-        window.__ringClouds.systems.forEach(function(ps){ try{ ps.stop(); ps.dispose(); }catch(e){} });
-        window.__ringClouds.rigs.forEach(function(r){ try{ r.dispose(); }catch(e){} });
-        window.__ringClouds.systems.length = 0;
-        return;
-      }
-      var mul = (q==='low') ? 0.5 : (q==='high' ? 1.2 : 1.0);
-      window.__ringClouds.systems.forEach(function(ps){
-        if (!ps) return;
-        try {
-          ps.minSize *= mul; ps.maxSize *= mul;
-          // clamp alphas a bit when upping size
-          if (ps.color1 && ps.color2){
-            ps.color1.a = Math.min(ps.color1.a * mul, 0.06);
-            ps.color2.a = Math.min(ps.color2.a * mul, 0.05);
-          }
-        } catch(e){}
-      });
-    };
-  }
-
-  function run(){
-    if (window.scene) { optimizeRingClouds(scene); }
-    else setTimeout(run, 400);
-  }
-  run();
-})();
-</script>
