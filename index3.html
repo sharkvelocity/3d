@@ -308,7 +308,7 @@ let hemiLight = null;
 
 let houseLights = []; let housePower = true;
 
-let player = { sanity:100, room:'Van', speedWalk:1.9, speedRun:2.4, running:false, god:false };
+let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false };
 let controls = { forward:false, back:false, left:false, right:false };
 let allowFly = false;
 
@@ -534,6 +534,8 @@ async function boot(){
 
   // Atmosphere/lights
   setupNightAtmosphere();
+    // Orbiting cloud sky
+    window.__clouds = addOrbitingClouds(scene, camera, { orbitSpeed: 0.00008 });
 
   // Hemispheric low-level fill to avoid total-black edge cases
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
@@ -699,6 +701,83 @@ function applyMoonTintForWeather(){
   }
 }
 
+
+/* ===========================================================
+   ORBITING CLOUD SKY (DOME + PARTICLE BELT)
+   =========================================================== */
+function addOrbitingClouds(scene, camera, opts={}){
+  const texURL = opts.textureURL || "https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png";
+  const domeDiam = opts.domeDiameter || 2000;
+  const orbitSpeed = (opts.orbitSpeed !== undefined ? opts.orbitSpeed : 0.0001);
+
+  const skyDome = BABYLON.MeshBuilder.CreateSphere(
+    "skyDome",
+    { diameter: domeDiam, sideOrientation: BABYLON.Mesh.BACKSIDE },
+    scene
+  );
+  skyDome.isPickable = false;
+  skyDome.checkCollisions = false;
+  skyDome.applyFog = false;
+
+  const skyMat = new BABYLON.StandardMaterial("skyMat", scene);
+  skyMat.disableLighting = true;
+  skyMat.emissiveColor = new BABYLON.Color3(1,1,1);
+  skyMat.diffuseColor = new BABYLON.Color3(0.02, 0.03, 0.07);
+  skyDome.material = skyMat;
+
+  const rig = new BABYLON.TransformNode("cloudRig", scene);
+  skyDome.parent = rig;
+
+  const emitter = new BABYLON.TransformNode("cloudEmitter", scene);
+  emitter.parent = rig;
+  emitter.position.set(0, domeDiam * 0.09, domeDiam * 0.18);
+
+  let ps;
+  const useGPU = BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported;
+  if (useGPU) {
+    ps = new BABYLON.GPUParticleSystem("cloudsGPU", { capacity: 50000 }, scene);
+    ps.activeParticleCount = 15000;
+    ps.manualEmitCount    = ps.activeParticleCount;
+    ps.minEmitBox = new BABYLON.Vector3(-120, -18, -300);
+    ps.maxEmitBox = new BABYLON.Vector3( 120,  18,  300);
+  } else {
+    ps = new BABYLON.ParticleSystem("cloudsCPU", 2500, scene);
+    ps.manualEmitCount = ps.getCapacity();
+    ps.minEmitBox = new BABYLON.Vector3(-90, -16, -240);
+    ps.maxEmitBox = new BABYLON.Vector3( 90,  16,  240);
+  }
+
+  ps.particleTexture = new BABYLON.Texture(texURL, scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+  ps.emitter = emitter;
+  ps.isBillboardBased = true;
+
+  ps.gravity = new BABYLON.Vector3(0,0,0);
+  ps.direction1 = new BABYLON.Vector3(0,0,0);
+  ps.direction2 = new BABYLON.Vector3(0,0,0);
+  ps.minAngularSpeed = -0.2;
+  ps.maxAngularSpeed =  0.2;
+
+  ps.color1    = new BABYLON.Color4(0.90, 0.92, 0.95, 0.12);
+  ps.color2    = new BABYLON.Color4(0.98, 0.98, 1.00, 0.16);
+  ps.colorDead = new BABYLON.Color4(0.95, 0.95, 0.98, 0.10);
+
+  ps.minSize = 3.5;
+  ps.maxSize = 6.0;
+  ps.minLifeTime = Number.MAX_SAFE_INTEGER;
+  ps.updateSpeed = 0.006;
+  ps.blendMode   = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  ps.minEmitPower = 0.2;
+  ps.maxEmitPower = 0.6;
+  ps.start();
+
+  scene.onBeforeRenderObservable.add(() => {
+    if (camera) rig.position.copyFrom(camera.position);
+    rig.rotation.y += orbitSpeed;
+  });
+
+  return { skyDome, particleSystem: ps, rig, emitter };
+}
+
 /* ===========================================================
    WEATHER / AUDIO
    =========================================================== */
@@ -727,27 +806,11 @@ Object.values(audio).forEach(a=>{
   if (Array.isArray(a)) a.forEach(x=>{ if(x && x.loop!==undefined) x.loop=false; });
   else if(a && a.loop !== undefined) a.loop = false;
 });
-function playStep(baseVolume=0.35, run=false){
+function playStep(volume=0.45){
   const pool = audio.steps;
   const s = pool[(Math.random()*pool.length)|0];
-
-  try {
-    s.currentTime = 0;
-
-    // Randomize pitch (playback speed between 0.9–1.1x)
-    s.playbackRate = 0.9 + Math.random() * 0.2;
-
-    // Slight random volume variation (±15%)
-    let vol = baseVolume * (0.85 + Math.random() * 0.3);
-
-    // Running steps louder than walking
-    if (run) vol *= 1.2;
-
-    s.volume = Math.min(vol, 1.0);
-    s.play().catch(()=>{});
-  } catch {}
+  try{ s.currentTime = 0; s.volume = volume; s.play().catch(()=>{}); }catch{}
 }
-
 
 /* ===========================================================
    WEATHER HELPERS
@@ -1086,40 +1149,6 @@ function setHousePower(on){
       ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
   });
 }
-// === Cloud Skybox ===
-function createCloudSkybox(scene){
-  // Giant box
-  const skybox = BABYLON.MeshBuilder.CreateBox("cloudSkybox", {size:1000}, scene);
-  skybox.infiniteDistance = true;
-
-  // Material
-  const skyMat = new BABYLON.StandardMaterial("cloudSkyMat", scene);
-  skyMat.backFaceCulling = false;
-
-  // Use emissive so it's not darkened by lights
-  skyMat.emissiveColor = new BABYLON.Color3(1,1,1);
-
-  // Cloud texture
-  skyMat.reflectionTexture = new BABYLON.CubeTexture("./assets/images/clouds.jpg", scene);
-  skyMat.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-
-  // Optionally soften/fade with fog color
-  skyMat.diffuseColor = new BABYLON.Color3(0,0,0);
-  skyMat.specularColor = new BABYLON.Color3(0,0,0);
-
-  skybox.material = skyMat;
-  return skybox;
-}
-
-// Call once when building scene
-const cloudSkybox = createCloudSkybox(scene);
-
-// Animate cloud scroll (optional, for dynamic effect)
-scene.onBeforeRenderObservable.add(()=>{
-  if (cloudSkybox.material && cloudSkybox.material.reflectionTexture){
-    cloudSkybox.material.reflectionTexture.rotationY += 0.0002; // slow pan
-  }
-});
 
 /* ===========================================================
    PLAYER / MOVEMENT / INPUT
@@ -1177,7 +1206,7 @@ function openDoorNearby(){
 /* ===========================================================
    PLAYER FOOTSTEPS (step1/2/3)
    =========================================================== */
-const stepState = { lastPos:null, acc:0, strideWalk:0.9, strideRun:0.8 };
+const stepState = { lastPos:null, acc:0, strideWalk:1.2, strideRun:0.8 };
 function updatePlayerFootsteps(dt){
   if (!stepState.lastPos) { stepState.lastPos = camera.position.clone(); return; }
   const now = camera.position;
@@ -1190,7 +1219,7 @@ function updatePlayerFootsteps(dt){
   const stride = player.running ? stepState.strideRun : stepState.strideWalk;
   if (stepState.acc >= stride){
     stepState.acc = 0;
-    playStep(0.38); // player step volume
+    playStep(0.42); // player step volume
   }
 }
 
