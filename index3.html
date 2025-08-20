@@ -178,7 +178,7 @@
   </div>
 
   <!-- (optional) Loading overlay -->
-  <div id="loading-overlay" aria-hidden="true">
+  <div id="loading-overlay-old1" aria-hidden="true">
     <div id="loading-card">
       <div id="loading-title">Loading assets…</div>
       <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
@@ -1979,6 +1979,92 @@
     }
   }
   tryInstall();
+})();
+</script>
+
+
+<script>
+(function loaderHideOnStarted(){
+  var overlay = document.getElementById('loading-overlay');
+  function finish(){ try{ document.body.classList.remove('game-loading'); }catch(e){} if (overlay) overlay.style.display='none'; }
+  window.addEventListener('game:started', finish, {once:false});
+})();
+</script>
+
+
+<script>
+// === BREATH: small camera‑anchored puffs (and disable giant sky mist) ===
+(function(){
+  // Soft switch to kill the heavy sky rings by default (you can re-enable with setCloudQuality('low'|'med'|'high'))
+  try {
+    if (window.setCloudQuality) setCloudQuality('off');
+    if (window.__ringClouds && __ringClouds.systems && __ringClouds.systems.length) {
+      __ringClouds.systems.forEach(function(ps){ try{ ps.stop(); ps.dispose(); }catch(e){} });
+      __ringClouds.systems.length = 0;
+    }
+  } catch(e){}
+
+  // Wrap setupBreathFX to enforce small, near-camera particles
+  var _setup = window.setupBreathFX;
+  window.setupBreathFX = function(scene, cam){
+    var fx = _setup ? _setup(scene, cam) : (window.breathFX || (window.breathFX = {}));
+    try {
+      var mouth = (fx && fx.mouth) ? fx.mouth : null;
+      if (mouth){
+        // Slightly lower and further so it doesn't fill the screen
+        mouth.position = new BABYLON.Vector3(0, -0.08, 0.90);
+      }
+      var ps = fx.ps;
+      if (ps){
+        // Small sprite size and short life so it reads as breath, not fog
+        ps.minSize = 0.02;
+        ps.maxSize = 0.06;
+        ps.minLifeTime = 0.45;
+        ps.maxLifeTime = 0.90;
+        ps.updateSpeed = 0.01;
+        ps.isBillboardBased = true;
+        ps.isLocal = true;
+
+        // Subtle alpha
+        ps.color1 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.14);
+        ps.color2 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.08);
+        ps.colorDead = new BABYLON.Color4(1,1,1,0);
+
+        // Keep gravity light and add a tiny upward bias via direction (set each frame below)
+        ps.gravity = new BABYLON.Vector3(0, 0.04, 0);
+      }
+      // Set burst emit caps based on GPU/CPU
+      breathFX.__burstEmit = (ps && ps.getClassName && ps.getClassName().includes('GPU')) ? 140 : 45;
+      // Shorter puffs
+      breathFX.burst = 0;
+    } catch(e){}
+    return window.breathFX;
+  };
+
+  // Wrap updateBreath to clamp emit and ensure forward/up direction
+  var _update = window.updateBreath;
+  window.updateBreath = function(dt){
+    if (!_update) return;
+    _update(dt);
+
+    var fx = window.breathFX;
+    if (!fx || !fx.ps || !window.camera) return;
+    var ps = fx.ps;
+
+    // Direction: forward with a hint upward, small spread
+    try {
+      var fwd = camera.getDirection(BABYLON.Axis.Z).scale(1.2).add(new BABYLON.Vector3(0, 0.12, 0));
+      ps.direction1 = fwd.add(new BABYLON.Vector3(-0.02, -0.01, -0.02));
+      ps.direction2 = fwd.add(new BABYLON.Vector3( 0.02,  0.01,  0.02));
+    } catch(e){}
+
+    // Clamp emit to small bursts only (never constant fog)
+    var want = (fx.burst && fx.burst > 0) ? (fx.__burstEmit || 90) : 0;
+    ps.emitRate = want;
+  };
+
+  // If breath was already initialized before this patch ran, re-run setup to apply small settings
+  try { if (typeof window.scene !== 'undefined' && typeof window.camera !== 'undefined' && typeof window.setupBreathFX === 'function') { window.setupBreathFX(scene, camera); } } catch(e){}
 })();
 </script>
 
