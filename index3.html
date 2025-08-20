@@ -2370,25 +2370,7 @@ function ensureDebugCube(){
 </script>
 
 
-<script>
-// === Breath FX stubs (prevent ReferenceError) ===
-(function(){
-  if (typeof setupBreathFX !== 'function'){
-    window.setupBreathFX = function(scene){
-      // Safe no-op initialization; extend later with actual audio if desired
-      window.breathFX = window.breathFX || { enabled: true, level: 0 };
-      try { if (typeof devLog === 'function') devLog('setupBreathFX: stub active'); } catch(e){}
-    };
-  }
-  if (typeof updateBreath !== 'function'){
-    window.updateBreath = function(dt){
-      // Safe no-op each frame
-      // If you add real breathing audio, modulate volume/pitch here.
-      return;
-    };
-  }
-})();
-</script>
+
 
 
 <script>
@@ -2401,6 +2383,153 @@ function ensureDebugCube(){
       return;
     };
   }
+})();
+</script>
+
+
+<script>
+/* ===========================================================
+   BREATH FX via Babylon ParticleSystem (camera-anchored)
+   =========================================================== */
+(function(){
+  window.breathFX = window.breathFX || {
+    enabled: true,
+    onlyWhenCold: false,  // set true if you only want visible breath in cold/rain/snow
+    timer: 0,
+    burst: 0,
+    useGPU: false,
+    ps: null,
+    mouth: null
+  };
+
+  // Create particle system parented to camera mouth
+  window.setupBreathFX = function(scene, cam){
+    scene = scene || window.scene;
+    cam   = cam   || window.camera;
+    if (!scene || !cam) { try{console.warn("setupBreathFX: missing scene or camera");}catch(e){} return breathFX; }
+
+    // Mouth transform, slightly forward and a bit down from the camera
+    var mouth = new BABYLON.TransformNode("breathMouth", scene);
+    mouth.parent = cam;
+    mouth.position = new BABYLON.Vector3(0, -0.06, 0.35);
+
+    // Particle system (prefer GPU if supported)
+    var useGPU = BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported;
+    var ps;
+    if (useGPU){
+      ps = new BABYLON.GPUParticleSystem("breathGPU", { capacity: 4000 }, scene);
+      ps.activeParticleCount = 2000;
+    } else {
+      ps = new BABYLON.ParticleSystem("breathCPU", 800, scene);
+    }
+
+    ps.particleTexture = new BABYLON.Texture(
+      "https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png",
+      scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE
+    );
+
+    ps.emitter = mouth;
+    ps.isLocal = true;
+    ps.isBillboardBased = true;
+
+    // Soft, wispy look
+    ps.color1    = new BABYLON.Color4(0.85, 0.88, 0.95, 0.35);
+    ps.color2    = new BABYLON.Color4(0.95, 0.98, 1.00, 0.18);
+    ps.colorDead = new BABYLON.Color4(1.00, 1.00, 1.00, 0.00);
+
+    ps.minSize = 0.05;
+    ps.maxSize = 0.16;
+    ps.minLifeTime = 0.6;
+    ps.maxLifeTime = 1.4;
+    ps.updateSpeed = 0.01;
+    ps.blendMode   = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+    ps.minEmitPower = 0.4;
+    ps.maxEmitPower = 1.0;
+    ps.minAngularSpeed = -0.5;
+    ps.maxAngularSpeed =  0.5;
+
+    // Gentle upward drift (warm air rises)
+    ps.gravity = new BABYLON.Vector3(0, 0.15, 0);
+
+    // Initial forward direction; will be updated each frame in updateBreath
+    ps.direction1 = new BABYLON.Vector3(0, 0.05, 1.4);
+    ps.direction2 = new BABYLON.Vector3(0, 0.10, 1.6);
+
+    // Noise for curl (CPU only)
+    if (!useGPU && BABYLON.NoiseProceduralTexture){
+      try {
+        var noiseTex = new BABYLON.NoiseProceduralTexture("breathNoise", 256, scene);
+        noiseTex.animationSpeedFactor = 5;
+        noiseTex.persistence = 2;
+        noiseTex.brightness = 0.2;
+        noiseTex.octaves = 3;
+        ps.noiseTexture = noiseTex;
+      } catch(e){}
+    }
+
+    // Start with no emission; bursts are handled in updateBreath
+    ps.emitRate = 0;
+    ps.start();
+
+    // Save refs
+    breathFX.ps = ps;
+    breathFX.mouth = mouth;
+    breathFX.useGPU = useGPU;
+    breathFX.timer = 0;
+    breathFX.burst = 0;
+
+    try { if (typeof devLog === 'function') devLog('Breath FX: ready (' + (useGPU?'GPU':'CPU') + ')'); } catch(e){}
+    return breathFX;
+  };
+
+  // dt in seconds
+  window.updateBreath = function(dt){
+    if (!breathFX.enabled || !breathFX.ps) return;
+
+    // Optional gating: only show in cold/rain/snow if desired
+    if (breathFX.onlyWhenCold){
+      var ok = false;
+      try {
+        var w = window.weather && (weather.name || weather.mode || "");
+        ok = /snow|rain|hail|cold|winter|blizzard/i.test(String(w));
+      } catch(e){}
+      if (!ok){ breathFX.ps.emitRate = 0; return; }
+    }
+
+    // Update direction to follow camera aim
+    var cam = window.camera;
+    if (cam && cam.getDirection){
+      var forward = cam.getDirection(BABYLON.Axis.Z); // camera forward
+      // Slight upward bias
+      var dir = forward.scale(1.6).add(new BABYLON.Vector3(0, 0.2, 0));
+      // Small spread
+      breathFX.ps.direction1 = dir.add(new BABYLON.Vector3(-0.08, -0.02, -0.08));
+      breathFX.ps.direction2 = dir.add(new BABYLON.Vector3( 0.08,  0.02,  0.08));
+    }
+
+    // Breathing rate (breaths per minute)
+    var bpm = 12; // idle
+    var moving = (typeof controls !== 'undefined') && (controls.forward || controls.back || controls.left || controls.right);
+    if (typeof player !== 'undefined' && player.running)      bpm = 26;
+    else if (moving)                                         bpm = 16;
+    else if (player && player.crouching)                     bpm = 10;
+
+    var interval = 60 / bpm; // seconds per breath
+
+    // Burst state machine
+    breathFX.timer += dt;
+    if (breathFX.burst > 0){
+      breathFX.ps.emitRate = breathFX.useGPU ? 1200 : 300; // active puff
+      breathFX.burst -= dt;
+      if (breathFX.burst <= 0){
+        breathFX.ps.emitRate = 0;  // stop emitting, let particles fade
+        breathFX.burst = 0;
+      }
+    } else if (breathFX.timer >= interval){
+      breathFX.timer = 0;
+      breathFX.burst = 0.22; // ~220ms puff
+    }
+  };
 })();
 </script>
 
