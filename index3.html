@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <link rel="icon" type="image/x-icon" href="/3d/favicon.ico?v=1">
+<link rel="shortcut icon" href="/3d/favicon.ico?v=1">
+
   <meta charset="utf-8" />
   <title>PhasmaPhoney — 3D Prototype</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
@@ -1256,9 +1259,44 @@ function openDoorNearby(){
 /* ===========================================================
    PLAYER FOOTSTEPS (step1/2/3)
    =========================================================== */
-const stepState = { lastPos:null, acc:0, strideWalk:1.2, strideRun:0.8 };
+const stepState = {
+  lastPos: null,
+  lastT: 0,
+  distSinceStep: 0,
+  intervalWalk: 1500,  // ms between steps when walking
+  intervalRun: 1000,   // ms between steps when running
+  minMove: 0.05        // meters required since last step to allow a new one
+};
 function updatePlayerFootsteps(dt){
-  if (!stepState.lastPos) { stepState.lastPos = camera.position.clone(); return; }
+  if (!stepState.lastPos) {
+    stepState.lastPos = camera.position.clone();
+    stepState.lastT = performance.now();
+    stepState.distSinceStep = 0;
+    return;
+  }
+
+  // Only when actually pressing movement
+  if (!(typeof controls !== 'undefined' && (controls.forward || controls.back || controls.left || controls.right))) return;
+
+  // Accumulate distance moved
+  const nowPos = camera.position;
+  const d = BABYLON.Vector3.Distance(nowPos, stepState.lastPos);
+  stepState.lastPos = nowPos.clone();
+  stepState.distSinceStep += d;
+
+  // Time gate
+  const now = performance.now();
+  const running = (typeof player !== 'undefined' && player.running);
+  const interval = running ? stepState.intervalRun : stepState.intervalWalk;
+
+  if ((now - stepState.lastT) >= interval && stepState.distSinceStep >= stepState.minMove){
+    stepState.lastT = now;
+    stepState.distSinceStep = 0;
+    if (typeof playStep === 'function') {
+      playStep(0.30, running);
+    }
+  }
+}
   const now = camera.position;
   const d = BABYLON.Vector3.Distance(now, stepState.lastPos);
   stepState.lastPos = now.clone();
