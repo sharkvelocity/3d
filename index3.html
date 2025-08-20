@@ -125,6 +125,12 @@
   body.mouse-mode #touch-right { display: none !important; }
 </style>
 
+
+<style>
+  /* Ensure loading overlay is hidden by default until Start */
+  #loading-overlay { display: none !important; }
+</style>
+
 </head>
 
 <body>
@@ -2304,15 +2310,19 @@ function ensureDebugCube(){
 
 
 
+
 <script>
-// === LOADING OVERLAY JS (show only after Start/boot) ===
+// === LOADING OVERLAY JS (gated until Start) ===
 (function(){
   var overlay = document.getElementById('loading-overlay');
   var fill = document.getElementById('loading-fill');
   var txt = document.getElementById('loading-text');
   if (!overlay) return;
 
-  function showLoading(){ overlay.style.display = 'flex'; }
+  // Gate: do not show until explicitly allowed
+  window.__allowLoadingOverlay = false;
+
+  function showLoading(){ if (window.__allowLoadingOverlay) overlay.style.display = 'flex'; }
   function hideLoading(){ overlay.style.display = 'none'; }
   function setPct(p){ if (fill) fill.style.width = Math.max(0, Math.min(100, p)) + '%'; }
 
@@ -2323,6 +2333,7 @@ function ensureDebugCube(){
 
   var progressTimer = null;
   function startSceneReadyLoop(){
+    if (!window.__allowLoadingOverlay) return; // don't start early
     if (progressTimer) return;
     showLoading();
     progressTimer = setInterval(function(){
@@ -2342,21 +2353,27 @@ function ensureDebugCube(){
 
   // Only show AFTER the game begins loading
   window.addEventListener('game:starting', function(){
+    window.__allowLoadingOverlay = true;
     startSceneReadyLoop();
-  });
+  }, { once: true });
 
   // Hook AssetsManager progress if the app uses it
   window.hookAssetsManagerProgress = function(assetsManager){
     if (!assetsManager) return;
-    showLoading();
     assetsManager.onProgress = function(task, remaining, total){
+      if (!window.__allowLoadingOverlay) return; // ignore early preloads
+      showLoading();
       if (total > 0) setPct(Math.round(100 * (total - remaining) / total));
       if (txt && task && task.name) txt.textContent = 'Loading ' + task.name + '…';
     };
-    assetsManager.onFinish = function(){ setPct(100); hideLoading(); };
+    assetsManager.onFinish = function(){ if (window.__allowLoadingOverlay){ setPct(100); hideLoading(); } };
   };
+
+  // Ensure hidden on initial load
+  hideLoading();
 })();
 </script>
+
 
 
 
@@ -2437,6 +2454,28 @@ function ensureDebugCube(){
     var prefersMouse = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
     setMouseMode(prefersMouse);
   } catch(e){}
+})();
+</script>
+
+
+<script>
+// === START BUTTON GATE FOR LOADING OVERLAY ===
+(function(){
+  function triggerStarting(){
+    try {
+      window.__allowLoadingOverlay = true;
+      window.dispatchEvent(new Event('game:starting'));
+    } catch(e){}
+  }
+  // Bind to #start-button if present (capture phase so it runs first)
+  var btn = document.getElementById('start-button');
+  if (btn && !btn.__loadingGateBound){
+    btn.addEventListener('click', function(){ triggerStarting(); }, {capture:true});
+    btn.addEventListener('touchstart', function(){ triggerStarting(); }, {capture:true, passive:true});
+    btn.__loadingGateBound = true;
+  }
+  // Also listen for a custom event if your flow dispatches it
+  window.addEventListener('ui:start', triggerStarting);
 })();
 </script>
 
