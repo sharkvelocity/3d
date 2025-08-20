@@ -138,6 +138,13 @@
   body.game-loading #loading-overlay { display: flex !important; }
 </style>
 
+
+<style>
+  /* Loader absolutely hidden unless .game-loading is on <body> */
+  #loading-overlay { display: none !important; }
+  body.game-loading #loading-overlay { display: flex !important; }
+</style>
+
 </head>
 
 <body>
@@ -2319,77 +2326,101 @@ function ensureDebugCube(){
 
 
 
+
 <script>
-// === LOADING OVERLAY (strictly after Start Investigation) ===
+// === LOADING OVERLAY (final, after-Start only, always-finish) ===
 (function(){
   var fill = document.getElementById('loading-fill');
   var txt  = document.getElementById('loading-text');
   if (!fill) return;
 
-  // Helpers
-  function showLoading(){
-    document.body.classList.add('game-loading');
-  }
-  function hideLoading(){
-    document.body.classList.remove('game-loading');
-  }
-  function setPct(p){
-    fill.style.width = Math.max(0, Math.min(100, p)) + '%';
-  }
+  // Gate: overlay visible only when body has .game-loading
+  function show(){ document.body.classList.add('game-loading'); }
+  function hide(){ document.body.classList.remove('game-loading'); }
+  function setPct(p){ fill.style.width = Math.max(0, Math.min(100, p)) + '%'; }
+
   // Expose (optional)
-  window.showLoading = showLoading;
-  window.hideLoading = hideLoading;
-  window.setLoadingPercent = setPct;
+  window.showLoading = show; window.hideLoading = hide; window.setLoadingPercent = setPct;
 
-  // Scene-ready loop (only advances if loader is visible)
-  var timer = null;
-  function startSceneReadyLoop(){
-    if (timer) return;
-    showLoading();
-    timer = setInterval(function(){
-      try {
-        var ready = (window.scene && scene.isReady && scene.isReady());
-        var w = parseFloat((fill.style.width||'0').replace('%','')) || 0;
-        if (!ready && w < 90) setPct(w + 2);
-        if (ready){
-          setPct(100);
-          hideLoading();
-          clearInterval(timer); timer = null;
-        }
-      } catch(e){ /* ignore */ }
-    }, 120);
+  // One-shot finisher
+  var finished = false;
+  function finish(){
+    if (finished) return;
+    finished = true;
+    setPct(100);
+    hide();
+    try { window.dispatchEvent(new Event('loader:finished')); } catch(e){}
   }
 
-  // Hook AssetsManager (ignored until loader is visible)
-  window.hookAssetsManagerProgress = function(assetsManager){
-    if (!assetsManager) return;
-    assetsManager.onProgress = function(task, remaining, total){
-      if (!document.body.classList.contains('game-loading')) return;
-      if (total > 0) setPct(Math.round(100 * (total - remaining) / total));
-      if (txt && task && task.name) txt.textContent = 'Loading ' + task.name + '…';
-    };
-    assetsManager.onFinish = function(){
-      if (document.body.classList.contains('game-loading')){
-        setPct(100); hideLoading();
-      }
-    };
-  };
+  // Begin loop AFTER Start only
+  function begin(){
+    if (document.body.classList.contains('game-loading')) return; // already running
+    show();
+    setPct(5);
 
-  // === STRICT START TRIGGERS ===
-  // 1) Wrap safeStart if present
+    // 1) Scene ready
+    try {
+      if (window.scene){
+        if (scene.executeWhenReady) scene.executeWhenReady(function(){ finish(); });
+        if (scene.onReadyObservable && scene.onReadyObservable.addOnce) scene.onReadyObservable.addOnce(function(){ finish(); });
+      }
+    } catch(e){}
+
+    // 2) Rendered frames fallback
+    (function framesFinish(){
+      var s = window.scene;
+      if (!s || !s.onAfterRenderObservable){ setTimeout(framesFinish, 200); return; }
+      var frames = 0;
+      var sub = s.onAfterRenderObservable.add(function(){
+        frames++;
+        // 12 frames ~= 0.2s @ 60fps
+        if (frames >= 12){ try { s.onAfterRenderObservable.remove(sub); } catch(e){} finish(); }
+      });
+    })();
+
+    // 3) isReady poll with smooth creep up to 96%
+    var last = performance.now();
+    var iv = setInterval(function(){
+      var now = performance.now();
+      var w = parseFloat((fill.style.width||'0').replace('%','')) || 0;
+      var ready = false;
+      try { ready = (window.scene && scene.isReady && scene.isReady()); } catch(e){}
+      if (!ready && w < 96) {
+        setPct(w + 1.5);
+      }
+      if (ready || finished) { clearInterval(iv); return; }
+      // hard timeout: finish after 20s no matter what
+      if (now - last > 20000){ clearInterval(iv); finish(); }
+    }, 120);
+
+    // 4) Also finish when your game signals start-complete
+    window.addEventListener('game:started', finish, { once: true });
+
+    // 5) Also finish when __started flips
+    (function pollStarted(){
+      var tries = 0;
+      var p = setInterval(function(){
+        tries++;
+        try { if (window.__started) { clearInterval(p); finish(); } } catch(e){}
+        if (tries > 600) clearInterval(p);
+      }, 100);
+    })();
+  }
+
+  // --- Start triggers ---
+  // A) wrap safeStart if present
   try {
-    if (typeof window.safeStart === 'function' && !window.safeStart.__gated){
+    if (typeof window.safeStart === 'function' && !window.safeStart.__loaderFinal){
       var _old = window.safeStart;
       window.safeStart = function(){
-        // SHOW loader right before starting your boot
-        startSceneReadyLoop();
+        begin();
         return _old.apply(this, arguments);
       };
-      window.safeStart.__gated = true;
+      window.safeStart.__loaderFinal = true;
     }
   } catch(e){}
 
-  // 2) Bind to buttons that say "Start Investigation" (even if created later)
+  // B) bind to any visible button with "Start Investigation" text
   function looksLikeStart(el){
     try {
       var t = (el.textContent || '').trim().toLowerCase();
@@ -2397,41 +2428,37 @@ function ensureDebugCube(){
     } catch(e){ return false; }
   }
   function bindStart(el){
-    if (!el || el.__loaderBound) return;
-    el.addEventListener('click', startSceneReadyLoop, {capture:true});
-    el.addEventListener('touchstart', startSceneReadyLoop, {capture:true, passive:true});
-    el.__loaderBound = true;
+    if (!el || el.__loaderFinalBound) return;
+    el.addEventListener('click', begin, { capture: true });
+    el.addEventListener('touchstart', begin, { capture: true, passive: true });
+    el.__loaderFinalBound = true;
   }
-  // Bind existing candidates
-  Array.prototype.forEach.call(document.querySelectorAll('button, .button, [role="button"]'), function(el){
+  Array.prototype.forEach.call(document.querySelectorAll('button, .button, [role=\"button\"]'), function(el){
     if (looksLikeStart(el)) bindStart(el);
   });
-  // Watch for future buttons (e.g., dynamic UI)
+  // dynamic buttons
   var mo = new MutationObserver(function(muts){
     muts.forEach(function(m){
-      if (m.addedNodes) {
-        m.addedNodes.forEach(function(n){
-          if (n.nodeType === 1){
-            if (looksLikeStart(n)) bindStart(n);
-            // scan children
-            n.querySelectorAll && n.querySelectorAll('button, .button, [role="button"]').forEach(function(c){
-              if (looksLikeStart(c)) bindStart(c);
-            });
-          }
+      if (!m.addedNodes) return;
+      Array.prototype.forEach.call(m.addedNodes, function(n){
+        if (n.nodeType !== 1) return;
+        if (looksLikeStart(n)) bindStart(n);
+        n.querySelectorAll && n.querySelectorAll('button, .button, [role=\"button\"]').forEach(function(c){
+          if (looksLikeStart(c)) bindStart(c);
         });
-      }
+      });
     });
   });
   mo.observe(document.documentElement, { childList: true, subtree: true });
 
-  // 3) Custom event hook if you want to trigger manually
-  window.addEventListener('game:starting', startSceneReadyLoop);
+  // C) allow manual event
+  window.addEventListener('game:starting', begin);
 
   // Ensure hidden on initial load
-  hideLoading();
-  setPct(0);
+  hide(); setPct(0);
 })();
 </script>
+
 
 
 
