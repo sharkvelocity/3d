@@ -1882,7 +1882,7 @@ function ensureDebugCube(){
     position: fixed;
     top: 0; bottom: 0;
     width: 50vw;
-    z-index: 9998;
+    z-index: 10050;
     touch-action: none; /* prevent browser gestures */
   }
   #touch-left  { left: 0; }
@@ -1910,46 +1910,44 @@ function ensureDebugCube(){
 
 
 
+
 <script>
-// === TOUCH CONTROLS LOGIC (refined) ===
+// === TOUCH CONTROLS LOGIC (fix left movement + invert pitch to user's preference) ===
 (function(){
   var left = document.getElementById('touch-left');
   var right = document.getElementById('touch-right');
   var runBtn = document.getElementById('run-toggle') || document.getElementById('btn-run');
-
   if (!left || !right) return;
 
-  // Sensitivity & deadzone
-  var MOVE_DEAD = 14;     // px
-  var LOOK_DEAD = 6;      // px
-  var LOOK_SENS = 0.0042; // radians per px
+  var MOVE_DEAD = 14;
+  var LOOK_DEAD = 6;
+  var LOOK_SENS = 0.0042;
   var PITCH_MIN = -Math.PI/2 + 0.12;
   var PITCH_MAX =  Math.PI/2 - 0.12;
 
-  // Movement tracking
   var lActive = false, lId = null, lStartX = 0, lStartY = 0;
-  // Look tracking
   var rActive = false, rId = null, rLastX = 0, rLastY = 0;
 
-  function ensureControls(){
+  function hasControls(){
     return (typeof controls !== 'undefined' && controls);
   }
-  function resetMove(){
-    lActive = false; lId = null;
-    if (ensureControls()){
+  function stopControls(){
+    if (hasControls()){
       controls.forward = controls.back = controls.left = controls.right = false;
     }
   }
+  function resetMove(){
+    lActive = false; lId = null;
+    stopControls();
+  }
 
-  // LEFT: forward/back/strafe from swipe direction
+  // LEFT: forward/back/strafe
   left.style.touchAction = 'none';
   left.addEventListener('touchstart', function(e){
     e.preventDefault();
-    // track the first available touch on left
     var t = e.changedTouches[0];
     lActive = true; lId = t.identifier; lStartX = t.clientX; lStartY = t.clientY;
-    // reset movement at start
-    resetMove();
+    stopControls(); // don't clear lActive here
   }, {passive:false});
 
   left.addEventListener('touchmove', function(e){
@@ -1958,38 +1956,33 @@ function ensureDebugCube(){
     for (var i=0;i<e.changedTouches.length;i++){
       var t = e.changedTouches[i];
       if (t.identifier !== lId) continue;
+      if (!hasControls()) return;
+
       var dx = t.clientX - lStartX;
       var dy = t.clientY - lStartY;
-      if (!ensureControls()) return;
 
-      // Default to no movement
+      // Default to stop
       controls.forward = controls.back = controls.left = controls.right = false;
-
-      // Only set movement when beyond deadzone; otherwise stop
       var moved = false;
+
       if (Math.abs(dx) > MOVE_DEAD){
-        if (dx < 0) controls.left = true;
-        if (dx > 0) controls.right = true;
+        controls.left  = dx < 0;
+        controls.right = dx > 0;
         moved = true;
       }
       if (Math.abs(dy) > MOVE_DEAD){
-        if (dy < 0) controls.forward = true;
-        if (dy > 0) controls.back = true;
+        controls.forward = dy < 0;
+        controls.back    = dy > 0;
         moved = true;
       }
-      if (!moved){
-        // if finger returns to center, stop movement
-        controls.forward = controls.back = controls.left = controls.right = false;
-      }
+      if (!moved) stopControls();
       break;
     }
   }, {passive:false});
 
   left.addEventListener('touchend', function(e){
     for (var i=0;i<e.changedTouches.length;i++){
-      if (e.changedTouches[i].identifier === lId){
-        resetMove(); break;
-      }
+      if (e.changedTouches[i].identifier === lId){ resetMove(); break; }
     }
   }, {passive:false});
   left.addEventListener('touchcancel', function(){ resetMove(); }, {passive:false});
@@ -2013,7 +2006,9 @@ function ensureDebugCube(){
       if (Math.abs(dx) > LOOK_DEAD || Math.abs(dy) > LOOK_DEAD){
         if (typeof camera !== 'undefined' && camera && camera.rotation){
           camera.rotation.y += dx * LOOK_SENS;
-          var nx = camera.rotation.x + (-dy * LOOK_SENS);
+          // Invert to match user's expectation (swipe up -> look DOWN, or vice versa)
+          // The user reported "up and down are reversed", so flip sign:
+          var nx = camera.rotation.x + (dy * LOOK_SENS);
           camera.rotation.x = Math.min(PITCH_MAX, Math.max(PITCH_MIN, nx));
         }
         rLastX = t.clientX; rLastY = t.clientY;
@@ -2024,21 +2019,12 @@ function ensureDebugCube(){
 
   right.addEventListener('touchend', function(e){
     for (var i=0;i<e.changedTouches.length;i++){
-      if (e.changedTouches[i].identifier === rId){
-        rActive = false; rId = null; break;
-      }
+      if (e.changedTouches[i].identifier === rId){ rActive = false; rId = null; break; }
     }
   }, {passive:false});
   right.addEventListener('touchcancel', function(){ rActive = false; rId = null; }, {passive:false});
 
-  // Prevent page scroll on the hit areas themselves
-  ['touchmove','touchstart'].forEach(function(ev){
-    [left, right].forEach(function(el){
-      el.addEventListener(ev, function(e){ e.preventDefault(); }, {passive:false});
-    });
-  });
-
-  // Run toggle unified (use HUD button if present, else fall back)
+  // Sync run buttons if present
   function updateRunBtn(btn){
     if (!btn) return;
     var on = (typeof player !== 'undefined' && player.running);
@@ -2049,7 +2035,6 @@ function ensureDebugCube(){
   function toggleRun(){
     if (typeof player === 'undefined') return;
     player.running = !player.running;
-    // Sync all possible buttons
     updateRunBtn(document.getElementById('run-toggle'));
     updateRunBtn(document.getElementById('btn-run'));
   }
@@ -2060,6 +2045,7 @@ function ensureDebugCube(){
   }
 })();
 </script>
+
     
 
 
