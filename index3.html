@@ -97,6 +97,14 @@
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
+
+<style>
+  /* Kill any legacy D-pad/arrow blocks that might linger */
+  .dpad, #dpad, .arrow-buttons, .arrow, .move-up, .move-down, .move-left, .move-right {
+    display: none !important;
+  }
+</style>
+
 </head>
 
 <body>
@@ -1901,19 +1909,20 @@ function ensureDebugCube(){
 <button id="run-toggle" type="button">Run: OFF</button>
 
 
+
 <script>
-// === TOUCH CONTROLS LOGIC ===
+// === TOUCH CONTROLS LOGIC (refined) ===
 (function(){
   var left = document.getElementById('touch-left');
   var right = document.getElementById('touch-right');
-  var runBtn = document.getElementById('run-toggle');
+  var runBtn = document.getElementById('run-toggle') || document.getElementById('btn-run');
 
-  if (!left || !right || !runBtn) return;
+  if (!left || !right) return;
 
   // Sensitivity & deadzone
   var MOVE_DEAD = 14;     // px
-  var LOOK_DEAD = 8;      // px
-  var LOOK_SENS = 0.0045; // radians per px
+  var LOOK_DEAD = 6;      // px
+  var LOOK_SENS = 0.0042; // radians per px
   var PITCH_MIN = -Math.PI/2 + 0.12;
   var PITCH_MAX =  Math.PI/2 - 0.12;
 
@@ -1922,40 +1931,55 @@ function ensureDebugCube(){
   // Look tracking
   var rActive = false, rId = null, rLastX = 0, rLastY = 0;
 
+  function ensureControls(){
+    return (typeof controls !== 'undefined' && controls);
+  }
   function resetMove(){
     lActive = false; lId = null;
-    if (window.controls){
+    if (ensureControls()){
       controls.forward = controls.back = controls.left = controls.right = false;
     }
   }
 
   // LEFT: forward/back/strafe from swipe direction
+  left.style.touchAction = 'none';
   left.addEventListener('touchstart', function(e){
     e.preventDefault();
-    if (lActive) return;
+    // track the first available touch on left
     var t = e.changedTouches[0];
     lActive = true; lId = t.identifier; lStartX = t.clientX; lStartY = t.clientY;
+    // reset movement at start
+    resetMove();
   }, {passive:false});
 
   left.addEventListener('touchmove', function(e){
     if (!lActive || lId===null) return;
+    e.preventDefault();
     for (var i=0;i<e.changedTouches.length;i++){
       var t = e.changedTouches[i];
       if (t.identifier !== lId) continue;
       var dx = t.clientX - lStartX;
       var dy = t.clientY - lStartY;
-      if (typeof controls === 'undefined') return;
-      // Reset
+      if (!ensureControls()) return;
+
+      // Default to no movement
       controls.forward = controls.back = controls.left = controls.right = false;
-      // Horizontal
+
+      // Only set movement when beyond deadzone; otherwise stop
+      var moved = false;
       if (Math.abs(dx) > MOVE_DEAD){
         if (dx < 0) controls.left = true;
         if (dx > 0) controls.right = true;
+        moved = true;
       }
-      // Vertical (note: up swipe = negative dy)
       if (Math.abs(dy) > MOVE_DEAD){
         if (dy < 0) controls.forward = true;
         if (dy > 0) controls.back = true;
+        moved = true;
+      }
+      if (!moved){
+        // if finger returns to center, stop movement
+        controls.forward = controls.back = controls.left = controls.right = false;
       }
       break;
     }
@@ -1971,25 +1995,26 @@ function ensureDebugCube(){
   left.addEventListener('touchcancel', function(){ resetMove(); }, {passive:false});
 
   // RIGHT: camera look
+  right.style.touchAction = 'none';
   right.addEventListener('touchstart', function(e){
     e.preventDefault();
-    if (rActive) return;
     var t = e.changedTouches[0];
     rActive = true; rId = t.identifier; rLastX = t.clientX; rLastY = t.clientY;
   }, {passive:false});
 
   right.addEventListener('touchmove', function(e){
     if (!rActive || rId===null) return;
+    e.preventDefault();
     for (var i=0;i<e.changedTouches.length;i++){
       var t = e.changedTouches[i];
       if (t.identifier !== rId) continue;
       var dx = t.clientX - rLastX;
       var dy = t.clientY - rLastY;
       if (Math.abs(dx) > LOOK_DEAD || Math.abs(dy) > LOOK_DEAD){
-        var cam = window.camera;
-        if (cam){
-          cam.rotation.y += dx * LOOK_SENS;
-          cam.rotation.x = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.rotation.x + (-dy * LOOK_SENS)));
+        if (typeof camera !== 'undefined' && camera && camera.rotation){
+          camera.rotation.y += dx * LOOK_SENS;
+          var nx = camera.rotation.x + (-dy * LOOK_SENS);
+          camera.rotation.x = Math.min(PITCH_MAX, Math.max(PITCH_MIN, nx));
         }
         rLastX = t.clientX; rLastY = t.clientY;
       }
@@ -2006,36 +2031,36 @@ function ensureDebugCube(){
   }, {passive:false});
   right.addEventListener('touchcancel', function(){ rActive = false; rId = null; }, {passive:false});
 
-  // Prevent page scroll on the whole doc while touching either half
+  // Prevent page scroll on the hit areas themselves
   ['touchmove','touchstart'].forEach(function(ev){
-    document.addEventListener(ev, function(e){
-      if (e.target===left || e.target===right) e.preventDefault();
-    }, {passive:false});
+    [left, right].forEach(function(el){
+      el.addEventListener(ev, function(e){ e.preventDefault(); }, {passive:false});
+    });
   });
 
-  // Run toggle button
-  function updateRunBtn(){
-    var on = (typeof player !== 'undefined' && !!player.running);
-    runBtn.textContent = "Run: " + (on ? "ON" : "OFF");
-    runBtn.classList.toggle('active', on);
-    try { var br = document.getElementById("btn-run"); if (br){ br.classList.toggle("on", on); br.textContent = "Run" + (on ? " (ON)" : ""); } } catch(e){}
+  // Run toggle unified (use HUD button if present, else fall back)
+  function updateRunBtn(btn){
+    if (!btn) return;
+    var on = (typeof player !== 'undefined' && player.running);
+    btn.textContent = 'Run' + (on ? ' (ON)' : '');
+    btn.classList.toggle('active', !!on);
+    btn.classList.toggle('on', !!on);
   }
-  runBtn.addEventListener('click', function(){
+  function toggleRun(){
     if (typeof player === 'undefined') return;
     player.running = !player.running;
-    updateRunBtn();
-  });
-  runBtn.addEventListener('touchstart', function(e){
-    e.preventDefault();
-    if (typeof player === 'undefined') return;
-    player.running = !player.running;
-    updateRunBtn();
-  }, {passive:false});
-
-  // Initialize button state
-  updateRunBtn();
+    // Sync all possible buttons
+    updateRunBtn(document.getElementById('run-toggle'));
+    updateRunBtn(document.getElementById('btn-run'));
+  }
+  if (runBtn){
+    runBtn.addEventListener('click', function(e){ e.preventDefault(); toggleRun(); });
+    runBtn.addEventListener('touchstart', function(e){ e.preventDefault(); toggleRun(); }, {passive:false});
+    updateRunBtn(runBtn);
+  }
 })();
 </script>
+    
 
 
 <!-- === MOBILE HUD (Triple‑tap to toggle) === -->
@@ -2044,7 +2069,7 @@ function ensureDebugCube(){
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 8px;
+    bottom: 96px;
     display: none; /* starts hidden; triple‑tap to toggle */
     z-index: 10001;
     pointer-events: none; /* buttons re-enable */
@@ -2083,7 +2108,7 @@ function ensureDebugCube(){
   .hud-btn.toggle.on { background: rgba(0,128,255,0.6); }
   /* Optional: only auto-show on touch devices (we still start hidden) */
   @media (hover: none) and (pointer: coarse) {
-    #mobile-hud { /* could set display:flex to default show; staying hidden per spec */ }
+    #mobile-hud { /* could set display:flex to default show; staying hidden per spec */  bottom: 96px; }
   }
 </style>
 <div id="mobile-hud">
