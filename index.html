@@ -898,56 +898,123 @@ function openDoorNearby(){
 }
 
 /* ===========================================================
-   BELT / PREVIEW / CAMERA OVERLAY
+   BELT / PREVIEW / CAMERA OVERLAY (safe/defensive)
    =========================================================== */
 let notebookOpen = false;
+
+// optional: cache a single preview engine so we don't leak multiples
+let __pv = { engine: null, scene: null, cam: null, canvas: null, mesh: null };
+
 function rebuildBelt(){
   const belt = document.getElementById('belt');
-  if (!belt) return;     
-  belt.innerHTML = '';
-  const belt = document.getElementById('belt'); belt.innerHTML='';
-  for(let i=1;i<=5;i++){
+  if (!belt) return;                 // Guard: belt not in DOM yet → no-op
+
+  belt.innerHTML = '';               // Clear once
+
+  for (let i = 1; i <= 5; i++) {
     const slotDiv = document.createElement('div');
-    slotDiv.className = 'slot' + (i===activeItemSlot?' active':''); slotDiv.dataset.slot = i;
-    const key = document.createElement('div'); key.className='key'; key.textContent=i; slotDiv.appendChild(key);
-    const label = inventory.slots[i] || '-';
-    const span = document.createElement('div'); span.style.fontSize='11px'; span.style.color='#8ff'; span.style.textAlign='center'; span.textContent=label;
+    slotDiv.className = 'slot' + (i === activeItemSlot ? ' active' : '');
+    slotDiv.dataset.slot = i;
+
+    const key = document.createElement('div');
+    key.className = 'key';
+    key.textContent = i;
+    slotDiv.appendChild(key);
+
+    const label = (typeof labelForSlot === 'function')
+      ? labelForSlot(i)
+      : (inventory.slots[i] || '-');
+
+    const span = document.createElement('div');
+    span.style.fontSize = '11px';
+    span.style.color = '#8ff';
+    span.style.textAlign = 'center';
+    span.textContent = label;
     slotDiv.appendChild(span);
-    slotDiv.onclick = (ev)=>{ ev.stopPropagation(); selectSlot(i); };
+
+    slotDiv.onclick = (ev) => { ev.stopPropagation(); selectSlot(i); };
     belt.appendChild(slotDiv);
   }
-  refreshHandPreview(); refreshCameraOverlay();
+
+  // Keep the rest of the UI in sync (guarded)
+  if (typeof refreshHandPreview === 'function') refreshHandPreview();
+  if (typeof refreshCameraOverlay === 'function') refreshCameraOverlay();
+  if (typeof syncHeldLights === 'function') syncHeldLights();
 }
+
 function selectSlot(n){
   activeItemSlot = n;
-  if (notebookOpen && inventory.slots[n] !== 'Notebook') closeNotebook();
+  // if notebook is open and switching away from it, close
+  if (notebookOpen && inventory.slots[n] !== 'Notebook' && typeof closeNotebook === 'function') {
+    closeNotebook();
+  }
   rebuildBelt();
-  syncHeldLights();
+  if (typeof syncHeldLights === 'function') syncHeldLights();
 }
+
 function refreshHandPreview(){
-  const wrap = document.getElementById('hand-preview'); wrap.innerHTML = '';
+  const wrap = document.getElementById('hand-preview');
+  if (!wrap) return;                 // Guard: preview host not mounted yet
+  wrap.innerHTML = '';
+
   const item = inventory.slots[activeItemSlot];
-  if(!item || !itemsGlb){ wrap.style.display='none'; return; }
-  const c = document.createElement('canvas'); c.width=180; c.height=140; c.style.width='100%'; c.style.height='100%'; wrap.appendChild(c);
+  if (!item || !itemsGlb) { wrap.style.display = 'none'; return; }
 
-  const pv = new BABYLON.Engine(c, true);
-  const pvScene = new BABYLON.Scene(pv);
-  const pvCam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), pvScene);
-  pvCam.attachControl(c, false); pvCam.panningSensibility=0; pvCam.wheelPrecision=50;
-  pvScene.clearColor = new BABYLON.Color4(0,0,0,0);
-  const hem = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), pvScene); hem.intensity=1.2;
+  // Reuse a single engine/canvas for the preview
+  if (!__pv.canvas) {
+    __pv.canvas = document.createElement('canvas');
+    __pv.canvas.width = 180;
+    __pv.canvas.height = 140;
+    __pv.canvas.style.width = '100%';
+    __pv.canvas.style.height = '100%';
+    wrap.appendChild(__pv.canvas);
 
-  const meshName = ITEM_MODEL_MAP[item]; const src = meshName && inventory.models[meshName];
-  if(!src){ wrap.style.display='none'; pv.dispose(); return; }
-  const clone = src.clone("pv-"+meshName, null, true); pvScene.addMesh(clone);
-  clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0); clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
-  wrap.style.display='block'; pv.runRenderLoop(()=>pvScene.render()); window.addEventListener('resize', ()=> pv.resize());
+    __pv.engine = new BABYLON.Engine(__pv.canvas, true);
+    __pv.scene = new BABYLON.Scene(__pv.engine);
+    __pv.scene.clearColor = new BABYLON.Color4(0,0,0,0);
+    __pv.cam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), __pv.scene);
+    __pv.cam.attachControl(__pv.canvas, false);
+    __pv.cam.panningSensibility = 0; __pv.cam.wheelPrecision = 50;
+    new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), __pv.scene).intensity = 1.2;
+
+    __pv.engine.runRenderLoop(()=> __pv.scene && __pv.scene.render());
+    window.addEventListener('resize', ()=> { try { __pv.engine && __pv.engine.resize(); } catch {} });
+  } else {
+    wrap.appendChild(__pv.canvas);
+  }
+
+  // swap mesh
+  if (__pv.mesh) { try { __pv.mesh.dispose(); } catch {} __pv.mesh = null; }
+
+  const meshName = ITEM_MODEL_MAP[item];
+  const src = meshName && inventory.models[meshName];
+  if (!src) { wrap.style.display = 'none'; return; }
+
+  __pv.mesh = src.clone("pv-"+meshName, null, true);
+  __pv.scene.addMesh(__pv.mesh);
+  __pv.mesh.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0);
+  __pv.mesh.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
+
+  wrap.style.display = 'block';
 }
+
 function refreshCameraOverlay(){
+  const overlay = document.getElementById('camera-overlay');
+  const irBadge = document.getElementById('camera-ir');
+  if (!overlay) return;              // Guard: overlay not mounted yet
+
   const item = inventory.slots[activeItemSlot];
-  const show = (item==='Camera');
-  document.getElementById('camera-overlay').style.display = show ? 'block' : 'none';
-  document.getElementById('camera-ir').style.display = (show && irOn) ? 'block' : 'none';
+  const show = (item === 'Camera');
+
+  overlay.style.display = show ? 'block' : 'none';
+  if (irBadge) irBadge.style.display = (show && irOn) ? 'block' : 'none';
+}
+
+/* Call rebuildBelt only after DOM exists */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { try { rebuildBelt(); } catch {} });
+} else {
+  try { rebuildBelt(); } catch {}
 }
 
 /* ===========================================================
