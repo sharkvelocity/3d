@@ -105,6 +105,26 @@
   }
 </style>
 
+
+<style>
+  /* Hide gameplay UI until the game has started */
+  #touch-left, #touch-right, #run-toggle, #mobile-hud { display: none !important; }
+  body.game-started #touch-left,
+  body.game-started #touch-right,
+  body.game-started #run-toggle,
+  body.game-started #mobile-hud { display: block !important; }
+</style>
+
+
+<style>
+  /* Hide touch hit-areas whenever we're in mouse/desktop mode */
+  @media (hover: hover) and (pointer: fine) {
+    #touch-left, #touch-right { display: none !important; }
+  }
+  body.mouse-mode #touch-left,
+  body.mouse-mode #touch-right { display: none !important; }
+</style>
+
 </head>
 
 <body>
@@ -2219,6 +2239,191 @@ function ensureDebugCube(){
     hud.style.display = (hud.style.display === 'none' || !hud.style.display) ? 'block' : 'none';
     try { devLog('HUD: ' + (hud.style.display==='block' ? 'shown' : 'hidden')); } catch(e){}
   };
+})();
+</script>
+
+
+
+<!-- === LOADING OVERLAY (with logo) === -->
+<style>
+  #loading-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.88);
+    z-index: 20000;
+    flex-direction: column;
+    gap: 18px;
+  }
+  #loading-box {
+    width: min(520px, 80vw);
+    padding: 18px 20px;
+    border-radius: 12px;
+    background: rgba(20,20,24,0.9);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+  }
+  #loading-logo {
+    max-width: 220px;
+    height: auto;
+    margin-bottom: 6px;
+  }
+  #loading-bar {
+    width: 100%;
+    height: 10px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.1);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+  }
+  #loading-fill {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #4ade80, #22d3ee);
+    transition: width 120ms linear;
+  }
+  #loading-text { font-size: 14px; opacity: 0.9; }
+</style>
+<div id="loading-overlay" style="display:none;">
+  <div id="loading-box">
+    <img src="logo.png" alt="Logo" id="loading-logo" />
+    <div id="loading-text">Loading…</div>
+    <div id="loading-bar"><div id="loading-fill"></div></div>
+  </div>
+</div>
+
+  </div>
+</div>
+
+
+<script>
+// === LOADING OVERLAY JS ===
+(function(){
+  var overlay = document.getElementById('loading-overlay');
+  var fill = document.getElementById('loading-fill');
+  var txt = document.getElementById('loading-text');
+  if (!overlay) return;
+
+  function showLoading(){ overlay.style.display = 'flex'; }
+  function hideLoading(){ overlay.style.display = 'none'; }
+  function setPct(p){ if (fill) fill.style.width = Math.max(0, Math.min(100, p)) + '%'; }
+
+  // Expose helpers globally
+  window.showLoading = showLoading;
+  window.hideLoading = hideLoading;
+  window.setLoadingPercent = setPct;
+
+  // If scene/engine exist, use readiness to hide
+  function hookSceneReady(){
+    try {
+      if (window.scene && scene.getEngine){
+        showLoading();
+        var timer = setInterval(function(){
+          try {
+            var ready = scene.isReady();
+            // Bump a fake-progress toward 90% while waiting
+            var w = parseFloat((fill.style.width||'0').replace('%','')) || 0;
+            if (!ready && w < 90) setPct(w + 2);
+            if (ready){
+              setPct(100);
+              hideLoading();
+              clearInterval(timer);
+            }
+          } catch(e){ /* no-op */ }
+        }, 120);
+      }
+    } catch(e){}
+  }
+  // Try now and also after boot
+  if (document.readyState === 'complete') hookSceneReady();
+  window.addEventListener('load', hookSceneReady);
+
+  // Hook AssetsManager progress if the app uses it
+  window.hookAssetsManagerProgress = function(assetsManager){
+    if (!assetsManager) return;
+    showLoading();
+    assetsManager.onProgress = function(task, remaining, total){
+      if (total > 0) setPct(Math.round(100 * (total - remaining) / total));
+      if (txt && task && task.name) txt.textContent = 'Loading ' + task.name + '…';
+    };
+    assetsManager.onFinish = function(){ setPct(100); hideLoading(); };
+  };
+})();
+</script>
+
+
+<script>
+// === GAME START MARKER ===
+(function(){
+  function markStarted(){
+    if (!document.body.classList.contains('game-started')){
+      document.body.classList.add('game-started');
+      try { devLog('Game started: showing gameplay UI'); } catch(e){}
+    }
+  }
+  // If __started is already true, mark now
+  try { if (window.__started) markStarted(); } catch(e){}
+  // Monkey-patch safeStart to dispatch event & mark
+  try {
+    if (typeof window.safeStart === 'function' && !window.safeStart.__wrapped){
+      var _old = window.safeStart;
+      window.safeStart = function(){
+        var r = _old.apply(this, arguments);
+        markStarted();
+        window.dispatchEvent(new Event('game:started'));
+        return r;
+      };
+      window.safeStart.__wrapped = true;
+    }
+  } catch(e){}
+  // Poll for __started if not using safeStart
+  var tries = 0;
+  var poll = setInterval(function(){
+    tries++;
+    try {
+      if (window.__started){ markStarted(); clearInterval(poll); }
+      if (tries > 600) clearInterval(poll); // stop after ~1 min
+    } catch(e){ if (tries > 600) clearInterval(poll); }
+  }, 100);
+})();
+</script>
+
+
+<script>
+// === INPUT MODE TOGGLER (mouse vs touch) ===
+(function(){
+  var left = document.getElementById('touch-left');
+  var right = document.getElementById('touch-right');
+
+  function setMouseMode(on){
+    document.body.classList.toggle('mouse-mode', !!on);
+    // Also disable pointer events on overlays so pointer lock & mouse look work
+    if (left)  left.style.pointerEvents  = on ? 'none' : 'auto';
+    if (right) right.style.pointerEvents = on ? 'none' : 'auto';
+  }
+
+  // If we detect a mouse down, prefer mouse mode
+  window.addEventListener('mousedown', function(){ setMouseMode(true); });
+  window.addEventListener('mousemove', function(e){
+    // if a real mouse is present, stay in mouse mode
+    if (e && e.mozInputSource === 1) setMouseMode(true);
+  });
+
+  // If we detect touch, exit mouse mode so overlays work
+  window.addEventListener('touchstart', function(){ setMouseMode(false); }, {passive:true});
+
+  // Initialize based on media query
+  try {
+    var prefersMouse = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    setMouseMode(prefersMouse);
+  } catch(e){}
 })();
 </script>
 
