@@ -2303,8 +2303,9 @@ function ensureDebugCube(){
 </div>
 
 
+
 <script>
-// === LOADING OVERLAY JS ===
+// === LOADING OVERLAY JS (show only after Start/boot) ===
 (function(){
   var overlay = document.getElementById('loading-overlay');
   var fill = document.getElementById('loading-fill');
@@ -2320,30 +2321,29 @@ function ensureDebugCube(){
   window.hideLoading = hideLoading;
   window.setLoadingPercent = setPct;
 
-  // If scene/engine exist, use readiness to hide
-  function hookSceneReady(){
-    try {
-      if (window.scene && scene.getEngine){
-        showLoading();
-        var timer = setInterval(function(){
-          try {
-            var ready = scene.isReady();
-            // Bump a fake-progress toward 90% while waiting
-            var w = parseFloat((fill.style.width||'0').replace('%','')) || 0;
-            if (!ready && w < 90) setPct(w + 2);
-            if (ready){
-              setPct(100);
-              hideLoading();
-              clearInterval(timer);
-            }
-          } catch(e){ /* no-op */ }
-        }, 120);
-      }
-    } catch(e){}
+  var progressTimer = null;
+  function startSceneReadyLoop(){
+    if (progressTimer) return;
+    showLoading();
+    progressTimer = setInterval(function(){
+      try {
+        var ready = window.scene && scene.isReady && scene.isReady();
+        var w = parseFloat((fill.style.width||'0').replace('%','')) || 0;
+        if (!ready && w < 90) setPct(w + 2);
+        if (ready){
+          setPct(100);
+          hideLoading();
+          clearInterval(progressTimer);
+          progressTimer = null;
+        }
+      } catch(e){ /* no-op */ }
+    }, 120);
   }
-  // Try now and also after boot
-  if (document.readyState === 'complete') hookSceneReady();
-  window.addEventListener('load', hookSceneReady);
+
+  // Only show AFTER the game begins loading
+  window.addEventListener('game:starting', function(){
+    startSceneReadyLoop();
+  });
 
   // Hook AssetsManager progress if the app uses it
   window.hookAssetsManagerProgress = function(assetsManager){
@@ -2359,8 +2359,10 @@ function ensureDebugCube(){
 </script>
 
 
+
+
 <script>
-// === GAME START MARKER ===
+// === GAME START MARKER (and loading trigger) ===
 (function(){
   function markStarted(){
     if (!document.body.classList.contains('game-started')){
@@ -2368,22 +2370,30 @@ function ensureDebugCube(){
       try { devLog('Game started: showing gameplay UI'); } catch(e){}
     }
   }
+  function triggerStarting(){
+    // signal loaders to show overlay
+    try { window.dispatchEvent(new Event('game:starting')); } catch(e){}
+  }
+
   // If __started is already true, mark now
   try { if (window.__started) markStarted(); } catch(e){}
-  // Monkey-patch safeStart to dispatch event & mark
+
+  // Wrap safeStart to trigger loading overlay BEFORE booting, then mark started after
   try {
     if (typeof window.safeStart === 'function' && !window.safeStart.__wrapped){
       var _old = window.safeStart;
       window.safeStart = function(){
+        // show loading overlay/progress
+        triggerStarting();
         var r = _old.apply(this, arguments);
-        markStarted();
-        window.dispatchEvent(new Event('game:started'));
+        // when boot completes and sets __started, markStarted will run via poll below or immediately if already set
         return r;
       };
       window.safeStart.__wrapped = true;
     }
   } catch(e){}
-  // Poll for __started if not using safeStart
+
+  // Poll for __started to mark the UI once ready
   var tries = 0;
   var poll = setInterval(function(){
     tries++;
@@ -2392,8 +2402,11 @@ function ensureDebugCube(){
       if (tries > 600) clearInterval(poll); // stop after ~1 min
     } catch(e){ if (tries > 600) clearInterval(poll); }
   }, 100);
+
+  // Also allow manual trigger: window.dispatchEvent(new Event('game:starting'))
 })();
 </script>
+
 
 
 <script>
