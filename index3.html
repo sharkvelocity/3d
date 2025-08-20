@@ -1762,5 +1762,350 @@
 })();
 </script>
 
+
+<script>
+/* ===========================================================
+   BREATH MIST (conditional: cold & near-ghost) + BLOODMOON weather
+   - Breath shows when: (A) environment is cold  OR (B) near the ghost.
+   - Indoors is cold only if power is OFF and outside weather is cold.
+   - Adds Weather 'BloodMoon': crimson sky, crimson moon, rainy.
+   =========================================================== */
+(function(){
+  // --- Power stub so you can wire house lights later ---
+  if (!window.powerGrid){
+    window.powerGrid = {
+      on: true,
+      set: function(on){
+        this.on = !!on;
+        try { window.dispatchEvent(new CustomEvent('power:changed', {detail:{on:this.on}})); } catch(e){}
+      }
+    };
+  }
+
+  // --- Helpers for color ---
+  function col3(r,g,b){ return new BABYLON.Color3(r,g,b); }
+  function col4(r,g,b,a){ return new BABYLON.Color4(r,g,b,a); }
+
+  // --- Breath FX gating extensions ---
+  window.breathFX = window.breathFX || {};
+  breathFX.config = Object.assign({
+    coldTempC: 7,           // ≤ this is "cold"
+    ghostRadius: 12,        // meters
+    appearNearGhostIfNotCold: true, // breath visible near ghost even if temp not cold
+    requireBothColdAndGhost: false   // set true if you want BOTH required
+  }, breathFX.config || {});
+
+  function getGhostPos(){
+    try {
+      if (window.ghost && ghost.position) return ghost.position;
+      if (window.ghost && ghost.mesh && ghost.mesh.position) return ghost.mesh.position;
+      if (Array.isArray(window.ghosts) && ghosts[0] && ghosts[0].position) return ghosts[0].position;
+    } catch(e){}
+    return null;
+  }
+  function playerPos(){
+    try { return (window.camera && camera.position) || (window.player && player.position) || null; } catch(e){ return null; }
+  }
+  function dist(a,b){ return BABYLON.Vector3.Distance(a,b); }
+
+  function isOutsideCold(){
+    try {
+      var w = window.weather || {};
+      // Prefer numeric temp if provided
+      if (typeof w.tempC === 'number') return w.tempC <= breathFX.config.coldTempC;
+      var s = (w.mode || w.name || w.current || '').toLowerCase();
+      if (/snow|blizzard|hail|freez|ice|winter/.test(s)) return true;
+      if (/rain/.test(s)) return !!(w.isColdRain || (typeof w.feelsLikeC === 'number' && w.feelsLikeC <= (breathFX.config.coldTempC+1)));
+      if (/blood\s*moon|bloodmoon/.test(s)) return false; // not implicitly cold
+    } catch(e){}
+    return false;
+  }
+  function isIndoors(){
+    try {
+      if (typeof window.getPlayerIsIndoors === 'function') return !!getPlayerIsIndoors();
+      if (window.player && typeof player.indoors !== 'undefined') return !!player.indoors;
+      // Fallback heuristic: if y < 3 and a "house" flag exists
+      if (window.level && level.isIndoorsAt) return !!level.isIndoorsAt(playerPos());
+    } catch(e){}
+    return false;
+  }
+  function isPowerOff(){
+    try { return window.powerGrid && powerGrid.on === false; } catch(e){ return false; }
+  }
+  function nearGhost(){
+    var gp = getGhostPos(), pp = playerPos();
+    if (!gp || !pp) return false;
+    return dist(gp, pp) <= breathFX.config.ghostRadius;
+  }
+
+  function shouldShowBreath(){
+    var outsideCold = isOutsideCold();
+    var indoors = isIndoors();
+    var envCold = outdoorsColdOrIndoorsCold(outsideCold, indoors);
+    var ghostProx = nearGhost();
+
+    if (breathFX.config.requireBothColdAndGhost){
+      return envCold && ghostProx;
+    }
+    // Default: show if cold OR near ghost
+    if (envCold) return true;
+    if (breathFX.config.appearNearGhostIfNotCold && ghostProx) return true;
+    return false;
+  }
+
+  function outdoorsColdOrIndoorsCold(outsideCold, indoors){
+    if (!indoors) return outsideCold;
+    // Indoors is cold only if power is off AND outside weather is cold
+    return isPowerOff() && outsideCold;
+  }
+
+  // Hook into existing updateBreath, but gate emission
+  // We keep your previous particle setup (breathFX.ps etc.)
+  var _updateBreath = window.updateBreath;
+  window.updateBreath = function(dt){
+    if (!breathFX || !breathFX.ps){ try { if (_updateBreath) _updateBreath(dt); } catch(e){} return; }
+    var show = shouldShowBreath();
+    if (!show){
+      breathFX.ps.emitRate = 0;
+      // Still advance any timers to avoid a "bursty" start next frame
+      try { if (_updateBreath) _updateBreath(dt); } catch(e){}
+      return;
+    }
+    // Otherwise run the actual emitter update (bursts & direction)
+    try { if (_updateBreath) _updateBreath(dt); } catch(e){}
+  };
+
+  // --- BLOODMOON WEATHER ---
+  // Extend ensureWeatherSystems/setWeather if present
+  function installBloodMoon(){
+    if (!window.ensureWeatherSystems) return;
+    var W = ensureWeatherSystems(window.scene);
+    if (!W) return;
+
+    // Keep refs for tinting
+    window.__skyTint = window.__skyTint || { active:false, prev:{ clouds:[], clear: null, moon: null } };
+
+    function tintCloudsCrimson(on){
+      if (!window.__ringClouds || !__ringClouds.systems) return;
+      if (on && !__skyTint.active){
+        __skyTint.prev.clouds = __ringClouds.systems.map(function(ps){
+          return { ps: ps, c1: ps.color1 && ps.color1.clone(), c2: ps.color2 && ps.color2.clone() };
+        });
+      }
+      __ringClouds.systems.forEach(function(ps){
+        if (!ps) return;
+        if (on){
+          ps.color1 = col4(0.55,0.12,0.12, 0.05);
+          ps.color2 = col4(0.48,0.08,0.08, 0.04);
+        } else {
+          // restore
+          var prev = (__skyTint.prev.clouds||[]).find(function(e){ return e.ps === ps; });
+          if (prev && prev.c1 && prev.c2){ ps.color1 = prev.c1; ps.color2 = prev.c2; }
+        }
+      });
+    }
+
+    function tintMoonCrimson(on){
+      // Try to find moon mesh or material
+      var moon = window.__moonRef || (window.scene && scene.getMeshByName && scene.getMeshByName("moon")) || null;
+      if (!moon){
+        try {
+          // fallback: any mesh with 'moon' in name
+          var matches = scene.meshes.filter(function(m){ return m.name && /moon/i.test(m.name); });
+          if (matches.length) moon = matches[0];
+        } catch(e){}
+      }
+      if (!moon) return;
+      var mat = moon.material;
+      if (!mat){
+        mat = new BABYLON.StandardMaterial("moonMatAuto", scene);
+        moon.material = mat;
+      }
+      if (on){
+        if (!__skyTint.prev.moon) __skyTint.prev.moon = {
+          diffuse: mat.diffuseColor && mat.diffuseColor.clone ? mat.diffuseColor.clone() : col3(1,1,1),
+          emissive: mat.emissiveColor && mat.emissiveColor.clone ? mat.emissiveColor.clone() : col3(0,0,0)
+        };
+        mat.diffuseColor = col3(0.75, 0.08, 0.08);
+        mat.emissiveColor = col3(0.28, 0.02, 0.02);
+      } else if (__skyTint.prev.moon){
+        mat.diffuseColor = __skyTint.prev.moon.diffuse;
+        mat.emissiveColor = __skyTint.prev.moon.emissive;
+      }
+    }
+
+    function tintSkyClearColor(on){
+      var s = window.scene;
+      if (!s) return;
+      if (on){
+        if (!__skyTint.prev.clear) __skyTint.prev.clear = s.clearColor.clone();
+        s.clearColor = new BABYLON.Color4(0.04, 0.01, 0.01, 1.0);
+      } else if (__skyTint.prev.clear){
+        s.clearColor = __skyTint.prev.clear.clone();
+      }
+    }
+
+    // Monkey-patch set to handle BloodMoon
+    if (!W.__patchedBloodMoon){
+      var _set = W.set.bind(W);
+      W.set = function(name){
+        var s = String(name||"").toLowerCase();
+        if (s === 'bloodmoon' || s === 'blood moon'){
+          _set('Rain');
+          tintCloudsCrimson(true);
+          tintMoonCrimson(true);
+          tintSkyClearColor(true);
+          this.mode = 'BloodMoon';
+          // Mark weather for "not implicitly cold"
+          window.weather = window.weather || {}; window.weather.mode = 'BloodMoon';
+        } else {
+          // restore sky/mood
+          tintCloudsCrimson(false);
+          tintMoonCrimson(false);
+          tintSkyClearColor(false);
+          _set(name);
+        }
+      };
+      W.__patchedBloodMoon = true;
+    }
+  }
+
+  // Defer install until scene exists
+  function tryInstall(){
+    if (window.scene){
+      installBloodMoon();
+    } else {
+      setTimeout(tryInstall, 250);
+    }
+  }
+  tryInstall();
+})();
+</script>
+
 </body>
 </html>
+
+<script>
+// === PERF PATCH: lighter ring clouds & mist (reduces overdraw and CPU cost) ===
+(function(){
+  function optimizeRingClouds(scene){
+    scene = scene || window.scene;
+    if (!scene) return;
+
+    var engine = scene.getEngine();
+    var isGPU = !!(BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported);
+
+    // Dispose any existing heavy clouds
+    try {
+      if (window.__ringClouds){
+        (__ringClouds.systems||[]).forEach(function(ps){ try{ ps.stop(); ps.dispose(); }catch(e){} });
+        (__ringClouds.rigs||[]).forEach(function(r){ try{ r.dispose(); }catch(e){} });
+      }
+    } catch(e){}
+
+    var skyRig = new BABYLON.TransformNode("ringCloudRigLite", scene);
+
+    function makeRing(name, innerR, outerR, height, capGPU, capCPU, sizeMin, sizeMax, alpha, speedY){
+      var cap = isGPU ? capGPU : capCPU;
+      // If CPU path and capCPU is 0, skip ring entirely
+      if (!isGPU && cap <= 0) return null;
+
+      var ps = isGPU ? new BABYLON.GPUParticleSystem(name+"GPU", { capacity: cap }, scene)
+                     : new BABYLON.ParticleSystem(name+"CPU", cap, scene);
+
+      ps.emitter = skyRig;
+      ps.isLocal = true;
+      ps.particleTexture = new BABYLON.Texture("https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png", scene);
+      ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+
+      // Smaller sprites, higher up (looks like clouds, not ground fog)
+      ps.minSize = sizeMin;
+      ps.maxSize = sizeMax;
+      ps.minLifeTime = 45;
+      ps.maxLifeTime = 65;
+      ps.emitRate = Math.max(20, Math.round(cap * 0.35)); // fill gradually, then stop
+      ps.color1 = new BABYLON.Color4(0.72,0.76,0.80, alpha);
+      ps.color2 = new BABYLON.Color4(0.80,0.84,0.88, alpha*0.8);
+      ps.colorDead = new BABYLON.Color4(0.80,0.84,0.88, 0);
+      ps.updateSpeed = 0.006;
+      ps.gravity = new BABYLON.Vector3(0, 0, 0);
+      ps.direction1 = new BABYLON.Vector3(0, 0, 0);
+      ps.direction2 = new BABYLON.Vector3(0, 0, 0);
+
+      // Ring sampling around the map at a higher altitude
+      ps.startPositionFunction = function(worldMatrix, position){
+        var r = innerR + Math.random() * (outerR - innerR);
+        var theta = Math.random() * Math.PI * 2;
+        var local = new BABYLON.Vector3(
+          r * Math.cos(theta),
+          height + (Math.random() - 0.5) * 30.0,
+          r * Math.sin(theta)
+        );
+        BABYLON.Vector3.TransformCoordinatesToRef(local, worldMatrix, position);
+      };
+      // Gentle vertical wobble
+      ps.startDirectionFunction = function(worldMatrix, directionToUpdate){
+        var dir = new BABYLON.Vector3(0, (Math.random()-0.5) * speedY, 0);
+        BABYLON.Vector3.TransformNormalToRef(dir, worldMatrix, directionToUpdate);
+      };
+
+      ps.start();
+      // Stop emission after a short fill to cap active particle count
+      setTimeout(function(){ try{ ps.emitRate = 0; }catch(e){} }, 8000);
+      return ps;
+    }
+
+    // Choose capacities based on GPU support (CPU path uses much fewer or disables outer ring)
+    var ps1 = makeRing("ringCloudsLiteA",
+      400, 900, 520,  // inner/outer/height (raised from ~200 to ~520)
+      1600, 420,      // capacity GPU / CPU
+      3.0, 6.0,       // size range (smaller than 6–12)
+      0.035,          // alpha
+      0.15            // vertical wobble
+    );
+    var ps2 = makeRing("ringCloudsLiteB",
+      950, 1500, 680,
+      2000, 0,        // disable second ring on CPU (0), keep on GPU at reduced cap
+      4.0, 7.5,
+      0.030,
+      0.12
+    );
+
+    // Slow rotation (reduced speed for subtle motion)
+    scene.onBeforeRenderObservable.add(function(){
+      skyRig.rotation.y += 0.000012 * engine.getDeltaTime();
+    });
+
+    window.__ringClouds = { systems: [ps1, ps2].filter(Boolean), rigs: [skyRig] };
+
+    // Expose a quick toggle for you
+    window.setCloudQuality = function(q){
+      q = String(q||'').toLowerCase();
+      if (q === 'off'){
+        window.__ringClouds.systems.forEach(function(ps){ try{ ps.stop(); ps.dispose(); }catch(e){} });
+        window.__ringClouds.rigs.forEach(function(r){ try{ r.dispose(); }catch(e){} });
+        window.__ringClouds.systems.length = 0;
+        return;
+      }
+      var mul = (q==='low') ? 0.5 : (q==='high' ? 1.2 : 1.0);
+      window.__ringClouds.systems.forEach(function(ps){
+        if (!ps) return;
+        try {
+          ps.minSize *= mul; ps.maxSize *= mul;
+          // clamp alphas a bit when upping size
+          if (ps.color1 && ps.color2){
+            ps.color1.a = Math.min(ps.color1.a * mul, 0.06);
+            ps.color2.a = Math.min(ps.color2.a * mul, 0.05);
+          }
+        } catch(e){}
+      });
+    };
+  }
+
+  function run(){
+    if (window.scene) { optimizeRingClouds(scene); }
+    else setTimeout(run, 400);
+  }
+  run();
+})();
+</script>
