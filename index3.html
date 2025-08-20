@@ -308,7 +308,7 @@ let hemiLight = null;
 
 let houseLights = []; let housePower = true;
 
-let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false };
+let player = { sanity:100, room:'Van', speedWalk:1.8, speedRun:3.6, running:false, god:false };
 let controls = { forward:false, back:false, left:false, right:false };
 let allowFly = false;
 
@@ -730,21 +730,23 @@ function addOrbitingClouds(scene, camera, opts={}){
 
   const emitter = new BABYLON.TransformNode("cloudEmitter", scene);
   emitter.parent = rig;
-  emitter.position.set(0, domeDiam * 0.09, domeDiam * 0.18);
+  emitter.position.set(0, domeDiam * 0.12, domeDiam * 0.28);
 
   let ps;
   const useGPU = BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported;
   if (useGPU) {
     ps = new BABYLON.GPUParticleSystem("cloudsGPU", { capacity: 50000 }, scene);
-    ps.activeParticleCount = 15000;
+    ps.activeParticleCount = 22000;
     ps.manualEmitCount    = ps.activeParticleCount;
-    ps.minEmitBox = new BABYLON.Vector3(-120, -18, -300);
-    ps.maxEmitBox = new BABYLON.Vector3( 120,  18,  300);
+    ps.isLocal = true; // follow emitter transform
+ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
   } else {
     ps = new BABYLON.ParticleSystem("cloudsCPU", 2500, scene);
     ps.manualEmitCount = ps.getCapacity();
-    ps.minEmitBox = new BABYLON.Vector3(-90, -16, -240);
-    ps.maxEmitBox = new BABYLON.Vector3( 90,  16,  240);
+    ps.isLocal = true; // follow emitter transform
+ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
   }
 
   ps.particleTexture = new BABYLON.Texture(texURL, scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
@@ -752,8 +754,8 @@ function addOrbitingClouds(scene, camera, opts={}){
   ps.isBillboardBased = true;
 
   ps.gravity = new BABYLON.Vector3(0,0,0);
-  ps.direction1 = new BABYLON.Vector3(0,0,0);
-  ps.direction2 = new BABYLON.Vector3(0,0,0);
+  ps.direction1 = new BABYLON.Vector3(-0.01, 0.0, -0.005);
+  ps.direction2 = new BABYLON.Vector3( 0.01, 0.0,  0.005);
   ps.minAngularSpeed = -0.2;
   ps.maxAngularSpeed =  0.2;
 
@@ -840,8 +842,8 @@ function setWeather(state){
     if(!weather.rainPS){
       const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
       ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder thin streak
-      ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
-      ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
+      ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
       ps.minSize = 0.05; ps.maxSize = 0.1;
       ps.minLifeTime = 0.9; ps.maxLifeTime = 1.4;
       ps.emitRate = 1800;
@@ -863,8 +865,8 @@ function setWeather(state){
     if (!weather.snowPS){
       const ps = new BABYLON.ParticleSystem("snow", 2500, scene);
       ps.particleTexture = makeSnowTexture();
-      ps.minEmitBox = new BABYLON.Vector3(-80, 40, -80);
-      ps.maxEmitBox = new BABYLON.Vector3(80, 40, 80);
+      ps.minEmitBox = new BABYLON.Vector3(-300, -35, -600);
+    ps.maxEmitBox = new BABYLON.Vector3( 300,  35,  600);
       ps.minSize = 0.06; ps.maxSize = 0.14;
       ps.minLifeTime = 2.2; ps.maxLifeTime = 3.5;
       ps.emitRate = 1200;
@@ -1942,7 +1944,7 @@ function ensureDebugCube(){
       if (t.identifier !== lId) continue;
       var dx = t.clientX - lStartX;
       var dy = t.clientY - lStartY;
-      if (!window.controls) return;
+      if (typeof controls === 'undefined') return;
       // Reset
       controls.forward = controls.back = controls.left = controls.right = false;
       // Horizontal
@@ -2013,24 +2015,199 @@ function ensureDebugCube(){
 
   // Run toggle button
   function updateRunBtn(){
-    var on = !!(window.player && player.running);
+    var on = (typeof player !== 'undefined' && !!player.running);
     runBtn.textContent = "Run: " + (on ? "ON" : "OFF");
     runBtn.classList.toggle('active', on);
+    try { var br = document.getElementById("btn-run"); if (br){ br.classList.toggle("on", on); br.textContent = "Run" + (on ? " (ON)" : ""); } } catch(e){}
   }
   runBtn.addEventListener('click', function(){
-    if (!window.player) return;
+    if (typeof player === 'undefined') return;
     player.running = !player.running;
     updateRunBtn();
   });
   runBtn.addEventListener('touchstart', function(e){
     e.preventDefault();
-    if (!window.player) return;
+    if (typeof player === 'undefined') return;
     player.running = !player.running;
     updateRunBtn();
   }, {passive:false});
 
   // Initialize button state
   updateRunBtn();
+})();
+</script>
+
+
+<!-- === MOBILE HUD (Triple‑tap to toggle) === -->
+<style>
+  #mobile-hud {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 8px;
+    display: none; /* starts hidden; triple‑tap to toggle */
+    z-index: 10001;
+    pointer-events: none; /* buttons re-enable */
+  }
+  .hud-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 10px;
+  }
+  .hud-left, .hud-center, .hud-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hud-right {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+  .hud-btn {
+    pointer-events: auto;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    border-radius: 14px;
+    font-size: 14px;
+    padding: 10px 14px;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    min-width: 70px;
+    text-align: center;
+  }
+  .hud-btn:active { transform: translateY(1px); }
+  .hud-btn.toggle.on { background: rgba(0,128,255,0.6); }
+  /* Optional: only auto-show on touch devices (we still start hidden) */
+  @media (hover: none) and (pointer: coarse) {
+    #mobile-hud { /* could set display:flex to default show; staying hidden per spec */ }
+  }
+</style>
+<div id="mobile-hud">
+  <div class="hud-row">
+    <div class="hud-left">
+      <button id="btn-interact" class="hud-btn">Interact</button>
+    </div>
+    <div class="hud-center">
+      <button id="btn-use" class="hud-btn">Use</button>
+      <button id="btn-place" class="hud-btn">Place</button>
+      <button id="btn-toss" class="hud-btn">Toss</button>
+    </div>
+    <div class="hud-right">
+      <button id="btn-run" class="hud-btn toggle">Run</button>
+      <button id="btn-crouch" class="hud-btn toggle">Crouch</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// === MOBILE HUD LOGIC ===
+(function(){
+  var hud = document.getElementById('mobile-hud');
+  if (!hud) return;
+
+  // Triple-tap detector
+  var tapCount = 0, lastTap = 0;
+  function onTap(e){
+    var now = performance.now();
+    if (now - lastTap > 450) tapCount = 0;
+    tapCount++; lastTap = now;
+    if (tapCount >= 3){
+      tapCount = 0;
+      hud.style.display = (hud.style.display === 'none' || !hud.style.display) ? 'block' : 'none';
+      try { devLog('HUD: ' + (hud.style.display==='block' ? 'shown' : 'hidden')); } catch(e){}
+    }
+  }
+  // Listen on the whole canvas/document for convenience
+  document.addEventListener('touchstart', function(e){
+    // Ignore taps on buttons to avoid flicker
+    if (e.target.closest && e.target.closest('#mobile-hud')) return;
+    onTap(e);
+  }, {passive:false});
+
+  // Utility to call if exists, else dispatch event
+  function callOrDispatch(name){
+    if (typeof window[name] === 'function'){
+      try { window[name](); return true; } catch(e){}
+    }
+    window.dispatchEvent(new CustomEvent('mobile:' + name));
+    try { devLog('mobile:' + name + ' dispatched'); } catch(e){}
+    return false;
+  }
+
+  // Buttons
+  var btnInteract = document.getElementById('btn-interact');
+  var btnUse = document.getElementById('btn-use');
+  var btnPlace = document.getElementById('btn-place');
+  var btnToss = document.getElementById('btn-toss');
+  var btnRun = document.getElementById('btn-run');
+  var btnCrouch = document.getElementById('btn-crouch');
+
+  function updateRun(){
+    var on = (typeof player !== 'undefined' && !!player.running);
+    btnRun.classList.toggle('on', on);
+    btnRun.textContent = 'Run' + (on ? ' (ON)' : '');
+  }
+  function updateCrouch(){
+    var on = (typeof player !== 'undefined' && !!player.crouching);
+    btnCrouch.classList.toggle('on', on);
+    btnCrouch.textContent = 'Crouch' + (on ? ' (ON)' : '');
+  }
+
+  function toggleRun(){
+    if (typeof player === 'undefined') return;
+    player.running = !player.running;
+    updateRun();
+  }
+  function toggleCrouch(){
+    if (typeof player === 'undefined') return;
+    player.crouching = !player.crouching;
+    // Fallback: gently adjust camera if no native crouch handler
+    if (!window.onCrouchToggle && window.camera){
+      var baseY = window.__baseCamY || camera.position.y;
+      if (!window.__baseCamY) window.__baseCamY = baseY;
+      var target = player.crouching ? baseY - 0.5 : baseY;
+      camera.position.y = target;
+    }
+    updateCrouch();
+  }
+
+  // Wire clicks & touch
+  function bind(btn, fn){
+    if (!btn) return;
+    btn.addEventListener('click', fn);
+    btn.addEventListener('touchstart', function(e){ e.preventDefault(); fn(); }, {passive:false});
+  }
+
+  bind(btnInteract, function(){
+    // Try your common actions in priority order
+    if (callOrDispatch('openDoorNearby')) return;
+    if (callOrDispatch('toggleNearestHouseLight')) return;
+    // fallback generic
+    window.dispatchEvent(new CustomEvent('mobile:interact'));
+  });
+  bind(btnUse,    function(){ if (!callOrDispatch('useHeldItem')) window.dispatchEvent(new CustomEvent('mobile:use')); });
+  bind(btnPlace,  function(){ if (!callOrDispatch('placeHeldItem')) window.dispatchEvent(new CustomEvent('mobile:place')); });
+  bind(btnToss,   function(){
+    if (typeof window.tossHeldItem === 'function'){ tossHeldItem(); }
+    else if (typeof window.dropHeldItem === 'function'){ dropHeldItem(); }
+    else { window.dispatchEvent(new CustomEvent('mobile:toss')); }
+  });
+  bind(btnRun,    toggleRun);
+  bind(btnCrouch, toggleCrouch);
+
+  // Initialize toggles
+  updateRun(); updateCrouch();
+
+  // If dev console exists, expose a toggle
+  window.toggleMobileHUD = function(){
+    hud.style.display = (hud.style.display === 'none' || !hud.style.display) ? 'block' : 'none';
+    try { devLog('HUD: ' + (hud.style.display==='block' ? 'shown' : 'hidden')); } catch(e){}
+  };
 })();
 </script>
 
