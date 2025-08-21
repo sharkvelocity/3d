@@ -424,6 +424,38 @@ async function loadMoon(){
 </script>
 
 <script>
+// === Global, idempotent render loop helpers ===
+(function(){
+  if (typeof window.startRenderLoopSafeFor !== 'function') {
+    window.__renderLoops = window.__renderLoops || new WeakSet();
+    window.startRenderLoopSafeFor = function(engine, scene){
+      try{
+        if (!engine || !scene) return;
+        if (window.__renderLoops.has(engine)) return; // already started
+        window.__renderLoops.add(engine);
+        if (typeof engine.runRenderLoop === 'function') {
+          engine.runRenderLoop(function(){
+            try { if (scene && scene.activeCamera) scene.render(); } catch(_) {}
+          });
+        } else {
+          (function loop(){
+            try { if (scene && scene.activeCamera) scene.render(); } catch(_) {}
+            requestAnimationFrame(loop);
+          })();
+        }
+      }catch(_){ /* swallow */ }
+    };
+  }
+  if (typeof window.startRenderLoopSafe !== 'function') {
+    window.startRenderLoopSafe = function(){
+      if (window.engine && window.scene) window.startRenderLoopSafeFor(window.engine, window.scene);
+    };
+  }
+})();
+</script>
+
+
+<script>
 /* === Safe weather invoker === */
 (function(){
   window.callSetWeather = function(w){
