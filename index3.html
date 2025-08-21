@@ -10,6 +10,35 @@
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
   <script src="./cdn/babylon.js">
 
+/* === loadMoon shim: ensure global === */
+(function(){
+  if (typeof window.loadMoon !== 'function') {
+    window.loadMoon = async function(){
+      try {
+        const res = await fetch("./assets/models/sky/moon.glb", { method: "GET" });
+        if (!res.ok) throw new Error("moon.glb not reachable: " + res.status);
+        const ct = (res.headers.get("content-type")||"");
+        if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
+        const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+        let moonMesh = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
+        if (!moonMesh) throw new Error("moon.glb had no meshes");
+        moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+        moonMesh.renderingGroupId=1;
+        const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        moonMesh.material = mat;
+      } catch (e){
+        console.warn("loadMoon shim fallback:", e);
+        const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+        moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+        const mat = new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting=true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+        moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+      }
+    };
+  }
+})();
+
 /* ===== loadMoon (clean) ===== */
 async function loadMoon(){
   try{
