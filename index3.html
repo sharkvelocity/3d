@@ -10,6 +10,27 @@
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
   <script src="./cdn/babylon.js">
 
+/* Bind Start button */
+(function(){
+  var btn = document.getElementById('start-button');
+  if (btn) {
+    btn.addEventListener('click', function(ev){
+      ev.preventDefault();
+      ev.stopPropagation();
+      safeStart();
+    }, { once: false });
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){
+      var b = document.getElementById('start-button');
+      if (b) b.addEventListener('click', function(ev){
+        ev.preventDefault(); ev.stopPropagation(); safeStart();
+      });
+    });
+  }
+})();
+
+
+
 /* === Runtime Error Diagnostics === */
 (function(){
   if (!window.__diagnosticsInstalled){
@@ -257,8 +278,6 @@ async function loadMoon() {
     moonMesh.material = moonMat;
     moonMesh.position = new BABYLON.Vector3(0, 350, 380);
   }
-}
-
 </script>
   <script src="./cdn/earcut.min.js">
 /* === Dev Options Gate (ESC -> Yes -> password) === */
@@ -1394,18 +1413,29 @@ function $(s){ return document.querySelector(s); }
    BOOT / STARTUP
    =========================================================== */
 let __started = false;
-async function safeStart(){
-  if(__started) return;
-  __started = true;
 
-  if(!window.BABYLON || !BABYLON.Engine){
-    toast("Engine not ready. Check Babylon includes.", 2200);
-    __started = false;
-    return;
+async function safeStart(){
+  if (window.__started) return;
+  window.__started = true;
+  try {
+    // Hide title UI immediately to avoid double clicks
+    var t = document.getElementById('title-screen');
+    if (t) t.style.display = 'none';
+
     await boot();
+
+    if (typeof toast === 'function') toast('Investigation started', 1200);
+  } catch (e) {
+    console.error('safeStart failed:', e);
+    if (typeof toast === 'function') toast('Failed to start: ' + (e && e.message ? e.message : e), 2200);
+    window.__started = false;
+    // Restore title UI so user can retry
+    var t2 = document.getElementById('title-screen');
+    if (t2) t2.style.display = '';
+  }
 }
 
-  const scr = document.getElementById('title-screen');
+const scr = document.getElementById('title-screen');
   if (scr) scr.style.display = 'none';
 
   
