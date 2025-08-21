@@ -2,55 +2,80 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — 3D Prototype (CDN-Local, Moon Fix)</title>
+  <title>PhasmaPhoney — 3D Prototype (Startup Screen Fixed)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <meta name="description" content="Babylon.js prototype with consolidated dev panel and corrected moon loader." />
-
-  <!-- Use YOUR repo's local runtime (./cdn) -->
-  <script src="./cdn/babylon.js"></script>
-  <script src="./cdn/earcut.min.js"></script>
-  <script src="./cdn/meshopt_decoder.js"></script>
-  <script src="./cdn/draco_decoder_gltf.js"></script>
-  <script src="./cdn/babylonjs.loaders.min.js"></script>
-  <!-- optional inspector if present -->
-  <script src="./cdn/babylon.inspector.bundle.js"></script>
+  <meta name="description" content="Babylon.js prototype with a single startup pipeline, consolidated dev tools, and fixed title screen." />
+  <link rel="icon" href="./favicon.ico" />
+  <!-- Load Babylon from your GitHub Pages path (repo is served at /3d/) -->
+  <script src="https://sharkvelocity.github.io/3d/cdn/babylon.js"></script>
+  <script src="https://sharkvelocity.github.io/3d/cdn/babylonjs.loaders.min.js"></script>
+  <script src="https://sharkvelocity.github.io/3d/cdn/earcut.min.js"></script>
+  <script src="https://sharkvelocity.github.io/3d/cdn/meshopt_decoder.js"></script>
+  <script src="https://sharkvelocity.github.io/3d/cdn/draco_decoder_gltf.js"></script>
+  <!-- Optional Inspector (only if present in your cdn/) -->
+  <script src="https://sharkvelocity.github.io/3d/cdn/babylon.inspector.bundle.js"></script>
 
   <style>
-    :root{ --bg:#0a0a0a; --fg:#e6f1ff; --muted:#93a4b7; --accent:#7dd3fc; --accent2:#34d399; }
+    :root{
+      --bg:#0a0a0a;--fg:#e6f1ff;--muted:#93a4b7;--accent:#7dd3fc;--accent2:#34d399;--danger:#fb7185;
+      --glass:rgba(18,20,23,0.65);
+    }
+    *{box-sizing:border-box}
     html,body{height:100%;margin:0;background:#0a0a0a;color:#e6f1ff;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;overflow:hidden}
     #renderCanvas{width:100vw;height:100vh;touch-action:none;display:block;background:#000}
+
+    /* Title/Startup Screen (SINGLE SOURCE OF TRUTH) */
     .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(1200px 800px at 50% 40%,#12151a 0%,#0a0a0a 60%,#000 100%);z-index:50}
-    #titleCard{width:min(720px,92vw);padding:28px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02));box-shadow:0 10px 40px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.06);text-align:center}
-    #logo{font-size:40px;font-weight:800;color:#eaf2ff;text-shadow:0 0 20px rgba(125,211,252,.35)}
+    #titleCard{width:min(740px,92vw);padding:28px 28px 22px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02));box-shadow:0 10px 40px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.06);backdrop-filter:blur(8px);text-align:center}
+    #logoWrap{display:flex;flex-direction:column;align-items:center;gap:10px}
+    #logoImg{width:min(360px,70vw);height:auto;image-rendering:auto;filter:drop-shadow(0 10px 22px rgba(0,0,0,.5));}
+    #title{font-size:36px;letter-spacing:1.5px;font-weight:800;color:#eaf2ff;text-shadow:0 0 20px rgba(125,211,252,.35)}
+    #tag{margin-top:6px;color:var(--muted);font-size:14px}
     .row{display:flex;gap:14px;justify-content:center;align-items:center;margin-top:20px}
-    .btn{appearance:none;border:0;border-radius:12px;padding:14px 18px;font-weight:700;letter-spacing:.4px;cursor:pointer;color:#061018}
-    .solid{background:linear-gradient(180deg,var(--accent),#38bdf8)}
-    .ghost{background:linear-gradient(180deg,var(--accent2),#16a34a)}
+    .btn{appearance:none;border:0;border-radius:12px;padding:14px 18px;font-weight:700;letter-spacing:.4px;cursor:pointer;color:#061018;transition:.18s transform,.18s filter,.18s opacity}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+    .solid{background:linear-gradient(180deg,var(--accent),#38bdf8);box-shadow:0 6px 20px rgba(56,189,248,.35)}
+    .ghost{background:linear-gradient(180deg,var(--accent2),#16a34a);box-shadow:0 6px 20px rgba(52,211,153,.35)}
+    .btn:hover{transform:translateY(-1px)}
+
+    /* Loading Overlay */
     #loadingOverlay{position:fixed;inset:0;background:linear-gradient(180deg,#0a0f14,#07090c 60%,#050607);display:none;align-items:center;justify-content:center;z-index:60}
-    #loadingCard{width:min(680px,92vw);padding:22px;border-radius:16px;background:rgba(18,20,23,0.65);backdrop-filter:blur(8px)}
-    .bar{height:12px;background:#1a2733;border-radius:999px;overflow:hidden}
-    .fill{height:100%;width:0%;background:linear-gradient(90deg,#34d399,#22d3ee,#38bdf8);transition:width .1s ease}
+    #loadingCard{width:min(680px,92vw);padding:22px;border-radius:16px;background:var(--glass);backdrop-filter:blur(8px);box-shadow:0 10px 30px rgba(0,0,0,.65)}
+    #loadTitle{font-weight:800;letter-spacing:.6px;margin-bottom:8px}
+    .bar{height:12px;background:#1a2733;border-radius:999px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+    .fill{height:100%;width:0%;background:linear-gradient(90deg,#34d399,#22d3ee,#38bdf8);box-shadow:0 0 30px rgba(56,189,248,.35);transition:width .1s ease}
+    #loadMeta{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:8px}
+
+    /* HUD */
     #hud{position:fixed;inset:0;pointer-events:none;display:none;z-index:30}
     #hudTop{position:absolute;top:12px;left:12px;display:flex;gap:10px}
     .chip{pointer-events:auto;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.07);padding:8px 10px;border-radius:12px;font-size:12px}
     #hudRight{position:absolute;top:12px;right:12px;display:flex;gap:10px}
     #hudBottom{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px}
-    #belt{pointer-events:auto;display:flex;gap:8px;background:rgba(10,12,15,.55);padding:10px 12px;border-radius:14px}
+    #belt{pointer-events:auto;display:flex;gap:8px;background:rgba(10,12,15,.55);padding:10px 12px;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.06)}
     .slot{width:70px;min-height:60px;border-radius:12px;background:linear-gradient(180deg,#0f1319,#0c0f14);border:1px solid rgba(255,255,255,.08);position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center}
-    .slot.active{outline:2px solid #38bdf8}
+    .slot.active{outline:2px solid #38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.25)}
     .key{position:absolute;top:4px;left:6px;font-size:10px;color:#a7c1d6}
     .label{font-size:12px;color:#bfe5ff;margin-top:4px}
-    #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#111827;color:#e5f0ff;border:1px solid #233244;padding:10px 12px;border-radius:10px;display:none;z-index:80}
+
+    /* Toast */
+    #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#111827;color:#e5f0ff;border:1px solid #233244;padding:10px 12px;border-radius:10px;display:none;z-index:80;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+
+    /* Dev Gate + Panel */
     #dev-gate{position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;}
     #dev-panel{position:fixed;right:12px;bottom:56px;width:min(440px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:10px;padding:10px;color:#9ff;display:none;z-index:99997;}
     #dev-toggle{position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;}
   </style>
 </head>
 <body>
-  <div id="titleScreen" class="screen">
+  <!-- SINGLE Title Screen (no duplicates) -->
+  <div id="titleScreen" class="screen" aria-hidden="false">
     <div id="titleCard">
-      <div id="logo">PHASMAPHONEY</div>
-      <div>Local Babylon runtime (./cdn) • Clean startup • Moon loader fixed</div>
+      <div id="logoWrap">
+        <img id="logoImg" alt="PhasmaPhoney logo" src="./logo.png" onerror="this.style.display='none';document.getElementById('title').style.display='block';" />
+        <div id="title" style="display:none">PHASMAPHONEY</div>
+      </div>
+      <div id="tag">3D Prototype • Single startup pipeline • Consolidated dev tools</div>
       <div class="row">
         <button id="startBtn" class="btn solid">Start Investigation</button>
         <button id="inspectorBtn" class="btn ghost" title="Shift+I also works">Open Inspector</button>
@@ -58,16 +83,16 @@
     </div>
   </div>
 
-  <div id="loadingOverlay">
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" role="status" aria-live="polite">
     <div id="loadingCard">
-      <div>Loading assets… <span id="loadPct">0%</span></div>
+      <div id="loadTitle">Loading assets… <span id="loadPct">0%</span></div>
       <div class="bar"><div id="loadFill" class="fill"></div></div>
-      <div style="display:flex;justify-content:space-between;color:#93a4b7;font-size:12px;margin-top:8px">
-        <span id="loadLabel">Preparing engine</span><span id="loadDetail">0 / 0</span>
-      </div>
+      <div id="loadMeta"><span id="loadLabel">Preparing engine</span><span id="loadDetail">0 / 0</span></div>
     </div>
   </div>
 
+  <!-- HUD -->
   <div id="hud">
     <div id="hudTop">
       <div class="chip" id="roomChip">Room: —</div>
@@ -81,7 +106,7 @@
     <div id="hudBottom"><div id="belt"></div></div>
   </div>
 
-  <!-- Dev Gate + Panel -->
+  <!-- Dev Gate + Panel (consolidated) -->
   <div id="dev-gate">
     <div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">
       <div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>
@@ -113,17 +138,16 @@
   </div>
 
   <canvas id="renderCanvas"></canvas>
-  <div id="toast" style="display:none"></div>
+  <div id="toast"></div>
 
   <script>
   (()=>{
     'use strict';
-    const $ = (id)=>document.getElementById(id);
-    const startBtn=$('startBtn'), inspectorBtn=$('inspectorBtn');
-    const titleScreen=$('titleScreen'), loadingOverlay=$('loadingOverlay');
-    const loadFill=$('loadFill'), loadPct=$('loadPct'), loadLabel=$('loadLabel'), loadDetail=$('loadDetail');
-    const hud=$('hud'), weatherChip=$('weatherChip'), sanityChip=$('sanityChip'), posChip=$('posChip'), modeChip=$('modeChip'), beltEl=$('belt');
-    const toastEl=$('toast'); const canvas=$('renderCanvas');
+    const $id = (id)=>document.getElementById(id);
+    const titleScreen=$id('titleScreen'), startBtn=$id('startBtn'), inspectorBtn=$id('inspectorBtn');
+    const loadingOverlay=$id('loadingOverlay'), loadFill=$id('loadFill'), loadPct=$id('loadPct'), loadLabel=$id('loadLabel'), loadDetail=$id('loadDetail');
+    const hud=$id('hud'), roomChip=$id('roomChip'), weatherChip=$id('weatherChip'), sanityChip=$id('sanityChip'), posChip=$id('posChip'), modeChip=$id('modeChip'), beltEl=$id('belt');
+    const toastEl=$id('toast'), canvas=$id('renderCanvas');
 
     const S={ booting:false, booted:false, engine:null, scene:null, camera:null, light:null, ghost:null,
               lighterOn:false, flyMode:false, activeSlot:1, inventory:{1:'EMF',2:'Camera',3:'Crucifix',4:'Lighter',5:'Notebook'},
@@ -131,7 +155,7 @@
 
     let toastTimer=null;
     function toast(msg,ms=2200){ toastEl.textContent=msg; toastEl.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.style.display='none',ms); }
-    function show(el,on){ el.style.display = on ? (el===loadingOverlay?'flex':'block') : 'none'; }
+    function show(el,on){ el.style.display=on?(el===loadingOverlay?'flex':'block'):'none'; }
     function setLoading(total){ S.toLoad=total; S.done=0; updateLoad(0,'Initializing'); show(loadingOverlay,true); }
     function stepLoad(label){ S.done++; updateLoad(S.done/S.toLoad*100,label); }
     function updateLoad(pct,label){ const p=Math.max(0,Math.min(100,Math.floor(pct))); loadFill.style.width=p+'%'; loadPct.textContent=p+'%'; if(label) loadLabel.textContent=label; loadDetail.textContent=`${S.done} / ${S.toLoad}`; }
@@ -155,24 +179,19 @@
     }
 
     async function loadHouse(){ stepLoad('Loading house…');
-      const path = "./assets/models/map/Abandoned_House.glb"; // exact path from your repo
       await BABYLON.SceneLoader.AppendAsync("./assets/models/map/", "Abandoned_House.glb", S.scene);
       S.scene.meshes.forEach(m=>{ if(!m) return; const n=(m.name||'').toLowerCase(); m.checkCollisions=/(wall|door|floor|ground|stairs|house|room)/.test(n); m.isPickable=true; });
     }
 
-    // --- Moon loader (FIXED) ---
+    // Moon loader (fixed)
     async function loadMoon(){
       stepLoad('Loading moon…');
       try{
         const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", S.scene);
         const moon = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
         moon.isPickable=false; moon.checkCollisions=false; moon.applyFog=false; moon.renderingGroupId=1;
-        // ensure emissive, no lighting
         const mat = moon.material || new BABYLON.StandardMaterial("moonMat", S.scene);
-        mat.disableLighting = true;
-        mat.emissiveColor = new BABYLON.Color3(1,1,1);
-        moon.material = mat;
-        // simple sky motion
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1); moon.material = mat;
         S.scene.onBeforeRenderObservable.add(()=>{
           const t = performance.now()*0.00002;
           moon.position.x = Math.cos(t)*380;
@@ -180,7 +199,6 @@
           moon.position.y = 340 + Math.sin(t*1.7)*10;
         });
       }catch(e){
-        // fallback: emissive sphere so the sky isn't empty
         const moon=BABYLON.MeshBuilder.CreateSphere('moon',{diameter:60,segments:18},S.scene);
         moon.isPickable=false; moon.applyFog=false; moon.renderingGroupId=1;
         const mat=new BABYLON.StandardMaterial('moonMat',S.scene); mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(0.9,0.9,0.9); moon.material=mat; moon.position=new BABYLON.Vector3(0,350,380);
@@ -200,9 +218,9 @@
       S.scene.onBeforeRenderObservable.add(()=>{ const p=S.camera.position; posChip.textContent=`X: ${p.x.toFixed(1)} Y: ${p.y.toFixed(1)} Z: ${p.z.toFixed(1)}`; });
     }
 
-    // Dev gate/panel
-    const devGate=$('dev-gate'), devYes=$('dev-yes'), devNo=$('dev-no'), devPassWrap=$('dev-pass-wrap'), devPass=$('dev-pass'), devPassSubmit=$('dev-pass-submit');
-    const devToggle=$('dev-toggle'), devPanel=$('dev-panel'), devClose=$('dev-close');
+    // Dev gate/panel (single instance)
+    const devGate=$id('dev-gate'), devYes=$id('dev-yes'), devNo=$id('dev-no'), devPassWrap=$id('dev-pass-wrap'), devPass=$id('dev-pass'), devPassSubmit=$id('dev-pass-submit');
+    const devToggle=$id('dev-toggle'), devPanel=$id('dev-panel'), devClose=$id('dev-close');
     window.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && devGate.style.display!=='flex' && !S.booted){ devGate.style.display='flex'; devPass.value=''; devPassWrap.style.display='none'; } });
     if(devYes) devYes.onclick=()=>{ devPassWrap.style.display='flex'; devPass.focus(); };
     if(devNo)  devNo.onclick =()=>{ devGate.style.display='none'; };
@@ -225,7 +243,7 @@
         setupCameraAndPlayer();
         await loadHouse();
         await spawnGhost();
-        await loadMoon(); // fixed loader with exact path
+        await loadMoon();
         setupHUD(); setupInputs();
         stepLoad('Finalizing…');
         S.engine.runRenderLoop(()=>{ if(S.scene) S.scene.render(); });
@@ -237,7 +255,8 @@
       }finally{ S.booting=false; }
     }
 
-    startBtn.addEventListener('click', (ev)=>{ ev.preventDefault(); safeStart(); });
+    // Bind ONCE (no duplicates)
+    startBtn.addEventListener('click', (ev)=>{ ev.preventDefault(); safeStart(); }, { once:false });
     inspectorBtn.addEventListener('click', ()=>{ try{ BABYLON.Inspector.Show(S.scene, {embedMode:false}); }catch{ toast('Inspector not available'); } });
   })();
   </script>
