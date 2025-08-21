@@ -424,20 +424,35 @@ async function loadMoon(){
 </script>
 
 <script>
-// === Safe render loop (no recursion) ===
+// === Safe render loop wrapper (idempotent, no recursion) ===
 (function(){
-  window.startRenderLoopSafe = function(){
-    var eng = (window.engine && typeof window.engine.runRenderLoop === 'function') ? window.engine : null;
-    var render = function(){ if (window.scene && window.scene.activeCamera) window.scene.render(); };
-    if (eng) {
-      if (!window.__renderLoopStarted) { window.__renderLoopStarted = true; eng.runRenderLoop(render); }
-    } else {
-      if (!window.__rafLoopStarted) {
-        window.__rafLoopStarted = true;
-        (function loop(){ render(); try{ requestAnimationFrame(loop); }catch(e){} })();
+  if (typeof window.startRenderLoopSafe !== 'function') {
+    window._renderLoopStarted = false;
+    window.startRenderLoopSafe = function(){
+      if (window._renderLoopStarted) return;
+      window._renderLoopStarted = true;
+      function frame(){
+        try{
+          if (window.scene && window.scene.activeCamera) {
+            window.scene.render();
+          }
+        }catch(e){ /* swallow to keep loop alive */ }
+        requestAnimationFrame(frame);
       }
-    }
-  };
+      try{
+        if (window.engine && typeof window.engine.runRenderLoop === 'function') {
+          window.window.startRenderLoopSafe();{
+            if (window.scene && window.scene.activeCamera) window.scene.render();
+          });
+        } else {
+          frame();
+        }
+      }catch(e){
+        // Fallback to RAF
+        frame();
+      }
+    };
+  }
 })();
 </script>
 
@@ -1789,7 +1804,7 @@ async function boot(){
       }
 
       // Start render loop
-      engine.runRenderLoop(()=>{ if (scene && scene.activeCamera) scene.render(); });
+      window.startRenderLoopSafe();=>{ if (scene && scene.activeCamera) scene.render(); });
     } catch (e) {
       console.error('Baseline boot failed:', e);
     }
@@ -1888,7 +1903,7 @@ if (typeof loadMoon === 'function') {
     updateGhost(dt);
   });
 
-  engine.runRenderLoop(()=> scene.render());
+  window.startRenderLoopSafe();=> scene.render());
   window.addEventListener('resize', ()=> engine.resize());
 
   // HUD visible now
@@ -2453,7 +2468,7 @@ function refreshHandPreview(){
     __pv.cam.panningSensibility = 0; __pv.cam.wheelPrecision = 50;
     new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), __pv.scene).intensity = 1.2;
 
-    __pv.engine.runRenderLoop(()=> __pv.scene && __pv.scene.render());
+    __pv.window.startRenderLoopSafe();=> __pv.scene && __pv.scene.render());
     window.addEventListener('resize', ()=> { try { __pv.engine && __pv.engine.resize(); } catch {} });
   } else {
     wrap.appendChild(__pv.canvas);
