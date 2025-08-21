@@ -2,26 +2,1415 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — 3D Prototype</title>
+  <title>PhasmaPhoney — 3D Prototype (Upgraded)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-  <meta name="author" content="Shark-Blades" />
   <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
-  <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
 
   <!-- Babylon core + loaders (local to repo) -->
-  <script src="./cdn/babylon.js"></script>
-  <script src="./cdn/earcut.min.js"></script>
-  <script src="./cdn/meshopt_decoder.js"></script>
-  <script src="./cdn/draco_decoder_gltf.js"></script>
-  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
-  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-  <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
+  <script src="./cdn/babylon.js">
+
+/* === Global capLightsAndMaterials === */
+(function(){
+  window.capLightsAndMaterials = function(maxLights){
+    try{
+      maxLights = Math.max(1, Math.min(maxLights||6, 8));
+      const lights = (window.scene && scene.lights) ? scene.lights : [];
+      for(let i=0;i<lights.length;i++){
+        const L = lights[i];
+        const on = i < maxLights;
+        try { L.setEnabled(on); } catch(_) {}
+        try {
+          const sg = L.getShadowGenerator && L.getShadowGenerator();
+          if (sg && i >= 2) { sg.dispose(); }
+        } catch(_) {}
+      }
+      if (window.scene && scene.materials){
+        scene.materials.forEach(m=>{
+          if ('maxSimultaneousLights' in m){
+            try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+          }
+        });
+        if (scene.onNewMaterialAddedObservable){
+          scene.onNewMaterialAddedObservable.add(m=>{
+            if ('maxSimultaneousLights' in m){
+              try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+            }
+          });
+        }
+      }
+    }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+  };
+  // Provide a local alias for non-module scripts that call window.capLightsAndMaterials()
+  if (typeof capLightsAndMaterials === 'undefined') {
+    try { window.capLightsAndMaterialsAlias = window.capLightsAndMaterials; } catch(_) {}
+    try { var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_) {}
+  }
+})();
+
+
+
+catch(_) {}
+      // keep shadows for first two only
+      try {
+        const sg = L.getShadowGenerator && L.getShadowGenerator();
+        if (sg && i >= 2) { sg.dispose(); }
+      } catch(_) {}
+    }
+    // Clamp existing materials
+    if (window.scene && scene.materials){
+      scene.materials.forEach(m=>{
+        if ('maxSimultaneousLights' in m){
+          try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+        }
+      });
+      // Clamp new materials created later
+      if (scene.onNewMaterialAddedObservable){
+        scene.onNewMaterialAddedObservable.add(m=>{
+          if ('maxSimultaneousLights' in m){
+            try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+          }
+        });
+      }
+    }
+  }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+}
+
+
+
+    }
+    // Clamp material light counts
+    (scene.materials||[]).forEach(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+    // Also set on new materials created later
+    scene.onNewMaterialAddedObservable.add(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+  }catch(e){ console.warn('capLightsAndMaterials error', e); }
+}
+
+
+
+/* === loadMoon alias === */
+try {
+  if (typeof window.loadMoon === 'function' && typeof loadMoon === 'undefined') {
+    // create a global identifier so bare loadMoon() works in non-module scripts
+    var loadMoon = window.loadMoon;
+  }
+} catch(e) {}
+
+
+
+/* === loadMoon shim: ensure global === */
+(function(){
+  if (typeof window.loadMoon !== 'function') {
+    window.loadMoon = async function(){
+      try {
+        const res = await fetch("./assets/models/sky/moon.glb", { method: "GET" });
+        if (!res.ok) throw new Error("moon.glb not reachable: " + res.status);
+        const ct = (res.headers.get("content-type")||"");
+        if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
+        const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+        let moonMesh = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
+        if (!moonMesh) throw new Error("moon.glb had no meshes");
+        moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+        moonMesh.renderingGroupId=1;
+        const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        moonMesh.material = mat;
+      } catch (e){
+        console.warn("loadMoon shim fallback:", e);
+        const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+        moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+        const mat = new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting=true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+        moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+      }
+    };
+  }
+})();
+
+/* ===== loadMoon (clean) ===== */
+async function loadMoon(){
+  try{
+    // Try to import the GLB if present and valid
+    const res = await fetch("./assets/models/sky/moon.glb", { method:"GET" });
+    if(!res.ok){ throw new Error("moon.glb not reachable: " + res.status); }
+    const ct = (res.headers.get("content-type")||"");
+    if (ct.includes("text/html")){ throw new Error("moon.glb served as HTML"); }
+
+    const imp = await BABYLON.SceneLoader.ImportMeshAsync(
+      "", "./assets/models/sky/", "moon.glb", scene
+    );
+    let moonMesh = imp.meshes.find(m => m.name && m.name !== "__root__") || imp.meshes[0];
+    if(!moonMesh){ throw new Error("moon.glb had no meshes"); }
+
+    moonMesh.isPickable = false;
+    moonMesh.checkCollisions = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    let mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    mat.emissiveColor = new BABYLON.Color3(1,1,1);
+    moonMesh.material = mat;
+
+    // simple idle motion
+    scene.onBeforeRenderObservable.add(()=>{
+      const t = performance.now()*0.00002;
+      moonMesh.position.x = Math.cos(t)*380;
+      moonMesh.position.z = Math.sin(t)*380;
+      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
+    });
+
+  }catch(e){
+    console.warn("loadMoon failed, using sphere fallback:", e);
+    const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+    moonMesh.isPickable = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    const mat = new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    try{
+      mat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
+    }catch{
+      mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+    }
+    moonMesh.material = mat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+  }
+}
+
+
+
+/* Bind Start button */
+(function(){
+  var btn = document.getElementById('start-button');
+  if (btn) {
+    btn.addEventListener('click', function(ev){
+      ev.preventDefault();
+      ev.stopPropagation();
+      safeStart();
+    }, { once: false });
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){
+      var b = document.getElementById('start-button');
+      if (b) b.addEventListener('click', function(ev){
+        ev.preventDefault(); ev.stopPropagation(); safeStart();
+      });
+    });
+  }
+})();
+
+
+
+/* === Runtime Error Diagnostics === */
+(function(){
+  if (!window.__diagnosticsInstalled){
+    window.__diagnosticsInstalled = true;
+    function ensureOverlay(){
+      var o = document.getElementById('error-overlay');
+      if(!o){
+        o = document.createElement('div'); o.id='error-overlay';
+        o.style.cssText='position:fixed;left:8px;bottom:8px;max-width:60vw;z-index:100000;background:rgba(128,0,0,0.9);color:#fff;border:1px solid #f66;padding:8px 10px;border-radius:8px;font:12px/1.35 monospace;display:none;white-space:pre-wrap;';
+        document.body.appendChild(o);
+      }
+      return o;
+    }
+    function show(msg){
+      try{
+        console.error(msg);
+        var o = ensureOverlay();
+        o.textContent = '[Error] '+ msg;
+        o.style.display='block';
+        clearTimeout(o.__t);
+        o.__t = setTimeout(function(){ o.style.display='none'; }, 7000);
+      }catch(e){}
+    }
+    window.addEventListener('error', function(e){
+      show((e && e.message) ? e.message : String(e));
+    });
+    window.addEventListener('unhandledrejection', function(e){
+      var m = (e && e.reason && (e.reason.stack || e.reason.message)) || String(e && e.reason);
+      show('Unhandled promise rejection: ' + m);
+    });
+  }
+})();
+
+
+/* === Logo auto-fallback === */
+(function(){
+  function tryPaths(img, paths){
+    let i=0;
+    const tryNext=()=>{
+      if(i>=paths.length){ img.style.display='none'; return; }
+      const p = paths[i++];
+      const test = new Image();
+      test.onload = ()=>{ img.src = p; img.style.display=''; };
+      test.onerror = tryNext;
+      test.src = p;
+    };
+    tryNext();
+  }
+  const img = document.getElementById('title-logo');
+  if (img){
+    const original = img.getAttribute('src') || './logo.jpg';
+    const candidates = ['./logo.png','/3d/logo.png','./images/logo.png','./assets/images/logo.png','./Logo.png','./logo.jpg','/3d/logo.jpg','./images/logo.jpg','./assets/images/logo.jpg','./Logo.jpg'];
+    tryPaths(img, candidates.filter((v, idx, arr)=>arr.indexOf(v)===idx));
+  }
+})();
+
+
+/* ====== SHIMS + CORE UTILS (injected) ====== */
+(function(){
+  // $ selector
+  if (typeof window.$ !== 'function') { window.$ = function(sel){ return document.querySelector(sel); }; }
+  // $id helper
+  if (typeof window.$id !== 'function') { window.$id = function(id){ return document.getElementById(id); }; }
+  // toast
+  if (typeof window.toast !== 'function') {
+    window.toast = function(msg, ms){
+      try{
+        var t = document.getElementById('toast');
+        if(!t){
+          t = document.createElement('div'); t.id='toast';
+          t.style.cssText = 'position:fixed;left:50%;top:16px;transform:translateX(-50%);background:rgba(0,0,0,0.7);border:1px solid #066;border-radius:8px;padding:8px 12px;color:#0ff;z-index:10001;display:none;max-width:70vw;text-align:center;';
+          document.body.appendChild(t);
+        }
+        t.textContent = String(msg||'');
+        t.style.display = 'block';
+        setTimeout(function(){ t.style.display='none'; }, (ms||1500));
+      }catch(e){}
+    };
+  }
+  // Ensure vanZone exists
+  if (!window.vanZone) { window.vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 }; }
+  // inVanZone
+  if (typeof window.inVanZone !== 'function') {
+    window.inVanZone = function(pos){
+      try{ return BABYLON.Vector3.Distance(pos, window.vanZone.center) <= window.vanZone.radius; }
+      catch(e){ return false; }
+    };
+  }
+  // ground pick
+  if (typeof window.pickGroundHeightAt !== 'function') {
+    window.pickGroundHeightAt = function(x, z){
+      var ray = new BABYLON.Ray(new BABYLON.Vector3(x,80,z), new BABYLON.Vector3(0,-1,0), 200);
+      var hit = scene && scene.pickWithRay ? scene.pickWithRay(ray, function(m){
+        if(!m || !m.isPickable) return false;
+        var n = (m.name||"");
+        return /ground|floor|terrain|fallbackground/i.test(n);
+      }) : {hit:false};
+      if (hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
+      return 1.2;
+    };
+  }
+  // poly helpers
+  if (typeof window.pointInPolyXZ !== 'function') {
+    window.pointInPolyXZ = function(p, poly){
+      var inside=false;
+      for(var i=0,j=poly.length-1;i<poly.length;j=i++){
+        var xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+        var intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
+        if(intersect) inside=!inside;
+      }
+      return inside;
+    };
+  }
+  if (typeof window.randomPointInPolygonXZ !== 'function') {
+    window.randomPointInPolygonXZ = function(poly){
+      var minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+      poly.forEach(function(p){ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
+      for(var i=0;i<500;i++){
+        var x = minX + Math.random()*(maxX-minX);
+        var z = minZ + Math.random()*(maxZ-minZ);
+        if(pointInPolyXZ(new BABYLON.Vector3(x,0,z), poly)) return new BABYLON.Vector3(x, 0, z);
+      }
+      return poly[0].clone();
+    };
+  }
+})();
+
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+
+)();
+</script>
+
+<script>
+/* === Safe weather invoker === */
+(function(){
+  window.callSetWeather = function(w){
+    if (!window.scene) { window.__pendingWeather = w; return; }
+    try { if (typeof window.setWeather === 'function') window.callSetWeather(w); }
+    catch(e){ try{ console.warn('callSetWeather -> setWeather failed', e); }catch(_e){} }
+  };
+  // apply pending after scene exists (in case other code didn't already do it)
+  function applyPendingWeather(){
+    if (window.__pendingWeather && window.scene && typeof window.setWeather === 'function'){
+      try { window.callSetWeather(window.__pendingWeather); } finally { window.__pendingWeather = null; }
+    }
+  }
+  document.addEventListener('scene-ready', applyPendingWeather);
+  window.__applyPendingWeather2 = applyPendingWeather;
+})();
+</script>
+
+
+<script>
+/* === Engine/Scene bootstrap + weather guard === */
+(function(){
+  window.ensureCES = function(){
+    try {
+      var canvas = document.getElementById('renderCanvas') || document.querySelector('canvas');
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = 'renderCanvas';
+        canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;background:#000;';
+        document.body.appendChild(canvas);
+      }
+      if (!window.engine) {
+        window.engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
+      }
+      if (!window.scene) {
+        window.scene = new BABYLON.Scene(window.engine);
+      }
+      return { canvas, engine: window.engine, scene: window.scene };
+    } catch (e) {
+      console.error('ensureCES failed', e);
+      return {};
+    }
+  };
+
+  // Wrap setWeather to be safe if scene isn't ready yet
+  if (typeof window.setWeather === 'function' && !window.__setWeatherWrapped) {
+    const __origSetWeather = window.setWeather;
+    window.setWeather = function(w){
+      if (!window.scene) { window.__pendingWeather = w; console.warn('setWeather deferred until scene exists'); return; }
+      try { __origSetWeather(w); } catch(e){ console.warn('setWeather failed', e); }
+    };
+    window.__setWeatherWrapped = true;
+  }
+
+  // Apply any pending weather once scene is ready
+  function applyPendingWeather(){
+    if (window.__pendingWeather && typeof window.setWeather === 'function' && window.scene){
+      try { window.callSetWeather(window.__pendingWeather); } finally { window.__pendingWeather = null; }
+    }
+  }
+  document.addEventListener('scene-ready', applyPendingWeather);
+  window.__applyPendingWeather = applyPendingWeather;
+})();
+</script>
+
+
+<script>
+// === BASELINE MODE (pre-breath, pre-skybox) ===
+window.BASELINE_MODE = true;
+
+// UI shims
+if (typeof window.toast !== 'function') {
+  window.toast = function(msg, ms){ try{ console.log('[toast]', msg); }catch(_){} };
+}
+if (typeof window.$ !== 'function') {
+  window.$ = function(sel){ return document.querySelector(sel); };
+}
+
+// Map helper shims (only if missing)
+if (typeof window.pickGroundHeightAt !== 'function') {
+  window.pickGroundHeightAt = function(scene, x, z){
+    try {
+      const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 1000, z), new BABYLON.Vector3(0,-1,0), 5000);
+      const hit = scene.pickWithRay(ray, m => m && m.isPickable !== false);
+      return (hit && hit.pickedPoint) ? hit.pickedPoint.y : 0;
+    } catch(e){ return 0; }
+  };
+}
+if (typeof window.randomPointInPolygonXZ !== 'function') {
+  window.randomPointInPolygonXZ = function(poly){
+    // naive box fallback if not provided: choose within bounding box
+    let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+    for (const p of (poly||[])){ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); }
+    if (!isFinite(minX)) return {x:0,z:0};
+    return { x: minX + Math.random()*(maxX-minX), z: minZ + Math.random()*(maxZ-minZ) };
+  };
+}
+</script>
+
+
+<script>
+// === SAFE MODE: keep runtime lightweight (you can set SAFE_MODE=false to re-enable all effects)
+window.SAFE_MODE = true;
+</script>
+
+
+<script>
+/* === GLOBAL LIGHT LIMITERS === */
+(function(){
+  window.hookSceneLightCaps = function(scene, maxLights){
+    try{
+      maxLights = Math.max(1, Math.min(maxLights||2, 8));
+      function applyToLights(){
+        const arr = scene.lights || [];
+        for (let i=0;i<arr.length;i++){
+          const L = arr[i];
+          const on = i < maxLights;
+          try { L.setEnabled(on); } catch(_){}
+          try {
+            const sg = L.getShadowGenerator && L.getShadowGenerator();
+            if (sg && i >= 1) { sg.dispose(); }
+          } catch(_){}
+        }
+      }
+      applyToLights();
+      if (scene.onNewLightAddedObservable){
+        scene.onNewLightAddedObservable.add(()=>applyToLights());
+      } else {
+        setTimeout(applyToLights, 0);
+      }
+      function capMat(m){
+        if (!m) return;
+        if ('maxSimultaneousLights' in m){
+          try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_){}
+        }
+      }
+      (scene.materials||[]).forEach(capMat);
+      if (scene.onNewMaterialAddedObservable){
+        scene.onNewMaterialAddedObservable.add(capMat);
+      }
+    }catch(e){ try{ console.warn('hookSceneLightCaps error', e); }catch(_e){} }
+  };
+  if (typeof window.capLightsAndMaterials !== 'function') {
+    window.capLightsAndMaterials = function(maxLights){
+      try{ if (window.scene) window.hookSceneLightCaps(window.scene, maxLights); }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+    };
+  }
+  try { if (typeof hookSceneLightCaps === 'undefined') var hookSceneLightCaps = window.hookSceneLightCaps; } catch(_){}
+  try { if (typeof capLightsAndMaterials === 'undefined') var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_){}
+})();
+</script>
+
+
+<script>
+/* === GLOBAL HELPERS (standalone) === */
+(function(){
+  // capLightsAndMaterials (global)
+  if (typeof window.capLightsAndMaterials !== 'function') {
+    window.capLightsAndMaterials = function(maxLights){
+      try{
+        maxLights = Math.max(1, Math.min(maxLights||6, 8));
+        const lights = (window.scene && scene.lights) ? scene.lights : [];
+        for(let i=0;i<lights.length;i++){
+          const L = lights[i];
+          const on = i < maxLights;
+          try { L.setEnabled(on); } catch(_) {}
+          try {
+            const sg = L.getShadowGenerator && L.getShadowGenerator();
+            if (sg && i >= 2) { sg.dispose(); }
+          } catch(_) {}
+        }
+        if (window.scene && scene.materials){
+          scene.materials.forEach(m=>{
+            if ('maxSimultaneousLights' in m){
+              try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+            }
+          });
+          if (scene.onNewMaterialAddedObservable){
+            scene.onNewMaterialAddedObservable.add(m=>{
+              if ('maxSimultaneousLights' in m){
+                try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+              }
+            });
+          }
+        }
+      }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+    };
+  }
+  // make direct calls work
+  if (typeof capLightsAndMaterials === 'undefined') { try { var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_) {} }
+
+  // loadMoon shim (global)
+  if (typeof window.loadMoon !== 'function') {
+    window.loadMoon = async function(){
+      try {
+        const res = await fetch("./assets/models/sky/moon.glb", { method: "GET" });
+        if (!res.ok) throw new Error("moon.glb not reachable: " + res.status);
+        const ct = (res.headers.get("content-type")||"");
+        if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
+        const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+        let moonMesh = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
+        if (!moonMesh) throw new Error("moon.glb had no meshes");
+        moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+        moonMesh.renderingGroupId=1;
+        const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        moonMesh.material = mat;
+      } catch (e){
+        console.warn("loadMoon shim fallback:", e);
+        const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+        moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+        const mat = new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting=true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+        moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+      }
+    };
+  }
+  if (typeof loadMoon === 'undefined') { try { var loadMoon = window.loadMoon; } catch(_) {} }
+})();
+</script>
+
+  <script src="./cdn/meshopt_decoder.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/draco_decoder_gltf.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/gui/babylon.gui.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <!-- Fallbacks (optional):
+  <script defer src="https://unpkg.com/babylonjs@6.43.1/babylon.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script defer src="https://unpkg.com/babylonjs@6.43.1/loaders/babylonjs.loaders.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script defer src="https://unpkg.com/babylonjs-gui@6.43.1/babylon.gui.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  -->
 
   <!-- Optional: room names -->
-  <script src="./rooms.js"></script>
+  <script src="./rooms.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
 
   <style>
-    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
+    :root{
+      --c0:#0ff; --c1:#9ff; --c2:#8ff; --edge:#066; --bg:#000; --card:#0a0a0a;
+    }
+    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; color:var(--c0); }
     #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
 
     #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
@@ -30,73 +1419,63 @@
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
     #title-content{ text-align:center; max-width:90vw;}
     #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
-    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
+    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid var(--c0); color:var(--c0); background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
     #start-button:active{ transform:translateY(1px); }
 
-    /* Loading overlay (hidden by default, but here if you want to re-use) */
-    #loading-overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.9); display:none; align-items:center; justify-content:center; z-index:10050; }
-    #loading-card{ width:min(520px,92vw); background:#0a0a0a; border:1px solid #066; border-radius:12px; padding:16px; box-shadow:0 0 24px rgba(0,255,255,0.15); }
-    #loading-title{ color:#9ff; font-weight:bold; margin:0 0 8px 0; text-align:center; }
-    #loading-bar-wrap{ height:14px; background:#051416; border:1px solid #0a3c3f; border-radius:8px; overflow:hidden; }
-    #loading-bar{ height:100%; width:0%; background:linear-gradient(90deg, #0ff, #08a); transition:width 160ms ease; }
-    #loading-text{ color:#8ff; font-size:12px; margin-top:8px; text-align:center; opacity:0.95; }
-
     /* HUD */
-    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
+    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid var(--edge); padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
     #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
-    #hud .label{ color:#9ff; }
-    #hud .value{ color:#0ff; font-weight:bold; }
+    #hud .label{ color:var(--c1); }
+    #hud .value{ color:var(--c0); font-weight:bold; }
     #weather{ font-size:12px; color:#aff; opacity:0.9; }
     #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
 
     /* Storage button + modal */
-    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
+    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid var(--c0); color:var(--c0); background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
     #storage-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
-    #storage-card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:8px; width:min(740px,92vw); max-height:86vh; overflow:auto; padding:12px 14px; }
+    #storage-card{ background:var(--card); color:var(--c0); border:1px solid var(--edge); border-radius:8px; width:min(740px,92vw); max-height:86vh; overflow:auto; padding:12px 14px; }
     #storage-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:10px; }
+    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
 
     /* Notebook */
     #notebook-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.82); align-items:center; justify-content:center; }
-    #notebook-card{ background:#0b0b0b; color:#0ff; border:1px solid #066; border-radius:10px; width:min(920px,95vw); max-height:90vh; overflow:auto; padding:14px 16px; box-shadow:0 0 20px rgba(0,255,255,0.2); }
+    #notebook-card{ background:#0b0b0b; color:var(--c0); border:1px solid var(--edge); border-radius:10px; width:min(920px,95vw); max-height:90vh; overflow:auto; padding:14px 16px; box-shadow:0 0 20px rgba(0,255,255,0.2); }
     #notebook-tabs{ display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
-    .tab{ padding:6px 10px; border:1px solid #066; color:#9ff; background:#111; border-radius:6px; cursor:pointer; }
-    .tab.active{ color:#0ff; border-color:#0ff; box-shadow:0 0 10px rgba(0,255,255,0.2) inset; }
+    .tab{ padding:6px 10px; border:1px solid var(--edge); color:var(--c1); background:#111; border-radius:6px; cursor:pointer; }
+    .tab.active{ color:var(--c0); border-color:var(--c0); box-shadow:0 0 10px rgba(0,255,255,0.2) inset; }
     .page{ display:none; }
     .page.active{ display:block; }
     .ev-row{ display:flex; align-items:center; gap:8px; margin:6px 0; }
     .ev-row input{ transform:scale(1.3); }
 
-    /* Dev gate/panel */
-    #dev-gate, #dev-panel{ display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
-    .card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:10px; padding:14px; width:min(820px,92vw); max-height:88vh; overflow:auto; }
-    #dev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
-    #dev-log{ background:#000; border:1px solid #033; min-height:120px; padding:8px; border-radius:6px; color:#8ff; font-size:12px; white-space:pre-wrap; }
-    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
-
-    /* Hand preview */
+    /* Belt & preview */
     #hand-preview{ position:fixed; right:18px; bottom:110px; width:180px; height:140px; pointer-events:none; z-index:5000; display:none; }
-
-    /* Camera overlay */
     #camera-overlay{ position:fixed; inset:0; z-index:4000; display:none; pointer-events:none; background:radial-gradient(transparent 70%, rgba(0,0,0,0.45)); }
     #camera-rec{ position:absolute; top:12px; left:14px; color:#f44; font-size:14px; letter-spacing:1px; text-shadow:0 0 6px rgba(255,0,0,0.5); }
     #camera-orb{ position:absolute; width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,0.9); filter:blur(0.5px); display:none; box-shadow:0 0 10px rgba(255,255,255,0.8); }
     #camera-ir { position:absolute; top:12px; right:14px; color:#9f9; font-size:14px; display:none; }
 
-    /* Belt */
-    #belt{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+    #belt{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid var(--edge); padding:8px 10px; border-radius:10px; }
     .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
-    .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
-    .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+    .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:var(--c1); opacity:0.9; }
+    .slot.active{ outline:2px solid var(--c0); box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
     .slot canvas, .slot img{ max-width:60px; max-height:60px; image-rendering:crisp-edges; }
 
-    /* Touch controls */
-    #touch-controls{ position:fixed; right:12px; bottom:12px; display:none; grid-template-columns:repeat(2,64px); gap:8px; z-index:6000; }
-    .tbtn{ width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.5); border:1px solid #066; color:#0ff; display:flex; align-items:center; justify-content:center; user-select:none; }
-    .tbtn:active{ transform:translateY(1px); }
+    /* Dual on-screen joysticks */
+    .joy{ position:fixed; z-index:6500; width:140px; height:140px; border-radius:50%; background:rgba(0,0,0,0.25); border:1px solid var(--edge); display:none; }
+    .joy .base{ position:absolute; inset:0; border-radius:50%; box-shadow:inset 0 0 24px rgba(0,255,255,0.15); }
+    .joy .stick{ position:absolute; left:50%; top:50%; width:74px; height:74px; border-radius:50%; transform:translate(-50%,-50%); background:rgba(0,20,20,0.6); border:1px solid #0aa; }
+    #joy-left{ left:18px; bottom:18px; }
+    #joy-right{ right:18px; bottom:18px; }
+
+    /* Touch helper buttons */
+    #touch-use{ position:fixed; right:18px; bottom:180px; width:80px; height:44px; border-radius:10px; z-index:6500; display:none; border:1px solid var(--edge); background:rgba(0,0,0,0.55); color:var(--c0); }
+    #touch-notebook{ position:fixed; left:18px; bottom:180px; width:110px; height:44px; border-radius:10px; z-index:6500; display:none; border:1px solid var(--edge); background:rgba(0,0,0,0.55); color:var(--c0); }
 
     /* Toast */
-    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; color:var(--c0); z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
 </head>
 
 <body>
@@ -111,20 +1490,13 @@
   <!-- Start screen -->
   <div id="title-screen">
     <div id="title-content">
-      <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
-      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
+      <div style="margin:8px 0 16px; color:var(--c1);">“Welcome back. Keep the lights on and the sanity high.”</div>
       <button id="start-button">Start Investigation</button>
     </div>
   </div>
-
-  <!-- (optional) Loading overlay -->
-  <div id="loading-overlay" aria-hidden="true">
-    <div id="loading-card">
-      <div id="loading-title">Loading assets…</div>
-      <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
-      <div id="loading-text">0%</div>
-    </div>
-  </div>
+<!-- Items belt -->
+<div id="belt"></div>
 
   <!-- HUD -->
   <div id="hud">
@@ -139,14 +1511,14 @@
   <div id="storage-modal">
     <div id="storage-card">
       <div style="display:flex; align-items:center; justify-content:space-between;">
-        <div style="font-weight:bold;color:#9ff;">Van Storage — Pick 3 (slots 1–3)</div>
+        <div style="font-weight:bold;color:var(--c1);">Van Storage — Pick 3 (slots 1–3)</div>
         <button id="storage-close" class="hud-btn">Close</button>
       </div>
-      <div style="margin:6px 0 10px; color:#8ff;">Slot 4 is always Lighter. Slot 5 is always Notebook.</div>
+      <div style="margin:6px 0 10px; color:var(--c2);">Slot 4 is always Lighter. Slot 5 is always Notebook.</div>
       <div id="storage-grid"></div>
-      <div style="margin-top:10px; display:flex; gap:8px;">
-        <button id="storage-confirm" class="hud-btn" style="border:1px solid #0ff; color:#0ff;">Confirm Loadout</button>
-        <span id="storage-info" style="color:#8ff;"></span>
+      <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+        <button id="storage-confirm" class="hud-btn" style="border:1px solid var(--c0); color:var(--c0);">Confirm Loadout</button>
+        <span id="storage-info" style="color:var(--c2);"></span>
       </div>
     </div>
   </div>
@@ -155,7 +1527,7 @@
   <div id="notebook-modal">
     <div id="notebook-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <div style="font-weight:bold; color:#9ff;">Investigator's Journal</div>
+        <div style="font-weight:bold; color:var(--c1);">Investigator's Journal</div>
         <button id="notebook-close" class="hud-btn">Close</button>
       </div>
       <div id="notebook-tabs">
@@ -169,130 +1541,12 @@
     </div>
   </div>
 
-  <!-- Dev gate (ESC) -->
-  <div id="dev-gate">
-    <div class="card">
-      <div style="font-weight:bold; color:#9ff; margin-bottom:6px;">Enable Developer Options?</div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button id="dev-yes" class="hud-btn">Yes</button>
-        <button id="dev-no"  class="hud-btn">No</button>
-      </div>
-      <div id="dev-pass-wrap" style="display:none; margin-top:10px;">
-        <div style="color:#8ff; margin-bottom:4px;">Enter password:</div>
-        <input id="dev-pass" type="password" placeholder="password" style="padding:6px 8px; background:#000; color:#0ff; border:1px solid #066; border-radius:4px; width:200px;" />
-        <button id="dev-pass-submit" class="hud-btn" style="margin-left:6px;">Submit</button>
-      </div>
-    </div>
-  </div>
+  <!-- Dual Joysticks + Touch helpers -->
+  <div id="joy-left" class="joy"><div class="base"></div><div class="stick"></div></div>
+  <div id="joy-right" class="joy"><div class="base"></div><div class="stick"></div></div>
+  <button id="touch-use">USE</button>
+  <button id="touch-notebook">Notebook</button>
 
-  <!-- Dev Tools -->
-  <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
-
-  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:480px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-      <strong>Developer Tools</strong>
-      <div style="display:flex;gap:6px;">
-        <button id="devtools-open-overlay" class="hud-btn" title="Open devtools_overlay.html">Open External Overlay</button>
-        <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
-      </div>
-    </div>
-
-    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
-      <legend>Listen Groups</legend>
-      <label><input id="devtools-group-ghost" type="checkbox" checked> Ghost tracking</label><br>
-      <label><input id="devtools-group-evidence" type="checkbox"> Evidence item activity</label><br>
-      <label><input id="devtools-group-xyz" type="checkbox"> XYZ tracker (player)</label>
-    </fieldset>
-
-    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
-      <legend>Map Recorder</legend>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button id="devtools-map-start" class="hud-btn">Start Map</button>
-        <button id="devtools-map-pin" class="hud-btn" disabled>Pin</button>
-        <button id="devtools-map-confirm" class="hud-btn" disabled>Confirm</button>
-        <select id="devtools-room-select" style="flex:1;min-width:160px;">
-          <option value="">Select room…</option>
-        </select>
-        <button id="devtools-export-rooms" class="hud-btn" title="Download a rooms.generated.js skeleton">Export Rooms</button>
-      </div>
-    </fieldset>
-
-    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
-      <legend>Player / Debug</legend>
-      <div class="row" style="gap:12px;align-items:center;">
-        <label style="flex:1;">Walk speed
-          <input id="devtools-walk" type="range" min="0.20" max="3.00" step="0.05" value="0.90" style="width:100%;">
-        </label>
-        <label style="flex:1;">Run speed
-          <input id="devtools-run" type="range" min="0.40" max="6.00" step="0.05" value="1.80" style="width:100%;">
-        </label>
-      </div>
-      <div class="row">
-        <label><input id="devtools-god" type="checkbox"> God mode</label>
-        <label><input id="devtools-fly" type="checkbox"> Fly (PageUp/PageDown)</label>
-      </div>
-      <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button id="devtools-teleport" class="hud-btn">Teleport to ghost</button>
-        <button id="devtools-inspector" class="hud-btn">Inspector</button>
-        <button id="devtools-ping" class="hud-btn">Ping XYZ</button>
-        <button id="devtools-reveal-ghost" class="hud-btn">Toggle Ghost Visible</button>
-        <button id="devtools-force-hunt" class="hud-btn">Force Hunt</button>
-        <button id="devtools-end-hunt" class="hud-btn">End Hunt</button>
-      </div>
-    </fieldset>
-
-    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
-      <legend>Assets / GLB & Materials</legend>
-      <div class="row" style="gap:6px;">
-        <button id="asset-reload-map" class="hud-btn" title="Re-import the default house GLB">Reload Map</button>
-        <input id="asset-glb-file" type="file" accept=".glb,.gltf,.zip,.bin" class="hud-btn" style="padding:6px;"/>
-        <button id="asset-append-glb" class="hud-btn">Append GLB</button>
-        <button id="asset-replace-map" class="hud-btn">Replace Map</button>
-      </div>
-      <div class="row" style="gap:6px;">
-        <button id="asset-list-meshes" class="hud-btn">List Meshes</button>
-        <button id="asset-export-meshes" class="hud-btn">Export Mesh List</button>
-      </div>
-      <div class="row" style="gap:6px;">
-        <select id="asset-mesh-select" style="flex:1;min-width:140px;">
-          <option value="">(select a mesh)</option>
-        </select>
-        <button id="asset-focus" class="hud-btn">Focus</button>
-      </div>
-      <div class="row" style="gap:12px;">
-        <label><input id="asset-visible" type="checkbox"> visible</label>
-        <label><input id="asset-pick" type="checkbox"> pickable</label>
-        <label><input id="asset-collide" type="checkbox"> collisions</label>
-        <label><input id="asset-bbox" type="checkbox"> bbox</label>
-        <label><input id="asset-wire" type="checkbox"> wireframe</label>
-      </div>
-      <div class="row" style="gap:6px;">
-        <select id="asset-mat-select" style="flex:1;min-width:140px;">
-          <option value="">(material)</option>
-        </select>
-        <label>alpha <input id="asset-alpha" type="range" min="0" max="1" step="0.01" value="1" /></label>
-      </div>
-      <div class="row" style="gap:6px;">
-        <input id="asset-tex-url" type="text" placeholder="albedo/diffuse texture URL…" style="flex:1;min-width:200px;background:#0b0b0b;color:#9ff;border:1px solid #333;border-radius:6px;padding:6px;">
-        <button id="asset-apply-tex" class="hud-btn">Apply Texture</button>
-      </div>
-    </fieldset>
-
-    <div>
-      <label for="devtools-log">Developer Log</label>
-      <textarea id="devtools-log" style="width:100%;height:180px;background:#0b0b0b;color:#a8f;resize:vertical;border:1px solid #333;border-radius:8px;padding:8px;" readonly></textarea>
-    </div>
-  </div>
-
-  <!-- Hand preview, Belt, Touch controls, Toast -->
-  <div id="hand-preview"></div>
-  <div id="belt"></div>
-  <div id="touch-controls">
-    <div class="tbtn" id="t-up">↑</div>
-    <div class="tbtn" id="t-use">USE</div>
-    <div class="tbtn" id="t-left">←</div>
-    <div class="tbtn" id="t-right">→</div>
-  </div>
   <div id="toast"></div>
 
 <script>
@@ -315,16 +1569,15 @@ let allowFly = false;
 let houseRoot = null;
 let doorMeshes = [];
 let ghost = {
-  mesh:null, target:null, speed:1.4, slowSpeed:0.9, fastSpeed:1.4, alive:true,
+  mesh:null, target:null, speed:0.9, alive:true,
   anims:{ idle:null, walk:null },
   visible:false, hunting:false,
-  nextStep:0, stepInterval:0.55, footAudible:18,
-  isTwins:false, meshFast:null
+  nextStep:0, stepInterval:0.55, footAudible:18
 };
 
 // Cold breath FX
 const BREATH_RANGE = 5.0;
-let breath = { ps:null, anchor:null, pulse:0, cooldown:0 };
+let breath = { ps:null, anchor:null };
 
 /* Weather state + modifiers */
 let weather = {
@@ -346,10 +1599,8 @@ let activeItemSlot = 1;
 
 let inventory = {
   slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'},
-  models:{}, icons:{},
-  slotCharges:{1:0,2:0,3:0,4:Infinity,5:Infinity}
+  models:{}, icons:{}
 };
-const ITEM_DEFAULT_CHARGES = { 'Smudge':1, 'Salt':3 };
 const devBus = new EventTarget();
 let __devGhostLogTimer = 0;
 
@@ -361,8 +1612,6 @@ const ITEM_MODEL_MAP = {
   'Camera':'Photo_Camera_Photo_Camera_0',
   'UV Light':'Flashlight_Flashlight_0',
   'Flashlight':'Flashlight_Poquet_Flashlight_Poquet_0',
-  'Thermal Camera':'Thermal_Camera_Thermal_Camera_0',
-  'Voice Recorder':'Voice_Recorder_Voice_Recorder_0',
   'Ghost Writing Book':'(book-placeholder)',
   'D.O.T.S':'(dots-proj)',
   'Motion Sensor':'(motion-placeholder)'
@@ -406,13 +1655,6 @@ let ghostPolygon = [
   new BABYLON.Vector3(18.660, 0, -149.900)
 ];
 
-/* Placeables / rules */
-const CRUCIFIX_BASE_RADIUS = 3.0;
-const CRUCIFIX_DEMON_RADIUS = 5.0;
-const TWINS_SEP_MIN = 10.0, TWINS_SEP_MAX = 12.0;
-
-const placeables = { motionSensors: [], crucifixes: [] };
-
 /* ===========================================================
    UTILS
    =========================================================== */
@@ -450,52 +1692,41 @@ function pointInPolyXZ(p, poly){
 function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
 function $(s){ return document.querySelector(s); }
 
-function playFootstep(){
-  const arr = [audio.step1,audio.step2,audio.step3];
-  const s = arr[Math.floor(Math.random()*arr.length)];
-  if(s){ s.currentTime=0; s.volume=0.6; s.play().catch(()=>{}); }
-}
-
 /* ===========================================================
    BOOT / STARTUP
    =========================================================== */
 let __started = false;
+
 async function safeStart(){
-  if(__started) return;
-  __started = true;
+  
+  if (window.ensureCES) window.ensureCES();
+if (window.__started) return;
+  window.__started = true;
+  try {
+    // Hide title UI immediately to avoid double clicks
+    var t = document.getElementById('title-screen');
+    if (t) t.style.display = 'none';
 
-  if(!window.BABYLON || !BABYLON.Engine){
-    toast("Engine not ready. Check Babylon includes.", 2200);
-    __started = false;
-    return;
-  }
-
-  // hide title to satisfy user-gesture for audio
-  const scr = document.getElementById('title-screen');
-  if (scr) scr.style.display = 'none';
-
-  try{
     await boot();
-  }catch(err){
-    __started = false;
-    console.error(err);
-    toast("Startup failed: " + (err?.message||err), 2800);
-    if (scr) scr.style.display = 'flex';
-    return;
+
+    // Weather & ghost selection
+    const r = Math.random();
+    const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
+    if (window.scene) { callSetWeather(w); } else { window.__pendingWeather = w; }
+    const keys = Object.keys(GHOSTS);
+    currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+    if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
+
+    if (typeof toast === 'function') toast(`Investigation started. Weather: ${w}.`, 1600);
+  } catch (e) {
+    console.error('safeStart failed:', e);
+    if (typeof toast === 'function') toast('Failed to start: ' + (e && e.message ? e.message : e), 2200);
+    window.__started = false;
+    // Restore title UI so user can retry
+    var t2 = document.getElementById('title-screen');
+    if (t2) t2.style.display = '';
   }
-
-  // Weather + ghost
-  const r = Math.random();
-  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
-  setWeather(w);
-
-  const keys = Object.keys(GHOSTS);
-  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
-  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; } // harder to hear
-
-  toast(`Investigation started. Weather: ${w}.`, 1600);
 }
-
 (function bindStart(){
   const btn = document.getElementById('start-button');
   const screen = document.getElementById('title-screen');
@@ -513,7 +1744,40 @@ async function safeStart(){
    ENGINE & SCENE
    =========================================================== */
 async function boot(){
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  // === BASELINE MODE: skip heavy effects and just load the map ===
+  if (window.BASELINE_MODE) {
+    // Engine/scene/camera basic setup (assumes engine already created and canvas exists)
+    try {
+      const canvas = document.getElementById('renderCanvas') || document.querySelector('canvas');
+      if (!window.engine) window.engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
+      if (!window.scene) window.scene = new BABYLON.Scene(engine);
+      const scene = window.scene;
+
+      // Minimal camera
+      if (!scene.activeCamera) {
+        const camera = new BABYLON.ArcRotateCamera('cam', Math.PI/2, 1.2, 25, new BABYLON.Vector3(0,2,0), scene);
+        camera.attachControl(canvas, true);
+        scene.activeCamera = camera;
+      }
+      // Minimal single light
+      if (!scene.lights || scene.lights.length===0) {
+        new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0,1,0), scene);
+      }
+
+      // Load the map only
+      if (typeof window.loadMap === 'function') {
+        try { await window.loadMap(); } catch(e){ console.error('loadMap failed in baseline mode:', e); }
+      }
+
+      // Start render loop
+      window.startRenderLoopSafe(); });
+    } catch (e) {
+      console.error('Baseline boot failed:', e);
+    }
+    return; // do NOT execute heavy boot path
+  }
+
+  engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
   try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
   scene = new BABYLON.Scene(engine);
   scene.environmentTexture = null;
@@ -532,10 +1796,12 @@ async function boot(){
   camera.minZ = 0.1; camera.inertia = 0;
   camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  // Atmosphere/lights
+  
+  if (!scene.activeCamera) scene.activeCamera = camera;
+// Atmosphere/lights
   setupNightAtmosphere();
 
-  // Hemispheric low-level fill to avoid total-black edge cases
+  // Fill
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
 
@@ -543,9 +1809,29 @@ async function boot(){
   await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
+    // Ensure global light/material cap function exists
+    if (typeof window.capLightsAndMaterials !== 'function') {
+      window.capLightsAndMaterials = function(){ /* no-op cap */ };
+    }
+    window.capLightsAndMaterials(2);
+
   await loadItems().catch(()=>{});
   await loadGhost().catch(()=>{});
+  
+// --- robust moon load ---
+if (typeof loadMoon === 'function') {
   await loadMoon().catch(()=>{});
+} else if (typeof window.loadMoon === 'function') {
+  await window.loadMoon().catch(()=>{});
+} else {
+  // inline fallback if nothing is defined
+  const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+  moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+  const mat = new BABYLON.StandardMaterial("moonMat", scene);
+  mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+  moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+}
+
   setupBreathFX();
 
   if (!houseRoot){
@@ -560,59 +1846,36 @@ async function boot(){
   }
 
   if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
-  if (ghost.meshFast){ moonShadows.addShadowCaster(ghost.meshFast, true); flashShadows.addShadowCaster(ghost.meshFast, true); }
 
   // UI/inputs
   initUI();
   updateHUD();
+  setupJoysticks(); // dual sticks
 
   // Render loop + tickers
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
     handleMovement(dt);
-    updatePlayerFootsteps(dt);
     sanityTick(dt);
-
-    // Rain hidden while in van
-    if (weather.state==='Rain' && weather.rainPS){
-      weather.rainPS.emitRate = inVanZone(camera.position) ? 0 : 1800;
-    }
-
-    // lightning
-    if(weather.state==='Rain'){
-      weather.lightningTimer += dt;
-      if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
-    }
-
-    // light flicker during hunt
+    updateBreath(dt);
+    if(weather.state==='Rain'){ weather.lightningTimer += dt; if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); } }
     if (ghost.hunting && flickerOn){
       flickerTimer += dt;
       if (flickerTimer > 0.08){
         flickerTimer = 0;
-        houseLights.forEach(h=>{
-          if (!housePower) return;
-          h.light.intensity = (Math.random()<0.65) ? 0.2 + Math.random()*0.9 : 0.0;
-        });
+        houseLights.forEach(h=>{ if (!housePower) return; h.light.intensity = (Math.random()<0.65) ? 0.2 + Math.random()*0.9 : 0.0; });
       }
     }
-
     updateGhost(dt);
-    updateBreath(dt);
   });
 
-  engine.runRenderLoop(()=> scene.render());
+  window.startRenderLoopSafe();
   window.addEventListener('resize', ()=> engine.resize());
 
   // HUD visible now
   document.getElementById("hud").style.display="block";
   rebuildBelt();
-
-  if (!houseRoot) ensureDebugCube();
-
-  toast("Atmosphere ready. F=Flash, U=UV, I=IR, L=nearest light, P=power.", 3000);
-
-  canvas.addEventListener("webglcontextlost", (e)=>{ e.preventDefault(); toast("WebGL context lost. Restoring…", 1800); });
-  canvas.addEventListener("webglcontextrestored", ()=>{ toast("WebGL restored.", 1200); });
+  toast("F=Flash, U=UV, I=IR, L=nearest light, P=power. Touch: dual sticks + USE.", 3200);
 }
 
 /* ===========================================================
@@ -636,8 +1899,6 @@ function setupNightAtmosphere(){
   skybox.isPickable = false;
   skybox.renderingGroupId = 0;
 
-  const fillLight = new BABYLON.HemisphericLight('fillLight', new BABYLON.Vector3(0,1,0), scene);
-  fillLight.intensity=0.15;
   moonLight = new BABYLON.DirectionalLight("moonLight", new BABYLON.Vector3(-0.2,-1,0.1), scene);
   moonLight.position = new BABYLON.Vector3(0,200,0);
   moonLight.intensity = 0.45;
@@ -650,9 +1911,6 @@ function setupNightAtmosphere(){
 
   flashLight = new BABYLON.SpotLight("flashLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 10, scene);
   flashLight.parent = camera; flashLight.intensity = 0; flashLight.range = 40;
-  flashLight.diffuse = new BABYLON.Color3(1, 0.98, 0.92);
-  flashLight.specular = new BABYLON.Color3(0.8, 0.8, 0.8);
-  flashLight.shadowEnabled = true;
   flashShadows = new BABYLON.ShadowGenerator(1024, flashLight);
   flashShadows.useBlurExponentialShadowMap = true;
 
@@ -672,9 +1930,9 @@ function setupNightAtmosphere(){
 function applyNightPalette(){
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
-  scene.imageProcessingConfiguration.exposure = 0.8;
+  scene.imageProcessingConfiguration.exposure = 0.75;
   scene.imageProcessingConfiguration.contrast = 1.15;
-  scene.environmentIntensity = 0.25;
+  scene.environmentIntensity = 0.2;
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
@@ -708,34 +1966,15 @@ const audio = {
   clear: new Audio("./assets/audio/clearWeather.mp3"),
   spiritbox: new Audio("./assets/audio/spiritbox.mp3"),
   spiritStatic: new Audio("./assets/audio/spiritBoxStatic.mp3"),
-  whisper: new Audio("./assets/audio/whisper.mp3"),
   doorCreak1: new Audio("./assets/audio/doorCreak1.mp3"),
   doorCreak2: new Audio("./assets/audio/doorCreak2.mp3"),
-  slam1: new Audio("./assets/audio/doorSlam1.mp3"),
-  slam2: new Audio("./assets/audio/doorSlam2.mp3"),
-  ghostLaugh: new Audio("./assets/audio/ghostLaugh.mp3"),
   writing: new Audio("./assets/audio/GhostWriting1.mp3"),
-
-  // Shared footstep pool (player + ghost/myling)
-  steps: [
-    new Audio("./assets/audio/step1.mp3"),
-    new Audio("./assets/audio/step2.mp3"),
-    new Audio("./assets/audio/step3.mp3")
-  ]
+  step1: new Audio("./assets/audio/step1.wav"),
+  step2: new Audio("./assets/audio/step2.wav"),
+  step3: new Audio("./assets/audio/step3.wav")
 };
-Object.values(audio).forEach(a=>{
-  if (Array.isArray(a)) a.forEach(x=>{ if(x && x.loop!==undefined) x.loop=false; });
-  else if(a && a.loop !== undefined) a.loop = false;
-});
-function playStep(volume=0.45){
-  const pool = audio.steps;
-  const s = pool[(Math.random()*pool.length)|0];
-  try{ s.currentTime = 0; s.volume = volume; s.play().catch(()=>{}); }catch{}
-}
+Object.values(audio).forEach(a=>{ if(a && a.loop !== undefined) a.loop = false; });
 
-/* ===========================================================
-   WEATHER HELPERS
-   =========================================================== */
 function makeSnowTexture(){
   if (weather.snowTex) return weather.snowTex;
   const tex = new BABYLON.DynamicTexture("snowTex",{width:32,height:32},scene,false);
@@ -752,7 +1991,7 @@ function stopAllWeatherAudio(){ try{ audio.rain.pause(); audio.rain.currentTime=
 
 function setWeather(state){
   weather.state = state;
-  $('#hud-weather').textContent = state;
+  document.getElementById('hud-weather').textContent = state;
   stopAllWeatherPS(); stopAllWeatherAudio();
 
   weather.modSanityDrain = 1.0; weather.modHuntChance = 1.0; weather.modHuntPace = 1.0;
@@ -760,7 +1999,7 @@ function setWeather(state){
   if(state === 'Rain'){
     if(!weather.rainPS){
       const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
-      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder thin streak
+      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // placeholder
       ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
       ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
       ps.minSize = 0.05; ps.maxSize = 0.1;
@@ -839,11 +2078,12 @@ async function loadMap(){
       if(/door/i.test(m.name||"")) doorMeshes.push(m);
     });
 
-    // invisible catch ground
     const fallbackGround = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:400, height:400, subdivisions:1 }, scene);
-    fallbackGround.position.y = 0; fallbackGround.checkCollisions = true; fallbackGround.isPickable = true; fallbackGround.visibility = 0;
+    fallbackGround.position.y = 0;
+    fallbackGround.checkCollisions = true;
+    fallbackGround.isPickable = true;
+    fallbackGround.visibility = 0;
 
-    // spawn at van height
     const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
     camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
 
@@ -877,73 +2117,85 @@ async function loadItems(){
 /* ===========================================================
    GHOST + HUNT
    =========================================================== */
+
 async function loadGhost(){
+  function solidifyMaterials(root){
+    const meshes = root.getChildMeshes ? root.getChildMeshes(false) : [];
+    const all = meshes.concat([root]).filter(Boolean);
+    for (const m of all){
+      if (!m) continue;
+      m.visibility = 1;
+      m.isPickable = false;
+      m.checkCollisions = false;
+      if (m.material){
+        const mat = m.material;
+        if (mat.alpha !== undefined) mat.alpha = 1;
+        if (mat.backFaceCulling !== undefined) mat.backFaceCulling = true;
+        if (mat.disableLighting !== undefined) mat.disableLighting = false;
+        if (mat.transparencyMode !== undefined && BABYLON.PBRMaterial){
+          mat.transparencyMode = BABYLON.PBRMaterial.PBRMATERIAL_OPAQUE;
+        }
+        if (mat.needDepthPrePass !== undefined) mat.needDepthPrePass = false;
+      }
+    }
+  }
+  function makeFallbackGhost(){
+    const g = BABYLON.MeshBuilder.CreateBox("ghost", {size: 1.0}, scene);
+    const sm = new BABYLON.StandardMaterial("ghostMat", scene);
+    sm.alpha = 0.3;
+    sm.emissiveColor = new BABYLON.Color3(0.9,0.2,0.9);
+    g.material = sm;
+    g.isPickable = false;
+    g.checkCollisions = false;
+    g.alwaysSelectAsActiveMesh = true;
+    const y = pickGroundHeightAt(camera.position.x, camera.position.z);
+    g.position = new BABYLON.Vector3(camera.position.x + 2, y, camera.position.z + 2);
+    ghost.mesh = g;
+    ghost.visible = false;
+  }
+
   try{
-    const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
-    const pick = list[Math.floor(Math.random()*list.length)];
+    const ghostFiles = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
+    const pick = ghostFiles[Math.floor(Math.random()*ghostFiles.length)];
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
-    ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-    ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
-
-    const bb = ghost.mesh.getHierarchyBoundingVectors(true);
-    const height = bb.max.y - bb.min.y;
-    const scale = (1.9 / (height || 1));
-    ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
-    ghost.mesh.rotation = new BABYLON.Vector3(0,0,0);
-
-    r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
-    if(ghost.anims.idle) ghost.anims.idle.start(true);
-
+    const root = r.meshes[0] || r.meshes.find(m=>m.name==="__root__") || r.meshes.find(Boolean);
+    if (!root){ makeFallbackGhost(); return; }
+    ghost.mesh = root;
+    solidifyMaterials(root);
+    // scale normalize to ~1.9m height
+    const bb = root.getHierarchyBoundingVectors(true);
+    const h = (bb.max.y - bb.min.y) || 1;
+    const s = 1.9 / h;
+    root.scaling = new BABYLON.Vector3(s,s,s);
+    // spawn at random polygon or near van
     const p = randomPointInPolygonXZ(ghostPolygon);
     const gy = pickGroundHeightAt(p.x, p.z);
-    ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
-    ghost.target = randomPointInPolygonXZ(ghostPolygon);
-
+    root.position = new BABYLON.Vector3(p.x, gy, p.z);
+    root.rotationQuaternion = null;
+    root.rotation = new BABYLON.Vector3(0, Math.random()*Math.PI*2, 0);
+    root.alwaysSelectAsActiveMesh = true;
+    // default invisible until hunt
     setGhostVisible(false);
+    // animations
+    ghost.anims = ghost.anims || {};
+    r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
+    if (ghost.anims.idle) ghost.anims.idle.start(true);
+  }catch(e){
+    console.warn("loadGhost failed, using fallback:", e);
+    makeFallbackGhost();
+  }
+}
 
-    // Twins
-    ghost.isTwins = (currentGhostKey || "").toLowerCase() === "the twins";
-    if (ghost.isTwins) {
-      ghost.meshFast = ghost.mesh.clone("ghostFast", null, true);
-      ghost.meshFast.isPickable = false;
-      ghost.meshFast.checkCollisions = false;
-      ghost.meshFast.visibility = ghost.visible ? 1 : 0;
-
-      const sep = TWINS_SEP_MIN + Math.random() * (TWINS_SEP_MAX - TWINS_SEP_MIN);
-      const dir = new BABYLON.Vector3(1, 0, 0).rotateByQuaternionToRef(
-        BABYLON.Quaternion.FromEulerAngles(0, Math.random()*Math.PI*2, 0),
-        new BABYLON.Vector3()
-      );
-      const basePos = ghost.mesh.position.clone();
-      const fp = basePos.add(dir.scale(sep));
-      fp.y = pickGroundHeightAt(fp.x, fp.z);
-      ghost.meshFast.position.copyFrom(fp);
-
-      try {
-        moonShadows.addShadowCaster(ghost.meshFast, true);
-        flashShadows.addShadowCaster(ghost.meshFast, true);
-      } catch {}
-    }
-  }catch(e){ console.warn("Ghost load failed:", e); }
 }
 function setGhostVisible(v){
   ghost.visible = !!v;
   if (!ghost.mesh) return;
   ghost.mesh.getChildMeshes(false).concat([ghost.mesh]).forEach(m=>{ m.isVisible = v; m.visibility = v ? 1 : 0; });
-  if (ghost.meshFast){ ghost.meshFast.getChildMeshes(false).concat([ghost.meshFast]).forEach(m=>{ m.isVisible = v; m.visibility = v?1:0; }); }
 }
-
 function beginHunt(){
   if (!ghost.mesh || ghost.hunting) return;
-
-  // Check crucifix protection BEFORE starting a hunt.
-  if (tryBlockHuntByCrucifix()){
-    huntClock = 0; huntCooldown = 14 + Math.random()*16;
-    return; // blocked!
-  }
-
   ghost.hunting = true;
-  $('#hud-hunt-state').textContent = 'HUNTING';
+  document.getElementById('hud-hunt-state').textContent = 'HUNTING';
   setGhostVisible(true);
   ghost.speed = 1.4;
   ghost.stepInterval = 0.48;
@@ -953,9 +2205,9 @@ function beginHunt(){
 function endHunt(){
   if (!ghost.hunting) return;
   ghost.hunting = false;
-  $('#hud-hunt-state').textContent = 'Calm';
+  document.getElementById('hud-hunt-state').textContent = 'Calm';
   setGhostVisible(false);
-  ghost.speed = 1.4;
+  ghost.speed = 0.9;
   ghost.stepInterval = 0.55;
   flickerStop();
   toast('Hunt ended.', 900);
@@ -977,7 +2229,7 @@ function sanityTick(dt){
   const add = nearGhost ? 1.2/60 : 0;
   const drain = (base+add) * (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1) * (weather.modSanityDrain||1);
   player.sanity = Math.max(0, player.sanity - drain);
-  $('#hud-sanity').textContent = `${player.sanity|0}%`;
+  document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`;
 
   if (!ghost.hunting && !inVanZone(camera.position) && player.sanity <= 65){
     huntClock += dt * (weather.modHuntPace||1);
@@ -993,47 +2245,61 @@ function sanityTick(dt){
 /* ===========================================================
    MOON
    =========================================================== */
-async function loadMoon(){
-  try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
-    moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
-    if (!moonMesh) throw new Error("moon.glb had no meshes");
 
-    moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
-    moonMesh.renderingGroupId = 1;
+/* === Cold Breath FX (defensive) === */
+(function(){
+  if (!window.BREATH_RANGE) window.BREATH_RANGE = 5.0;
+  if (!window.breath) window.breath = { ps:null, anchor:null, cooldown:0 };
 
-    const bb = moonMesh.getHierarchyBoundingVectors(true);
-    const size = bb.max.subtract(bb.min).length();
-    if (size < 5) moonMesh.scaling = new BABYLON.Vector3(30,30,30);
+  window.setupBreathFX = function(){
+    if (!window.scene || !window.camera){
+      console.warn("setupBreathFX: missing scene or camera");
+      setTimeout(()=>{ if (window.scene && window.camera) window.setupBreathFX(); }, 120);
+      return;
+    }
+    if (breath.ps) return;
 
-    moonMat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
-    moonMesh.material = moonMat;
-
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    applyMoonTintForWeather();
+    const emitter = new BABYLON.TransformNode("breathAnchor", scene);
+    breath.anchor = emitter;
 
     scene.onBeforeRenderObservable.add(()=>{
-      const t = performance.now()*0.00002;
-      moonMesh.position.x = Math.cos(t)*380;
-      moonMesh.position.z = Math.sin(t)*380;
-      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
+      if (!camera) return;
+      const fwd = camera.getForwardRay().direction.clone(); fwd.normalize();
+      const pos = camera.position.add(fwd.scale(0.35));
+      emitter.position.copyFrom(pos);
+      emitter.position.y = camera.position.y - 0.1;
     });
-  }catch(e){
-    console.warn("loadMoon failed, using sphere:", e);
-    moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
-    moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
-    moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    try{ moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
-    catch{ moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    applyMoonTintForWeather();
-  }
-}
 
+    const ps = new BABYLON.ParticleSystem("breathPS", 300, scene);
+    ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene, true);
+    ps.emitter = emitter;
+    ps.minSize = 0.02; ps.maxSize = 0.05;
+    ps.minLifeTime = 0.35; ps.maxLifeTime = 0.8;
+    ps.emitRate = 0;
+    ps.direction1 = new BABYLON.Vector3(0, 0.02, 0.02);
+    ps.direction2 = new BABYLON.Vector3(0, 0.03, 0.03);
+    ps.color1 = new BABYLON.Color4(0.9,0.95,1,0.45);
+    ps.color2 = new BABYLON.Color4(0.9,0.95,1,0.25);
+    ps.updateSpeed = 0.02;
+    ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+    ps.start();
+
+    breath.ps = ps;
+  };
+
+  window.updateBreath = function(dt){
+    if (!breath.ps) return;
+    const nearGhost = (window.ghost && ghost.mesh) ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < BREATH_RANGE : false;
+
+    // Weather gating
+    const state = (window.weather && weather.state) ? weather.state : 'Clear';
+    const isCold = state === 'Snow' || state === 'Rain' || state === 'Blood Moon' || nearGhost;
+    const target = isCold ? 220 : 0;
+
+    const cur = breath.ps.emitRate||0;
+    breath.ps.emitRate = cur + (target - cur) * 0.15;
+  };
+})();
 /* ===========================================================
    HOUSE LIGHTS
    =========================================================== */
@@ -1070,11 +2336,20 @@ function setHousePower(on){
       ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
   });
 }
+function toggleNearestHouseLight(){
+  if (!houseLights.length || !housePower) { toast(housePower? "No lights found." : "Power is OFF", 900); return; }
+  let n=null, best=1e9;
+  houseLights.forEach(h=>{ const d=BABYLON.Vector3.Distance(camera.position, h.light.position); if(d<best){ best=d; n=h; }});
+  if (!n) return;
+  const on = n.light.intensity>0;
+  n.light.intensity = on ? 0 : 0.8;
+  if (n.mesh?.material?.emissiveColor) n.mesh.material.emissiveColor = on ? new BABYLON.Color3(0,0,0) : new BABYLON.Color3(1.4,1.2,0.9);
+}
 
 /* ===========================================================
-   PLAYER / MOVEMENT / INPUT
+   PLAYER / INPUT
    =========================================================== */
-function updateHUD(){ $('#hud-sanity').textContent = `${player.sanity|0}%`; $('#hud-room').textContent = player.room; }
+function updateHUD(){ document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`; document.getElementById('hud-room').textContent = player.room; }
 function handleMovement(dt){
   const speed = player.running ? player.speedRun : player.speedWalk;
   let move = new BABYLON.Vector3(0,0,0);
@@ -1125,81 +2400,123 @@ function openDoorNearby(){
 }
 
 /* ===========================================================
-   PLAYER FOOTSTEPS (step1/2/3)
-   =========================================================== */
-const stepState = { lastPos:null, acc:0, strideWalk:1.2, strideRun:0.8 };
-function updatePlayerFootsteps(dt){
-  if (!stepState.lastPos) { stepState.lastPos = camera.position.clone(); return; }
-  const now = camera.position;
-  const d = BABYLON.Vector3.Distance(now, stepState.lastPos);
-  stepState.lastPos = now.clone();
-  // only count when actually moving via controls
-  if(!(controls.forward||controls.back||controls.left||controls.right)) return;
-
-  stepState.acc += d;
-  const stride = player.running ? stepState.strideRun : stepState.strideWalk;
-  if (stepState.acc >= stride){
-    stepState.acc = 0;
-    playStep(0.42); // player step volume
-  }
-}
-
-/* ===========================================================
-   BELT / PREVIEW / CAMERA OVERLAY
+   BELT / PREVIEW / CAMERA OVERLAY (safe/defensive)
    =========================================================== */
 let notebookOpen = false;
-function labelForSlot(i){
-  const item = inventory.slots[i] || '-';
-  if (item==='Smudge' || item==='Salt'){
-    const left = inventory.slotCharges[i] ?? 0;
-    return `${item} (${left})`;
-  }
-  return item;
-}
+
+// optional: cache a single preview engine so we don't leak multiples
+let __pv = { engine: null, scene: null, cam: null, canvas: null, mesh: null };
+
 function rebuildBelt(){
-  const belt = document.getElementById('belt'); belt.innerHTML='';
-  for(let i=1;i<=5;i++){
+  const belt = document.getElementById('belt');
+  if (!belt) return;                 // Guard: belt not in DOM yet → no-op
+
+  belt.innerHTML = '';               // Clear once
+
+  for (let i = 1; i <= 5; i++) {
     const slotDiv = document.createElement('div');
-    slotDiv.className = 'slot' + (i===activeItemSlot?' active':''); slotDiv.dataset.slot = i;
-    const key = document.createElement('div'); key.className='key'; key.textContent=i; slotDiv.appendChild(key);
-    const span = document.createElement('div'); span.style.fontSize='11px'; span.style.color='#8ff'; span.style.textAlign='center'; span.textContent=labelForSlot(i);
+    slotDiv.className = 'slot' + (i === activeItemSlot ? ' active' : '');
+    slotDiv.dataset.slot = i;
+
+    const key = document.createElement('div');
+    key.className = 'key';
+    key.textContent = i;
+    slotDiv.appendChild(key);
+
+    const label = (typeof labelForSlot === 'function')
+      ? labelForSlot(i)
+      : (inventory.slots[i] || '-');
+
+    const span = document.createElement('div');
+    span.style.fontSize = '11px';
+    span.style.color = '#8ff';
+    span.style.textAlign = 'center';
+    span.textContent = label;
     slotDiv.appendChild(span);
-    slotDiv.onclick = (ev)=>{ ev.stopPropagation(); selectSlot(i); };
+
+    slotDiv.onclick = (ev) => { ev.stopPropagation(); selectSlot(i); };
     belt.appendChild(slotDiv);
   }
-  refreshHandPreview(); refreshCameraOverlay();
+
+  // Keep the rest of the UI in sync (guarded)
+  if (typeof refreshHandPreview === 'function') refreshHandPreview();
+  if (typeof refreshCameraOverlay === 'function') refreshCameraOverlay();
+  if (typeof syncHeldLights === 'function') syncHeldLights();
 }
+
 function selectSlot(n){
   activeItemSlot = n;
-  // if notebook is open and we switch to a non-notebook slot, close it
-  if (notebookOpen && inventory.slots[n] !== 'Notebook') closeNotebook();
+  // if notebook is open and switching away from it, close
+  if (notebookOpen && inventory.slots[n] !== 'Notebook' && typeof closeNotebook === 'function') {
+    closeNotebook();
+  }
   rebuildBelt();
-  syncHeldLights();
+  if (typeof syncHeldLights === 'function') syncHeldLights();
 }
+
 function refreshHandPreview(){
-  const wrap = document.getElementById('hand-preview'); wrap.innerHTML = '';
+  const wrap = document.getElementById('hand-preview');
+  if (!wrap) return;                 // Guard: preview host not mounted yet
+  wrap.innerHTML = '';
+
   const item = inventory.slots[activeItemSlot];
-  if(!item || !itemsGlb){ wrap.style.display='none'; return; }
-  const c = document.createElement('canvas'); c.width=180; c.height=140; c.style.width='100%'; c.style.height='100%'; wrap.appendChild(c);
+  if (!item || !itemsGlb) { wrap.style.display = 'none'; return; }
 
-  const pv = new BABYLON.Engine(c, true);
-  const pvScene = new BABYLON.Scene(pv);
-  const pvCam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), pvScene);
-  pvCam.attachControl(c, false); pvCam.panningSensibility=0; pvCam.wheelPrecision=50;
-  pvScene.clearColor = new BABYLON.Color4(0,0,0,0);
-  const hem = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), pvScene); hem.intensity=1.2;
+  // Reuse a single engine/canvas for the preview
+  if (!__pv.canvas) {
+    __pv.canvas = document.createElement('canvas');
+    __pv.canvas.width = 180;
+    __pv.canvas.height = 140;
+    __pv.canvas.style.width = '100%';
+    __pv.canvas.style.height = '100%';
+    wrap.appendChild(__pv.canvas);
 
-  const meshName = ITEM_MODEL_MAP[item]; const src = meshName && inventory.models[meshName];
-  if(!src){ wrap.style.display='none'; pv.dispose(); return; }
-  const clone = src.clone("pv-"+meshName, null, true); pvScene.addMesh(clone);
-  clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0); clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
-  wrap.style.display='block'; pv.runRenderLoop(()=>pvScene.render()); window.addEventListener('resize', ()=> pv.resize());
+    __pv.engine = new BABYLON.Engine(__pv.canvas, true);
+    __pv.scene = new BABYLON.Scene(__pv.engine);
+    __pv.scene.clearColor = new BABYLON.Color4(0,0,0,0);
+    __pv.cam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), __pv.scene);
+    __pv.cam.attachControl(__pv.canvas, false);
+    __pv.cam.panningSensibility = 0; __pv.cam.wheelPrecision = 50;
+    new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), __pv.scene).intensity = 1.2;
+
+    __pv.window.startRenderLoopSafe();
+    window.addEventListener('resize', ()=> { try { __pv.engine && __pv.engine.resize(); } catch {} });
+  } else {
+    wrap.appendChild(__pv.canvas);
+  }
+
+  // swap mesh
+  if (__pv.mesh) { try { __pv.mesh.dispose(); } catch {} __pv.mesh = null; }
+
+  const meshName = ITEM_MODEL_MAP[item];
+  const src = meshName && inventory.models[meshName];
+  if (!src) { wrap.style.display = 'none'; return; }
+
+  __pv.mesh = src.clone("pv-"+meshName, null, true);
+  __pv.scene.addMesh(__pv.mesh);
+  __pv.mesh.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0);
+  __pv.mesh.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
+
+  wrap.style.display = 'block';
 }
+
 function refreshCameraOverlay(){
+  const overlay = document.getElementById('camera-overlay');
+  const irBadge = document.getElementById('camera-ir');
+  if (!overlay) return;              // Guard: overlay not mounted yet
+
   const item = inventory.slots[activeItemSlot];
-  const show = (item==='Camera');
-  document.getElementById('camera-overlay').style.display = show ? 'block' : 'none';
-  document.getElementById('camera-ir').style.display = (show && irOn) ? 'block' : 'none';
+  const show = (item === 'Camera');
+
+  overlay.style.display = show ? 'block' : 'none';
+  if (irBadge) irBadge.style.display = (show && irOn) ? 'block' : 'none';
+}
+
+/* Call rebuildBelt only after DOM exists */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { try { rebuildBelt(); } catch {} });
+} else {
+  try { rebuildBelt(); } catch {}
 }
 
 /* ===========================================================
@@ -1212,344 +2529,40 @@ function logEvidence(type){
     toast(`Evidence: ${type}`, 1800);
     const cb = document.querySelector(`input[data-ev="${type}"]`); if(cb) cb.checked = true;
   }
-  if (window.__onEvidenceLogged) window.__onEvidenceLogged({ item:type, result:type, room:player.room, success:true });
 }
-function decChargeForActive(){
-  const i = activeItemSlot;
-  let c = inventory.slotCharges[i] ?? 0;
-  if (c===Infinity) return true;
-  if (c<=0) return false;
-  c -= 1;
-  inventory.slotCharges[i] = c;
-  if (c<=0){ toast(`${inventory.slots[i]} depleted.`, 1100); inventory.slots[i] = null; }
-  rebuildBelt();
-  return true;
+function useActiveItem(){
+  const item = inventory.slots[activeItemSlot]; if(!item) return;
+  const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
+  switch(item){
+    case 'EMF':
+      if(dist < 5){ if(Math.random()<0.5) logEvidence("EMF Level 5"); toast("EMF spikes!", 1000); } else toast("EMF quiet.", 800); break;
+    case 'Spirit Box':
+      if(player.room!=='Van' && dist<4){ if(Math.random()<0.55){ audio.spiritbox.play().catch(()=>{}); logEvidence("Spirit Box"); } else { audio.spiritStatic.play().catch(()=>{}); toast("...static...", 900); } }
+      else toast("No response.", 800); break;
+    case 'Thermometer':
+      if(dist<6 && Math.random()<0.5){ logEvidence("Freezing Temps"); toast("It’s unnaturally cold here.", 900); } else toast("Temp normal.", 900); break;
+    case 'UV Light':
+      if(Math.random()<0.4){ logEvidence("Fingerprints"); toast("A latent mark glows faintly.", 1000); } else toast("Nothing glows.", 900); break;
+    case 'Ghost Writing Book':
+      audio.writing.play().catch(()=>{}); setTimeout(()=>logEvidence("Ghost Writing"), 1200); toast("You place the book down...", 900); break;
+    case 'D.O.T.S':
+      if(Math.random()<0.45){ logEvidence("D.O.T.S"); toast("Something flickers through your setup...", 1000); } else toast("Nothing passes through.", 900); break;
+    case 'Camera':
+      showCameraOrb(); if(Math.random()<0.4) logEvidence("Orbs"); break;
+    case 'Smudge': toast("Air thickens—and clears.", 900); break;
+    case 'Crucifix': toast("You hold the crucifix ready.", 900); break;
+    case 'Salt': toast("You sprinkle a thin line.", 900); break;
+    case 'Motion Sensor': toast("Sensor armed.", 800); break;
+    case 'Lighter': toast("Flame lit.", 700); break;
+    case 'Notebook': openNotebook(true); break;
+    default: toast(`${item}...`, 700);
+  }
 }
 function showCameraOrb(){
   const dot = document.getElementById('camera-orb');
   dot.style.display='block';
   const w=window.innerWidth,h=window.innerHeight; const x=60+Math.random()*(w-120), y=60+Math.random()*(h-180);
   dot.style.transform = `translate(${x}px, ${y}px)`; setTimeout(()=> dot.style.display='none', 1000);
-}
-
-/* Placeables: Motion Sensor (not consumable) */
-function placeMotionSensor(){
-  const nearIdx = placeables.motionSensors.findIndex(ms => BABYLON.Vector3.Distance(ms.node.position, camera.position) < 2.0);
-  if (nearIdx >= 0){
-    const ms = placeables.motionSensors.splice(nearIdx,1)[0];
-    ms.node.dispose(); ms.plate?.dispose();
-    toast("Motion sensor picked up.", 900);
-    return;
-  }
-  const node = new BABYLON.TransformNode("motionSensor", scene);
-  const fp = camera.position.add(camera.getForwardRay().direction.scale(1.0));
-  const y = pickGroundHeightAt(fp.x, fp.z);
-  node.position = new BABYLON.Vector3(fp.x, y+0.05, fp.z);
-
-  const m = BABYLON.MeshBuilder.CreatePlane("msPlate", {size:0.2}, scene);
-  m.rotation.x = Math.PI/2; m.position = node.position.clone();
-  const mat = new BABYLON.StandardMaterial("msMat", scene);
-  mat.emissiveColor = new BABYLON.Color3(0.1,0.8,0.4);
-  mat.disableLighting = true; m.material = mat;
-
-  placeables.motionSensors.push({node, cooldown:0, plate:m});
-  toast("Motion sensor placed. (Click again near it to pick up.)", 1400);
-}
-function tickMotionSensors(dt){
-  for (const ms of placeables.motionSensors){
-    ms.cooldown = Math.max(0, ms.cooldown - dt);
-    const targets = [ghost.mesh].concat(ghost.meshFast ? [ghost.meshFast] : []);
-    const hit = targets.some(t => t && BABYLON.Vector3.Distance(t.position, ms.node.position) < 2.5);
-    if (hit && ms.cooldown === 0){
-      ms.cooldown = 4.0; // anti-spam
-      toast("Motion sensor tripped!", 900);
-      if (ms.plate?.material){
-        const old = ms.plate.material.emissiveColor.clone();
-        ms.plate.material.emissiveColor = new BABYLON.Color3(1,1,1);
-        setTimeout(()=>{ if(ms.plate?.material) ms.plate.material.emissiveColor = old; }, 250);
-      }
-    }
-  }
-}
-
-/* Placeables: Crucifix (consumes only when blocking a hunt) */
-function placeCrucifix(){
-  const nearIdx = placeables.crucifixes.findIndex(c => BABYLON.Vector3.Distance(c.node.position, camera.position) < 2.0);
-  if (nearIdx >= 0){
-    const c = placeables.crucifixes.splice(nearIdx,1)[0];
-    c.node.dispose(); c.mesh?.dispose();
-    toast(`Crucifix picked up (${c.uses} use(s) left).`, 1100);
-    return;
-  }
-  const node = new BABYLON.TransformNode("crucifix", scene);
-  const fp = camera.position.add(camera.getForwardRay().direction.scale(1.0));
-  const y = pickGroundHeightAt(fp.x, fp.z);
-  node.position = new BABYLON.Vector3(fp.x, y+0.02, fp.z);
-
-  const mesh = BABYLON.MeshBuilder.CreateCylinder("crx", {diameter:0.12, height:0.02, tessellation:6}, scene);
-  mesh.position = node.position.clone();
-  const mat = new BABYLON.StandardMaterial("crxMat", scene);
-  mat.emissiveColor = new BABYLON.Color3(0.9,0.6,0.2); mat.disableLighting = true; mesh.material = mat;
-
-  placeables.crucifixes.push({node, uses:2, mesh});
-  toast("Crucifix placed. (Pick up by clicking near it.)", 1200);
-}
-function tryBlockHuntByCrucifix(){
-  if (!placeables.crucifixes.length) return false;
-  const isDemon = (currentGhostKey||"").toLowerCase() === "demon";
-  const evalPos = ghost.mesh?.position; if(!evalPos) return false; // Twins: only slow twin (ghost.mesh)
-  let idx = -1;
-  for (let i=0;i<placeables.crucifixes.length;i++){
-    const c = placeables.crucifixes[i];
-    const r = isDemon ? CRUCIFIX_DEMON_RADIUS : CRUCIFIX_BASE_RADIUS;
-    if (BABYLON.Vector3.Distance(evalPos, c.node.position) <= r){ idx = i; break; }
-  }
-  if (idx === -1) return false;
-
-  const crx = placeables.crucifixes[idx];
-  crx.uses -= 1;
-  if (crx.mesh?.material){
-    const m = crx.mesh.material, old = m.emissiveColor.clone();
-    m.emissiveColor = new BABYLON.Color3(1,0.2,0.2);
-    setTimeout(()=>{ if(crx.mesh?.material) crx.mesh.material.emissiveColor = old; }, 220);
-  }
-  toast(`Crucifix warded the hunt! (${Math.max(crx.uses,0)} use(s) left)`, 1400);
-  if (crx.uses <= 0){ crx.node.dispose(); crx.mesh?.dispose(); placeables.crucifixes.splice(idx,1); }
-  return true;
-}
-
-/* ===========================================================
-   BREATH FX
-   =========================================================== */
-function setupBreathFX(){
-  const ps = new BABYLON.ParticleSystem("breath", 200, scene);
-  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene, true);
-  ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.6);
-  ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.1);
-  ps.minSize = 0.02; ps.maxSize = 0.06;
-  ps.emitRate = 0;
-  ps.minLifeTime = 0.3; ps.maxLifeTime = 0.7;
-  ps.direction1 = new BABYLON.Vector3(0,0.7,0.2);
-  ps.direction2 = new BABYLON.Vector3(0.1,0.8,0.1);
-  ps.gravity = new BABYLON.Vector3(0,0,0);
-  ps.updateSpeed = 0.02;
-  ps.disposeOnStop = false;
-
-  const anchor = new BABYLON.TransformNode("breathAnchor", scene);
-  ps.emitter = anchor; ps.start();
-  breath.ps = ps; breath.anchor = anchor;
-}
-function updateBreath(dt){
-  if (!breath.ps || !breath.anchor) return;
-  breath.anchor.position.copyFrom(camera.position.add(camera.getForwardRay().direction.scale(0.3)).add(new BABYLON.Vector3(0,0.1,0)));
-  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < BREATH_RANGE : false;
-  const targetRate = nearGhost ? 90 : 0;
-  const current = breath.ps.emitRate || 0;
-  breath.ps.emitRate = BABYLON.Scalar.Lerp(current, targetRate, 0.1);
-}
-
-/* ===========================================================
-   GHOST UPDATE / AI  (uses shared step sounds; Myling quieter/harder to hear)
-   =========================================================== */
-let footTimer = 0;
-function updateGhost(dt){
-  if(!ghost.mesh) return;
-
-  function moveActor(actorMesh, speed, targetVec){
-    const pos = actorMesh.position;
-    const target = targetVec ? targetVec.clone() : (ghost.target || randomPointInPolygonXZ(ghostPolygon));
-    if (!targetVec && (!ghost.target || BABYLON.Vector3.Distance(pos, ghost.target) < 1)) {
-      ghost.target = randomPointInPolygonXZ(ghostPolygon);
-    }
-    const dir = target.subtract(pos); dir.y = 0;
-    const len = dir.length();
-    if (len > 0.001){
-      dir.normalize();
-      actorMesh.moveWithCollisions(dir.scale(speed * dt * (ghost.hunting ? 2.2 * (weather.modHuntPace||1) : 1.2)));
-      lookAtXZ(actorMesh, target);
-    }
-  }
-
-  if (!ghost.isTwins) {
-    const chase = ghost.hunting ? camera.position : null;
-    moveActor(ghost.mesh, ghost.hunting ? ghost.speed : ghost.slowSpeed, chase);
-  } else {
-    const slowChase = ghost.hunting ? camera.position : null;
-    const fastChase = ghost.hunting ? camera.position : null;
-    moveActor(ghost.mesh,     ghost.hunting ? ghost.speed     : ghost.slowSpeed, slowChase);
-    moveActor(ghost.meshFast, ghost.hunting ? ghost.speed*1.1 : ghost.fastSpeed, fastChase);
-
-    // keep twins separated 10–12m
-    const a = ghost.mesh.position, b = ghost.meshFast.position;
-    const d = BABYLON.Vector3.Distance(a, b);
-    if (d < TWINS_SEP_MIN || d > TWINS_SEP_MAX){
-      const dir = b.subtract(a); dir.y = 0;
-      const need = BABYLON.Scalar.Clamp(TWINS_SEP_MIN + (TWINS_SEP_MAX - TWINS_SEP_MIN)*0.5, TWINS_SEP_MIN, TWINS_SEP_MAX);
-      if (dir.lengthSquared() < 0.0001) dir.copyFromFloats(1,0,0); else dir.normalize();
-      const targetB = a.add(dir.scale(need));
-      targetB.y = pickGroundHeightAt(targetB.x, targetB.z);
-      const adjust = targetB.subtract(b).scale(0.25);
-      ghost.meshFast.moveWithCollisions(adjust);
-    }
-  }
-
-  // footsteps (shared step files; Myling quieter + smaller radius)
-  footTimer -= dt;
-  if (footTimer <= 0){
-    const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
-    const audible = dist < ghost.footAudible;
-    if (ghost.hunting && audible){
-      const isMyling = ((currentGhostKey||"").toLowerCase()==="myling");
-      playStep(isMyling ? 0.22 : 0.38);
-    }
-    footTimer = ghost.stepInterval + Math.random()*0.12;
-  }
-
-  devBus.dispatchEvent(new Event('ghost'));
-  tickMotionSensors(dt);
-}
-
-/* ===========================================================
-   UI / INPUT
-   =========================================================== */
-let flashOn=false, uvOn=false, irOn=false;
-const keysDown = {};
-
-function initUI(){
-  // Storage
-  $('#storage-button').addEventListener('click', openStorage);
-  $('#storage-close').addEventListener('click', closeStorage);
-  $('#storage-confirm').addEventListener('click', confirmLoadout);
-
-  // Notebook
-  $('#notebook-close').addEventListener('click', closeNotebook);
-
-  // Dev gate on ESC
-  window.addEventListener('keydown', (e)=>{
-    if (e.key === 'Escape'){
-      if (!dev.enabled){
-        const gate = document.getElementById('dev-gate');
-        gate.style.display = (gate.style.display==='flex') ? 'none' : 'flex';
-      } else {
-        const t=document.getElementById('devtools-toggle');
-        if (t.style.display!=='none') t.click();
-      }
-    }
-  });
-  // Dev gate controls
-  $('#dev-yes').addEventListener('click', ()=>{ $('#dev-pass-wrap').style.display='block'; });
-  $('#dev-no').addEventListener('click', ()=>{ $('#dev-gate').style.display='none'; });
-  $('#dev-pass-submit').addEventListener('click', ()=>{
-    const val = ($('#dev-pass').value||'').trim();
-    if (val){
-      dev.enabled = true;
-      $('#dev-gate').style.display='none';
-      if (window.DevTools) window.DevTools.showToggle();
-      toast('Developer options enabled.', 1200);
-    } else {
-      toast('Enter a password.', 900);
-    }
-  });
-
-  // Touch controls
-  const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
-  const tbox = document.getElementById('touch-controls');
-  if (hasTouch){ tbox.style.display='grid'; }
-
-  const tUp  = document.getElementById('t-up');
-  const tLeft= document.getElementById('t-left');
-  const tRight=document.getElementById('t-right');
-  const tUse = document.getElementById('t-use');
-  const press = (el, on, off)=>{
-    const start=()=>on();
-    const end=()=>off();
-    el.addEventListener('touchstart', (e)=>{ e.preventDefault(); start(); }, {passive:false});
-    el.addEventListener('touchend',   (e)=>{ e.preventDefault(); end(); },   {passive:false});
-    el.addEventListener('mousedown',  (e)=>{ e.preventDefault(); start(); });
-    el.addEventListener('mouseup',    (e)=>{ e.preventDefault(); end(); });
-    el.addEventListener('mouseleave', (e)=>{ e.preventDefault(); end(); });
-  };
-  press(tUp, ()=>controls.forward=true, ()=>controls.forward=false);
-  press(tLeft, ()=>controls.left=true, ()=>controls.left=false);
-  press(tRight, ()=>controls.right=true, ()=>controls.right=false);
-  press(tUse, ()=>useActiveItem(), ()=>{});
-
-  // Dev tools open
-  const toggleBtn   = document.getElementById('devtools-toggle');
-  const panel       = document.getElementById('devtools-panel');
-  toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
-}
-
-/* Keys */
-window.addEventListener('keydown', (e)=>{
-  keysDown[e.key] = true;
-  if (e.repeat) return;
-
-  switch(e.key){
-    case 'w': case 'W': controls.forward=true; break;
-    case 's': case 'S': controls.back=true; break;
-    case 'a': case 'A': controls.left=true; break;
-    case 'd': case 'D': controls.right=true; break;
-    case 'Shift': player.running = true; break;
-
-    case '1': case '2': case '3': case '4': case '5':
-      selectSlot(parseInt(e.key,10)); break;
-
-    case 'n': case 'N': openNotebook(); break;
-    case 'e': case 'E': openDoorNearby(); break;
-
-    case 'f': case 'F': flashOn=!flashOn; uvOn=false; irOn=false; syncHeldLights(); break;
-    case 'u': case 'U': uvOn=!uvOn; flashOn=false; irOn=false; syncHeldLights(); break;
-    case 'i': case 'I': irOn=!irOn; flashOn=false; uvOn=false; syncHeldLights(); refreshCameraOverlay(); break;
-    case 'l': case 'L': toggleNearestHouseLight(); break;
-    case 'p': case 'P': setHousePower(!housePower); break;
-    case ' ':
-      useActiveItem(); break;
-  }
-});
-window.addEventListener('keyup', (e)=>{
-  keysDown[e.key] = false;
-  switch(e.key){
-    case 'w': case 'W': controls.forward=false; break;
-    case 's': case 'S': controls.back=false; break;
-    case 'a': case 'A': controls.left=false; break;
-    case 'd': case 'D': controls.right=false; break;
-    case 'Shift': player.running = false; break;
-  }
-});
-window.addEventListener('mousedown', (e)=>{ if(e.button===0) useActiveItem(); });
-window.addEventListener('wheel', (e)=>{
-  const dir = Math.sign(e.deltaY);
-  activeItemSlot += dir>0 ? 1 : -1;
-  if (activeItemSlot<1) activeItemSlot=5;
-  if (activeItemSlot>5) activeItemSlot=1;
-  rebuildBelt();
-  syncHeldLights();
-}, {passive:true});
-
-/* ===========================================================
-   LIGHT TOGGLES
-   =========================================================== */
-function syncHeldLights(){
-  const item = inventory.slots[activeItemSlot];
-  flashLight.intensity = 0; uvLight.intensity = 0; irLight.intensity = 0;
-
-  if (item==='Flashlight' && flashOn) flashLight.intensity = 3.0;
-  if (item==='UV Light'   && uvOn)    uvLight.intensity   = 2.0;
-  if (item==='Camera'     && irOn)    irLight.intensity   = 1.6;
-}
-function toggleNearestHouseLight(){
-  if (!housePower) return toast("Power is off.", 900);
-  let best=null, bestD=9e9;
-  houseLights.forEach(h=>{
-    const d = BABYLON.Vector3.Distance(h.light.position||h.mesh?.position||BABYLON.Vector3.Zero(), camera.position);
-    if (d<bestD){ bestD=d; best=h; }
-  });
-  if (!best) return;
-  best.light.intensity = best.light.intensity>0 ? 0 : 0.8;
-  if (best.mesh?.material?.emissiveColor){
-    best.mesh.material.emissiveColor = best.light.intensity>0 ? new BABYLON.Color3(1.4,1.2,0.9) : new BABYLON.Color3(0,0,0);
-  }
 }
 
 /* ===========================================================
@@ -1593,334 +2606,347 @@ function openStorage(){
   modal.style.display='flex'; storageOpen=true;
 }
 function closeStorage(){ document.getElementById('storage-modal').style.display='none'; storageOpen=false; }
-function addToLoadout(item){
-  for(let i=1;i<=3;i++){
-    if(!inventory.slots[i]){
-      inventory.slots[i]=item;
-      inventory.slotCharges[i] = (ITEM_DEFAULT_CHARGES[item] ?? Infinity);
-      toast(`Added ${item} to slot ${i}`, 900);
-      rebuildBelt();
-      return;
-    }
-  }
-  toast('Slots 1–3 full. Remove one first.', 1200);
-}
+function addToLoadout(item){ for(let i=1;i<=3;i++){ if(!inventory.slots[i]){ inventory.slots[i]=item; toast(`Added ${item} to slot ${i}`, 900); rebuildBelt(); return; } } toast('Slots 1–3 full. Remove one first.', 1200); }
 function confirmLoadout(){ closeStorage(); }
 
 /* ===========================================================
-   DEVTOOLS (panel + external overlay)
+   DUAL JOYSTICKS (movement + look)
    =========================================================== */
-(function setupDevTools(){
-  const toggleBtn   = document.getElementById('devtools-toggle');
-  const panel       = document.getElementById('devtools-panel');
-  const enableBtn   = document.getElementById('devtools-enable');
-  const openOverlay = document.getElementById('devtools-open-overlay');
-  const chkGhost    = document.getElementById('devtools-group-ghost');
-  const chkEv       = document.getElementById('devtools-group-evidence');
-  const chkXYZ      = document.getElementById('devtools-group-xyz');
-  const roomSel     = document.getElementById('devtools-room-select');
-  const logTa       = document.getElementById('devtools-log');
+const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
+const leftJoy = document.getElementById('joy-left');
+const rightJoy = document.getElementById('joy-right');
+const btnUse = document.getElementById('touch-use');
+const btnNote = document.getElementById('touch-notebook');
 
-  let overlayWin = null;
-  function postToOverlay(payload){
-    if (overlayWin && !overlayWin.closed){
-      overlayWin.postMessage(payload, "*");
+let joyMove = { active:false, id:null, dx:0, dy:0 };
+let joyLook = { active:false, id:null, dx:0, dy:0 };
+
+function setupJoysticks(){
+  if(!isTouch) return;
+  leftJoy.style.display = 'block';
+  rightJoy.style.display = 'block';
+  btnUse.style.display = 'block';
+  btnNote.style.display = 'block';
+
+  const initJoy = (root, state)=>{
+    const stick = root.querySelector('.stick');
+    const base = root.getBoundingClientRect();
+    const maxR = base.width*0.42;
+
+    const setStick = (dx,dy)=>{
+      const len = Math.hypot(dx,dy);
+      if(len>maxR){ const s=maxR/len; dx*=s; dy*=s; }
+      stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      state.dx = dx/maxR; state.dy = dy/maxR;
+    };
+    const reset = ()=>{ setStick(0,0); state.active=false; state.id=null; state.dx=0; state.dy=0; };
+
+    root.addEventListener('pointerdown', (e)=>{
+      if(state.active) return;
+      state.active = true; state.id = e.pointerId;
+      root.setPointerCapture(e.pointerId);
+      const r = root.getBoundingClientRect();
+      setStick(e.clientX-(r.left+r.width/2), e.clientY-(r.top+r.height/2));
+      e.preventDefault();
+    });
+    root.addEventListener('pointermove', (e)=>{
+      if(!state.active || e.pointerId!==state.id) return;
+      const r = root.getBoundingClientRect();
+      setStick(e.clientX-(r.left+r.width/2), e.clientY-(r.top+r.height/2));
+    });
+    ['pointerup','pointercancel','lostpointercapture'].forEach(ev=>{
+      root.addEventListener(ev, (e)=>{ if(e.pointerId===state.id) reset(); });
+    });
+  };
+
+  initJoy(leftJoy, joyMove);
+  initJoy(rightJoy, joyLook);
+
+  btnUse.addEventListener('pointerdown', (e)=>{ useActiveItem(); e.preventDefault(); });
+  btnNote.addEventListener('pointerdown', (e)=>{ openNotebook(); e.preventDefault(); });
+
+  // Apply joystick states each frame
+  scene.onBeforeRenderObservable.add(()=>{
+    // movement (left)
+    controls.forward = joyMove.dy < -0.25;
+    controls.back    = joyMove.dy >  0.25;
+    controls.left    = joyMove.dx < -0.25;
+    controls.right   = joyMove.dx >  0.25;
+
+    // look (right) — adjust camera rotation
+    const lookYaw = joyLook.dx * 0.025;   // horizontal
+    const lookPitch = joyLook.dy * 0.02;  // vertical
+    camera.cameraRotation = camera.cameraRotation || new BABYLON.Vector2(0,0);
+    camera.cameraRotation.y += lookYaw * engine.getDeltaTime(); // yaw
+    camera.cameraRotation.x += lookPitch * engine.getDeltaTime(); // pitch
+    camera.rotation.y = camera.cameraRotation.y;
+    camera.rotation.x = BABYLON.Scalar.Clamp(camera.cameraRotation.x, -Math.PI/2.2, Math.PI/2.2);
+  });
+}
+
+/* ===========================================================
+   BREATH FX
+   =========================================================== */
+function setupBreathFX(){
+  const ps = new BABYLON.ParticleSystem("breath", 200, scene);
+  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene, true);
+  ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.6);
+  ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.1);
+  ps.minSize = 0.02; ps.maxSize = 0.06;
+  ps.emitRate = 0;
+  ps.minLifeTime = 0.3; ps.maxLifeTime = 0.7;
+  ps.direction1 = new BABYLON.Vector3(0,0.7,0.2);
+  ps.direction2 = new BABYLON.Vector3(0.1,0.8,0.1);
+  ps.gravity = new BABYLON.Vector3(0,0,0);
+  ps.updateSpeed = 0.02;
+  ps.disposeOnStop = false;
+
+  const anchor = new BABYLON.TransformNode("breathAnchor", scene);
+  ps.emitter = anchor; ps.start();
+  breath.ps = ps; breath.anchor = anchor;
+}
+function updateBreath(dt){
+  if (!breath.ps || !breath.anchor) return;
+  breath.anchor.position.copyFrom(camera.position.add(camera.getForwardRay().direction.scale(0.3)).add(new BABYLON.Vector3(0,0.1,0)));
+  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < BREATH_RANGE : false;
+  const targetRate = nearGhost ? 90 : 0;
+  const current = breath.ps.emitRate || 0;
+  breath.ps.emitRate = BABYLON.Scalar.Lerp(current, targetRate, 0.1);
+}
+
+/* ===========================================================
+   GHOST UPDATE / AI
+   =========================================================== */
+let footTimer = 0;
+function updateGhost(dt){
+  if(!ghost.mesh) return;
+
+  if(!ghost.hunting){
+    const pos = ghost.mesh.position;
+    if(!ghost.target || BABYLON.Vector3.Distance(pos, ghost.target) < 1){
+      ghost.target = randomPointInPolygonXZ(ghostPolygon);
+    }
+    const dir = ghost.target.subtract(pos); dir.y = 0; const len = dir.length();
+    if (len > 0.001){
+      dir.normalize();
+      ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt * 1.2));
+      lookAtXZ(ghost.mesh, ghost.target);
+    }
+  } else {
+    const target = camera.position.clone();
+    const pos = ghost.mesh.position;
+    const dir = target.subtract(pos); dir.y = 0; const len = dir.length();
+    if(len > 0.001){
+      dir.normalize();
+      ghost.mesh.moveWithCollisions(dir.scale(ghost.speed * dt * 2.2 * (weather.modHuntPace||1)));
+      lookAtXZ(ghost.mesh, target);
     }
   }
 
-  function log(msg){
-    const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-    logTa.value += line; logTa.scrollTop = logTa.scrollHeight;
-    console.debug('%cDEV','color:#8af', msg);
-    postToOverlay({ type:'log', text: msg });
+  // footstep SFX
+  footTimer -= dt;
+  if (footTimer <= 0){
+    const dist = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+    const audible = dist < ghost.footAudible;
+    if (ghost.hunting && audible){
+      try{
+        const pick = Math.random()<0.5?audio.step1:(Math.random()<0.5?audio.step2:audio.step3);
+        pick.currentTime=0; pick.volume=0.6; pick.play().catch(()=>{});
+      }catch{}
+    }
+    footTimer = ghost.stepInterval + Math.random()*0.12;
   }
-  window.DevTools = { showToggle(){ toggleBtn.style.display='block'; }, open(){ panel.style.display='block'; }, log };
+}
 
-  toggleBtn.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block') ? 'none' : 'block'; });
-  openOverlay.addEventListener('click', ()=>{
-    try{
-      overlayWin = window.open('./devtools_overlay.html','devtools_overlay','width=520,height=680');
-      setTimeout(()=>postToOverlay({type:'handshake', hello:true}), 400);
-    }catch(e){ toast('Popup blocked: allow popups for this site.', 1800); }
+/* ===========================================================
+   UI / INPUT BINDINGS
+   =========================================================== */
+let flashOn=false, uvOn=false, irOn=false;
+const keysDown = {};
+
+function initUI(){
+  // Storage buttons
+  document.getElementById('storage-button').addEventListener('click', openStorage);
+  document.getElementById('storage-close').addEventListener('click', closeStorage);
+  document.getElementById('storage-confirm').addEventListener('click', confirmLoadout);
+
+  // Notebook
+  document.getElementById('notebook-close').addEventListener('click', closeNotebook);
+
+  // Touch helpers already wired in setupJoysticks()
+
+  // Keyboard movement + actions
+  window.addEventListener('keydown', (e)=>{
+    keysDown[e.key] = true;
+    if (e.repeat) return;
+    switch(e.key){
+      case 'w': case 'W': controls.forward=true; break;
+      case 's': case 'S': controls.back=true; break;
+      case 'a': case 'A': controls.left=true; break;
+      case 'd': case 'D': controls.right=true; break;
+      case 'Shift': player.running = true; break;
+
+      case '1': case '2': case '3': case '4': case '5': selectSlot(parseInt(e.key,10)); break;
+      case 'n': case 'N': openNotebook(); break;
+      case 'e': case 'E': openDoorNearby(); break;
+
+      case 'f': case 'F': flashOn=!flashOn; uvOn=false; irOn=false; syncHeldLights(); break;
+      case 'u': case 'U': uvOn=!uvOn; flashOn=false; irOn=false; syncHeldLights(); break;
+      case 'i': case 'I': irOn=!irOn; flashOn=false; uvOn=false; syncHeldLights(); refreshCameraOverlay(); break;
+      case 'l': case 'L': toggleNearestHouseLight(); break;
+      case 'p': case 'P': setHousePower(!housePower); break;
+    }
+  });
+  window.addEventListener('keyup', (e)=>{
+    keysDown[e.key] = false;
+    switch(e.key){
+      case 'w': case 'W': controls.forward=false; break;
+      case 's': case 'S': controls.back=false; break;
+      case 'a': case 'A': controls.left=false; break;
+      case 'd': case 'D': controls.right=false; break;
+      case 'Shift': player.running = false; break;
+    }
   });
 
-  try{
-    const raw = (window.ROOMS && Array.isArray(window.ROOMS)) ? window.ROOMS : [];
-    const names = raw.map(r => typeof r === 'string' ? r : (r?.name || 'Unnamed'));
-    if (roomSel && names.length){
-      roomSel.innerHTML = '<option value="">Select room…</option>' + names.map(n=>`<option>${n}</option>`).join('');
-    }
-  }catch{}
+  // Mouse to use active item
+  window.addEventListener('mousedown', (e)=>{ if(e.button===0) useActiveItem(); });
 
-  enableBtn.addEventListener('click', ()=>{
-    const on = enableBtn.dataset.on==='1' ? false : true;
-    enableBtn.dataset.on = on ? '1':'0';
-    enableBtn.textContent = on ? 'Disable Developer Listen' : 'Enable Developer Listen';
-    log(on ? 'Developer Listen: ON' : 'Developer Listen: OFF');
-
-    if (chkGhost) {
-      if (on && chkGhost.checked) devBus.addEventListener('ghost', ghostLogger);
-      else                         devBus.removeEventListener('ghost', ghostLogger);
-    }
-    if (chkEv) {
-      if (on && chkEv.checked) window.__onEvidenceLogged = d=> evidenceLogger(d);
-      else                     window.__onEvidenceLogged = null;
-    }
-    if (chkXYZ) {
-      if (on && chkXYZ.checked) startXYZ();
-      else                      stopXYZ();
-    }
-  });
-
-  function ghostLogger(){
-    const g = ghost.mesh?.position; if(!g) return;
-    const fast = ghost.meshFast?.position;
-    const data = { type:'ghost', x:g.x,y:g.y,z:g.z, hunting:ghost.hunting };
-    if (fast) data.fast = { x:fast.x,y:fast.y,z:fast.z };
-    postToOverlay(data);
-    if(performance.now() - __devGhostLogTimer < 250) return;
-    __devGhostLogTimer = performance.now();
-    log(`Ghost @ x:${g.x.toFixed(2)} y:${g.y.toFixed(2)} z:${g.z.toFixed(2)} hunting:${ghost.hunting}`);
-  }
-  function evidenceLogger(d){ log(`EV: ${d.item} in ${d.room} (${d.success?'OK':'FAIL'})`); postToOverlay({type:'evidence', ...d}); }
-
-  let xyzTimer=null;
-  function startXYZ(){
-    if (xyzTimer) return;
-    xyzTimer = setInterval(()=>{
-      const p=camera?.position; if(!p) return;
-      const d = { type:'xyz', x:p.x,y:p.y,z:p.z, room:player.room };
-      postToOverlay(d);
-      log(`XYZ x:${p.x.toFixed(2)} y:${p.y.toFixed(2)} z:${p.z.toFixed(2)}`);
-    }, 1000);
-  }
-  function stopXYZ(){ if(xyzTimer){ clearInterval(xyzTimer); xyzTimer=null; } }
-})();
-
-/* ===========================================================
-   USE ITEMS
-   =========================================================== */
-function useActiveItem(){
-  const item = inventory.slots[activeItemSlot]; if(!item) return;
-  const dist = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 999;
-  switch(item){
-    case 'EMF':
-      if(dist < 5){ if(Math.random()<0.5) logEvidence("EMF Level 5"); toast("EMF spikes!", 1000); } else toast("EMF quiet.", 800); break;
-
-    case 'Spirit Box':
-      if(player.room!=='Van' && dist<4){
-        if(Math.random()<0.55){ audio.spiritbox.play().catch(()=>{}); logEvidence("Spirit Box"); }
-        else { audio.spiritStatic.play().catch(()=>{}); toast("...static...", 900); }
-      } else toast("No response.", 800);
-      break;
-
-    case 'Thermometer':
-      if(dist<6 && Math.random()<0.5){ logEvidence("Freezing Temps"); toast("It’s unnaturally cold here.", 900); }
-      else toast("Temp normal.", 900);
-      break;
-
-    case 'UV Light':
-      if(Math.random()<0.4){ logEvidence("Fingerprints"); toast("A latent mark glows faintly.", 1000); } else toast("Nothing glows.", 900);
-      break;
-
-    case 'Ghost Writing Book':
-      audio.writing.play().catch(()=>{}); setTimeout(()=>logEvidence("Ghost Writing"), 1200); toast("You place the book down...", 900);
-      break;
-
-    case 'D.O.T.S':
-      if(Math.random()<0.45){ logEvidence("D.O.T.S"); toast("Something flickers through your setup...", 1000); } else toast("Nothing passes through.", 900);
-      break;
-
-    case 'Camera':
-      if (inVanZone(camera.position)) { toast("Too far. Try setting up indoors.", 1000); break; }
-      showCameraOrb();
-      if (dist < 15 && Math.random()<0.4) logEvidence("Orbs");
-      break;
-
-    case 'Smudge':
-      toast("Air thickens—and clears.", 900);
-      decChargeForActive(); // consume
-      break;
-
-    case 'Salt':
-      toast("You sprinkle a thin line.", 900);
-      decChargeForActive(); // consume
-      break;
-
-    case 'Crucifix':
-      placeCrucifix();
-      break;
-
-    case 'Motion Sensor':
-      placeMotionSensor();
-      break;
-
-    case 'Lighter':
-      toast("Flame lit.", 700);
-      break;
-
-    case 'Notebook':
-      openNotebook();
-      break;
-
-    default:
-      toast(`${item}...`, 700);
-  }
+  // Scroll to change slots
+  window.addEventListener('wheel', (e)=>{
+    const dir = Math.sign(e.deltaY);
+    activeItemSlot += dir>0 ? 1 : -1;
+    if (activeItemSlot<1) activeItemSlot=5;
+    if (activeItemSlot>5) activeItemSlot=1;
+    rebuildBelt(); syncHeldLights();
+  }, {passive:true});
 }
 
-/* ===========================================================
-   DEBUG CUBE
-   =========================================================== */
-function ensureDebugCube(){
-  if (scene.getMeshByName("dbgCube")) return;
-  const m = BABYLON.MeshBuilder.CreateBox("dbgCube",{size:2},scene);
-  m.position = new BABYLON.Vector3(43.657, 2, -112);
-  const mat = new BABYLON.StandardMaterial("dbgMat", scene);
-  mat.diffuseColor = new BABYLON.Color3(0.1,0.6,0.8);
-  m.material = mat;
-  scene.onBeforeRenderObservable.add(()=>{ m.rotation.y += 0.01; });
+function syncHeldLights(){
+  const item = inventory.slots[activeItemSlot];
+  flashLight.intensity = 0; uvLight.intensity = 0; irLight.intensity = 0;
+  if (item==='Flashlight' && flashOn) flashLight.intensity = 3.0;
+  if (item==='UV Light'   && uvOn)    uvLight.intensity   = 2.0;
+  if (item==='Camera'     && irOn)    irLight.intensity   = 1.6;
 }
 
-/* ===========================================================
-   START
-   =========================================================== */
-document.getElementById('start-button').addEventListener('click', safeStart);
 
-/* Helper: nearest house light toggle key "L" */
-function toggleNearestHouseLight(){ // already declared above, noop placeholder to keep reference valid
-}
-
-</script>
-  <!-- === Minimal Dual Joysticks: drop-in block (paste before </body>) === -->
-<style>
-  /* JOYSTICKS — tiny, self-contained */
-  .joystick{
-    position:fixed;
-    width:120px; height:120px;
-    border-radius:50%;
-    background:rgba(0,0,0,0.35);
-    border:1px solid #066;
-    backdrop-filter: blur(2px);
-    z-index:6001;
-    touch-action:none;
-    user-select:none;
-    display:none; /* shown on touch devices by JS */
-  }
-  .joystick .knob{
-    position:absolute; left:50%; top:50%;
-    width:62px; height:62px; transform:translate(-50%,-50%);
-    border-radius:50%;
-    background:rgba(0,20,20,0.65);
-    border:2px solid #0aa;
-    box-shadow:0 0 10px rgba(0,255,255,0.25) inset;
-  }
-  #joystick-left  { left:16px;  bottom:16px; }
-  #joystick-right { right:16px; bottom:16px; }
-  @media (pointer: coarse) { .joystick { display:block; } }
-</style>
-
-<!-- containers (created if missing, but included here for clarity) -->
-<div id="joystick-left"  class="joystick"><div class="knob"></div></div>
-<div id="joystick-right" class="joystick"><div class="knob"></div></div>
-
-<script>
-/* JOYSTICKS — tiny helper (idempotent) */
+/* === Dev Options Gate (ESC -> Yes -> password) === */
 (function(){
-  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
-  function ensure(id){
-    let el = document.getElementById(id);
-    if(!el){
-      el = document.createElement('div');
-      el.id = id; el.className='joystick';
-      el.innerHTML = '<div class="knob"></div>';
-      document.body.appendChild(el);
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
     }
-    return el;
-  }
-  const left  = ensure('joystick-left');
-  const right = ensure('joystick-right');
-  if(!isTouch){ left.style.display='none'; right.style.display='none'; }
-
-  function initJoysticks(cam, controls, opts={}){
-    if(!isTouch) return;
-    const cfg = { dead:0.12, look:0.045, snap:0.35, ...opts };
-    [left,right].forEach(el=>{
-      el.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
-      el.addEventListener('touchmove',  e=>e.preventDefault(), {passive:false});
-    });
-
-    function makeStick(container, onMove, onEnd){
-      const knob = container.querySelector('.knob');
-      const radius = container.clientWidth*0.5;
-      let active=false;
-
-      function setKnob(x,y){ knob.style.left=(x+radius)+'px'; knob.style.top=(y+radius)+'px'; }
-      function reset(){ setKnob(0,0); }
-      function pt(e){
-        const t = e.touches ? e.touches[0] : e;
-        const r = container.getBoundingClientRect();
-        return { x: t.clientX-(r.left+r.width/2), y: t.clientY-(r.top+r.height/2) };
-      }
-      function clamp(x,y,maxR){
-        const len = Math.hypot(x,y); if(len<=maxR) return {x,y};
-        const k = maxR/(len||1); return {x:x*k, y:y*k};
-      }
-      function start(e){ active=true; move(e); }
-      function move(e){
-        if(!active) return;
-        const p = pt(e), c = clamp(p.x,p.y,radius);
-        setKnob(c.x,c.y);
-        onMove(c.x/radius, c.y/radius);
-      }
-      function end(){ active=false; reset(); onEnd(); }
-
-      container.addEventListener('touchstart',start,{passive:false});
-      container.addEventListener('touchmove', move,{passive:false});
-      container.addEventListener('touchend',  end, {passive:false});
-      container.addEventListener('mousedown', start);
-      window.addEventListener('mousemove',    move);
-      window.addEventListener('mouseup',      end);
-      reset();
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
     }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
 
-    // LEFT: movement -> toggles your existing WASD booleans
-    makeStick(left, (nx, ny)=>{
-      const x = nx, z = -ny;
-      const mag = Math.hypot(x,z);
-      controls.forward = controls.back = controls.left = controls.right = false;
-      if (mag < cfg.dead) return;
-      const ux = x/mag, uz = z/mag;
-      if (uz >  cfg.snap) controls.forward = true;
-      if (uz < -cfg.snap) controls.back    = true;
-      if (ux < -cfg.snap) controls.left    = true;
-      if (ux >  cfg.snap) controls.right   = true;
-    }, ()=>{
-      controls.forward = controls.back = controls.left = controls.right = false;
-    });
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
 
-    // RIGHT: look -> adjusts camera.rotation.x/y (clamped pitch)
-    makeStick(right, (nx, ny)=>{
-      const mag = Math.hypot(nx, ny);
-      if (mag < cfg.dead) return;
-      if (!cam) return;
-      cam.rotation.y += nx * cfg.look;
-      const minPitch = -Math.PI/2 + 0.15;
-      const maxPitch =  Math.PI/2 - 0.15;
-      cam.rotation.x = Math.min(maxPitch, Math.max(minPitch, cam.rotation.x + (-ny * cfg.look)));
-    }, ()=>{});
-  }
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
 
-  // auto-init when your globals exist; otherwise expose a helper
-  function tryInit(){
-    if (window.camera && window.controls) { initJoysticks(window.camera, window.controls); return true; }
-    return false;
-  }
-  if (!tryInit()){
-    window.addEventListener('load', ()=> setTimeout(tryInit, 0));
-  }
-  window.initJoysticks = (cam, ctrls, opts)=> initJoysticks(cam, ctrls, opts);
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
-<!-- === /Minimal Dual Joysticks === -->
+<div id="hand-preview" style="display:none"></div>
+
+<script id="__start_button_binder__">
+(function(){
+  function byId(id){ return document.getElementById(id); }
+  function bindStart(){
+    var btn = byId('startInvestigationBtn') || byId('start-button');
+    if (!btn) return false;
+    if (!window.safeStart) {
+      window.safeStart = async function(ev){
+        try{ ev && ev.preventDefault && ev.preventDefault(); }catch(_){}
+        try{
+          // Prefer your app's boot/start entry point
+          if (typeof window.start === 'function') await window.start();
+          else if (typeof window.safeStartInternal === 'function') await window.safeStartInternal();
+          else if (typeof window.boot === 'function') await window.boot();
+          else if (typeof window.startGame === 'function') await window.startGame();
+        }catch(e){ console.error('safeStart failed:', e); }
+        try{ if (typeof window.startRenderLoopSafe === 'function') window.startRenderLoopSafe(); }catch(_){}
+        // Hide title screen after starting
+        var screen = byId('title-screen') || byId('titleScreen');
+        if (screen) screen.style.display = 'none';
+      };
+    }
+    // Avoid double-binding
+    btn.onclick = window.safeStart;
+    btn.onkeydown = function(e){ if (e && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); window.safeStart(e); } };
+    return true;
+  }
+  document.addEventListener('DOMContentLoaded', bindStart);
+  // Also retry after 1s in case button is injected late
+  setTimeout(bindStart, 1000);
+})();
+</script>
+
 </body>
 </html>
