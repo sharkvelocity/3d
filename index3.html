@@ -424,6 +424,46 @@ async function loadMoon(){
 </script>
 
 <script>
+// === BASELINE MODE (pre-breath, pre-skybox) ===
+window.BASELINE_MODE = true;
+
+// UI shims
+if (typeof window.toast !== 'function') {
+  window.toast = function(msg, ms){ try{ console.log('[toast]', msg); }catch(_){} };
+}
+if (typeof window.$ !== 'function') {
+  window.$ = function(sel){ return document.querySelector(sel); };
+}
+
+// Map helper shims (only if missing)
+if (typeof window.pickGroundHeightAt !== 'function') {
+  window.pickGroundHeightAt = function(scene, x, z){
+    try {
+      const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 1000, z), new BABYLON.Vector3(0,-1,0), 5000);
+      const hit = scene.pickWithRay(ray, m => m && m.isPickable !== false);
+      return (hit && hit.pickedPoint) ? hit.pickedPoint.y : 0;
+    } catch(e){ return 0; }
+  };
+}
+if (typeof window.randomPointInPolygonXZ !== 'function') {
+  window.randomPointInPolygonXZ = function(poly){
+    // naive box fallback if not provided: choose within bounding box
+    let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+    for (const p of (poly||[])){ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); }
+    if (!isFinite(minX)) return {x:0,z:0};
+    return { x: minX + Math.random()*(maxX-minX), z: minZ + Math.random()*(maxZ-minZ) };
+  };
+}
+</script>
+
+
+<script>
+// === SAFE MODE: keep runtime lightweight (you can set SAFE_MODE=false to re-enable all effects)
+window.SAFE_MODE = true;
+</script>
+
+
+<script>
 /* === GLOBAL LIGHT LIMITERS === */
 (function(){
   window.hookSceneLightCaps = function(scene, maxLights){
@@ -1635,6 +1675,39 @@ async function safeStart(){
    ENGINE & SCENE
    =========================================================== */
 async function boot(){
+  // === BASELINE MODE: skip heavy effects and just load the map ===
+  if (window.BASELINE_MODE) {
+    // Engine/scene/camera basic setup (assumes engine already created and canvas exists)
+    try {
+      const canvas = document.getElementById('renderCanvas') || document.querySelector('canvas');
+      if (!window.engine) window.engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
+      if (!window.scene) window.scene = new BABYLON.Scene(engine);
+      const scene = window.scene;
+
+      // Minimal camera
+      if (!scene.activeCamera) {
+        const camera = new BABYLON.ArcRotateCamera('cam', Math.PI/2, 1.2, 25, new BABYLON.Vector3(0,2,0), scene);
+        camera.attachControl(canvas, true);
+        scene.activeCamera = camera;
+      }
+      // Minimal single light
+      if (!scene.lights || scene.lights.length===0) {
+        new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0,1,0), scene);
+      }
+
+      // Load the map only
+      if (typeof window.loadMap === 'function') {
+        try { await window.loadMap(); } catch(e){ console.error('loadMap failed in baseline mode:', e); }
+      }
+
+      // Start render loop
+      engine.runRenderLoop(()=>{ if (scene && scene.activeCamera) scene.render(); });
+    } catch (e) {
+      console.error('Baseline boot failed:', e);
+    }
+    return; // do NOT execute heavy boot path
+  }
+
   engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
   try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
   scene = new BABYLON.Scene(engine);
