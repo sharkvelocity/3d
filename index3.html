@@ -1476,39 +1476,6 @@ window.SAFE_MODE = true;
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; color:var(--c0); z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
-
-<script>
-// === Global, idempotent render loop helper ===
-(function(){
-  if (typeof window.startRenderLoopSafe !== 'function') {
-    window._renderLoopStarted = false;
-    window.startRenderLoopSafe = function(){
-      if (window._renderLoopStarted) return;
-      window._renderLoopStarted = true;
-      function rafLoop(){
-        try{
-          if (window.scene && window.scene.activeCamera) { window.scene.render(); }
-        }catch(_){}
-        requestAnimationFrame(rafLoop);
-      }
-      try{
-        if (window.engine && typeof window.engine.runRenderLoop === 'function'){
-          window.engine.runRenderLoop(function(){
-            try{
-              if (window.scene && window.scene.activeCamera) { window.scene.render(); }
-            }catch(_){}
-          });
-        } else {
-          rafLoop();
-        }
-      }catch(_){
-        rafLoop();
-      }
-    };
-  }
-})();
-</script>
-
 </head>
 
 <body>
@@ -1624,7 +1591,7 @@ let weather = {
   modHuntPace:1.0
 };
 
-let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
+window.vanZone = window.vanZone || { center: new BABYLON.Vector3(43.657,2,-119.008), radius: 11 }; const vanZone = window.vanZone;
 
 let storageOpen = false;
 let dev = { enabled:false, gateOpen:false, log:[] };
@@ -1741,6 +1708,7 @@ if (window.__started) return;
     if (t) t.style.display = 'none';
 
     await boot();
+    try { if (window.engine && window.engine.hideLoadingUI) window.engine.hideLoadingUI(); } catch(e) {}
 
     // Weather & ghost selection
     const r = Math.random();
@@ -1777,6 +1745,8 @@ if (window.__started) return;
    ENGINE & SCENE
    =========================================================== */
 async function boot(){
+  try { if (window.engine && window.engine.displayLoadingUI) window.engine.displayLoadingUI(); } catch(e) {}
+
   // === BASELINE MODE: skip heavy effects and just load the map ===
   if (window.BASELINE_MODE) {
     // Engine/scene/camera basic setup (assumes engine already created and canvas exists)
@@ -1803,7 +1773,7 @@ async function boot(){
       }
 
       // Start render loop
-      window.startRenderLoopSafe(); /* replaced */ ( ()=>{ if (scene && scene.activeCamera) scene.render(); });
+      engine.runRenderLoop(()=>{ if (scene && scene.activeCamera) scene.render(); });
     } catch (e) {
       console.error('Baseline boot failed:', e);
     }
@@ -1902,7 +1872,7 @@ if (typeof loadMoon === 'function') {
     updateGhost(dt);
   });
 
-  window.startRenderLoopSafe(); /* replaced */ ( ()=> scene.render());
+  engine.runRenderLoop(()=> scene.render());
   window.addEventListener('resize', ()=> engine.resize());
 
   // HUD visible now
@@ -2117,7 +2087,8 @@ async function loadMap(){
     fallbackGround.isPickable = true;
     fallbackGround.visibility = 0;
 
-    const y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
+    let y = pickGroundHeightAt(vanZone.center.x, vanZone.center.z);
+    if (!isFinite(y)) y = 1.7;
     camera.position = new BABYLON.Vector3(vanZone.center.x, y + 1.7, vanZone.center.z);
 
     doorMeshes.forEach(door=>{ door.actionManager = new BABYLON.ActionManager(scene); door.isPickable = true; });
@@ -2467,7 +2438,7 @@ function refreshHandPreview(){
     __pv.cam.panningSensibility = 0; __pv.cam.wheelPrecision = 50;
     new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), __pv.scene).intensity = 1.2;
 
-    __pv.window.startRenderLoopSafe(); /* replaced */ ( ()=> __pv.scene && __pv.scene.render());
+    __pv.engine.runRenderLoop(()=> __pv.scene && __pv.scene.render());
     window.addEventListener('resize', ()=> { try { __pv.engine && __pv.engine.resize(); } catch {} });
   } else {
     wrap.appendChild(__pv.canvas);
