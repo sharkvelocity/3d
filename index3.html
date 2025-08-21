@@ -10,6 +10,33 @@
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
   <script src="./cdn/babylon.js">
 
+/* === Safe Render Loop === */
+(function(){
+  if (typeof window.startRenderLoopSafe !== 'function') {
+    window._renderLoopStarted = false;
+    window.startRenderLoopSafe = function(){
+      if (window._renderLoopStarted) return;
+      window._renderLoopStarted = true;
+      const rafLoop = function(){
+        try{ if (window.scene && window.scene.activeCamera) window.scene.render(); }catch(e){}
+        requestAnimationFrame(rafLoop);
+      };
+      try{
+        if (window.engine && typeof window.engine.runRenderLoop === 'function') {
+          window.engine.runRenderLoop(function(){
+            try{ if (window.scene && window.scene.activeCamera) window.scene.render(); }catch(e){}
+          });
+        } else {
+          rafLoop();
+        }
+      }catch(e){
+        rafLoop();
+      }
+    };
+  }
+})();
+
+
 /* === Global capLightsAndMaterials === */
 (function(){
   window.capLightsAndMaterials = function(maxLights){
@@ -1770,7 +1797,7 @@ async function boot(){
       }
 
       // Start render loop
-      engine.runRenderLoop(()=>{ if (scene && scene.activeCamera) scene.render(); });
+      window.startRenderLoopSafe();
     } catch (e) {
       console.error('Baseline boot failed:', e);
     }
@@ -1806,7 +1833,7 @@ async function boot(){
   hemiLight.intensity = 0.06;
 
   // Map + items + ghost + moon
-  try { await loadMap(); } catch(e) {}
+  await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
     // Ensure global light/material cap function exists
