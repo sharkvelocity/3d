@@ -424,6 +424,53 @@ async function loadMoon(){
 </script>
 
 <script>
+/* === GLOBAL LIGHT LIMITERS === */
+(function(){
+  window.hookSceneLightCaps = function(scene, maxLights){
+    try{
+      maxLights = Math.max(1, Math.min(maxLights||2, 8));
+      function applyToLights(){
+        const arr = scene.lights || [];
+        for (let i=0;i<arr.length;i++){
+          const L = arr[i];
+          const on = i < maxLights;
+          try { L.setEnabled(on); } catch(_){}
+          try {
+            const sg = L.getShadowGenerator && L.getShadowGenerator();
+            if (sg && i >= 1) { sg.dispose(); }
+          } catch(_){}
+        }
+      }
+      applyToLights();
+      if (scene.onNewLightAddedObservable){
+        scene.onNewLightAddedObservable.add(()=>applyToLights());
+      } else {
+        setTimeout(applyToLights, 0);
+      }
+      function capMat(m){
+        if (!m) return;
+        if ('maxSimultaneousLights' in m){
+          try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_){}
+        }
+      }
+      (scene.materials||[]).forEach(capMat);
+      if (scene.onNewMaterialAddedObservable){
+        scene.onNewMaterialAddedObservable.add(capMat);
+      }
+    }catch(e){ try{ console.warn('hookSceneLightCaps error', e); }catch(_e){} }
+  };
+  if (typeof window.capLightsAndMaterials !== 'function') {
+    window.capLightsAndMaterials = function(maxLights){
+      try{ if (window.scene) window.hookSceneLightCaps(window.scene, maxLights); }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+    };
+  }
+  try { if (typeof hookSceneLightCaps === 'undefined') var hookSceneLightCaps = window.hookSceneLightCaps; } catch(_){}
+  try { if (typeof capLightsAndMaterials === 'undefined') var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_){}
+})();
+</script>
+
+
+<script>
 /* === GLOBAL HELPERS (standalone) === */
 (function(){
   // capLightsAndMaterials (global)
@@ -1624,7 +1671,7 @@ async function boot(){
     if (typeof window.capLightsAndMaterials !== 'function') {
       window.capLightsAndMaterials = function(){ /* no-op cap */ };
     }
-    window.capLightsAndMaterials(6);
+    window.capLightsAndMaterials(2);
 
   await loadItems().catch(()=>{});
   await loadGhost().catch(()=>{});
