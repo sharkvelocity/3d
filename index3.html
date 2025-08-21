@@ -10,6 +10,39 @@
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
   <script src="./cdn/babylon.js">
 
+/* === Cap lights & materials for low uniform blocks === */
+function capLightsAndMaterials(maxLights){
+  try{
+    maxLights = Math.max(1, Math.min(maxLights||6, 8));
+    const lights = scene.lights || [];
+    // Enable only the first N lights with shadows for the first 1-2
+    for(let i=0;i<lights.length;i++){
+      const L = lights[i];
+      const on = i < maxLights;
+      L.setEnabled(on);
+      if (L.getShadowGenerator && L.getShadowGenerator()){
+        // keep shadows on only for the first two enabled lights
+        L.getShadowGenerator().forceBackFacesOnly = true;
+        if (i >= 2) L.getShadowGenerator().dispose();
+      }
+    }
+    // Clamp material light counts
+    (scene.materials||[]).forEach(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+    // Also set on new materials created later
+    scene.onNewMaterialAddedObservable.add(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+  }catch(e){ console.warn('capLightsAndMaterials error', e); }
+}
+
+
+
 /* === loadMoon alias === */
 try {
   if (typeof window.loadMoon === 'function' && typeof loadMoon === 'undefined') {
@@ -1166,6 +1199,7 @@ async function loadMoon(){
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; color:var(--c0); z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
 </head>
 
 <body>
@@ -1432,7 +1466,7 @@ async function safeStart(){
    ENGINE & SCENE
    =========================================================== */
 async function boot(){
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
   try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
   scene = new BABYLON.Scene(engine);
   scene.environmentTexture = null;
@@ -1464,6 +1498,7 @@ async function boot(){
   await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
+    capLightsAndMaterials(6);
   await loadItems().catch(()=>{});
   await loadGhost().catch(()=>{});
   
