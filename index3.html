@@ -424,31 +424,18 @@ async function loadMoon(){
 </script>
 
 <script>
-/* === Safe render loop helper (non-recursive) === */
+// === Safe render loop (no recursion) ===
 (function(){
-  window.__renderLoopStarted = false;
   window.startRenderLoopSafe = function(){
-    try{
-      if (window.__renderLoopStarted) return;
-      var eng = (window && window.engine) ? window.engine : null;
-      var scn = (window && window.scene) ? window.scene : null;
-      if (eng && typeof eng.runRenderLoop === 'function' && scn){
-        window.__renderLoopStarted = true;
-        eng.runRenderLoop(function(){
-          try{
-            var s = (window && window.scene) ? window.scene : null;
-            if (s && s.activeCamera) s.render();
-          }catch(e){
-            window.__renderLoopStarted = false;
-            setTimeout(window.startRenderLoopSafe, 100);
-          }
-        });
-      }else{
-        setTimeout(window.startRenderLoopSafe, 100);
+    var eng = (window.engine && typeof window.engine.runRenderLoop === 'function') ? window.engine : null;
+    var render = function(){ if (window.scene && window.scene.activeCamera) window.scene.render(); };
+    if (eng) {
+      if (!window.__renderLoopStarted) { window.__renderLoopStarted = true; eng.runRenderLoop(render); }
+    } else {
+      if (!window.__rafLoopStarted) {
+        window.__rafLoopStarted = true;
+        (function loop(){ render(); try{ requestAnimationFrame(loop); }catch(e){} })();
       }
-    }catch(e){
-      try{ console.warn('startRenderLoopSafe error', e); }catch(_){}
-      setTimeout(window.startRenderLoopSafe, 150);
     }
   };
 })();
