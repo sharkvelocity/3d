@@ -2,452 +2,739 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — 3D Prototype (index2)</title>
+  <title>PhasmaPhoney — Touch/Mouse Build</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-  <meta name="author" content="Shark-Blades" />
-  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
+  <meta name="description" content="Ghost hunting prototype with Babylon.js (local only)" />
 
-  <!-- Babylon core + loaders (LOCAL) -->
+  <!-- Local Babylon bundle (no external CDNs) -->
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
   <script src="./cdn/draco_decoder_gltf.js"></script>
-  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
 
   <style>
-    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, monospace; color:#0ff; }
-    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
-
-    #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
+    html, body { margin:0; padding:0; width:100%; height:100%; background:#000; color:#0ff; font:14px/1.4 monospace; overflow:hidden; }
+    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; touch-action:none; }
 
     /* Title */
-    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
-    #title-content{ text-align:center; max-width:90vw;}
-    #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
-    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); border-radius:10px; }
-    #start-button:active{ transform:translateY(1px); }
+    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.9); display:flex; align-items:center; justify-content:center; z-index:9999; }
+    #title-card{ text-align:center; max-width:90vw; }
+    #title-card img{ max-width:60vw; max-height:35vh; object-fit:contain; image-rendering:crisp-edges; }
+    .btn{ padding:12px 18px; border:2px solid #0ff; background:#111; color:#0ff; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); }
+    .btn:active{ transform:translateY(1px); }
 
     /* HUD */
-    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
-    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
-    #hud .label{ color:#9ff; }
-    #hud .value{ color:#0ff; font-weight:bold; }
-    #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
+    #hud{ position:fixed; top:10px; left:10px; display:none; flex-direction:column; gap:6px; z-index:6000; pointer-events:none; }
+    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.45); border:1px solid #066; padding:6px 8px; border-radius:6px; min-width:240px; }
+    #hud .label{ color:#9ff; } .value{ color:#0ff; font-weight:bold; }
+    #hud-ems{ display:flex; gap:6px; align-items:center; }
+    .emf-led{ width:10px; height:10px; border-radius:2px; background:#022; border:1px solid #055; opacity:0.5; }
+    .emf-led.on{ background:#0f0; opacity:1; }
+    .emf-level{ width:12px; height:12px; border-radius:2px; background:#033; border:1px solid #066; opacity:0.35; }
+    .emf-level.active{ opacity:1; background:#0c0; }
+    .emf-level.max{ background:#f33; }
 
     /* Action bar */
-    #actions{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:6000; display:flex; gap:10px; pointer-events:auto; }
-    .hud-btn{ border:1px solid #0aa; background:#111; color:#0ff; padding:10px 14px; border-radius:10px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); }
-    .hud-btn:active{ transform:translateY(1px); }
-    #activeItem{ text-align:center; margin-top:6px; color:#8ff; }
+    #action-bar{ position:fixed; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:10px; z-index:6000; }
+    #action-bar .btn{ pointer-events:auto; }
 
-    /* Notebook FAB */
-    #notebook-button{ position:fixed; left:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
-    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
+    /* Notebook and Storage */
+    #notebook-button{ position:fixed; left:10px; bottom:14px; z-index:6000; display:none; }
+    #storage-button{ position:fixed; right:10px; top:10px; z-index:6000; display:none; }
 
-    /* Touch halves (centered vertical 1/3 each) */
-    #touch-left, #touch-right{ position:fixed; top:33%; bottom:33%; width:50%; z-index:5000; }
-    #touch-left{ left:0; }
-    #touch-right{ right:0; }
-    @media (pointer: coarse){
-      #touch-left, #touch-right{ background:rgba(0,0,0,0.05); }
+    /* Touch halves (kept inside their bounds) */
+    #touch-move, #touch-look{
+      position:fixed; top:0; bottom:0; width:50vw; z-index:5500; pointer-events:auto;
     }
+    #touch-move{ left:0; }
+    #touch-look{ right:0; }
+    .touch-hint{
+      position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      width:34%; height:34%; min-width:120px; min-height:120px;
+      border-radius:16px; border:1px dashed #066; background:rgba(0,0,0,0.2); display:none;
+    }
+    .thumb{ position:absolute; width:64px; height:64px; margin:-32px 0 0 -32px; border-radius:50%; border:2px solid #0aa; background:rgba(0,20,20,0.6); display:none; }
+
+    /* Flash overlay (lightning) */
+    #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms linear; }
 
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+    /* Salt preview */
+    #salt-preview{ position:fixed; pointer-events:none; left:0; top:0; right:0; bottom:0; z-index:3000; display:none; }
+
   </style>
 </head>
 <body>
-  <div id="flash-overlay"></div>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Title screen -->
   <div id="title-screen">
-    <div id="title-content">
-      <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
-      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
-      <button id="start-button">Start Investigation</button>
+    <div id="title-card">
+      <img src="./logo.png" alt="PhasmaPhoney Logo" />
+      <div style="margin:10px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <button id="start-button" class="btn">Start Investigation</button>
     </div>
   </div>
 
-  <!-- HUD -->
   <div id="hud">
-    <div class="row"><div class="label">Item</div><div class="value" id="hud-item">EMF</div></div>
-    <div class="row"><div class="label">Weather</div><div class="value" id="hud-weather">Clear</div></div>
-    <div id="hud-hunt">Hunt: Calm</div>
-    <div id="activeItem"></div>
+    <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
+    <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
+    <div class="row"><div class="label">Weather</div><div class="value" id="hud-weather">—</div></div>
+    <div class="row" id="hud-ems">
+      <div class="label">EMF</div>
+      <div id="emf-led" class="emf-led" title="EMF device power"></div>
+      <div style="display:flex; gap:4px; margin-left:6px;">
+        <div class="emf-level" id="emf1"></div>
+        <div class="emf-level" id="emf2"></div>
+        <div class="emf-level" id="emf3"></div>
+        <div class="emf-level" id="emf4"></div>
+        <div class="emf-level" id="emf5"></div>
+      </div>
+    </div>
   </div>
 
-  <!-- Action bar -->
-  <div id="actions">
-    <button id="use-btn"   class="hud-btn">Use</button>
-    <button id="place-btn" class="hud-btn">Place</button>
-    <button id="toss-btn"  class="hud-btn">Toss</button>
+  <button id="notebook-button" class="btn">Notebook</button>
+  <button id="storage-button" class="btn">Storage</button>
+
+  <div id="action-bar">
+    <button id="btn-use" class="btn">Use</button>
+    <button id="btn-place" class="btn">Place</button>
+    <button id="btn-toss" class="btn">Toss</button>
   </div>
 
-  <!-- Touch control halves -->
-  <div id="touch-left"></div>
-  <div id="touch-right"></div>
+  <!-- Touch halves & hints -->
+  <div id="touch-move" aria-label="Move area">
+    <div class="touch-hint"></div><div class="thumb"></div>
+  </div>
+  <div id="touch-look" aria-label="Look area">
+    <div class="touch-hint"></div><div class="thumb"></div>
+  </div>
 
-  <button id="notebook-button">Notebook</button>
-  <button id="storage-button">Storage</button>
+  <div id="flash-overlay"></div>
   <div id="toast"></div>
+  <div id="salt-preview"></div>
 
 <script>
-// ===========================================================
-// Fully wired systems (local-lib build) — integrates with an
-// existing ghost mesh if present in the loaded scene.
-// ===========================================================
-const canvas = document.getElementById('renderCanvas');
-const flashOverlay = document.getElementById('flash-overlay');
+/* ========================== SMALL HELPERS ========================== */
+const $ = s => document.querySelector(s);
+function toast(msg, ms=1400){ const t=$("#toast"); t.textContent=msg; t.style.display="block"; setTimeout(()=>t.style.display="none", ms); }
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+function lerp(a,b,t){ return a + (b-a)*t; }
+function nowSec(){ return performance.now()*0.001; }
 
-let engine, scene, camera, ground;
-let uvLight=null, uvOn=false;
+/* ========================== INPUT SYSTEM ========================== */
+class InputSystem{
+  constructor(canvas, moveArea, lookArea){
+    this.canvas = canvas;
+    this.moveArea = moveArea;
+    this.lookArea = lookArea;
+    this.keys = new Map();
+    this._moveVec = {x:0, z:0};
+    this._look = {dx:0, dy:0};
+    this._running = false;
+    this._actions = { use:false, place:false, toss:false };
+    this.pointerLocked = false;
 
-const Input = {
-  moveVec: new BABYLON.Vector3(0,0,0),
-  lookVec: new BABYLON.Vector2(0,0),
-  running:false,
-  actions:{ use:false, place:false, toss:false }
+    // mouse look (pointer lock)
+    canvas.addEventListener("click", ()=>{
+      if (!document.pointerLockElement) canvas.requestPointerLock();
+    });
+    document.addEventListener("pointerlockchange", ()=>{
+      this.pointerLocked = (document.pointerLockElement === canvas);
+    });
+    window.addEventListener("mousemove", (e)=>{
+      if(!this.pointerLocked) return;
+      this._look.dx += e.movementX || 0;
+      this._look.dy += e.movementY || 0;
+    });
+
+    // wheel = cycle items (exposed via custom event)
+    window.addEventListener("wheel", (e)=>{
+      const dir = Math.sign(e.deltaY);
+      window.dispatchEvent(new CustomEvent("cycle-item", { detail: { dir } }));
+    }, {passive:true});
+
+    // keys
+    window.addEventListener("keydown", (e)=>{
+      if (e.repeat) return;
+      this.keys.set(e.key.toLowerCase(), true);
+      if (e.key === "Shift") this._running = true;
+      if (e.key === " ") this._actions.use = true;
+      if (e.key.toLowerCase() === "e") this._actions.place = true;
+      if (e.key.toLowerCase() === "q") this._actions.toss = true;
+    });
+    window.addEventListener("keyup", (e)=>{
+      this.keys.set(e.key.toLowerCase(), false);
+      if (e.key === "Shift") this._running = false;
+    });
+
+    // touch halves
+    this._bindTouchHalf(moveArea, (nx, ny)=>{ // move
+      // map to forward/back (ny) and strafe (nx)
+      this._moveVec.x = clamp(nx, -1, 1);
+      this._moveVec.z = clamp(-ny, -1, 1);
+    }, ()=>{ this._moveVec.x = 0; this._moveVec.z = 0; });
+
+    this._bindTouchHalf(lookArea, (nx, ny)=>{ // look deltas
+      // scale to pixels for camera rotation use
+      this._look.dx += nx * 12;
+      this._look.dy += ny * 12;
+    }, ()=>{});
+
+    // buttons
+    $("#btn-use").addEventListener("click", ()=>{ this._actions.use = true; });
+    $("#btn-place").addEventListener("click", ()=>{ this._actions.place = true; });
+    $("#btn-toss").addEventListener("click", ()=>{ this._actions.toss = true; });
+  }
+
+  _bindTouchHalf(area, onMove, onEnd){
+    const hint = area.querySelector(".touch-hint");
+    const thumb = area.querySelector(".thumb");
+    hint.style.display = "block";
+
+    let active = false, cx=0, cy=0;
+    function center(){
+      const r = area.getBoundingClientRect();
+      cx = r.left + r.width*0.5;
+      cy = r.top + r.height*0.5;
+    }
+    const start = (e)=>{
+      active = true; center();
+      thumb.style.display = "block";
+      const t = e.touches ? e.touches[0] : e;
+      thumb.style.left = t.clientX + "px"; thumb.style.top = t.clientY + "px";
+    };
+    const move = (e)=>{
+      if(!active) return;
+      const t = e.touches ? e.touches[0] : e;
+      const dx = t.clientX - cx;
+      const dy = t.clientY - cy;
+      const r = Math.min(area.clientWidth, area.clientHeight)*0.5;
+      const nx = clamp(dx / r, -1, 1);
+      const ny = clamp(dy / r, -1, 1);
+      thumb.style.left = (cx + nx*r) + "px";
+      thumb.style.top  = (cy + ny*r) + "px";
+      onMove(nx, ny);
+    };
+    const end = ()=>{
+      active = false; thumb.style.display = "none"; onEnd();
+    };
+
+    area.addEventListener("touchstart", (e)=>{ e.preventDefault(); start(e); }, {passive:false});
+    area.addEventListener("touchmove",  (e)=>{ e.preventDefault(); move(e); },  {passive:false});
+    area.addEventListener("touchend",   (e)=>{ e.preventDefault(); end(); },    {passive:false});
+    area.addEventListener("mousedown",  (e)=>{ e.preventDefault(); start(e); });
+    window.addEventListener("mousemove",     move);
+    window.addEventListener("mouseup",       end);
+    window.addEventListener("resize",        center);
+    center();
+  }
+
+  snapshotAndConsume(){
+    // keyboard WASD enrich movement
+    const w = this.keys.get("w") || this.keys.get("arrowup");
+    const s = this.keys.get("s") || this.keys.get("arrowdown");
+    const a = this.keys.get("a") || this.keys.get("arrowleft");
+    const d = this.keys.get("d") || this.keys.get("arrowright");
+    let kx = 0, kz = 0;
+    if (w) kz += 1; if (s) kz -= 1; if (a) kx -= 1; if (d) kx += 1;
+    const mag = Math.hypot(kx, kz); if (mag>0){ kx/=mag; kz/=mag; }
+
+    const moveVec = { x: clamp(this._moveVec.x + kx, -1, 1), z: clamp(this._moveVec.z + kz, -1, 1) };
+    const snap = { moveVec, running: this._running, lookDX: this._look.dx, lookDY: this._look.dy, actions: { ...this._actions } };
+    // consume one-shot actions and deltas
+    this._look.dx = 0; this._look.dy = 0;
+    this._actions.use = this._actions.place = this._actions.toss = false;
+    return Object.freeze(snap);
+  }
+}
+
+/* ========================== GLOBAL STATE ========================== */
+const canvas = document.getElementById("renderCanvas");
+let engine, scene, camera;
+let flashLight, uvLight;
+let houseRoot = null;
+let player = { sanity:100, room:"Van", speedWalk:0.9, speedRun:1.7, running:false };
+let input;
+let weather = { state:"Clear", rainPS:null, lightningTimer:0, nextStrike:5 };
+let ghost = { mesh:null, target:null, lastSaltHit:0, footprints:[], hotspots:[] }; // footprints + EMF hotspots
+let inventory = {
+  selected: 1,
+  slots: {1:"Flashlight", 2:"UV Light", 3:"EMF", 4:"Salt", 5:"Notebook"},
+  charges: {4:3} // Salt has 3 strips per container
 };
+let saltStrips = []; // {pos, dir, placedAt, cooldownUntil}
+let tossed = [];     // proxy items {mesh, vel, birth}
+let emf = { on:false, level:0, nextPatternAt:0, tone:null, ctx:null };
 
-const Items = ['EMF','UV Light','Salt'];
-let heldIndex=0, heldItem=Items[heldIndex];
-function setHUDItem(){ const el=document.getElementById('hud-item'); if(el) el.textContent = heldItem; document.getElementById('activeItem').textContent = heldItem; }
-setHUDItem();
-
-// keyboard helpers
-window.addEventListener('keydown', (e)=>{
-  if(e.repeat) return;
-  if(e.key==='q'){ heldIndex=(heldIndex+Items.length-1)%Items.length; heldItem=Items[heldIndex]; setHUDItem(); }
-  if(e.key==='e'){ heldIndex=(heldIndex+1)%Items.length; heldItem=Items[heldIndex]; setHUDItem(); }
-  if(e.key==='Shift') Input.running=true;
-  if(e.key===' ') Input.actions.use=true;
-});
-window.addEventListener('keyup', (e)=>{ if(e.key==='Shift') Input.running=false; });
-
-// Touch halves
-(function setupTouchHalves(){
-  const left=document.getElementById('touch-left');
-  const right=document.getElementById('touch-right');
-  let leftId=null, rightId=null;
-
-  function norm(el, x, y){
-    const r = el.getBoundingClientRect();
-    const nx = ((x - r.left)/r.width)*2 - 1;
-    const ny = ((y - r.top )/r.height)*2 - 1;
-    return {nx, ny};
-  }
-
-  // LEFT => move
-  left.addEventListener('touchstart', e=>{ if(leftId!==null) return; leftId=e.changedTouches[0].identifier; }, {passive:false});
-  left.addEventListener('touchmove', e=>{
-    const t=[...e.changedTouches].find(t=>t.identifier===leftId); if(!t) return;
-    const {nx,ny}=norm(left,t.clientX,t.clientY);
-    Input.moveVec.x = nx;  // strafe
-    Input.moveVec.z = -ny; // forward/back
-  }, {passive:false});
-  left.addEventListener('touchend', e=>{ const gone=[...e.changedTouches].find(t=>t.identifier===leftId); if(gone){ leftId=null; Input.moveVec.set(0,0,0);} }, {passive:false});
-
-  // RIGHT => look
-  right.addEventListener('touchstart', e=>{ if(rightId!==null) return; rightId=e.changedTouches[0].identifier; }, {passive:false});
-  right.addEventListener('touchmove', e=>{
-    const t=[...e.changedTouches].find(t=>t.identifier===rightId); if(!t) return;
-    const {nx,ny}=norm(right,t.clientX,t.clientY);
-    Input.lookVec.set(nx, ny);
-  }, {passive:false});
-  right.addEventListener('touchend', e=>{ const gone=[...e.changedTouches].find(t=>t.identifier===rightId); if(gone){ rightId=null; Input.lookVec.set(0,0);} }, {passive:false});
-})();
-
-// Buttons
-document.getElementById('use-btn').onclick   = ()=> Input.actions.use  = true;
-document.getElementById('place-btn').onclick = ()=> Input.actions.place = true;
-document.getElementById('toss-btn').onclick  = ()=> Input.actions.toss = true;
-
-// Toast
-function toast(msg, ms=1100){
-  const t=document.getElementById('toast');
-  t.textContent = msg; t.style.display='block';
-  setTimeout(()=> t.style.display='none', ms);
+/* ========================== AUDIO (WebAudio beeps) ========================== */
+function ensureAudio(){
+  if (emf.ctx) return;
+  try{ emf.ctx = new (window.AudioContext || window.webkitAudioContext)(); }catch{ emf.ctx = null; }
 }
-
-// Hotspots for EMF
-const INTERACT = { HOT_RADIUS:0.61, HOT_TTL_MS:10000, spots:[] };
-function markInteractionAt(pos, tag='generic'){ INTERACT.spots.push({ pos: pos.clone(), tag, expiresAt: performance.now()+INTERACT.HOT_TTL_MS }); }
-function pruneSpots(){ const now=performance.now(); INTERACT.spots = INTERACT.spots.filter(s=> now < s.expiresAt); }
-function nearestSpotDist(p){ pruneSpots(); let best=Infinity; for(const s of INTERACT.spots){ const d=BABYLON.Vector3.Distance(p, s.pos); if(d<best) best=d; } return best; }
-
-// Proxy items (for toss)
-const ProxyItemSystem = (()=>{
-  function mat(name){ const m=new BABYLON.StandardMaterial(name, scene); m.diffuseColor=new BABYLON.Color3(0.22,0.24,0.28); return m; }
-  function create(kind, pos, yaw){
-    const mesh = kind==='Book' || kind==='EMF' || kind==='UV Light'
-      ? BABYLON.MeshBuilder.CreateBox('book',{width:0.15,height:0.02,depth:0.22},scene)
-      : BABYLON.MeshBuilder.CreateCylinder('cup',{diameterTop:0.08,diameterBottom:0.09,height:0.1,tessellation:18},scene);
-    mesh.material = mat('m_'+kind);
-    mesh.position = pos.clone();
-    mesh.rotation.y = yaw || 0;
-    return mesh;
-  }
-  return { create };
-})();
-
-// Weather
-const Weather = (()=>{
-  let rain=null, ltTimer=0, next=3+Math.random()*10;
-  function enableRain(){
-    if(rain) return;
-    rain = new BABYLON.ParticleSystem('rain', 2400, scene);
-    rain.particleTexture = new BABYLON.Texture('./assets/images/nosignal.gif', scene);
-    rain.minEmitBox = new BABYLON.Vector3(-30, 30, -30);
-    rain.maxEmitBox = new BABYLON.Vector3( 30, 30,  30);
-    rain.minSize=0.05; rain.maxSize=0.1;
-    rain.minLifeTime=0.6; rain.maxLifeTime=1.0;
-    rain.direction1 = new BABYLON.Vector3(0,-1.2,0);
-    rain.direction2 = new BABYLON.Vector3(0,-1.0,0);
-    rain.emitRate=2200; rain.gravity=new BABYLON.Vector3(0,-9.8,0);
-    rain.start();
-  }
-  function bloodMoonTint(){
-    scene.clearColor = new BABYLON.Color4(0.15,0.01,0.01,1);
-    scene.fogColor   = new BABYLON.Color3(0.06,0.01,0.02);
-  }
-  function flash(){ flashOverlay.style.opacity='0.65'; setTimeout(()=> flashOverlay.style.opacity='0', 120); }
-  function tick(dt){ if(!rain) return; ltTimer+=dt; if(ltTimer>=next){ ltTimer=0; next=3+Math.random()*10; flash(); } }
-  return { set(state){ if(state==='Rain'){ enableRain(); } if(state==='Blood Moon'){ bloodMoonTint(); enableRain(); } }, tick };
-})();
-
-// Salt system
-const SaltSystem = (()=>{
-  let preview=null, charges=3, strips=[];
-  function ensurePreview(){
-    if(preview) return preview;
-    preview = BABYLON.MeshBuilder.CreateBox('saltPreview', {width:0.7,height:0.02,depth:0.12}, scene);
-    const m=new BABYLON.StandardMaterial('saltPrevMat', scene);
-    m.diffuseColor=new BABYLON.Color3(0.95,0.95,1); m.alpha=0.35;
-    preview.material = m; preview.isPickable=false;
-    return preview;
-  }
-  function updatePreview(){
-    if(heldItem!=='Salt'){ if(preview) preview.isVisible=false; return; }
-    const hit = rayGroundCenter(); if(!hit){ if(preview) preview.isVisible=false; return; }
-    ensurePreview();
-    preview.position = hit.add(new BABYLON.Vector3(0,0.01,0));
-    preview.rotation = new BABYLON.Vector3(0, camera.rotation.y, 0);
-    preview.isVisible=true;
-  }
-  function place(){
-    if(heldItem!=='Salt') return;
-    if(charges<=0){ toast('Salt is empty'); return; }
-    const hit = rayGroundCenter(); if(!hit){ toast('Aim at ground'); return; }
-    const s = BABYLON.MeshBuilder.CreateBox('saltStrip', {width:0.7,height:0.02,depth:0.12}, scene);
-    const m=new BABYLON.StandardMaterial('saltMat', scene);
-    m.diffuseColor=new BABYLON.Color3(0.95,0.95,1); s.material=m;
-    s.position = hit.add(new BABYLON.Vector3(0,0.01,0));
-    s.rotation = new BABYLON.Vector3(0, camera.rotation.y, 0);
-    s.metadata = { isSalt:true, t:performance.now() };
-    strips.push(s);
-    charges--; markInteractionAt(s.position, 'saltPlaced');
-    toast(`Salt placed (${3-charges}/3)`);
-  }
-  function getStrips(){ return strips; }
-  return { updatePreview, place, getStrips };
-})();
-
-// UV footprints
-const UVFootprints = (()=>{
-  const prints=[]; // {mesh, born}
-  function spawnTrail(startPos, dir){
-    for(let i=0;i<5;i++){
-      const p=BABYLON.MeshBuilder.CreatePlane('uvfoot',{size:0.22},scene);
-      p.rotation.x=Math.PI/2; p.position = startPos.add(dir.scale(i*0.28));
-      const m=new BABYLON.StandardMaterial('uvfootMat',scene);
-      m.diffuseColor=new BABYLON.Color3(0.6,0.1,0.95); m.alpha=0;
-      p.material=m; prints.push({mesh:p, born:performance.now()});
-    }
-  }
-  function update(){
-    const now=performance.now();
-    let beamDir=null, beamPos=null;
-    if(uvOn && uvLight){ beamDir = uvLight.getDirection(BABYLON.Axis.Z); beamPos = uvLight.getAbsolutePosition(); }
-    for(const f of prints){
-      const age=now-f.born; if(age>60000){ f.mesh.dispose(); continue; }
-      if(uvOn && beamDir && beamPos){
-        const to=f.mesh.position.subtract(beamPos); const dist=to.length();
-        if(dist<10){ to.normalize(); const d=BABYLON.Vector3.Dot(to, beamDir); f.mesh.material.alpha=(d>0.95)?1:0; }
-        else f.mesh.material.alpha=0;
-      } else f.mesh.material.alpha=0;
-    }
-    for(let i=prints.length-1;i>=0;i--){ if(prints[i].mesh.isDisposed()) prints.splice(i,1); }
-  }
-  return { spawnTrail, update };
-})();
-
-// EMF
-const EMF = { on:false, level:0, nextBeepAt:0, _tone:null };
-const EMF_CFG = { nearDist:1.6, farDist:6.0 };
-function levelFromGhostDistance(d){ const n=1-BABYLON.Scalar.Clamp((d-EMF_CFG.nearDist)/(EMF_CFG.farDist-EMF_CFG.nearDist),0,1); return Math.round(n*5); }
-function levelFromSpotDistance(d){ if(d>INTERACT.HOT_RADIUS) return 0; if(d<=INTERACT.HOT_RADIUS*0.33) return 4; if(d<=INTERACT.HOT_RADIUS*0.66) return 3; return 2; }
-function emfTick(ghostMesh){
-  if(!EMF.on){ if(EMF._tone){EMF._tone.pause(); EMF._tone=null;} EMF.level=0; return; }
-  let base=0;
-  if(ghostMesh){ const dg=BABYLON.Vector3.Distance(ghostMesh.position,camera.position); base=levelFromGhostDistance(dg); if(dg<EMF_CFG.nearDist+0.6 && Math.random()<0.2) base=5; }
-  const hot=levelFromSpotDistance(nearestSpotDist(camera.position));
-  const lvl=Math.max(base, hot); EMF.level=lvl;
-  const now=performance.now();
-  if(lvl>=2){
-    if(lvl===5){
-      if(!EMF._tone){ const s=new Audio('./assets/audio/emf_beep.mp3'); s.loop=true; s.volume=0.5; s.play().catch(()=>{}); EMF._tone=s; }
-    }else{
-      let gap=1200; if(lvl===3) gap=700; if(lvl===4) gap=350;
-      if(now>=EMF.nextBeepAt){ const s=new Audio('./assets/audio/emf_beep.mp3'); s.volume=0.4; s.play().catch(()=>{}); EMF.nextBeepAt=now+gap; }
-      if(EMF._tone){ EMF._tone.pause(); EMF._tone=null; }
-    }
-  }else{ if(EMF._tone){ EMF._tone.pause(); EMF._tone=null; } }
+function emfStartTone(freq=750){
+  ensureAudio(); if(!emf.ctx) return;
+  if (emf.tone) emfStopTone();
+  const osc = emf.ctx.createOscillator();
+  const gain = emf.ctx.createGain();
+  osc.type = "square"; osc.frequency.value = freq;
+  gain.gain.value = 0.05;
+  osc.connect(gain).connect(emf.ctx.destination);
+  osc.start();
+  emf.tone = {osc, gain};
 }
-
-// Toggle UV
-function toggleUV(){
-  uvOn=!uvOn;
-  if(uvOn){
-    if(!uvLight){
-      uvLight = new BABYLON.SpotLight('uvLight', new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 8, scene);
-      uvLight.parent = camera; uvLight.intensity=1.8; uvLight.range=12;
-      uvLight.diffuse = new BABYLON.Color3(0.6,0.3,0.9); uvLight.specular = new BABYLON.Color3(0,0,0);
-    }else{ uvLight.setEnabled(true); uvLight.intensity=1.8; }
-  }else{ if(uvLight){ uvLight.intensity=0; uvLight.setEnabled(false); } }
-  toast(uvOn?'UV on':'UV off');
-}
-
-// Actions
-function onUse(){
-  if(heldItem==='EMF'){ EMF.on=!EMF.on; toast(EMF.on?'EMF on':'EMF off'); return; }
-  if(heldItem==='UV Light'){ toggleUV(); return; }
-  if(heldItem==='Salt'){ toast('Use does nothing for salt. Tap Place.'); return; }
-}
-function onPlace(){ if(heldItem==='Salt'){ SaltSystem.place(); return; } toast('Nothing to place.'); }
-function onToss(){
-  const ahead = camera.position.add(camera.getForwardRay().direction.scale(0.9));
-  const m = ProxyItemSystem.create(heldItem, ahead, camera.rotation.y);
-  markInteractionAt(m.position, 'thrown');
-  const vel = camera.getForwardRay().direction.scale(4.5).add(new BABYLON.Vector3(0,3.5,0));
-  let life=0;
-  const token = scene.onBeforeRenderObservable.add(()=>{
-    const dt=engine.getDeltaTime()/1000; life+=dt;
-    m.position.addInPlace(vel.scale(dt)); vel.y -= 9.8*dt;
-    const gy=(ground?.position?.y ?? 0)+0.02;
-    if(m.position.y<=gy){ m.position.y=gy; scene.onBeforeRenderObservable.remove(token); markInteractionAt(m.position,'landed'); }
-    if(life>5){ scene.onBeforeRenderObservable.remove(token); }
-  });
-}
-
-// Helpers
-function rayGroundCenter(){
-  const pick = scene.pick(scene.pointerX || innerWidth/2, scene.pointerY || innerHeight/2, m=>m && m.isPickable!==false);
-  if(pick?.hit && pick.pickedPoint) return pick.pickedPoint.clone();
-  return null;
-}
-function applyInput(dt){
-  camera.rotation.y += Input.lookVec.x * 0.045;
-  const minPitch = -Math.PI/2 + 0.15, maxPitch = Math.PI/2 - 0.15;
-  camera.rotation.x = Math.min(maxPitch, Math.max(minPitch, camera.rotation.x + (-Input.lookVec.y * 0.045)));
-  let mv = Input.moveVec.clone();
-  if(mv.lengthSquared()>1e-3){
-    mv.normalize();
-    const speed = (Input.running?3.4:1.8);
-    const fwd = camera.getForwardRay().direction; fwd.y=0; fwd.normalize();
-    const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
-    const desired = fwd.scale(mv.z).add(right.scale(mv.x)).normalize().scale(speed*dt);
-    camera.position.addInPlace(desired);
-    if(ground) camera.position.y = ground.position.y + 1.7;
+function emfStopTone(){
+  if (emf.tone){
+    try{ emf.tone.osc.stop(); emf.tone.osc.disconnect(); emf.tone.gain.disconnect(); }catch{}
+    emf.tone = null;
   }
 }
 
-// Ghost detection (use existing ghost if present)
-function findGhostMesh(){
-  const cands = scene.meshes.filter(m=> (m.name||'').toLowerCase().includes('ghost'));
-  // Prefer non-root visible meshes
-  return cands.find(m=>m.isVisible!==false && !/^__?root__?$/i.test(m.name||'')) || cands[0] || null;
-}
+/* ========================== BOOT ========================== */
+document.getElementById("start-button").addEventListener("click", startGame);
+async function startGame(){
+  $("#title-screen").style.display = "none";
+  $("#hud").style.display = "flex";
+  $("#storage-button").style.display = "block";
+  $("#notebook-button").style.display = "block";
+  engine = new BABYLON.Engine(canvas, true, {preserveDrawingBuffer:true, stencil:true});
+  scene = new BABYLON.Scene(engine);
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
 
-// Boot
-async function boot(){
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
-  scene  = new BABYLON.Scene(engine);
-  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2; scene.fogDensity = 0.0045;
+  // camera
+  camera = new BABYLON.UniversalCamera("cam", new BABYLON.Vector3(43.657, 2.2, -119.008), scene);
+  camera.attachControl(canvas, true);
+  camera.checkCollisions = true;
+  camera.applyGravity = true;
+  camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+  camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
+  camera.minZ = 0.1; camera.inertia = 0;
+
+  // lights
+  const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene); hemi.intensity = 0.12;
+  const moon = new BABYLON.DirectionalLight("moon", new BABYLON.Vector3(-0.2,-1,0.1), scene); moon.intensity = 0.4;
+
+  // player-lights
+  flashLight = new BABYLON.SpotLight("flash", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 12, scene);
+  flashLight.parent = camera; flashLight.intensity = 0; flashLight.range = 40;
+  flashLight.diffuse = new BABYLON.Color3(1, 0.98, 0.92);
+
+  uvLight = new BABYLON.SpotLight("uv", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 10, scene);
+  uvLight.parent = camera; uvLight.intensity = 0; uvLight.range = 25;
+  uvLight.diffuse = new BABYLON.Color3(0.6, 0.3, 0.9);
+
+  // sky / fog
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+  scene.fogDensity = 0.0045;
+  scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
 
-  // Camera
-  camera = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(0,1.7,6), scene);
-  camera.minZ = 0.1;
+  // map
+  await loadMap();
 
-  // Ground fallback
-  ground = BABYLON.MeshBuilder.CreateGround('ground', { width:80, height:80 }, scene);
-  const gmat = new BABYLON.StandardMaterial('gmat', scene);
-  gmat.diffuseColor = new BABYLON.Color3(0.06,0.08,0.12); gmat.specularColor = new BABYLON.Color3(0,0,0);
-  ground.material = gmat;
+  // weather
+  setWeather(Math.random()<0.33 ? "Blood Moon" : (Math.random()<0.5 ? "Rain" : "Clear"));
 
-  // Optional: try load your map & ghosts safely (won't crash if missing)
-  try{
-    await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/map/', 'Abandoned_House.glb', scene);
-  }catch(e){ console.warn('Map not loaded (optional):', e?.message||e); }
-  try{
-    // if your pipeline spawns ghosts automatically, nothing to do;
-    // otherwise attempt to import one ghost file as a fallback test:
-    // await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/ghosts/', 'ghost1.glb', scene);
-  }catch(e){ console.warn('Ghost not loaded (optional):', e?.message||e); }
+  // input
+  input = new InputSystem(canvas, $("#touch-move"), $("#touch-look"));
 
-  // Weather
-  const r=Math.random(); const wx = r<0.45?'Clear': r<0.80?'Rain':'Blood Moon';
-  Weather.set(wx); const hw=document.getElementById('hud-weather'); if(hw) hw.textContent=wx;
+  // UI buttons extra
+  $("#notebook-button").onclick = ()=> toast("Notebook (placeholder).");
+  $("#storage-button").onclick = ()=> toast("Storage (placeholder).");
 
-  // Render loop
-  engine.runRenderLoop(()=>{
-    const dt = engine.getDeltaTime()/1000;
-    const ghost = findGhostMesh();
-
-    SaltSystem.updatePreview();
-    applyInput(dt);
-    UVFootprints.update();
-    emfTick(ghost);
-    Weather.tick(dt);
-
-    // When ghost passes through salt, leave footprints trail
-    if(ghost){
-      const strips = SaltSystem.getStrips();
-      for(const s of strips){
-        const dx=Math.abs(ghost.position.x - s.position.x);
-        const dz=Math.abs(ghost.position.z - s.position.z);
-        if(dx<0.6 && dz<0.6){
-          const dir = ghost.forward ? ghost.forward : ghost.getDirection(BABYLON.Axis.Z) || new BABYLON.Vector3(1,0,0);
-          const d2 = new BABYLON.Vector3(dir.x,0,dir.z); if(d2.lengthSquared()<0.0001) d2.copyFromFloats(1,0,0); else d2.normalize();
-          UVFootprints.spawnTrail(ghost.position.clone(), d2);
-          markInteractionAt(s.position, 'salt');
-        }
-      }
-    }
-
-    scene.render();
-
-    // consume one-shot actions
-    if(Input.actions.use){ onUse(); Input.actions.use=false; }
-    if(Input.actions.place){ onPlace(); Input.actions.place=false; }
-    if(Input.actions.toss){ onToss(); Input.actions.toss=false; }
+  window.addEventListener("cycle-item", (e)=>{
+    const dir = (e.detail?.dir)||0;
+    const order = [1,2,3,4,5];
+    let idx = order.indexOf(inventory.selected);
+    idx = (idx + (dir>0?1:-1) + order.length) % order.length;
+    inventory.selected = order[idx];
+    toast("Item: " + (inventory.slots[inventory.selected]||"-"));
   });
 
-  window.addEventListener('resize', ()=> engine.resize());
+  // action buttons wire into logic
+  $("#btn-use").onclick = ()=> handleUse();
+  $("#btn-place").onclick = ()=> handlePlace();
+  $("#btn-toss").onclick = ()=> handleToss();
+
+  // game loop
+  engine.runRenderLoop(()=>{
+    const dt = engine.getDeltaTime() / 1000;
+    tick(dt);
+    scene.render();
+  });
+  window.addEventListener("resize", ()=> engine.resize());
 }
 
-// Start flow
-async function safeStart(){
-  const title=document.getElementById('title-screen'); if(title) title.style.display='none';
-  document.getElementById('hud').style.display='flex';
-  document.getElementById('storage-button').style.display='block';
-  document.getElementById('notebook-button').style.display='block';
-  await boot();
+/* ========================== MAP LOAD ========================== */
+async function loadMap(){
+  try{
+    const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
+    houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
+    result.meshes.forEach(m=>{
+      m.checkCollisions = true; m.isPickable = true;
+      const bb = m.getBoundingInfo().boundingBox;
+      const size = bb.maximum.subtract(bb.minimum);
+      if (size.y < 0.12 || size.x < 0.12 || size.z < 0.12) m.checkCollisions = false;
+      if (m.material && m.material.alpha && m.material.alpha < 0.9) m.checkCollisions = false;
+    });
+  }catch(e){
+    // fallback ground
+    const ground = BABYLON.MeshBuilder.CreateGround("fallbackGround", {width:140, height:140}, scene);
+    ground.position.y = 0; ground.checkCollisions = true;
+    const gmat = new BABYLON.StandardMaterial("gmat", scene);
+    gmat.diffuseColor = new BABYLON.Color3(0.06,0.08,0.12); gmat.specularColor = new BABYLON.Color3(0,0,0);
+    ground.material = gmat;
+  }
 }
-document.getElementById('start-button').addEventListener('click', safeStart);
+
+/* ========================== WEATHER ========================== */
+function setWeather(state){
+  weather.state = state;
+  $("#hud-weather").textContent = state;
+  if (state === "Blood Moon"){
+    scene.clearColor = new BABYLON.Color4(0.02,0,0.02,1);
+    scene.fogDensity = 0.005;
+    ensureRain(true); // blood moon also rains + lightning
+  } else if (state === "Rain"){
+    scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+    scene.fogDensity = 0.0045;
+    ensureRain(true);
+  } else {
+    ensureRain(false);
+  }
+}
+function ensureRain(on){
+  if (on){
+    if (!weather.rainPS){
+      const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
+      // simple procedural streaks: use dynamic texture
+      const tex = new BABYLON.DynamicTexture("rainTex", {width:4, height:16}, scene, false);
+      const ctx = tex.getContext(); ctx.fillStyle="#AEE"; ctx.fillRect(1,0,2,16); tex.update(false);
+      ps.particleTexture = tex;
+      ps.minEmitBox = new BABYLON.Vector3(-60, 40, -60);
+      ps.maxEmitBox = new BABYLON.Vector3( 60, 40,  60);
+      ps.minSize = 0.05; ps.maxSize = 0.08;
+      ps.minLifeTime = 0.6; ps.maxLifeTime = 1.1;
+      ps.emitRate = 1800;
+      ps.direction1 = new BABYLON.Vector3(0, -1.3, 0);
+      ps.direction2 = new BABYLON.Vector3(0, -1.0, 0);
+      ps.color1 = new BABYLON.Color4(0.8,0.9,1,0.75);
+      ps.color2 = new BABYLON.Color4(0.8,0.9,1,0.6);
+      ps.gravity = new BABYLON.Vector3(0,-9.8,0);
+      ps.updateSpeed = 0.02;
+      weather.rainPS = ps;
+    }
+    weather.rainPS.start();
+    scheduleLightning();
+  } else {
+    if (weather.rainPS) weather.rainPS.stop();
+  }
+}
+function scheduleLightning(){
+  weather.lightningTimer = 0;
+  weather.nextStrike = 3 + Math.random()*8;
+}
+function lightningTick(dt){
+  if (weather.state==="Clear") return;
+  weather.lightningTimer += dt;
+  if (weather.lightningTimer >= weather.nextStrike){
+    weather.lightningTimer = 0;
+    weather.nextStrike = 3 + Math.random()*8;
+    const f = $("#flash-overlay");
+    f.style.opacity = "0.7"; setTimeout(()=> f.style.opacity = "0", 120);
+  }
+}
+
+/* ========================== RAY HELPERS ========================== */
+function pickGround(){
+  const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
+  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  return hit;
+}
+function groundYAt(x,z){
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 60, z), new BABYLON.Vector3(0,-1,0), 120);
+  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  return (hit.hit && hit.pickedPoint) ? hit.pickedPoint.y : 0.1;
+}
+
+/* ========================== GAME TICK ========================== */
+function tick(dt){
+  // input
+  const snap = input.snapshotAndConsume();
+  // camera rotate (mouse + right-touch)
+  const sensitivity = 0.0026;
+  camera.rotation.y += snap.lookDX * sensitivity;
+  const newPitch = clamp(camera.rotation.x + (-snap.lookDY * sensitivity), -Math.PI/2 + 0.12, Math.PI/2 - 0.12);
+  camera.rotation.x = newPitch;
+
+  // move
+  const speed = (snap.running ? player.speedRun : player.speedWalk);
+  const fwd = camera.getForwardRay().direction; fwd.y = 0; fwd.normalize();
+  const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+  const desired = fwd.scale(snap.moveVec.z).add(right.scale(snap.moveVec.x));
+  if (desired.lengthSquared() > 0){
+    desired.normalize();
+    camera.cameraDirection = desired.scale(speed * dt);
+  } else {
+    camera.cameraDirection = new BABYLON.Vector3(0,0,0);
+  }
+
+  // action routing
+  if (snap.actions.use) handleUse();
+  if (snap.actions.place) handlePlace();
+  if (snap.actions.toss) handleToss();
+
+  // systems
+  footprintsTick(dt);
+  ghostTick(dt);
+  tossedTick(dt);
+  emfTick(dt);
+  lightningTick(dt);
+
+  // HUD
+  $("#hud-room").textContent = player.room;
+  $("#hud-sanity").textContent = (player.sanity|0) + "%";
+}
+
+/* ========================== ITEMS / ACTIONS ========================== */
+function selectedItem(){ return inventory.slots[inventory.selected]; }
+
+function handleUse(){
+  const it = selectedItem();
+  if (!it) return;
+  switch(it){
+    case "Flashlight":
+      flashLight.intensity = flashLight.intensity > 0 ? 0 : 3.0;
+      toast(flashLight.intensity>0 ? "Flashlight ON" : "Flashlight OFF");
+      break;
+    case "UV Light":
+      uvLight.intensity = uvLight.intensity > 0 ? 0 : 2.0;
+      toast(uvLight.intensity>0 ? "UV ON" : "UV OFF");
+      break;
+    case "EMF":
+      emf.on = !emf.on;
+      toast(emf.on ? "EMF ON" : "EMF OFF");
+      $("#emf-led").classList.toggle("on", emf.on);
+      if (!emf.on){ emf.level = 0; emfStopTone(); updateEMFLeds(); }
+      break;
+    case "Notebook":
+      toast("Notebook opened.");
+      break;
+    default:
+      toast(`${it} used.`);
+  }
+}
+
+function handlePlace(){
+  const it = selectedItem();
+  if (!it) return;
+  if (it === "Salt"){
+    const left = inventory.charges[4] ?? 0;
+    if (left <= 0){ toast("No salt left."); return; }
+    // ray pick
+    const hit = pickGround();
+    if (!hit.hit || !hit.pickedPoint){ toast("Aim at floor to place salt."); return; }
+    const p = hit.pickedPoint;
+    placeSaltStrip(p, camera.rotation.y);
+    inventory.charges[4] = (left-1);
+    toast(`Salt placed. (${inventory.charges[4]} left)`);
+  } else {
+    toast(`${it} cannot be placed.`);
+  }
+}
+
+function handleToss(){
+  const it = selectedItem();
+  if (!it) return;
+  // spawn proxy mesh
+  const mesh = BABYLON.MeshBuilder.CreateSphere("proxy", {diameter:0.25}, scene);
+  mesh.position = camera.position.add(camera.getForwardRay().direction.scale(0.8)).add(new BABYLON.Vector3(0, -0.1, 0));
+  mesh.material = new BABYLON.StandardMaterial("pmat", scene);
+  mesh.material.diffuseColor = new BABYLON.Color3(0.3,0.6,0.9);
+  const dir = camera.getForwardRay().direction.clone();
+  const vel = dir.scale(8).add(new BABYLON.Vector3(0, 4, 0));
+  tossed.push({mesh, vel, birth: nowSec()});
+  // make EMF hotspot around landing area (10s once it rests—estimate)
+  ghost.hotspots.push({pos: mesh.position.clone(), expire: nowSec()+10, level: 2});
+  toast(`${it} tossed.`);
+}
+
+/* ========================== SALT / FOOTPRINTS ========================== */
+function placeSaltStrip(p, yaw){
+  const len = 1.8; // about 6 ft
+  const dir = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw)); // perpendicular to camera forward for "strip"
+  const n = new BABYLON.Vector3(dir.z, 0, -dir.x); // orthogonal
+  const center = new BABYLON.Vector3(p.x, groundYAt(p.x,p.z)+0.02, p.z);
+  const salt = BABYLON.MeshBuilder.CreatePlane("salt", {width:len, height:0.22}, scene);
+  salt.rotation = new BABYLON.Vector3(Math.PI/2, 0, 0);
+  salt.position = center;
+  // align plane long edge across the hallway (i.e., n direction)
+  const angle = Math.atan2(n.x, n.z);
+  salt.rotation.y = angle;
+
+  const mat = new BABYLON.StandardMaterial("saltMat", scene);
+  mat.diffuseColor = new BABYLON.Color3(0.9,0.9,0.95);
+  mat.alpha = 0.85;
+  salt.material = mat; salt.isPickable = true; salt.checkCollisions = false;
+
+  saltStrips.push({mesh: salt, pos: center.clone(), dir: n, placedAt: nowSec(), cooldownUntil:0});
+}
+
+function spawnFootprints(fromPos, dirVec){
+  const count = 4 + (Math.random()<0.5 ? 1 : 0);
+  const step = 0.5;
+  for (let i=0;i<count;i++){
+    const off = dirVec.scale(i*step + 0.4);
+    const x = fromPos.x + off.x, z = fromPos.z + off.z;
+    const y = groundYAt(x,z) + 0.01;
+
+    const fp = BABYLON.MeshBuilder.CreatePlane("fp", {width:0.25, height:0.38}, scene);
+    fp.rotation = new BABYLON.Vector3(Math.PI/2, Math.atan2(dirVec.x, dirVec.z), 0);
+    fp.position = new BABYLON.Vector3(x,y,z);
+    const m = new BABYLON.StandardMaterial("fpMat", scene);
+    m.emissiveColor = new BABYLON.Color3(0.6, 0.3, 0.9); // purple glow under UV
+    m.disableLighting = true;
+    m.alpha = 0.0; // hidden unless UV cone on it
+    fp.material = m; fp.isPickable = false; fp.metadata = { born: nowSec(), life: 60 };
+    ghost.footprints.push(fp);
+  }
+}
+
+function footprintsTick(dt){
+  // visibility only under UV cone
+  const uvOn = uvLight.intensity > 0;
+  const coneDir = camera.getForwardRay().direction.clone();
+  const coneCos = Math.cos(uvLight.angle*0.5);
+  ghost.footprints = ghost.footprints.filter(fp=>{
+    const age = nowSec() - (fp.metadata?.born||0);
+    if (age > (fp.metadata?.life||60)){ fp.dispose(); return false; }
+    if (uvOn){
+      const to = fp.position.subtract(camera.position); to.y = 0;
+      const d = to.length();
+      if (d < (uvLight.range||25)){
+        to.normalize();
+        const cos = BABYLON.Vector3.Dot(to, new BABYLON.Vector3(coneDir.x,0,coneDir.z).normalize());
+        fp.material.alpha = (cos >= coneCos) ? 1.0 : 0.0;
+      } else {
+        fp.material.alpha = 0.0;
+      }
+    } else {
+      fp.material.alpha = 0.0;
+    }
+    return true;
+  });
+}
+
+/* ========================== GHOST SIM ========================== */
+function ghostTick(dt){
+  // simple wandering target within a box
+  if (!ghost.mesh){
+    ghost.mesh = BABYLON.MeshBuilder.CreateBox("ghost", {size:1.2}, scene);
+    ghost.mesh.material = new BABYLON.StandardMaterial("gmat", scene);
+    ghost.mesh.material.diffuseColor = new BABYLON.Color3(0.8,0.9,1);
+    ghost.mesh.material.alpha = 0.35;
+    ghost.mesh.isPickable = false; ghost.mesh.checkCollisions = false;
+    ghost.mesh.position = camera.position.add(new BABYLON.Vector3(5,0,5));
+    ghost.target = ghost.mesh.position.clone();
+  }
+  const pos = ghost.mesh.position;
+  const tgt = ghost.target;
+  if (BABYLON.Vector3.Distance(pos, tgt) < 0.5){
+    // pick new target
+    const nx = (Math.random()*40 - 20);
+    const nz = (Math.random()*40 - 20);
+    const y = groundYAt(nx, nz);
+    ghost.target = new BABYLON.Vector3(nx, y+1.0, nz);
+  } else {
+    const dir = tgt.subtract(pos); dir.y = 0;
+    if (dir.lengthSquared()>0.0001){
+      dir.normalize();
+      ghost.mesh.moveWithCollisions(dir.scale(0.8*dt));
+    }
+  }
+
+  // salt interaction → footprints with cooldown per strip
+  saltStrips.forEach(s=>{
+    if (nowSec() < s.cooldownUntil) return;
+    const d = BABYLON.Vector3.Distance(new BABYLON.Vector3(s.pos.x,0,s.pos.z), new BABYLON.Vector3(pos.x,0,pos.z));
+    if (d < 0.9){
+      s.cooldownUntil = nowSec() + 12; // anti-spam
+      const travelDir = ghost.target.subtract(pos); travelDir.y = 0;
+      if (travelDir.lengthSquared()<0.0001){ travelDir.copyFromFloats(0,0,1); } else travelDir.normalize();
+      spawnFootprints(s.pos, travelDir);
+    }
+  });
+
+  // occasionally nudge environment → create EMF hotspot
+  if (Math.random() < 0.0025){
+    const hp = pos.clone();
+    ghost.hotspots.push({pos: hp, expire: nowSec()+10, level: (Math.random()<0.3 ? 5 : 2)});
+  }
+}
+
+/* ========================== TOSSED PROXIES ========================== */
+function tossedTick(dt){
+  const g = -9.8;
+  tossed = tossed.filter(t=>{
+    t.vel.y += g * dt * 0.35;
+    const next = t.mesh.position.add(t.vel.scale(dt));
+    // collide with ground y
+    const y = groundYAt(next.x, next.z);
+    if (next.y <= y + 0.12){
+      next.y = y + 0.12;
+      t.vel.copyFromFloats(0,0,0);
+    }
+    t.mesh.position.copyFrom(next);
+    // lifetime
+    if (nowSec() - t.birth > 60){ t.mesh.dispose(); return false; }
+    return true;
+  });
+}
+
+/* ========================== EMF ========================== */
+function updateEMFLeds(){
+  for (let i=1;i<=5;i++){
+    const el = document.getElementById("emf"+i);
+    const active = emf.level >= i;
+    el.classList.toggle("active", active);
+    el.classList.toggle("max", i===5 && emf.level===5);
+  }
+}
+function emfTick(dt){
+  // expire hotspots
+  ghost.hotspots = ghost.hotspots.filter(h=> nowSec() < h.expire);
+  if (!emf.on){ return; }
+
+  // determine strongest hotspot within ~0.65m (~2.1ft)
+  let level = 0;
+  for (const h of ghost.hotspots){
+    const d = BABYLON.Vector3.Distance(h.pos, camera.position);
+    if (d <= 0.65) level = Math.max(level, h.level||2);
+  }
+  emf.level = level;
+  updateEMFLeds();
+
+  // beep patterns up to 10s when near a hotspot (handled by hotspot lifetime)
+  if (level <= 1){ emfStopTone(); return; }
+
+  const t = nowSec();
+  if (level < 5){
+    // intermittent beeps: beep...beep.....beep
+    if (t >= emf.nextPatternAt){
+      emfStartTone(750);
+      setTimeout(()=> emfStopTone(), 140);
+      // randomize spacing between 0.6–1.2s
+      emf.nextPatternAt = t + (0.6 + Math.random()*0.6);
+    }
+  } else { // level 5
+    if (!emf.tone) emfStartTone(880); // continuous
+  }
+}
+/* ========================== END ========================== */
 </script>
 </body>
 </html>
