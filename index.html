@@ -2069,6 +2069,7 @@ async function loadMap(){
     const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
     houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
     result.meshes.forEach(m=>{
+      if (m.material){ if (m.material.alpha !== undefined) m.material.alpha = 1; if (m.material.transparencyMode !== undefined) m.material.transparencyMode = BABYLON.Material.MATERIAL_OPAQUE; }
       m.checkCollisions = true; m.isPickable = true;
       const bb = m.getBoundingInfo().boundingBox;
       const size = bb.maximum.subtract(bb.minimum);
@@ -2119,70 +2120,47 @@ async function loadItems(){
    =========================================================== */
 
 async function loadGhost(){
-  function solidifyMaterials(root){
-    const meshes = root.getChildMeshes ? root.getChildMeshes(false) : [];
-    const all = meshes.concat([root]).filter(Boolean);
-    for (const m of all){
-      if (!m) continue;
-      m.visibility = 1;
-      m.isPickable = false;
-      m.checkCollisions = false;
-      if (m.material){
-        const mat = m.material;
-        if (mat.alpha !== undefined) mat.alpha = 1;
-        if (mat.backFaceCulling !== undefined) mat.backFaceCulling = true;
-        if (mat.disableLighting !== undefined) mat.disableLighting = false;
-        if (mat.transparencyMode !== undefined && BABYLON.PBRMaterial){
-          mat.transparencyMode = BABYLON.PBRMaterial.PBRMATERIAL_OPAQUE;
-        }
-        if (mat.needDepthPrePass !== undefined) mat.needDepthPrePass = false;
-      }
-    }
-  }
-  function makeFallbackGhost(){
-    const g = BABYLON.MeshBuilder.CreateBox("ghost", {size: 1.0}, scene);
-    const sm = new BABYLON.StandardMaterial("ghostMat", scene);
-    sm.alpha = 0.3;
-    sm.emissiveColor = new BABYLON.Color3(0.9,0.2,0.9);
-    g.material = sm;
-    g.isPickable = false;
-    g.checkCollisions = false;
-    g.alwaysSelectAsActiveMesh = true;
-    const y = pickGroundHeightAt(camera.position.x, camera.position.z);
-    g.position = new BABYLON.Vector3(camera.position.x + 2, y, camera.position.z + 2);
-    ghost.mesh = g;
-    ghost.visible = false;
-  }
-
   try{
-    const ghostFiles = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
-    const pick = ghostFiles[Math.floor(Math.random()*ghostFiles.length)];
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
-    const root = r.meshes[0] || r.meshes.find(m=>m.name==="__root__") || r.meshes.find(Boolean);
-    if (!root){ makeFallbackGhost(); return; }
-    ghost.mesh = root;
-    solidifyMaterials(root);
-    // scale normalize to ~1.9m height
-    const bb = root.getHierarchyBoundingVectors(true);
-    const h = (bb.max.y - bb.min.y) || 1;
-    const s = 1.9 / h;
-    root.scaling = new BABYLON.Vector3(s,s,s);
-    // spawn at random polygon or near van
+    const files = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
+    const choice = files[(Math.random()*files.length)|0];
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", choice, scene);
+    const g = r.meshes.find(m=>m && m.name!=="__root__") || r.meshes[0];
+    if (!g) throw new Error("empty ghost glb");
+    ghost.mesh = g;
+    ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
+    // Ensure solid
+    ghost.mesh.getChildMeshes(true).forEach(m=>{
+      if (m.material){
+        if (m.material.alpha !== undefined) m.material.alpha = 1;
+        if (m.material.transparencyMode !== undefined) m.material.transparencyMode = BABYLON.Material.MATERIAL_OPAQUE;
+        if (m.material.needDepthPrePass !== undefined) m.material.needDepthPrePass = false;
+      }
+    });
+    const bb = ghost.mesh.getHierarchyBoundingVectors(true);
+    const height = bb.max.y - bb.min.y;
+    const scale = (1.9 / (height || 1));
+    ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
+    ghost.mesh.rotation = new BABYLON.Vector3(0,0,0);
+    r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
+    if(ghost.anims.idle) ghost.anims.idle.start(true);
     const p = randomPointInPolygonXZ(ghostPolygon);
     const gy = pickGroundHeightAt(p.x, p.z);
-    root.position = new BABYLON.Vector3(p.x, gy, p.z);
-    root.rotationQuaternion = null;
-    root.rotation = new BABYLON.Vector3(0, Math.random()*Math.PI*2, 0);
-    root.alwaysSelectAsActiveMesh = true;
-    // default invisible until hunt
+    ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
+    ghost.target = randomPointInPolygonXZ(ghostPolygon);
     setGhostVisible(false);
-    // animations
-    ghost.anims = ghost.anims || {};
-    r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
-    if (ghost.anims.idle) ghost.anims.idle.start(true);
   }catch(e){
-    console.warn("loadGhost failed, using fallback:", e);
-    makeFallbackGhost();
+    console.warn("Ghost glb failed, falling back to cube:", e);
+    // Fallback cube
+    const g = BABYLON.MeshBuilder.CreateBox("ghostCube", {size:1.0}, scene);
+    const mat = new BABYLON.StandardMaterial("ghostCubeMat", scene);
+    mat.alpha = 0.35; mat.emissiveColor = new BABYLON.Color3(0.6,0.8,1.0);
+    g.material = mat;
+    g.isPickable = false; g.checkCollisions = false;
+    const p = randomPointInPolygonXZ(ghostPolygon);
+    const gy = pickGroundHeightAt(p.x, p.z);
+    g.position = new BABYLON.Vector3(p.x, gy, p.z);
+    ghost.mesh = g;
+    ghost.target = randomPointInPolygonXZ(ghostPolygon);
   }
 }
 
