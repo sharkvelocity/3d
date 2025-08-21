@@ -10,33 +10,6 @@
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
   <script src="./cdn/babylon.js">
 
-/* === Safe Render Loop === */
-(function(){
-  if (typeof window.startRenderLoopSafe !== 'function') {
-    window._renderLoopStarted = false;
-    window.startRenderLoopSafe = function(){
-      if (window._renderLoopStarted) return;
-      window._renderLoopStarted = true;
-      const rafLoop = function(){
-        try{ if (window.scene && window.scene.activeCamera) window.scene.render(); }catch(e){}
-        requestAnimationFrame(rafLoop);
-      };
-      try{
-        if (window.engine && typeof window.engine.runRenderLoop === 'function') {
-          window.engine.runRenderLoop(function(){
-            try{ if (window.scene && window.scene.activeCamera) window.scene.render(); }catch(e){}
-          });
-        } else {
-          rafLoop();
-        }
-      }catch(e){
-        rafLoop();
-      }
-    };
-  }
-})();
-
-
 /* === Global capLightsAndMaterials === */
 (function(){
   window.capLightsAndMaterials = function(maxLights){
@@ -1503,6 +1476,41 @@ window.SAFE_MODE = true;
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; color:var(--c0); z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
+
+<script>
+// === Global, idempotent render loop starter ===
+(function(){
+  if (typeof window.startRenderLoopSafe !== 'function') {
+    window._renderLoopStarted = false;
+    window.startRenderLoopSafe = function(){
+      if (window._renderLoopStarted) return;
+      // mark as started to prevent double loops
+      window._renderLoopStarted = true;
+      var frame = function(){
+        try{
+          if (window.scene && window.scene.activeCamera) {
+            window.scene.render();
+          }
+        }catch(e){ /* keep loop alive */ }
+        requestAnimationFrame(frame);
+      };
+      try{
+        if (window.engine && typeof window.engine.runRenderLoop === 'function') {
+          window.engine.runRenderLoop(function(){
+            if (window.scene && window.scene.activeCamera) window.scene.render();
+          });
+        } else {
+          frame(); // fallback RAF loop
+        }
+      }catch(e){
+        // If runRenderLoop throws, fall back to RAF and keep going
+        frame();
+      }
+    };
+  }
+})();
+</script>
+
 </head>
 
 <body>
@@ -1797,7 +1805,7 @@ async function boot(){
       }
 
       // Start render loop
-      window.startRenderLoopSafe();
+      engine.runRenderLoop(()=>{ if (scene && scene.activeCamera) scene.render(); });
     } catch (e) {
       console.error('Baseline boot failed:', e);
     }
