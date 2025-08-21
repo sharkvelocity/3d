@@ -401,7 +401,17 @@ let weather = {
   modHuntPace:1.0
 };
 
+// Spawn/van zone (used by loadMap/handleMovement)
 let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
+
+// Ghost roam polygon (used by loadGhost/random spawn)
+let ghostPolygon = [
+  new BABYLON.Vector3(18.404, 0, -96.040),
+  new BABYLON.Vector3(57.205, 0, -94.031),
+  new BABYLON.Vector3(62.145, 0, -105.142),
+  new BABYLON.Vector3(61.872, 0, -149.928),
+  new BABYLON.Vector3(18.660, 0, -149.900)
+];
 
 let storageOpen = false;
 let dev = { enabled:false, gateOpen:false, log:[] };
@@ -606,6 +616,42 @@ async function boot(){
   // Hemispheric low-level fill to avoid total-black edge cases
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
+/* ===========================================================
+   UTILS (must be defined before loadMap/loadGhost/boot)
+   =========================================================== */
+function pickGroundHeightAt(x, z){
+  // Raycast straight down to find the floor/ground Y.
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 80, z), new BABYLON.Vector3(0,-1,0), 200);
+  const hit = scene.pickWithRay(ray, m=>{
+    if(!m || !m.isPickable) return false;
+    const n = (m.name||"");
+    return /ground|floor|terrain|fallbackground/i.test(n);
+  });
+  if(hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
+  return 1.2; // safe default
+}
+
+function pointInPolyXZ(p, poly){
+  // classic even–odd rule in XZ
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+    const intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
+    if(intersect) inside=!inside;
+  }
+  return inside;
+}
+
+function randomPointInPolygonXZ(poly){
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  poly.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
+  for(let i=0;i<500;i++){
+    const x = minX + Math.random()*(maxX-minX);
+    const z = minZ + Math.random()*(maxZ-minZ);
+    if(pointInPolyXZ(new BABYLON.Vector3(x,0,z), poly)) return new BABYLON.Vector3(x, 0, z);
+  }
+  return poly[0].clone();
+}
 
   // Map + items + ghost + moon
   await loadMap().catch(()=>{});
