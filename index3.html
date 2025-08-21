@@ -476,11 +476,8 @@ const TWINS_SEP_MIN = 10.0, TWINS_SEP_MAX = 12.0;
 
 const placeables = { motionSensors: [], crucifixes: [] };
 
-/* ===========================================================
-   UTILS
-   =========================================================== */
-  // ===========================================================
-// DEV GATE LOGIC
+// ===========================================================
+// DEV GATE LOGIC (ESC → Yes → password → show tools)
 // ===========================================================
 (function setupDevGate(){
   const gate = document.getElementById('dev-gate');
@@ -492,7 +489,7 @@ const placeables = { motionSensors: [], crucifixes: [] };
   const devToggle = document.getElementById('devtools-toggle');
   const devPanel  = document.getElementById('devtools-panel');
 
-  // Open the dev-gate when ESC is pressed
+  // Open the dev-gate when ESC is pressed (only if not already enabled)
   window.addEventListener('keydown', e=>{
     if(e.key === "Escape" && !dev.enabled && !dev.gateOpen){
       gate.style.display = 'flex';
@@ -500,69 +497,30 @@ const placeables = { motionSensors: [], crucifixes: [] };
     }
   });
 
-  btnYes.addEventListener('click', ()=>{ passWrap.style.display='block'; });
-  btnNo.addEventListener('click', ()=>{ gate.style.display='none'; dev.gateOpen=false; });
+  btnYes?.addEventListener('click', ()=>{ passWrap.style.display='block'; passInput.focus(); });
+  btnNo?.addEventListener('click', ()=>{ gate.style.display='none'; dev.gateOpen=false; });
 
-  passSubmit.addEventListener('click', ()=>{
+  passSubmit?.addEventListener('click', ()=>{
     const val = passInput.value.trim();
-    // Adjust password as you wish:
+    // Set your own password here
     if(val === "letmein"){
       dev.enabled = true;
       gate.style.display = 'none';
       dev.gateOpen = false;
       toast("Developer options enabled.",2000);
-      devToggle.style.display = 'block'; // show toggle button
+      devToggle.style.display = 'block'; // reveal the toggle
     }else{
       toast("Wrong password.",2000);
     }
     passInput.value = "";
   });
 
-  // Toggle panel
-  devToggle.addEventListener('click', ()=>{
-    devPanel.style.display = (devPanel.style.display==='block')?'none':'block';
+  // Toggle the panel
+  devToggle?.addEventListener('click', ()=>{
+    devPanel.style.display = (devPanel.style.display==='block') ? 'none' : 'block';
   });
 })();
 
-function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
-function inVanZone(pos){ return BABYLON.Vector3.Distance(pos, vanZone.center) <= vanZone.radius; }
-function pickGroundHeightAt(x, z){
-  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 80, z), new BABYLON.Vector3(0,-1,0), 200);
-  const hit = scene.pickWithRay(ray, m=>{
-    if(!m || !m.isPickable) return false;
-    const n = (m.name||"");
-    return /ground|floor|terrain|fallbackground/i.test(n);
-  });
-  if(hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
-  return 1.2;
-}
-function randomPointInPolygonXZ(poly){
-  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
-  poly.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
-  for(let i=0;i<500;i++){
-    const x = minX + Math.random()*(maxX-minX);
-    const z = minZ + Math.random()*(maxZ-minZ);
-    if(pointInPolyXZ(new BABYLON.Vector3(x,0,z), poly)) return new BABYLON.Vector3(x, 0, z);
-  }
-  return poly[0].clone();
-}
-function pointInPolyXZ(p, poly){
-  let inside=false;
-  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-    const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
-    const intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
-    if(intersect) inside=!inside;
-  }
-  return inside;
-}
-function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
-function $(s){ return document.querySelector(s); }
-
-function playFootstep(){
-  const arr = [audio.step1,audio.step2,audio.step3];
-  const s = arr[Math.floor(Math.random()*arr.length)];
-  if(s){ s.currentTime=0; s.volume=0.6; s.play().catch(()=>{}); }
-}
 
 /* ===========================================================
    BOOT / STARTUP
@@ -1180,10 +1138,19 @@ function sanityTick(dt){
 }
 
 /* ===========================================================
-   MOON
+   MOON  (robust version)
    =========================================================== */
 async function loadMoon(){
-  try{
+  try {
+    // Quick sanity check: is the GLB actually a GLB (and reachable)?
+    const url = "./assets/models/sky/moon.glb";
+    const head = await fetch(url, { method: "GET" });
+    if (!head.ok) throw new Error("moon.glb not reachable (status " + head.status + ")");
+    const ct = head.headers.get("content-type") || "";
+    // Some static hosts don’t send a perfect GLB MIME — just make sure it’s not HTML
+    if (ct.includes("text/html")) throw new Error("moon.glb returned HTML (likely 404 or wrong path)");
+
+    // Load GLB
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
     moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
     if (!moonMesh) throw new Error("moon.glb had no meshes");
@@ -1209,8 +1176,9 @@ async function loadMoon(){
       moonMesh.position.z = Math.sin(t)*380;
       moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
     });
-  }catch(e){
+  } catch(e) {
     console.warn("loadMoon failed, using sphere:", e);
+    // Guaranteed fallback (never throws)
     moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
     moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
     moonMat = new BABYLON.StandardMaterial("moonMat", scene);
@@ -1222,6 +1190,7 @@ async function loadMoon(){
     applyMoonTintForWeather();
   }
 }
+
 
 /* ===========================================================
    HOUSE LIGHTS
