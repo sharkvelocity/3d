@@ -2870,60 +2870,36 @@ function syncHeldLights(){
 </script>
 <div id="hand-preview" style="display:none"></div>
 
-<script id="__spawn_and_ghost_rules__">
+<script id="__start_button_binder__">
 (function(){
-  function vec3(x,y,z){ return new BABYLON.Vector3(x,y,z); }
-  window.vanZone = window.vanZone || { center: vec3(43.657,2,-119.008), radius: 11 };
-
-  function groundYAt(x,z){
-    try{
-      if (!window.scene) return 1.7;
-      const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 1000, z), new BABYLON.Vector3(0,-1,0), 5000);
-      const pick = window.scene.pickWithRay(ray, function(m){ return m && m.isPickable !== false; });
-      if (pick && pick.hit && pick.pickedPoint) return pick.pickedPoint.y + 0.0;
-    }catch(e){}
-    return 1.7;
-  }
-
-  window.applySpawnAndGhostRules = function(){
-    try{
-      const scene = window.scene; if (!scene) return;
-      const cam = scene.activeCamera || (scene.cameras && scene.cameras[0]);
-      if (cam){
-        let y = groundYAt(window.vanZone.center.x, window.vanZone.center.z);
-        if (!isFinite(y)) y = 1.7;
-        const pos = vec3(window.vanZone.center.x, y + 1.7, window.vanZone.center.z);
-        if (typeof cam.setPosition === 'function') cam.setPosition(pos); else cam.position = pos;
-        if ('target' in cam) cam.target = vec3(window.vanZone.center.x, y, window.vanZone.center.z);
-      }
-
-      // Hide the ghost initially; it should only be visible during a hunt
-      const ghost = (scene.meshes||[]).find(m => /ghost/i.test(m.name));
-      if (ghost){
-        ghost.isVisible = false;
-        ghost.isPickable = false;
-        window.__ghostHidden = true;
-      }
-
-      // Ensure HUD (if present) is on top and visible
-      const hud = document.getElementById('hud') || document.querySelector('.hud');
-      if (hud){ hud.style.display='block'; hud.style.zIndex = '9990'; }
-    }catch(e){ console.warn('applySpawnAndGhostRules failed', e); }
-  };
-
-  // Run when we think scene is ready
-  document.addEventListener('scene-ready', function(){ setTimeout(window.applySpawnAndGhostRules, 0); });
-  // Also try after Start in case the event is not emitted
-  if (!window.__spawnRulesHooked){
-    window.__spawnRulesHooked = true;
-    const btn = document.getElementById('startInvestigationBtn');
-    if (btn){
-      const orig = btn.onclick;
-      btn.onclick = function(ev){
-        try{ if (typeof orig === 'function') orig.call(this, ev); }finally{ setTimeout(window.applySpawnAndGhostRules, 500); }
+  function byId(id){ return document.getElementById(id); }
+  function bindStart(){
+    var btn = byId('startInvestigationBtn') || byId('start-button');
+    if (!btn) return false;
+    if (!window.safeStart) {
+      window.safeStart = async function(ev){
+        try{ ev && ev.preventDefault && ev.preventDefault(); }catch(_){}
+        try{
+          // Prefer your app's boot/start entry point
+          if (typeof window.start === 'function') await window.start();
+          else if (typeof window.safeStartInternal === 'function') await window.safeStartInternal();
+          else if (typeof window.boot === 'function') await window.boot();
+          else if (typeof window.startGame === 'function') await window.startGame();
+        }catch(e){ console.error('safeStart failed:', e); }
+        try{ if (typeof window.startRenderLoopSafe === 'function') window.startRenderLoopSafe(); }catch(_){}
+        // Hide title screen after starting
+        var screen = byId('title-screen') || byId('titleScreen');
+        if (screen) screen.style.display = 'none';
       };
     }
+    // Avoid double-binding
+    btn.onclick = window.safeStart;
+    btn.onkeydown = function(e){ if (e && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); window.safeStart(e); } };
+    return true;
   }
+  document.addEventListener('DOMContentLoaded', bindStart);
+  // Also retry after 1s in case button is injected late
+  setTimeout(bindStart, 1000);
 })();
 </script>
 
