@@ -10,6 +10,60 @@
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
   <script src="./cdn/babylon.js">
 
+/* ===== loadMoon (clean) ===== */
+async function loadMoon(){
+  try{
+    // Try to import the GLB if present and valid
+    const res = await fetch("./assets/models/sky/moon.glb", { method:"GET" });
+    if(!res.ok){ throw new Error("moon.glb not reachable: " + res.status); }
+    const ct = (res.headers.get("content-type")||"");
+    if (ct.includes("text/html")){ throw new Error("moon.glb served as HTML"); }
+
+    const imp = await BABYLON.SceneLoader.ImportMeshAsync(
+      "", "./assets/models/sky/", "moon.glb", scene
+    );
+    let moonMesh = imp.meshes.find(m => m.name && m.name !== "__root__") || imp.meshes[0];
+    if(!moonMesh){ throw new Error("moon.glb had no meshes"); }
+
+    moonMesh.isPickable = false;
+    moonMesh.checkCollisions = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    let mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    mat.emissiveColor = new BABYLON.Color3(1,1,1);
+    moonMesh.material = mat;
+
+    // simple idle motion
+    scene.onBeforeRenderObservable.add(()=>{
+      const t = performance.now()*0.00002;
+      moonMesh.position.x = Math.cos(t)*380;
+      moonMesh.position.z = Math.sin(t)*380;
+      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
+    });
+
+  }catch(e){
+    console.warn("loadMoon failed, using sphere fallback:", e);
+    const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+    moonMesh.isPickable = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    const mat = new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    try{
+      mat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
+    }catch{
+      mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+    }
+    moonMesh.material = mat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+  }
+}
+
+
+
 /* Bind Start button */
 (function(){
   var btn = document.getElementById('start-button');
@@ -241,127 +295,7 @@
   bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
 })();
 
-async function loadMoon() {
-  try {
-    let moonMesh;
-    let moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    try {
-      moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
-    } catch {
-      moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
-    }
-    moonMesh = await BABYLON.SceneLoader.ImportMeshAsync(
-      "", "./assets/models/sky/", "moon.glb", scene
-    ).then(res => res.meshes.find(m=>m && m.name!=="__root__") || res.meshes[0]);
-    if (!moonMesh) throw new Error("moon.glb had no meshes");
-    moonMesh.isPickable = false;
-    moonMesh.checkCollisions = false;
-    moonMesh.applyFog = false;
-    moonMesh.renderingGroupId = 1;
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    if (typeof applyMoonTintForWeather === 'function') applyMoonTintForWeather();
-  } catch (e) {
-    console.warn("loadMoon failed, using sphere:", e);
-    let moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", { diameter: 60, segments: 18 }, scene);
-    moonMesh.isPickable = false;
-    moonMesh.applyFog = false;
-    moonMesh.renderingGroupId = 1;
-    let moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    try {
-      moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
-    } catch {
-      moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
-    }
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-  }
-</script>
-  <script src="./cdn/earcut.min.js">
-/* === Dev Options Gate (ESC -> Yes -> password) === */
-(function(){
-  const ensureUI = ()=>{
-    let gate = document.getElementById('dev-gate');
-    if (!gate){
-      gate = document.createElement('div'); gate.id='dev-gate';
-      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
-      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
-                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
-                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
-                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
-                       '</div>';
-      document.body.appendChild(gate);
-    }
-    let toggle = document.getElementById('devtools-toggle');
-    if (!toggle){
-      toggle = document.createElement('button');
-      toggle.id='devtools-toggle';
-      toggle.textContent='Dev Tools';
-      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
-      document.body.appendChild(toggle);
-    }
-    let panel = document.getElementById('devtools-panel');
-    if (!panel){
-      panel = document.createElement('div');
-      panel.id='devtools-panel';
-      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
-      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
-                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
-                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
-      document.body.appendChild(panel);
-    }
-    return {gate, toggle, panel};
-  };
-
-  const {gate, toggle, panel} = ensureUI();
-  window.dev = window.dev || { enabled:false, gateOpen:false };
-
-  // ESC -> gate
-  window.addEventListener('keydown', function(e){
-    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
-      gate.style.display = 'flex'; dev.gateOpen = true;
-    }
-  });
-
-  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
-
-  const btnYes = document.getElementById('dev-yes');
-  const btnNo = document.getElementById('dev-no');
-  const passWrap = document.getElementById('dev-pass-wrap');
-  const passInput = document.getElementById('dev-pass');
-  const passSubmit = document.getElementById('dev-pass-submit');
-
-  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
-  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
-  if (passSubmit) passSubmit.onclick = ()=>{
-    const val = (passInput.value||'').trim();
-    if (val === 'letmein'){
-      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
-      toast('Developer options enabled.', 1800);
-      toggle.style.display='block';
-    } else {
-      toast('Wrong password.', 1200);
-    }
-    passInput.value='';
-  };
-
-  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
-
-  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
-
-  // Quick toggles in panel (defensive)
-  const byId = id => document.getElementById(id);
-  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
-
-  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
-  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
-})();
+)();
 </script>
   <script src="./cdn/meshopt_decoder.js">
 /* === Dev Options Gate (ESC -> Yes -> password) === */
