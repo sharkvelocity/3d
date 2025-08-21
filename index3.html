@@ -1191,6 +1191,75 @@ async function loadMoon(){
   }
 }
 
+/* ===========================================================
+   COLD BREATH FX (defensive)
+   =========================================================== */
+function setupBreathFX(){
+  // Guard: scene & camera must exist
+  if (!scene || !camera) {
+    console.warn("setupBreathFX: scene or camera not ready; will retry once after start");
+    // Retry once on next frame after boot finishes
+    setTimeout(()=>{ if (scene && camera) setupBreathFX(); }, 100);
+    return;
+  }
+
+  // If already created, skip
+  if (breath.ps) return;
+
+  const emitter = new BABYLON.TransformNode("breathAnchor", scene);
+  breath.anchor = emitter;
+
+  // Anchor stays ~just below camera to feel like “your” breath
+  scene.onBeforeRenderObservable.add(()=>{
+    if (!camera) return;
+    const forward = camera.getForwardRay().direction.clone(); forward.normalize();
+    const pos = camera.position.add(forward.scale(0.35));
+    emitter.position.copyFrom(pos);
+    emitter.position.y = camera.position.y - 0.1;
+  });
+
+  // Use CPU particles for tiny “puffs”
+  const ps = new BABYLON.ParticleSystem("breathPS", 300, scene);
+  ps.particleTexture = new BABYLON.Texture("https://raw.githubusercontent.com/aWeirdo/Babylon.js/master/smoke_15.png", scene, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+  ps.emitter = emitter;
+  ps.minSize = 0.02; ps.maxSize = 0.05;
+  ps.minLifeTime = 0.35; ps.maxLifeTime = 0.8;
+  ps.emitRate = 0;           // we’ll pulse manually
+  ps.direction1 = new BABYLON.Vector3(0, 0.02, 0.02);
+  ps.direction2 = new BABYLON.Vector3(0, 0.03, 0.03);
+  ps.color1 = new BABYLON.Color4(0.9,0.95,1,0.45);
+  ps.color2 = new BABYLON.Color4(0.9,0.95,1,0.25);
+  ps.updateSpeed = 0.02;
+  ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  ps.start();
+
+  breath.ps = ps;
+
+  // Drive the tiny “puffs” only when it’s cold enough
+  const NEAR_GHOST = ()=> ghost?.mesh && BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < BREATH_RANGE;
+  const IS_COLD = ()=> {
+    if (weather.state === 'Snow') return true;
+    if (weather.state === 'Rain') return true;
+    if (weather.state === 'Blood Moon') return true; // chilly wind vibe
+    // Clear: simulate chill near the ghost only
+    return NEAR_GHOST();
+  };
+
+  scene.onBeforeRenderObservable.add(()=>{
+    if (!breath.ps) return;
+    // short cooldown to avoid constant stream
+    breath.cooldown = Math.max(0, breath.cooldown - engine.getDeltaTime()/1000);
+
+    if (IS_COLD() && breath.cooldown === 0){
+      // quick exhale burst
+      breath.ps.emitRate = 220;
+      setTimeout(()=>{ if(breath.ps) breath.ps.emitRate = 0; }, 140);
+      breath.cooldown = 0.9 + Math.random()*0.6;
+    } else if (!IS_COLD()){
+      breath.ps.emitRate = 0;
+    }
+  });
+}
 
 /* ===========================================================
    HOUSE LIGHTS
