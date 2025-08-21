@@ -1478,33 +1478,31 @@ window.SAFE_MODE = true;
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
 
 <script>
-// === Global, idempotent render loop starter ===
+// === Global, idempotent render loop helper ===
 (function(){
   if (typeof window.startRenderLoopSafe !== 'function') {
     window._renderLoopStarted = false;
     window.startRenderLoopSafe = function(){
       if (window._renderLoopStarted) return;
-      // mark as started to prevent double loops
       window._renderLoopStarted = true;
-      var frame = function(){
+      function rafLoop(){
         try{
-          if (window.scene && window.scene.activeCamera) {
-            window.scene.render();
-          }
-        }catch(e){ /* keep loop alive */ }
-        requestAnimationFrame(frame);
-      };
+          if (window.scene && window.scene.activeCamera) { window.scene.render(); }
+        }catch(_){}
+        requestAnimationFrame(rafLoop);
+      }
       try{
-        if (window.engine && typeof window.engine.runRenderLoop === 'function') {
+        if (window.engine && typeof window.engine.runRenderLoop === 'function'){
           window.engine.runRenderLoop(function(){
-            if (window.scene && window.scene.activeCamera) window.scene.render();
+            try{
+              if (window.scene && window.scene.activeCamera) { window.scene.render(); }
+            }catch(_){}
           });
         } else {
-          frame(); // fallback RAF loop
+          rafLoop();
         }
-      }catch(e){
-        // If runRenderLoop throws, fall back to RAF and keep going
-        frame();
+      }catch(_){
+        rafLoop();
       }
     };
   }
@@ -1805,7 +1803,7 @@ async function boot(){
       }
 
       // Start render loop
-      engine.runRenderLoop(()=>{ if (scene && scene.activeCamera) scene.render(); });
+      window.startRenderLoopSafe(); /* replaced */ ( ()=>{ if (scene && scene.activeCamera) scene.render(); });
     } catch (e) {
       console.error('Baseline boot failed:', e);
     }
@@ -1904,7 +1902,7 @@ if (typeof loadMoon === 'function') {
     updateGhost(dt);
   });
 
-  engine.runRenderLoop(()=> scene.render());
+  window.startRenderLoopSafe(); /* replaced */ ( ()=> scene.render());
   window.addEventListener('resize', ()=> engine.resize());
 
   // HUD visible now
@@ -2469,7 +2467,7 @@ function refreshHandPreview(){
     __pv.cam.panningSensibility = 0; __pv.cam.wheelPrecision = 50;
     new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), __pv.scene).intensity = 1.2;
 
-    __pv.engine.runRenderLoop(()=> __pv.scene && __pv.scene.render());
+    __pv.window.startRenderLoopSafe(); /* replaced */ ( ()=> __pv.scene && __pv.scene.render());
     window.addEventListener('resize', ()=> { try { __pv.engine && __pv.engine.resize(); } catch {} });
   } else {
     wrap.appendChild(__pv.canvas);
