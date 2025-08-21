@@ -424,6 +424,53 @@ async function loadMoon(){
 </script>
 
 <script>
+/* === Engine/Scene bootstrap + weather guard === */
+(function(){
+  window.ensureCES = function(){
+    try {
+      var canvas = document.getElementById('renderCanvas') || document.querySelector('canvas');
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = 'renderCanvas';
+        canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;background:#000;';
+        document.body.appendChild(canvas);
+      }
+      if (!window.engine) {
+        window.engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
+      }
+      if (!window.scene) {
+        window.scene = new BABYLON.Scene(window.engine);
+      }
+      return { canvas, engine: window.engine, scene: window.scene };
+    } catch (e) {
+      console.error('ensureCES failed', e);
+      return {};
+    }
+  };
+
+  // Wrap setWeather to be safe if scene isn't ready yet
+  if (typeof window.setWeather === 'function' && !window.__setWeatherWrapped) {
+    const __origSetWeather = window.setWeather;
+    window.setWeather = function(w){
+      if (!window.scene) { window.__pendingWeather = w; console.warn('setWeather deferred until scene exists'); return; }
+      try { __origSetWeather(w); } catch(e){ console.warn('setWeather failed', e); }
+    };
+    window.__setWeatherWrapped = true;
+  }
+
+  // Apply any pending weather once scene is ready
+  function applyPendingWeather(){
+    if (window.__pendingWeather && typeof window.setWeather === 'function' && window.scene){
+      try { window.setWeather(window.__pendingWeather); } finally { window.__pendingWeather = null; }
+    }
+  }
+  document.addEventListener('scene-ready', applyPendingWeather);
+  window.__applyPendingWeather = applyPendingWeather;
+})();
+</script>
+
+
+<script>
 // === BASELINE MODE (pre-breath, pre-skybox) ===
 window.BASELINE_MODE = true;
 
@@ -1631,7 +1678,9 @@ function $(s){ return document.querySelector(s); }
 let __started = false;
 
 async function safeStart(){
-  if (window.__started) return;
+  
+  if (window.ensureCES) window.ensureCES();
+if (window.__started) return;
   window.__started = true;
   try {
     // Hide title UI immediately to avoid double clicks
