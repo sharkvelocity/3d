@@ -8,7 +8,420 @@
 
   <!-- Babylon core + loaders (local to repo) -->
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
-  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/babylon.js">
+
+/* === Global capLightsAndMaterials === */
+(function(){
+  window.capLightsAndMaterials = function(maxLights){
+    try{
+      maxLights = Math.max(1, Math.min(maxLights||6, 8));
+      const lights = (window.scene && scene.lights) ? scene.lights : [];
+      for(let i=0;i<lights.length;i++){
+        const L = lights[i];
+        const on = i < maxLights;
+        try { L.setEnabled(on); } catch(_) {}
+        try {
+          const sg = L.getShadowGenerator && L.getShadowGenerator();
+          if (sg && i >= 2) { sg.dispose(); }
+        } catch(_) {}
+      }
+      if (window.scene && scene.materials){
+        scene.materials.forEach(m=>{
+          if ('maxSimultaneousLights' in m){
+            try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+          }
+        });
+        if (scene.onNewMaterialAddedObservable){
+          scene.onNewMaterialAddedObservable.add(m=>{
+            if ('maxSimultaneousLights' in m){
+              try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+            }
+          });
+        }
+      }
+    }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+  };
+  // Provide a local alias for non-module scripts that call window.capLightsAndMaterials()
+  if (typeof capLightsAndMaterials === 'undefined') {
+    try { window.capLightsAndMaterialsAlias = window.capLightsAndMaterials; } catch(_) {}
+    try { var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_) {}
+  }
+})();
+
+
+
+catch(_) {}
+      // keep shadows for first two only
+      try {
+        const sg = L.getShadowGenerator && L.getShadowGenerator();
+        if (sg && i >= 2) { sg.dispose(); }
+      } catch(_) {}
+    }
+    // Clamp existing materials
+    if (window.scene && scene.materials){
+      scene.materials.forEach(m=>{
+        if ('maxSimultaneousLights' in m){
+          try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+        }
+      });
+      // Clamp new materials created later
+      if (scene.onNewMaterialAddedObservable){
+        scene.onNewMaterialAddedObservable.add(m=>{
+          if ('maxSimultaneousLights' in m){
+            try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+          }
+        });
+      }
+    }
+  }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+}
+
+
+
+    }
+    // Clamp material light counts
+    (scene.materials||[]).forEach(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+    // Also set on new materials created later
+    scene.onNewMaterialAddedObservable.add(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+  }catch(e){ console.warn('capLightsAndMaterials error', e); }
+}
+
+
+
+/* === loadMoon alias === */
+try {
+  if (typeof window.loadMoon === 'function' && typeof loadMoon === 'undefined') {
+    // create a global identifier so bare loadMoon() works in non-module scripts
+    var loadMoon = window.loadMoon;
+  }
+} catch(e) {}
+
+
+
+/* === loadMoon shim: ensure global === */
+(function(){
+  if (typeof window.loadMoon !== 'function') {
+    window.loadMoon = async function(){
+      try {
+        const res = await fetch("./assets/models/sky/moon.glb", { method: "GET" });
+        if (!res.ok) throw new Error("moon.glb not reachable: " + res.status);
+        const ct = (res.headers.get("content-type")||"");
+        if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
+        const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+        let moonMesh = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
+        if (!moonMesh) throw new Error("moon.glb had no meshes");
+        moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+        moonMesh.renderingGroupId=1;
+        const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        moonMesh.material = mat;
+      } catch (e){
+        console.warn("loadMoon shim fallback:", e);
+        const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+        moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+        const mat = new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting=true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+        moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+      }
+    };
+  }
+})();
+
+/* ===== loadMoon (clean) ===== */
+async function loadMoon(){
+  try{
+    // Try to import the GLB if present and valid
+    const res = await fetch("./assets/models/sky/moon.glb", { method:"GET" });
+    if(!res.ok){ throw new Error("moon.glb not reachable: " + res.status); }
+    const ct = (res.headers.get("content-type")||"");
+    if (ct.includes("text/html")){ throw new Error("moon.glb served as HTML"); }
+
+    const imp = await BABYLON.SceneLoader.ImportMeshAsync(
+      "", "./assets/models/sky/", "moon.glb", scene
+    );
+    let moonMesh = imp.meshes.find(m => m.name && m.name !== "__root__") || imp.meshes[0];
+    if(!moonMesh){ throw new Error("moon.glb had no meshes"); }
+
+    moonMesh.isPickable = false;
+    moonMesh.checkCollisions = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    let mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    mat.emissiveColor = new BABYLON.Color3(1,1,1);
+    moonMesh.material = mat;
+
+    // simple idle motion
+    scene.onBeforeRenderObservable.add(()=>{
+      const t = performance.now()*0.00002;
+      moonMesh.position.x = Math.cos(t)*380;
+      moonMesh.position.z = Math.sin(t)*380;
+      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
+    });
+
+  }catch(e){
+    console.warn("loadMoon failed, using sphere fallback:", e);
+    const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+    moonMesh.isPickable = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    const mat = new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    try{
+      mat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
+    }catch{
+      mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+    }
+    moonMesh.material = mat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+  }
+}
+
+
+
+/* Bind Start button */
+(function(){
+  var btn = document.getElementById('start-button');
+  if (btn) {
+    btn.addEventListener('click', function(ev){
+      ev.preventDefault();
+      ev.stopPropagation();
+      safeStart();
+    }, { once: false });
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){
+      var b = document.getElementById('start-button');
+      if (b) b.addEventListener('click', function(ev){
+        ev.preventDefault(); ev.stopPropagation(); safeStart();
+      });
+    });
+  }
+})();
+
+
+
+/* === Runtime Error Diagnostics === */
+(function(){
+  if (!window.__diagnosticsInstalled){
+    window.__diagnosticsInstalled = true;
+    function ensureOverlay(){
+      var o = document.getElementById('error-overlay');
+      if(!o){
+        o = document.createElement('div'); o.id='error-overlay';
+        o.style.cssText='position:fixed;left:8px;bottom:8px;max-width:60vw;z-index:100000;background:rgba(128,0,0,0.9);color:#fff;border:1px solid #f66;padding:8px 10px;border-radius:8px;font:12px/1.35 monospace;display:none;white-space:pre-wrap;';
+        document.body.appendChild(o);
+      }
+      return o;
+    }
+    function show(msg){
+      try{
+        console.error(msg);
+        var o = ensureOverlay();
+        o.textContent = '[Error] '+ msg;
+        o.style.display='block';
+        clearTimeout(o.__t);
+        o.__t = setTimeout(function(){ o.style.display='none'; }, 7000);
+      }catch(e){}
+    }
+    window.addEventListener('error', function(e){
+      show((e && e.message) ? e.message : String(e));
+    });
+    window.addEventListener('unhandledrejection', function(e){
+      var m = (e && e.reason && (e.reason.stack || e.reason.message)) || String(e && e.reason);
+      show('Unhandled promise rejection: ' + m);
+    });
+  }
+})();
+
+
+/* === Logo auto-fallback === */
+(function(){
+  function tryPaths(img, paths){
+    let i=0;
+    const tryNext=()=>{
+      if(i>=paths.length){ img.style.display='none'; return; }
+      const p = paths[i++];
+      const test = new Image();
+      test.onload = ()=>{ img.src = p; img.style.display=''; };
+      test.onerror = tryNext;
+      test.src = p;
+    };
+    tryNext();
+  }
+  const img = document.getElementById('title-logo');
+  if (img){
+    const original = img.getAttribute('src') || './logo.jpg';
+    const candidates = ['./logo.png','/3d/logo.png','./images/logo.png','./assets/images/logo.png','./Logo.png','./logo.jpg','/3d/logo.jpg','./images/logo.jpg','./assets/images/logo.jpg','./Logo.jpg'];
+    tryPaths(img, candidates.filter((v, idx, arr)=>arr.indexOf(v)===idx));
+  }
+})();
+
+
+/* ====== SHIMS + CORE UTILS (injected) ====== */
+(function(){
+  // $ selector
+  if (typeof window.$ !== 'function') { window.$ = function(sel){ return document.querySelector(sel); }; }
+  // $id helper
+  if (typeof window.$id !== 'function') { window.$id = function(id){ return document.getElementById(id); }; }
+  // toast
+  if (typeof window.toast !== 'function') {
+    window.toast = function(msg, ms){
+      try{
+        var t = document.getElementById('toast');
+        if(!t){
+          t = document.createElement('div'); t.id='toast';
+          t.style.cssText = 'position:fixed;left:50%;top:16px;transform:translateX(-50%);background:rgba(0,0,0,0.7);border:1px solid #066;border-radius:8px;padding:8px 12px;color:#0ff;z-index:10001;display:none;max-width:70vw;text-align:center;';
+          document.body.appendChild(t);
+        }
+        t.textContent = String(msg||'');
+        t.style.display = 'block';
+        setTimeout(function(){ t.style.display='none'; }, (ms||1500));
+      }catch(e){}
+    };
+  }
+  // Ensure vanZone exists
+  if (!window.vanZone) { window.vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 }; }
+  // inVanZone
+  if (typeof window.inVanZone !== 'function') {
+    window.inVanZone = function(pos){
+      try{ return BABYLON.Vector3.Distance(pos, window.vanZone.center) <= window.vanZone.radius; }
+      catch(e){ return false; }
+    };
+  }
+  // ground pick
+  if (typeof window.pickGroundHeightAt !== 'function') {
+    window.pickGroundHeightAt = function(x, z){
+      var ray = new BABYLON.Ray(new BABYLON.Vector3(x,80,z), new BABYLON.Vector3(0,-1,0), 200);
+      var hit = scene && scene.pickWithRay ? scene.pickWithRay(ray, function(m){
+        if(!m || !m.isPickable) return false;
+        var n = (m.name||"");
+        return /ground|floor|terrain|fallbackground/i.test(n);
+      }) : {hit:false};
+      if (hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
+      return 1.2;
+    };
+  }
+  // poly helpers
+  if (typeof window.pointInPolyXZ !== 'function') {
+    window.pointInPolyXZ = function(p, poly){
+      var inside=false;
+      for(var i=0,j=poly.length-1;i<poly.length;j=i++){
+        var xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+        var intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
+        if(intersect) inside=!inside;
+      }
+      return inside;
+    };
+  }
+  if (typeof window.randomPointInPolygonXZ !== 'function') {
+    window.randomPointInPolygonXZ = function(poly){
+      var minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+      poly.forEach(function(p){ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
+      for(var i=0;i<500;i++){
+        var x = minX + Math.random()*(maxX-minX);
+        var z = minZ + Math.random()*(maxZ-minZ);
+        if(pointInPolyXZ(new BABYLON.Vector3(x,0,z), poly)) return new BABYLON.Vector3(x, 0, z);
+      }
+      return poly[0].clone();
+    };
+  }
+})();
+
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+
+)();
+</script>
 
 <script>
 /* === Safe weather invoker === */
@@ -27,7 +440,6 @@
   document.addEventListener('scene-ready', applyPendingWeather);
   window.__applyPendingWeather2 = applyPendingWeather;
 })();
-catch(e){ console.error(e); }
 </script>
 
 
@@ -75,7 +487,6 @@ catch(e){ console.error(e); }
   document.addEventListener('scene-ready', applyPendingWeather);
   window.__applyPendingWeather = applyPendingWeather;
 })();
-catch(e){ console.error(e); }
 </script>
 
 
@@ -105,7 +516,7 @@ if (typeof window.randomPointInPolygonXZ !== 'function') {
   window.randomPointInPolygonXZ = function(poly){
     // naive box fallback if not provided: choose within bounding box
     let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
-    for (const p of (poly||[]) { minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); }
+    for (const p of (poly||[])){ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); }
     if (!isFinite(minX)) return {x:0,z:0};
     return { x: minX + Math.random()*(maxX-minX), z: minZ + Math.random()*(maxZ-minZ) };
   };
@@ -234,19 +645,766 @@ window.SAFE_MODE = true;
 })();
 </script>
 
-  <script src="./cdn/meshopt_decoder.js"></script>
-  <script src="./cdn/draco_decoder_gltf.js"></script>
-  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
-  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-  <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/draco_decoder_gltf.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script src="./cdn/gui/babylon.gui.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
   <!-- Fallbacks (optional):
-  <script defer src="https://unpkg.com/babylonjs@6.43.1/babylon.js"></script>
-  <script defer src="https://unpkg.com/babylonjs@6.43.1/loaders/babylonjs.loaders.min.js"></script>
-  <script defer src="https://unpkg.com/babylonjs-gui@6.43.1/babylon.gui.min.js"></script>
+  <script defer src="https://unpkg.com/babylonjs@6.43.1/babylon.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script defer src="https://unpkg.com/babylonjs@6.43.1/loaders/babylonjs.loaders.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
+  <script defer src="https://unpkg.com/babylonjs-gui@6.43.1/babylon.gui.min.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
   -->
 
   <!-- Optional: room names -->
-  <script src="./rooms.js"></script>
+  <script src="./rooms.js">
+/* === Dev Options Gate (ESC -> Yes -> password) === */
+(function(){
+  const ensureUI = ()=>{
+    let gate = document.getElementById('dev-gate');
+    if (!gate){
+      gate = document.createElement('div'); gate.id='dev-gate';
+      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
+      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
+                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
+                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
+                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
+                       '</div>';
+      document.body.appendChild(gate);
+    }
+    let toggle = document.getElementById('devtools-toggle');
+    if (!toggle){
+      toggle = document.createElement('button');
+      toggle.id='devtools-toggle';
+      toggle.textContent='Dev Tools';
+      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
+      document.body.appendChild(toggle);
+    }
+    let panel = document.getElementById('devtools-panel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id='devtools-panel';
+      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
+      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
+                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
+                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
+      document.body.appendChild(panel);
+    }
+    return {gate, toggle, panel};
+  };
+
+  const {gate, toggle, panel} = ensureUI();
+  window.dev = window.dev || { enabled:false, gateOpen:false };
+
+  // ESC -> gate
+  window.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
+      gate.style.display = 'flex'; dev.gateOpen = true;
+    }
+  });
+
+  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
+
+  const btnYes = document.getElementById('dev-yes');
+  const btnNo = document.getElementById('dev-no');
+  const passWrap = document.getElementById('dev-pass-wrap');
+  const passInput = document.getElementById('dev-pass');
+  const passSubmit = document.getElementById('dev-pass-submit');
+
+  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
+  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
+  if (passSubmit) passSubmit.onclick = ()=>{
+    const val = (passInput.value||'').trim();
+    if (val === 'letmein'){
+      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
+      toast('Developer options enabled.', 1800);
+      toggle.style.display='block';
+    } else {
+      toast('Wrong password.', 1200);
+    }
+    passInput.value='';
+  };
+
+  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
+
+  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
+
+  // Quick toggles in panel (defensive)
+  const byId = id => document.getElementById(id);
+  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
+
+  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
+  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
+})();
+</script>
 
   <style>
     :root{
@@ -318,33 +1476,6 @@ window.SAFE_MODE = true;
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; color:var(--c0); z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
-
-<script>
-// === Global, idempotent render loop helper ===
-(function(){
-  if (typeof window.startRenderLoopSafe !== 'function') {
-    let started = false;
-    window.startRenderLoopSafe = function(){
-      if (started) return;
-      if (!window.engine || !window.scene) { requestAnimationFrame(window.startRenderLoopSafe); return; }
-      started = true;
-      try {
-        if (typeof window.engine.runRenderLoop === 'function') {
-          window.window.startRenderLoopSafe(); } catch(_){}
-          });
-        } else {
-          (function loop(){ try { if (window.scene && window.scene.activeCamera) window.scene.render(); } catch(_){}
-            requestAnimationFrame(loop); })();
-        }
-      } catch(_){
-        (function loop(){ try { if (window.scene && window.scene.activeCamera) window.scene.render(); } catch(_){}
-          requestAnimationFrame(loop); })();
-      }
-    };
-  }
-})();
-</script>
-
 </head>
 
 <body>
@@ -639,7 +1770,7 @@ async function boot(){
       }
 
       // Start render loop
-      window.startRenderLoopSafe(); });
+      engine.runRenderLoop(()=>{ if (scene && scene.activeCamera) scene.render(); });
     } catch (e) {
       console.error('Baseline boot failed:', e);
     }
@@ -738,7 +1869,7 @@ if (typeof loadMoon === 'function') {
     updateGhost(dt);
   });
 
-  window.startRenderLoopSafe();
+  engine.runRenderLoop(()=> scene.render());
   window.addEventListener('resize', ()=> engine.resize());
 
   // HUD visible now
@@ -1132,7 +2263,7 @@ function adoptExistingGltfLights(){
   let adopted = 0;
   (scene.lights||[]).forEach(l=>{
     if ([moonLight,flashLight,uvLight,irLight,hemiLight].includes(l)) return;
-    if (HOUSE_LIGHT_REGEX.test(l.name||"") {
+    if (HOUSE_LIGHT_REGEX.test(l.name||"")){
       l.intensity = 0;
       l.diffuse = new BABYLON.Color3(1.0, 0.95, 0.8);
       houseLights.push({ light:l, mesh:null });
@@ -1303,7 +2434,7 @@ function refreshHandPreview(){
     __pv.cam.panningSensibility = 0; __pv.cam.wheelPrecision = 50;
     new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), __pv.scene).intensity = 1.2;
 
-    __pv.window.startRenderLoopSafe();
+    __pv.engine.runRenderLoop(()=> __pv.scene && __pv.scene.render());
     window.addEventListener('resize', ()=> { try { __pv.engine && __pv.engine.resize(); } catch {} });
   } else {
     wrap.appendChild(__pv.canvas);
@@ -1348,7 +2479,7 @@ if (document.readyState === 'loading') {
    =========================================================== */
 function logEvidence(type){
   if(!EVIDENCE_TYPES.includes(type)) return;
-  if(!discoveredEvidence.has(type) {
+  if(!discoveredEvidence.has(type)){
     discoveredEvidence.add(type);
     toast(`Evidence: ${type}`, 1800);
     const cb = document.querySelector(`input[data-ev="${type}"]`); if(cb) cb.checked = true;
@@ -1738,5 +2869,189 @@ function syncHeldLights(){
 })();
 </script>
 <div id="hand-preview" style="display:none"></div>
+
+<!-- === Orchestrated Title + Loading UI (injected) === -->
+<style id="__orchestrated_loader_css__">
+  #titleScreen, #loadingScreen {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(6,8,12,0.96) 0%, rgba(3,4,6,0.98) 100%);
+    z-index: 9999; color: #e8e8f0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }
+  #titleScreen { display: flex; flex-direction: column; gap: 20px; }
+  #titleLogo { width: min(520px, 70vw); opacity: 0.95; }
+  .btn-primary {
+    padding: 12px 22px; border-radius: 12px; border: 1px solid #4e6aff55; 
+    background: linear-gradient(180deg,#1a2336,#101520); color: #cfe0ff; font-weight: 650; letter-spacing: .4px;
+    cursor: pointer; box-shadow: 0 10px 30px rgba(40,70,140,.25), inset 0 -2px 0 rgba(255,255,255,.05);
+    transition: transform .08s ease, filter .15s ease, background .2s ease;
+  }
+  .btn-primary:hover { transform: translateY(-1px); filter: brightness(1.05); }
+  #loadingScreen { flex-direction: column; gap: 16px; }
+  #loadingBarWrap { width: min(560px, 80vw); height: 14px; border-radius: 999px; background: #131a26; overflow: hidden; border:1px solid #2b3752; }
+  #loadingBar { height: 100%; width: 0%; background: linear-gradient(90deg,#6aa8ff,#93e2ff); box-shadow: 0 0 25px #6aa8ff88; }
+  #loadingText { font-size: 13px; opacity:.85; }
+</style>
+
+<div id="titleScreen">
+  <img id="titleLogo" alt="Game Logo">
+  <button id="startInvestigationBtn" class="btn-primary">Start Investigation</button>
+</div>
+
+<div id="loadingScreen">
+  <div id="loadingBarWrap"><div id="loadingBar"></div></div>
+  <div id="loadingText">Preparing…</div>
+</div>
+<!-- === /Orchestrated Title + Loading UI === -->
+
+
+<script id="__orchestrated_loader_js__">
+(function(){
+  // --- Utility: ensure canvas/engine/scene exist ---
+  function ensureCES(){
+    try {
+      var canvas = document.getElementById('renderCanvas') || document.querySelector('canvas');
+      if (!canvas){
+        canvas = document.createElement('canvas');
+        canvas.id = 'renderCanvas';
+        canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;background:#000';
+        document.body.appendChild(canvas);
+      }
+      if (!window.engine) window.engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
+      if (!window.scene) window.scene = new BABYLON.Scene(window.engine);
+      if (!window.scene.activeCamera){
+        const cam = new BABYLON.ArcRotateCamera('cam', Math.PI/2, 1.25, 25, new BABYLON.Vector3(0,2,0), window.scene);
+        cam.attachControl(canvas, true);
+        window.scene.activeCamera = cam;
+      }
+      return {canvas, engine: window.engine, scene: window.scene};
+    } catch (e){ console.error("ensureCES failed", e); return {}; }
+  }
+
+  // --- Render loop: idempotent ---
+  if (typeof window.startRenderLoopSafe !== 'function'){
+    let started = false;
+    window.startRenderLoopSafe = function(){
+      if (started) return;
+      if (!window.engine || !window.scene){ requestAnimationFrame(window.startRenderLoopSafe); return; }
+      started = true;
+      try {
+        if (typeof window.engine.runRenderLoop === 'function'){
+          window.engine.runRenderLoop(function(){
+            try { if (window.scene && window.scene.activeCamera) window.scene.render(); } catch(_){}
+          });
+        } else {
+          (function loop(){
+            try { if (window.scene && window.scene.activeCamera) window.scene.render(); } catch(_){}
+            requestAnimationFrame(loop);
+          })();
+        }
+      } catch(_){
+        (function loop(){
+          try { if (window.scene && window.scene.activeCamera) window.scene.render(); } catch(_){}
+          requestAnimationFrame(loop);
+        })();
+      }
+    };
+  }
+
+  // --- Simple progress UI ---
+  function setLogoSrc(){
+    const logo = document.getElementById('titleLogo');
+    if (!logo) return;
+    // If you have a local path, set it here. Falling back to existing <link rel="icon"> or leave blank.
+    const linkIcon = document.querySelector('link[rel="icon"], link[rel="shortcut icon"]');
+    if (linkIcon) logo.src = linkIcon.href;
+    if (!logo.src) logo.alt = "Game";
+  }
+  function showTitle(){ setLogoSrc(); qs('#titleScreen').style.display='flex'; qs('#loadingScreen').style.display='none'; }
+  function showLoading(){ qs('#titleScreen').style.display='none'; qs('#loadingScreen').style.display='flex'; }
+  function setProgress(pct, txt){
+    const bar = qs('#loadingBar'); if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    const t = qs('#loadingText'); if (t && txt) t.textContent = txt;
+  }
+  function qs(sel){ return document.querySelector(sel); }
+
+  // --- Ordered loading pipeline ---
+  async function runLoadPipeline(){
+    const steps = [];
+    // 1) Abandoned building / map (must be first)
+    if (typeof window.loadMap === 'function') {
+      steps.push({name:'abandoned_building', fn: async()=>{ await window.loadMap(); }});
+    } else if (BABYLON && BABYLON.SceneLoader){
+      // fallback if you use a known path
+      // steps.push({name:'abandoned_building', fn: async()=>{ await BABYLON.SceneLoader.AppendAsync('./assets/models/', 'abandoned_building.glb', window.scene); }});
+    }
+
+    // 2) Belt / equipment
+    if (typeof window.loadBelt === 'function') {
+      steps.push({name:'equipment_belt', fn: async()=>{ await window.loadBelt(); }});
+    }
+
+    // 3) Ghost spawn (depends on building geometry)
+    if (typeof window.loadGhost === 'function') {
+      steps.push({name:'ghost', fn: async()=>{ await window.loadGhost(); }});
+    } else {
+      steps.push({name:'ghost_spawn', fn: async()=>{
+        try{
+          // naive spawn: find a mesh named like the building; pick bounds center
+          const m = (window.scene.meshes||[]).find(x=>/abandoned|building|house/i.test(x.name));
+          let target = new BABYLON.Vector3(0,1,0);
+          if (m && m.getBoundingInfo){
+            const b = m.getBoundingInfo().boundingBox;
+            target = b.centerWorld.clone(); target.y = b.maximumWorld.y * 0.5;
+          }
+          const ghost = BABYLON.MeshBuilder.CreateSphere('ghost', {diameter:1.2}, window.scene);
+          ghost.position = target;
+          ghost.isPickable = false;
+        }catch(e){ console.warn('ghost fallback failed', e); }
+      }});
+    }
+
+    // 4) Moon / sky (visual)
+    if (typeof window.loadMoon === 'function') {
+      steps.push({name:'moon', fn: async()=>{ await window.loadMoon(); }});
+    }
+
+    // Execute sequentially with progress
+    const total = steps.length || 1;
+    for (let i=0; i<steps.length; i++){
+      const step = steps[i];
+      setProgress(Math.round( (i/total)*100 ), 'Loading ' + step.name + '…');
+      try { await step.fn(); } catch(e){ console.warn('Step failed:', step.name, e); }
+    }
+    setProgress(100, 'Finalizing…');
+  }
+
+  // --- Public: safeStart called by button ---
+  async function safeStart(){
+    // Ensure engine/scene
+    ensureCES();
+    // Transition UI
+    showLoading();
+    setProgress(2, 'Preparing…');
+
+    // Start render loop
+    window.startRenderLoopSafe();
+
+    // Optional: show Babylon’s default loading UI while assets stream
+    try { if (window.engine && window.engine.displayLoadingUI) window.engine.displayLoadingUI(); } catch(_){}
+
+    // Run pipeline in strict order
+    await runLoadPipeline();
+
+    // Hide loading UI(s)
+    try { if (window.engine && window.engine.hideLoadingUI) window.engine.hideLoadingUI(); } catch(_){}
+    qs('#loadingScreen').style.display='none';
+  }
+
+  // Wire up the Start button
+  document.addEventListener('DOMContentLoaded', function(){
+    showTitle();
+    const btn = document.getElementById('startInvestigationBtn');
+    if (btn) btn.onclick = function(){ safeStart().catch(e=>console.error('safeStart failed', e)); };
+  });
+})();
+</script>
+
 </body>
 </html>
