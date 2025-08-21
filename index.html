@@ -54,21 +54,6 @@
       #touch-left, #touch-right{ background:rgba(0,0,0,0.05); }
     }
 
-    
-    /* Initial hidden UI; shown after safeStart() */
-    #actions, #item-cycle, #touch-left, #touch-right, #notebook-button, #storage-button { display:none; }
-
-    /* EMF bars */
-    #emf-ui { display:flex; gap:8px; align-items:center; }
-    #hud-emf-bars { display:flex; gap:3px; }
-    #hud-emf-bars .bar{ width:10px; height:10px; border:1px solid #0aa; background:#022; border-radius:2px; opacity:0.35; }
-    #hud-emf-bars .bar.on{ background:#0ff; opacity:1; box-shadow:0 0 8px rgba(0,255,255,0.35); }
-
-    /* Simple modal */
-    .modal{ display:none; position:fixed; inset:0; z-index:7000; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
-    .modal .card{ background:#0b0b0b; color:#0ff; border:1px solid #066; border-radius:8px; width:min(640px,92vw); padding:12px; }
-
-
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
@@ -80,7 +65,7 @@
   <!-- Title screen -->
   <div id="title-screen">
     <div id="title-content">
-      <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" onerror="this.onerror=null; this.src='./logo.jpg';" />
+      <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
       <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
       <button id="start-button">Start Investigation</button>
     </div>
@@ -90,44 +75,18 @@
   <div id="hud">
     <div class="row"><div class="label">Item</div><div class="value" id="hud-item">EMF</div></div>
     <div class="row"><div class="label">Weather</div><div class="value" id="hud-weather">Clear</div></div>
-    <div class="row" id="emf-ui">
-      <div class="label">EMF</div>
-      <div class="value"><span id="hud-emf-num">0</span></div>
-      <div class="emf-bars" id="hud-emf-bars">
-        <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
-      </div>
-    </div>
     <div id="hud-hunt">Hunt: Calm</div>
     <div id="activeItem"></div>
   </div>
 
-  <!-- Item cycle (mobile / touch) -->
-  <div id="item-cycle" style="display:none; position:fixed; bottom:110px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; pointer-events:auto;">
-    <button id="prev-item" class="hud-btn">Prev</button>
-    <button id="next-item" class="hud-btn">Next</button>
-  </div>
-
   <!-- Action bar -->
-  <div id="actions" style="display:none;">
+  <div id="actions">
     <button id="use-btn"   class="hud-btn">Use</button>
     <button id="place-btn" class="hud-btn">Place</button>
     <button id="toss-btn"  class="hud-btn">Toss</button>
   </div>
 
-  <!-- Notebook / Storage buttons -->
-  <button id="notebook-button" class="hud-btn" style="display:none;">Notebook</button>
-  <button id="storage-button"  class="hud-btn" style="display:none;">Storage</button>
-
-  <!-- Minimal modals -->
-  <div id="notebook-modal" class="modal"><div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-    <strong>Investigator's Notebook</strong><button id="nb-close" class="hud-btn">Close</button></div>
-    <div style="color:#9ff;opacity:.9">Placeholder notebook — hook your pages here.</div>
-  </div></div>
-  <div id="storage-modal" class="modal"><div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-    <strong>Van Storage</strong><button id="st-close" class="hud-btn">Close</button></div>
-    <div style="color:#9ff;opacity:.9">Placeholder storage — hook loadout UI here.</div>
-  </div></div>
-<!-- Touch control halves -->
+  <!-- Touch control halves -->
   <div id="touch-left"></div>
   <div id="touch-right"></div>
 
@@ -189,16 +148,16 @@ window.addEventListener('keyup', (e)=>{ if(e.key==='Shift') Input.running=false;
     Input.moveVec.x = nx;  // strafe
     Input.moveVec.z = -ny; // forward/back
   }, {passive:false});
-  left.addEventListener('touchend', e=>{ const gone=[...e.changedTouches].find(t=>t.identifier===leftId); if(gone){ leftId=null; Input.moveVec.copyFromFloats(0,0,0);} }, {passive:false});
+  left.addEventListener('touchend', e=>{ const gone=[...e.changedTouches].find(t=>t.identifier===leftId); if(gone){ leftId=null; Input.moveVec.set(0,0,0);} }, {passive:false});
 
   // RIGHT => look
   right.addEventListener('touchstart', e=>{ if(rightId!==null) return; rightId=e.changedTouches[0].identifier; }, {passive:false});
   right.addEventListener('touchmove', e=>{
     const t=[...e.changedTouches].find(t=>t.identifier===rightId); if(!t) return;
     const {nx,ny}=norm(right,t.clientX,t.clientY);
-    Input.lookVec.copyFromFloats(nx, ny);
+    Input.lookVec.set(nx, ny);
   }, {passive:false});
-  right.addEventListener('touchend', e=>{ const gone=[...e.changedTouches].find(t=>t.identifier===rightId); if(gone){ rightId=null; Input.lookVec.copyFromFloats(0,0);} }, {passive:false});
+  right.addEventListener('touchend', e=>{ const gone=[...e.changedTouches].find(t=>t.identifier===rightId); if(gone){ rightId=null; Input.lookVec.set(0,0);} }, {passive:false});
 })();
 
 // Buttons
@@ -206,22 +165,12 @@ document.getElementById('use-btn').onclick   = ()=> Input.actions.use  = true;
 document.getElementById('place-btn').onclick = ()=> Input.actions.place = true;
 document.getElementById('toss-btn').onclick  = ()=> Input.actions.toss = true;
 
-
-// Mobile cycle buttons
-document.getElementById('prev-item').onclick = ()=>{ heldIndex=(heldIndex+Items.length-1)%Items.length; heldItem=Items[heldIndex]; setHUDItem(); };
-document.getElementById('next-item').onclick = ()=>{ heldIndex=(heldIndex+1)%Items.length; heldItem=Items[heldIndex]; setHUDItem(); };
-
 // Toast
 function toast(msg, ms=1100){
   const t=document.getElementById('toast');
   t.textContent = msg; t.style.display='block';
   setTimeout(()=> t.style.display='none', ms);
 }
-
-
-// Notebook/Storage wiring
-document.getElementById('notebook-button').onclick = ()=> toast('Notebook opened (placeholder)');
-document.getElementById('storage-button').onclick = ()=> toast('Storage opened (placeholder)');
 
 // Hotspots for EMF
 const INTERACT = { HOT_RADIUS:0.61, HOT_TTL_MS:10000, spots:[] };
@@ -250,7 +199,7 @@ const Weather = (()=>{
   function enableRain(){
     if(rain) return;
     rain = new BABYLON.ParticleSystem('rain', 2400, scene);
-    rain.particleTexture = new BABYLON.Texture('./assets/images/rain_streak.png', scene);
+    rain.particleTexture = new BABYLON.Texture('./assets/images/nosignal.gif', scene);
     rain.minEmitBox = new BABYLON.Vector3(-30, 30, -30);
     rain.maxEmitBox = new BABYLON.Vector3( 30, 30,  30);
     rain.minSize=0.05; rain.maxSize=0.1;
@@ -268,18 +217,6 @@ const Weather = (()=>{
   function tick(dt){ if(!rain) return; ltTimer+=dt; if(ltTimer>=next){ ltTimer=0; next=3+Math.random()*10; flash(); } }
   return { set(state){ if(state==='Rain'){ enableRain(); } if(state==='Blood Moon'){ bloodMoonTint(); enableRain(); } }, tick };
 })();
-
-
-// --- Fix: Salt strip cooldown ---
-let saltCooldowns = new Map();
-function canSpawnFootprints(strip){
-  const now = performance.now();
-  if(saltCooldowns.has(strip)){
-    if(now - saltCooldowns.get(strip) < 12000) return false;
-  }
-  saltCooldowns.set(strip, now);
-  return true;
-}
 
 // Salt system
 const SaltSystem = (()=>{
@@ -352,39 +289,8 @@ const EMF = { on:false, level:0, nextBeepAt:0, _tone:null };
 const EMF_CFG = { nearDist:1.6, farDist:6.0 };
 function levelFromGhostDistance(d){ const n=1-BABYLON.Scalar.Clamp((d-EMF_CFG.nearDist)/(EMF_CFG.farDist-EMF_CFG.nearDist),0,1); return Math.round(n*5); }
 function levelFromSpotDistance(d){ if(d>INTERACT.HOT_RADIUS) return 0; if(d<=INTERACT.HOT_RADIUS*0.33) return 4; if(d<=INTERACT.HOT_RADIUS*0.66) return 3; return 2; }
-
 function emfTick(ghostMesh){
-  const numEl=document.getElementById('hud-emf-num');
-  const bars=document.querySelectorAll('#hud-emf-bars .bar');
-
-  if(!EMF.on){ if(EMF._tone){EMF._tone.pause(); EMF._tone=null;} EMF.level=0;
-    if(numEl) numEl.textContent='0';
-    bars.forEach((b,i)=> b.classList.toggle('on', false));
-    return;
-  }
-  let base=0;
-  if(ghostMesh){
-    const dg=BABYLON.Vector3.Distance(ghostMesh.position||ghostMesh.pos||ghostMesh.getAbsolutePosition?.()||BABYLON.Vector3.Zero(), camera.position);
-    if(dg<EMF_CFG.hotDist) base=2+Math.floor((EMF_CFG.hotDist-dg)/1.5);
-    if(dg<EMF_CFG.nearDist+0.6 && Math.random()<0.2) base=5;
-  }
-  const hot=levelFromSpotDistance(nearestSpotDist(camera.position));
-  const lvl=Math.max(base, hot); EMF.level=lvl;
-
-  if(numEl) numEl.textContent=String(lvl);
-  bars.forEach((b,i)=> b.classList.toggle('on', EMF.on && lvl>=i+1));
-
-  const now=performance.now();
-  if(lvl>=2){
-    if(lvl===5){
-      if(!EMF._tone){ const s=new Audio('./assets/audio/emf_beep.mp3'); s.loop=true; s.volume=0.5; s.play().catch(()=>{}); EMF._tone=s; }
-    }else{
-      let gap=1200; if(lvl===3) gap=700; if(lvl===4) gap=350;
-      if(now>=EMF.nextBeepAt){ emfBeep.currentTime=0; emfBeep.play().catch(()=>{}); EMF.nextBeepAt=now+gap; }
-      if(EMF._tone){ EMF._tone.pause(); EMF._tone=null; }
-    }
-  }else{ if(EMF._tone){ EMF._tone.pause(); EMF._tone=null; } }
-} EMF.level=0; return; }
+  if(!EMF.on){ if(EMF._tone){EMF._tone.pause(); EMF._tone=null;} EMF.level=0; return; }
   let base=0;
   if(ghostMesh){ const dg=BABYLON.Vector3.Distance(ghostMesh.position,camera.position); base=levelFromGhostDistance(dg); if(dg<EMF_CFG.nearDist+0.6 && Math.random()<0.2) base=5; }
   const hot=levelFromSpotDistance(nearestSpotDist(camera.position));
@@ -395,16 +301,11 @@ function emfTick(ghostMesh){
       if(!EMF._tone){ const s=new Audio('./assets/audio/emf_beep.mp3'); s.loop=true; s.volume=0.5; s.play().catch(()=>{}); EMF._tone=s; }
     }else{
       let gap=1200; if(lvl===3) gap=700; if(lvl===4) gap=350;
-      if(now>=EMF.nextBeepAt){ emfBeep.currentTime=0; emfBeep.play().catch(()=>{}); EMF.nextBeepAt=now+gap; }
+      if(now>=EMF.nextBeepAt){ const s=new Audio('./assets/audio/emf_beep.mp3'); s.volume=0.4; s.play().catch(()=>{}); EMF.nextBeepAt=now+gap; }
       if(EMF._tone){ EMF._tone.pause(); EMF._tone=null; }
     }
   }else{ if(EMF._tone){ EMF._tone.pause(); EMF._tone=null; } }
 }
-
-
-// --- EMF Audio Pool ---
-const emfBeep = new Audio('./assets/audio/emf_beep.mp3');
-emfBeep.volume=0.4;
 
 // Toggle UV
 function toggleUV(){
@@ -429,23 +330,38 @@ function onPlace(){ if(heldItem==='Salt'){ SaltSystem.place(); return; } toast('
 function onToss(){
   const ahead = camera.position.add(camera.getForwardRay().direction.scale(0.9));
   const m = ProxyItemSystem.create(heldItem, ahead, camera.rotation.y);
-  m.checkCollisions = true; m.ellipsoid = new BABYLON.Vector3(0.2,0.2,0.2);
   markInteractionAt(m.position, 'thrown');
-  let vel = camera.getForwardRay().direction.scale(4.5).add(new BABYLON.Vector3(0,3.5,0));
+  const vel = camera.getForwardRay().direction.scale(4.5).add(new BABYLON.Vector3(0,3.5,0));
   let life=0;
   const token = scene.onBeforeRenderObservable.add(()=>{
     const dt=engine.getDeltaTime()/1000; life+=dt;
-    vel.y -= 9.8*dt;
-    const disp = vel.scale(dt);
-    m.moveWithCollisions(disp);
-
-    // settle condition
-    if (life>0.15 && Math.abs(vel.y)<0.2){
-      scene.onBeforeRenderObservable.remove(token);
-      markInteractionAt(m.position,'landed');
-    }
-    if(life>6){ scene.onBeforeRenderObservable.remove(token); }
+    m.position.addInPlace(vel.scale(dt)); vel.y -= 9.8*dt;
+    const gy=(ground?.position?.y ?? 0)+0.02;
+    if(m.position.y<=gy){ m.position.y=gy; scene.onBeforeRenderObservable.remove(token); markInteractionAt(m.position,'landed'); }
+    if(life>5){ scene.onBeforeRenderObservable.remove(token); }
   });
+}
+
+// Helpers
+function rayGroundCenter(){
+  const pick = scene.pick(scene.pointerX || innerWidth/2, scene.pointerY || innerHeight/2, m=>m && m.isPickable!==false);
+  if(pick?.hit && pick.pickedPoint) return pick.pickedPoint.clone();
+  return null;
+}
+function applyInput(dt){
+  camera.rotation.y += Input.lookVec.x * 0.045;
+  const minPitch = -Math.PI/2 + 0.15, maxPitch = Math.PI/2 - 0.15;
+  camera.rotation.x = Math.min(maxPitch, Math.max(minPitch, camera.rotation.x + (-Input.lookVec.y * 0.045)));
+  let mv = Input.moveVec.clone();
+  if(mv.lengthSquared()>1e-3){
+    mv.normalize();
+    const speed = (Input.running?3.4:1.8);
+    const fwd = camera.getForwardRay().direction; fwd.y=0; fwd.normalize();
+    const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+    const desired = fwd.scale(mv.z).add(right.scale(mv.x)).normalize().scale(speed*dt);
+    camera.position.addInPlace(desired);
+    if(ground) camera.position.y = ground.position.y + 1.7;
+  }
 }
 
 // Ghost detection (use existing ghost if present)
@@ -459,17 +375,12 @@ function findGhostMesh(){
 async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
   scene  = new BABYLON.Scene(engine);
-  scene.collisionsEnabled = true;
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2; scene.fogDensity = 0.0045;
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
 
   // Camera
   camera = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(0,1.7,6), scene);
   camera.minZ = 0.1;
-  camera.applyGravity = true;
-  camera.checkCollisions = true;
-  camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
-  camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
 
   // Ground fallback
   ground = BABYLON.MeshBuilder.CreateGround('ground', { width:80, height:80 }, scene);
@@ -511,7 +422,7 @@ async function boot(){
         if(dx<0.6 && dz<0.6){
           const dir = ghost.forward ? ghost.forward : ghost.getDirection(BABYLON.Axis.Z) || new BABYLON.Vector3(1,0,0);
           const d2 = new BABYLON.Vector3(dir.x,0,dir.z); if(d2.lengthSquared()<0.0001) d2.copyFromFloats(1,0,0); else d2.normalize();
-          if(canSpawnFootprints(s)) UVFootprints.spawnTrail(ghost.position.clone(), d2);
+          UVFootprints.spawnTrail(ghost.position.clone(), d2);
           markInteractionAt(s.position, 'salt');
         }
       }
@@ -531,26 +442,11 @@ async function boot(){
 // Start flow
 async function safeStart(){
   const title=document.getElementById('title-screen'); if(title) title.style.display='none';
-  document.getElementById("hud").style.display="flex"; document.getElementById("actions").style.display="flex"; document.getElementById("item-cycle").style.display="flex"; document.getElementById('touch-left').style.display='block'; document.getElementById('touch-right').style.display='block';
+  document.getElementById('hud').style.display='flex';
   document.getElementById('storage-button').style.display='block';
   document.getElementById('notebook-button').style.display='block';
   await boot();
 }
-
-// Notebook / Storage wiring
-document.getElementById('notebook-button').onclick = ()=>{ document.getElementById('notebook-modal').style.display='flex'; };
-document.getElementById('storage-button').onclick  = ()=>{ document.getElementById('storage-modal').style.display='flex'; };
-document.getElementById('nb-close').onclick = ()=>{ document.getElementById('notebook-modal').style.display='none'; };
-document.getElementById('st-close').onclick = ()=>{ document.getElementById('storage-modal').style.display='none'; };
-
-// Item cycle wiring
-const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
-if(hasTouch){
-  document.getElementById('item-cycle').style.display='flex';
-}
-document.getElementById('prev-item').onclick = ()=>{ heldIndex = (heldIndex - 1 + Items.length) % Items.length; heldItem = Items[heldIndex]; setHUDItem(); };
-document.getElementById('next-item').onclick = ()=>{ heldIndex = (heldIndex + 1) % Items.length; heldItem = Items[heldIndex]; setHUDItem(); };
-
 document.getElementById('start-button').addEventListener('click', safeStart);
 </script>
 </body>
