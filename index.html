@@ -10,6 +10,263 @@
   <!-- If you host these locally (./cdn/*), keep the lines below. Otherwise, uncomment the unpkg fallbacks. -->
   <script src="./cdn/babylon.js">
 
+/* === Global capLightsAndMaterials === */
+(function(){
+  window.capLightsAndMaterials = function(maxLights){
+    try{
+      maxLights = Math.max(1, Math.min(maxLights||6, 8));
+      const lights = (window.scene && scene.lights) ? scene.lights : [];
+      for(let i=0;i<lights.length;i++){
+        const L = lights[i];
+        const on = i < maxLights;
+        try { L.setEnabled(on); } catch(_) {}
+        try {
+          const sg = L.getShadowGenerator && L.getShadowGenerator();
+          if (sg && i >= 2) { sg.dispose(); }
+        } catch(_) {}
+      }
+      if (window.scene && scene.materials){
+        scene.materials.forEach(m=>{
+          if ('maxSimultaneousLights' in m){
+            try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+          }
+        });
+        if (scene.onNewMaterialAddedObservable){
+          scene.onNewMaterialAddedObservable.add(m=>{
+            if ('maxSimultaneousLights' in m){
+              try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+            }
+          });
+        }
+      }
+    }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+  };
+  // Provide a local alias for non-module scripts that call window.capLightsAndMaterials()
+  if (typeof capLightsAndMaterials === 'undefined') {
+    try { window.capLightsAndMaterialsAlias = window.capLightsAndMaterials; } catch(_) {}
+    try { var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_) {}
+  }
+})();
+
+
+
+catch(_) {}
+      // keep shadows for first two only
+      try {
+        const sg = L.getShadowGenerator && L.getShadowGenerator();
+        if (sg && i >= 2) { sg.dispose(); }
+      } catch(_) {}
+    }
+    // Clamp existing materials
+    if (window.scene && scene.materials){
+      scene.materials.forEach(m=>{
+        if ('maxSimultaneousLights' in m){
+          try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+        }
+      });
+      // Clamp new materials created later
+      if (scene.onNewMaterialAddedObservable){
+        scene.onNewMaterialAddedObservable.add(m=>{
+          if ('maxSimultaneousLights' in m){
+            try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+          }
+        });
+      }
+    }
+  }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+}
+
+
+
+    }
+    // Clamp material light counts
+    (scene.materials||[]).forEach(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+    // Also set on new materials created later
+    scene.onNewMaterialAddedObservable.add(m=>{
+      if ('maxSimultaneousLights' in m){
+        try{ m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); }catch(e){}
+      }
+    });
+  }catch(e){ console.warn('capLightsAndMaterials error', e); }
+}
+
+
+
+/* === loadMoon alias === */
+try {
+  if (typeof window.loadMoon === 'function' && typeof loadMoon === 'undefined') {
+    // create a global identifier so bare loadMoon() works in non-module scripts
+    var loadMoon = window.loadMoon;
+  }
+} catch(e) {}
+
+
+
+/* === loadMoon shim: ensure global === */
+(function(){
+  if (typeof window.loadMoon !== 'function') {
+    window.loadMoon = async function(){
+      try {
+        const res = await fetch("./assets/models/sky/moon.glb", { method: "GET" });
+        if (!res.ok) throw new Error("moon.glb not reachable: " + res.status);
+        const ct = (res.headers.get("content-type")||"");
+        if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
+        const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+        let moonMesh = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
+        if (!moonMesh) throw new Error("moon.glb had no meshes");
+        moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+        moonMesh.renderingGroupId=1;
+        const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        moonMesh.material = mat;
+      } catch (e){
+        console.warn("loadMoon shim fallback:", e);
+        const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+        moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+        const mat = new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting=true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+        moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+      }
+    };
+  }
+})();
+
+/* ===== loadMoon (clean) ===== */
+async function loadMoon(){
+  try{
+    // Try to import the GLB if present and valid
+    const res = await fetch("./assets/models/sky/moon.glb", { method:"GET" });
+    if(!res.ok){ throw new Error("moon.glb not reachable: " + res.status); }
+    const ct = (res.headers.get("content-type")||"");
+    if (ct.includes("text/html")){ throw new Error("moon.glb served as HTML"); }
+
+    const imp = await BABYLON.SceneLoader.ImportMeshAsync(
+      "", "./assets/models/sky/", "moon.glb", scene
+    );
+    let moonMesh = imp.meshes.find(m => m.name && m.name !== "__root__") || imp.meshes[0];
+    if(!moonMesh){ throw new Error("moon.glb had no meshes"); }
+
+    moonMesh.isPickable = false;
+    moonMesh.checkCollisions = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    let mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    mat.emissiveColor = new BABYLON.Color3(1,1,1);
+    moonMesh.material = mat;
+
+    // simple idle motion
+    scene.onBeforeRenderObservable.add(()=>{
+      const t = performance.now()*0.00002;
+      moonMesh.position.x = Math.cos(t)*380;
+      moonMesh.position.z = Math.sin(t)*380;
+      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
+    });
+
+  }catch(e){
+    console.warn("loadMoon failed, using sphere fallback:", e);
+    const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+    moonMesh.isPickable = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+
+    const mat = new BABYLON.StandardMaterial("moonMat", scene);
+    mat.disableLighting = true;
+    try{
+      mat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
+    }catch{
+      mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+    }
+    moonMesh.material = mat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+  }
+}
+
+
+
+/* Bind Start button */
+(function(){
+  var btn = document.getElementById('start-button');
+  if (btn) {
+    btn.addEventListener('click', function(ev){
+      ev.preventDefault();
+      ev.stopPropagation();
+      safeStart();
+    }, { once: false });
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){
+      var b = document.getElementById('start-button');
+      if (b) b.addEventListener('click', function(ev){
+        ev.preventDefault(); ev.stopPropagation(); safeStart();
+      });
+    });
+  }
+})();
+
+
+
+/* === Runtime Error Diagnostics === */
+(function(){
+  if (!window.__diagnosticsInstalled){
+    window.__diagnosticsInstalled = true;
+    function ensureOverlay(){
+      var o = document.getElementById('error-overlay');
+      if(!o){
+        o = document.createElement('div'); o.id='error-overlay';
+        o.style.cssText='position:fixed;left:8px;bottom:8px;max-width:60vw;z-index:100000;background:rgba(128,0,0,0.9);color:#fff;border:1px solid #f66;padding:8px 10px;border-radius:8px;font:12px/1.35 monospace;display:none;white-space:pre-wrap;';
+        document.body.appendChild(o);
+      }
+      return o;
+    }
+    function show(msg){
+      try{
+        console.error(msg);
+        var o = ensureOverlay();
+        o.textContent = '[Error] '+ msg;
+        o.style.display='block';
+        clearTimeout(o.__t);
+        o.__t = setTimeout(function(){ o.style.display='none'; }, 7000);
+      }catch(e){}
+    }
+    window.addEventListener('error', function(e){
+      show((e && e.message) ? e.message : String(e));
+    });
+    window.addEventListener('unhandledrejection', function(e){
+      var m = (e && e.reason && (e.reason.stack || e.reason.message)) || String(e && e.reason);
+      show('Unhandled promise rejection: ' + m);
+    });
+  }
+})();
+
+
+/* === Logo auto-fallback === */
+(function(){
+  function tryPaths(img, paths){
+    let i=0;
+    const tryNext=()=>{
+      if(i>=paths.length){ img.style.display='none'; return; }
+      const p = paths[i++];
+      const test = new Image();
+      test.onload = ()=>{ img.src = p; img.style.display=''; };
+      test.onerror = tryNext;
+      test.src = p;
+    };
+    tryNext();
+  }
+  const img = document.getElementById('title-logo');
+  if (img){
+    const original = img.getAttribute('src') || './logo.jpg';
+    const candidates = ['./logo.png','/3d/logo.png','./images/logo.png','./assets/images/logo.png','./Logo.png','./logo.jpg','/3d/logo.jpg','./images/logo.jpg','./assets/images/logo.jpg','./Logo.jpg'];
+    tryPaths(img, candidates.filter((v, idx, arr)=>arr.indexOf(v)===idx));
+  }
+})();
+
+
 /* ====== SHIMS + CORE UTILS (injected) ====== */
 (function(){
   // $ selector
@@ -157,96 +414,237 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
+
+)();
 </script>
-  <script src="./cdn/earcut.min.js">
-/* === Dev Options Gate (ESC -> Yes -> password) === */
+
+<script>
+/* === Safe weather invoker === */
 (function(){
-  const ensureUI = ()=>{
-    let gate = document.getElementById('dev-gate');
-    if (!gate){
-      gate = document.createElement('div'); gate.id='dev-gate';
-      gate.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);display:none;z-index:99999;align-items:center;justify-content:center;';
-      gate.innerHTML = '<div style="background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:12px 14px;color:#0ff;width:min(420px,92vw)">'+
-                       '<div style="font-weight:bold;margin-bottom:6px">Enable Developer Options?</div>'+
-                       '<div style="display:flex;gap:8px;margin-bottom:8px;"><button id="dev-yes" class="hud-btn">Yes</button><button id="dev-no" class="hud-btn">No</button></div>'+
-                       '<div id="dev-pass-wrap" style="display:none;gap:6px;align-items:center;"><input id="dev-pass" placeholder="Password" style="flex:1;padding:6px;background:#111;color:#9ff;border:1px solid #066;border-radius:6px"><button id="dev-pass-submit" class="hud-btn">Unlock</button></div>'+
-                       '</div>';
-      document.body.appendChild(gate);
-    }
-    let toggle = document.getElementById('devtools-toggle');
-    if (!toggle){
-      toggle = document.createElement('button');
-      toggle.id='devtools-toggle';
-      toggle.textContent='Dev Tools';
-      toggle.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99998;display:none;padding:8px 12px;border:1px solid #066;background:#111;color:#0ff;border-radius:8px;';
-      document.body.appendChild(toggle);
-    }
-    let panel = document.getElementById('devtools-panel');
-    if (!panel){
-      panel = document.createElement('div');
-      panel.id='devtools-panel';
-      panel.style.cssText='position:fixed;right:12px;bottom:56px;width:min(420px,92vw);max-height:60vh;overflow:auto;background:#0b0b0b;border:1px solid #066;border-radius:8px;padding:10px;color:#9ff;display:none;z-index:99997;';
-      panel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:bold;">Developer Panel</div><button id="devtools-close" class="hud-btn">Close</button></div>'+
-                        '<div style="font-size:12px;color:#8ff;opacity:0.9">Quick toggles:</div>'+
-                        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;"><button class="hud-btn" id="dev-god">God Mode</button><button class="hud-btn" id="dev-fly">Fly Mode</button><button class="hud-btn" id="dev-blood">Blood Moon</button><button class="hud-btn" id="dev-clear">Clear</button><button class="hud-btn" id="dev-rain">Rain</button><button class="hud-btn" id="dev-snow">Snow</button></div>';
-      document.body.appendChild(panel);
-    }
-    return {gate, toggle, panel};
+  window.callSetWeather = function(w){
+    if (!window.scene) { window.__pendingWeather = w; return; }
+    try { if (typeof window.setWeather === 'function') window.callSetWeather(w); }
+    catch(e){ try{ console.warn('callSetWeather -> setWeather failed', e); }catch(_e){} }
   };
-
-  const {gate, toggle, panel} = ensureUI();
-  window.dev = window.dev || { enabled:false, gateOpen:false };
-
-  // ESC -> gate
-  window.addEventListener('keydown', function(e){
-    if(e.key === 'Escape' && !dev.enabled && !dev.gateOpen){
-      gate.style.display = 'flex'; dev.gateOpen = true;
+  // apply pending after scene exists (in case other code didn't already do it)
+  function applyPendingWeather(){
+    if (window.__pendingWeather && window.scene && typeof window.setWeather === 'function'){
+      try { window.callSetWeather(window.__pendingWeather); } finally { window.__pendingWeather = null; }
     }
-  });
-
-  gate.addEventListener('click', function(e){ if(e.target===gate){ gate.style.display='none'; dev.gateOpen=false; } });
-
-  const btnYes = document.getElementById('dev-yes');
-  const btnNo = document.getElementById('dev-no');
-  const passWrap = document.getElementById('dev-pass-wrap');
-  const passInput = document.getElementById('dev-pass');
-  const passSubmit = document.getElementById('dev-pass-submit');
-
-  if (btnYes) btnYes.onclick = ()=>{ passWrap.style.display='flex'; passInput.focus(); };
-  if (btnNo)  btnNo.onclick  = ()=>{ gate.style.display='none'; dev.gateOpen=false; };
-  if (passSubmit) passSubmit.onclick = ()=>{
-    const val = (passInput.value||'').trim();
-    if (val === 'letmein'){
-      dev.enabled = true; gate.style.display='none'; dev.gateOpen=false;
-      toast('Developer options enabled.', 1800);
-      toggle.style.display='block';
-    } else {
-      toast('Wrong password.', 1200);
-    }
-    passInput.value='';
-  };
-
-  toggle.addEventListener('click', ()=>{ panel.style.display = (panel.style.display==='block' ? 'none' : 'block'); });
-
-  document.getElementById('devtools-close').addEventListener('click', ()=>{ panel.style.display='none'; });
-
-  // Quick toggles in panel (defensive)
-  const byId = id => document.getElementById(id);
-  const bind = (id, fn)=>{ const el = byId(id); if(el) el.onclick = fn; };
-
-  bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
-  bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  }
+  document.addEventListener('scene-ready', applyPendingWeather);
+  window.__applyPendingWeather2 = applyPendingWeather;
 })();
 </script>
+
+
+<script>
+/* === Engine/Scene bootstrap + weather guard === */
+(function(){
+  window.ensureCES = function(){
+    try {
+      var canvas = document.getElementById('renderCanvas') || document.querySelector('canvas');
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = 'renderCanvas';
+        canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;background:#000;';
+        document.body.appendChild(canvas);
+      }
+      if (!window.engine) {
+        window.engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
+      }
+      if (!window.scene) {
+        window.scene = new BABYLON.Scene(window.engine);
+      }
+      return { canvas, engine: window.engine, scene: window.scene };
+    } catch (e) {
+      console.error('ensureCES failed', e);
+      return {};
+    }
+  };
+
+  // Wrap setWeather to be safe if scene isn't ready yet
+  if (typeof window.setWeather === 'function' && !window.__setWeatherWrapped) {
+    const __origSetWeather = window.setWeather;
+    window.setWeather = function(w){
+      if (!window.scene) { window.__pendingWeather = w; console.warn('setWeather deferred until scene exists'); return; }
+      try { __origSetWeather(w); } catch(e){ console.warn('setWeather failed', e); }
+    };
+    window.__setWeatherWrapped = true;
+  }
+
+  // Apply any pending weather once scene is ready
+  function applyPendingWeather(){
+    if (window.__pendingWeather && typeof window.setWeather === 'function' && window.scene){
+      try { window.callSetWeather(window.__pendingWeather); } finally { window.__pendingWeather = null; }
+    }
+  }
+  document.addEventListener('scene-ready', applyPendingWeather);
+  window.__applyPendingWeather = applyPendingWeather;
+})();
+</script>
+
+
+<script>
+// === BASELINE MODE (pre-breath, pre-skybox) ===
+window.BASELINE_MODE = true;
+
+// UI shims
+if (typeof window.toast !== 'function') {
+  window.toast = function(msg, ms){ try{ console.log('[toast]', msg); }catch(_){} };
+}
+if (typeof window.$ !== 'function') {
+  window.$ = function(sel){ return document.querySelector(sel); };
+}
+
+// Map helper shims (only if missing)
+if (typeof window.pickGroundHeightAt !== 'function') {
+  window.pickGroundHeightAt = function(scene, x, z){
+    try {
+      const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 1000, z), new BABYLON.Vector3(0,-1,0), 5000);
+      const hit = scene.pickWithRay(ray, m => m && m.isPickable !== false);
+      return (hit && hit.pickedPoint) ? hit.pickedPoint.y : 0;
+    } catch(e){ return 0; }
+  };
+}
+if (typeof window.randomPointInPolygonXZ !== 'function') {
+  window.randomPointInPolygonXZ = function(poly){
+    // naive box fallback if not provided: choose within bounding box
+    let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+    for (const p of (poly||[])){ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); }
+    if (!isFinite(minX)) return {x:0,z:0};
+    return { x: minX + Math.random()*(maxX-minX), z: minZ + Math.random()*(maxZ-minZ) };
+  };
+}
+</script>
+
+
+<script>
+// === SAFE MODE: keep runtime lightweight (you can set SAFE_MODE=false to re-enable all effects)
+window.SAFE_MODE = true;
+</script>
+
+
+<script>
+/* === GLOBAL LIGHT LIMITERS === */
+(function(){
+  window.hookSceneLightCaps = function(scene, maxLights){
+    try{
+      maxLights = Math.max(1, Math.min(maxLights||2, 8));
+      function applyToLights(){
+        const arr = scene.lights || [];
+        for (let i=0;i<arr.length;i++){
+          const L = arr[i];
+          const on = i < maxLights;
+          try { L.setEnabled(on); } catch(_){}
+          try {
+            const sg = L.getShadowGenerator && L.getShadowGenerator();
+            if (sg && i >= 1) { sg.dispose(); }
+          } catch(_){}
+        }
+      }
+      applyToLights();
+      if (scene.onNewLightAddedObservable){
+        scene.onNewLightAddedObservable.add(()=>applyToLights());
+      } else {
+        setTimeout(applyToLights, 0);
+      }
+      function capMat(m){
+        if (!m) return;
+        if ('maxSimultaneousLights' in m){
+          try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_){}
+        }
+      }
+      (scene.materials||[]).forEach(capMat);
+      if (scene.onNewMaterialAddedObservable){
+        scene.onNewMaterialAddedObservable.add(capMat);
+      }
+    }catch(e){ try{ console.warn('hookSceneLightCaps error', e); }catch(_e){} }
+  };
+  if (typeof window.capLightsAndMaterials !== 'function') {
+    window.capLightsAndMaterials = function(maxLights){
+      try{ if (window.scene) window.hookSceneLightCaps(window.scene, maxLights); }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+    };
+  }
+  try { if (typeof hookSceneLightCaps === 'undefined') var hookSceneLightCaps = window.hookSceneLightCaps; } catch(_){}
+  try { if (typeof capLightsAndMaterials === 'undefined') var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_){}
+})();
+</script>
+
+
+<script>
+/* === GLOBAL HELPERS (standalone) === */
+(function(){
+  // capLightsAndMaterials (global)
+  if (typeof window.capLightsAndMaterials !== 'function') {
+    window.capLightsAndMaterials = function(maxLights){
+      try{
+        maxLights = Math.max(1, Math.min(maxLights||6, 8));
+        const lights = (window.scene && scene.lights) ? scene.lights : [];
+        for(let i=0;i<lights.length;i++){
+          const L = lights[i];
+          const on = i < maxLights;
+          try { L.setEnabled(on); } catch(_) {}
+          try {
+            const sg = L.getShadowGenerator && L.getShadowGenerator();
+            if (sg && i >= 2) { sg.dispose(); }
+          } catch(_) {}
+        }
+        if (window.scene && scene.materials){
+          scene.materials.forEach(m=>{
+            if ('maxSimultaneousLights' in m){
+              try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+            }
+          });
+          if (scene.onNewMaterialAddedObservable){
+            scene.onNewMaterialAddedObservable.add(m=>{
+              if ('maxSimultaneousLights' in m){
+                try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+              }
+            });
+          }
+        }
+      }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+    };
+  }
+  // make direct calls work
+  if (typeof capLightsAndMaterials === 'undefined') { try { var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_) {} }
+
+  // loadMoon shim (global)
+  if (typeof window.loadMoon !== 'function') {
+    window.loadMoon = async function(){
+      try {
+        const res = await fetch("./assets/models/sky/moon.glb", { method: "GET" });
+        if (!res.ok) throw new Error("moon.glb not reachable: " + res.status);
+        const ct = (res.headers.get("content-type")||"");
+        if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
+        const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+        let moonMesh = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
+        if (!moonMesh) throw new Error("moon.glb had no meshes");
+        moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+        moonMesh.renderingGroupId=1;
+        const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        moonMesh.material = mat;
+      } catch (e){
+        console.warn("loadMoon shim fallback:", e);
+        const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+        moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+        const mat = new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting=true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+        moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+      }
+    };
+  }
+  if (typeof loadMoon === 'undefined') { try { var loadMoon = window.loadMoon; } catch(_) {} }
+})();
+</script>
+
   <script src="./cdn/meshopt_decoder.js">
 /* === Dev Options Gate (ESC -> Yes -> password) === */
 (function(){
@@ -325,10 +723,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   <script src="./cdn/draco_decoder_gltf.js">
@@ -409,10 +807,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   <script src="./cdn/loaders/babylon.glTF2FileLoader.js">
@@ -493,10 +891,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js">
@@ -577,10 +975,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   <script src="./cdn/gui/babylon.gui.min.js">
@@ -661,10 +1059,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   <!-- Fallbacks (optional):
@@ -746,10 +1144,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   <script defer src="https://unpkg.com/babylonjs@6.43.1/loaders/babylonjs.loaders.min.js">
@@ -830,10 +1228,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   <script defer src="https://unpkg.com/babylonjs-gui@6.43.1/babylon.gui.min.js">
@@ -914,10 +1312,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
   -->
@@ -1001,10 +1399,10 @@
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
 
@@ -1077,6 +1475,7 @@
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid var(--edge); border-radius:8px; padding:8px 12px; color:var(--c0); z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
 </head>
 
 <body>
@@ -1091,7 +1490,7 @@
   <!-- Start screen -->
   <div id="title-screen">
     <div id="title-content">
-      <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
+      <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
       <div style="margin:8px 0 16px; color:var(--c1);">“Welcome back. Keep the lights on and the sanity high.”</div>
       <button id="start-button">Start Investigation</button>
     </div>
@@ -1297,32 +1696,37 @@ function $(s){ return document.querySelector(s); }
    BOOT / STARTUP
    =========================================================== */
 let __started = false;
+
 async function safeStart(){
-  if(__started) return;
-  __started = true;
-
-  if(!window.BABYLON || !BABYLON.Engine){
-    toast("Engine not ready. Check Babylon includes.", 2200);
-    __started = false;
-    return;
-  }
-
-  const scr = document.getElementById('title-screen');
-  if (scr) scr.style.display = 'none';
-
   
+  if (window.ensureCES) window.ensureCES();
+if (window.__started) return;
+  window.__started = true;
+  try {
+    // Hide title UI immediately to avoid double clicks
+    var t = document.getElementById('title-screen');
+    if (t) t.style.display = 'none';
 
-  const r = Math.random();
-  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
-  setWeather(w);
+    await boot();
 
-  const keys = Object.keys(GHOSTS);
-  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
-  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
+    // Weather & ghost selection
+    const r = Math.random();
+    const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
+    if (window.scene) { callSetWeather(w); } else { window.__pendingWeather = w; }
+    const keys = Object.keys(GHOSTS);
+    currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+    if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
 
-  toast(`Investigation started. Weather: ${w}.`, 1600);
+    if (typeof toast === 'function') toast(`Investigation started. Weather: ${w}.`, 1600);
+  } catch (e) {
+    console.error('safeStart failed:', e);
+    if (typeof toast === 'function') toast('Failed to start: ' + (e && e.message ? e.message : e), 2200);
+    window.__started = false;
+    // Restore title UI so user can retry
+    var t2 = document.getElementById('title-screen');
+    if (t2) t2.style.display = '';
+  }
 }
-
 (function bindStart(){
   const btn = document.getElementById('start-button');
   const screen = document.getElementById('title-screen');
@@ -1340,7 +1744,40 @@ async function safeStart(){
    ENGINE & SCENE
    =========================================================== */
 async function boot(){
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  // === BASELINE MODE: skip heavy effects and just load the map ===
+  if (window.BASELINE_MODE) {
+    // Engine/scene/camera basic setup (assumes engine already created and canvas exists)
+    try {
+      const canvas = document.getElementById('renderCanvas') || document.querySelector('canvas');
+      if (!window.engine) window.engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
+      if (!window.scene) window.scene = new BABYLON.Scene(engine);
+      const scene = window.scene;
+
+      // Minimal camera
+      if (!scene.activeCamera) {
+        const camera = new BABYLON.ArcRotateCamera('cam', Math.PI/2, 1.2, 25, new BABYLON.Vector3(0,2,0), scene);
+        camera.attachControl(canvas, true);
+        scene.activeCamera = camera;
+      }
+      // Minimal single light
+      if (!scene.lights || scene.lights.length===0) {
+        new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0,1,0), scene);
+      }
+
+      // Load the map only
+      if (typeof window.loadMap === 'function') {
+        try { await window.loadMap(); } catch(e){ console.error('loadMap failed in baseline mode:', e); }
+      }
+
+      // Start render loop
+      window.startRenderLoopSafe(); });
+    } catch (e) {
+      console.error('Baseline boot failed:', e);
+    }
+    return; // do NOT execute heavy boot path
+  }
+
+  engine = new BABYLON.Engine(canvas, true, { disableUniformBuffers: true });
   try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
   scene = new BABYLON.Scene(engine);
   scene.environmentTexture = null;
@@ -1359,7 +1796,9 @@ async function boot(){
   camera.minZ = 0.1; camera.inertia = 0;
   camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  // Atmosphere/lights
+  
+  if (!scene.activeCamera) scene.activeCamera = camera;
+// Atmosphere/lights
   setupNightAtmosphere();
 
   // Fill
@@ -1370,9 +1809,29 @@ async function boot(){
   await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
+    // Ensure global light/material cap function exists
+    if (typeof window.capLightsAndMaterials !== 'function') {
+      window.capLightsAndMaterials = function(){ /* no-op cap */ };
+    }
+    window.capLightsAndMaterials(2);
+
   await loadItems().catch(()=>{});
   await loadGhost().catch(()=>{});
+  
+// --- robust moon load ---
+if (typeof loadMoon === 'function') {
   await loadMoon().catch(()=>{});
+} else if (typeof window.loadMoon === 'function') {
+  await window.loadMoon().catch(()=>{});
+} else {
+  // inline fallback if nothing is defined
+  const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+  moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+  const mat = new BABYLON.StandardMaterial("moonMat", scene);
+  mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+  moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+}
+
   setupBreathFX();
 
   if (!houseRoot){
@@ -1410,7 +1869,7 @@ async function boot(){
     updateGhost(dt);
   });
 
-  engine.runRenderLoop(()=> scene.render());
+  window.startRenderLoopSafe();
   window.addEventListener('resize', ()=> engine.resize());
 
   // HUD visible now
@@ -1742,69 +2201,6 @@ function sanityTick(dt){
    MOON
    =========================================================== */
 
-/* === loadMoon (robust) === */
-async function loadMoon(){
-  try{
-    const urlBase = "./assets/models/sky/";
-    const file = "moon.glb";
-    // quick HEAD-ish check
-    try{
-      const res = await fetch(urlBase + file, { method: "GET" });
-      if(!res.ok) throw new Error("moon.glb not reachable (status "+res.status+")");
-      const ct = (res.headers.get("content-type")||"");
-      if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
-    }catch(checkErr){
-      throw checkErr;
-    }
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", urlBase, file, scene);
-    window.moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
-    if (!moonMesh) throw new Error("moon.glb had no meshes");
-    moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
-    moonMesh.renderingGroupId = 1;
-    const bb = moonMesh.getHierarchyBoundingVectors(true);
-    const size = bb.max.subtract(bb.min).length();
-    if (size < 5) moonMesh.scaling = new BABYLON.Vector3(30,30,30);
-    window.moonMat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    if (typeof applyMoonTintForWeather === 'function') applyMoonTintForWeather();
-    scene.onBeforeRenderObservable.add(()=>{
-      const t = performance.now()*0.00002;
-      moonMesh.position.x = Math.cos(t)*380;
-      moonMesh.position.z = Math.sin(t)*380;
-      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
-    });
-  }catch(e){
-    console.warn("loadMoon failed, using sphere:", e);
-    window.moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
-    moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
-    window.moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    try{ moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
-    catch{ moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    if (typeof applyMoonTintForWeather === 'function') applyMoonTintForWeather();
-  }
-}
-);
-  }catch(e){
-    console.warn("loadMoon failed, using sphere:", e);
-    moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
-    moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
-    moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    try{ moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
-    catch{ moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    applyMoonTintForWeather();
-  }
-}
-
-
 /* === Cold Breath FX (defensive) === */
 (function(){
   if (!window.BREATH_RANGE) window.BREATH_RANGE = 5.0;
@@ -2038,7 +2434,7 @@ function refreshHandPreview(){
     __pv.cam.panningSensibility = 0; __pv.cam.wheelPrecision = 50;
     new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), __pv.scene).intensity = 1.2;
 
-    __pv.engine.runRenderLoop(()=> __pv.scene && __pv.scene.render());
+    __pv.window.startRenderLoopSafe();
     window.addEventListener('resize', ()=> { try { __pv.engine && __pv.engine.resize(); } catch {} });
   } else {
     wrap.appendChild(__pv.canvas);
@@ -2466,11 +2862,46 @@ function syncHeldLights(){
 
   bind('dev-god', ()=>{ window.player = window.player||{}; player.god = !player.god; toast('God mode: '+(player.god?'ON':'OFF'), 1000); });
   bind('dev-fly', ()=>{ window.allowFly = !window.allowFly; toast('Fly mode: '+(window.allowFly?'ON':'OFF'), 1000); });
-  bind('dev-blood', ()=>{ if(typeof setWeather==='function') setWeather('Blood Moon'); });
-  bind('dev-clear', ()=>{ if(typeof setWeather==='function') setWeather('Clear'); });
-  bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
-  bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
+  bind('dev-blood', ()=>{ if(typeof setWeather==='function') callSetWeather('Blood Moon'); });
+  bind('dev-clear', ()=>{ if(typeof setWeather==='function') callSetWeather('Clear'); });
+  bind('dev-rain', ()=>{ if(typeof setWeather==='function') callSetWeather('Rain'); });
+  bind('dev-snow', ()=>{ if(typeof setWeather==='function') callSetWeather('Snow'); });
 })();
 </script>
+<div id="hand-preview" style="display:none"></div>
+
+<script id="__start_button_binder__">
+(function(){
+  function byId(id){ return document.getElementById(id); }
+  function bindStart(){
+    var btn = byId('startInvestigationBtn') || byId('start-button');
+    if (!btn) return false;
+    if (!window.safeStart) {
+      window.safeStart = async function(ev){
+        try{ ev && ev.preventDefault && ev.preventDefault(); }catch(_){}
+        try{
+          // Prefer your app's boot/start entry point
+          if (typeof window.start === 'function') await window.start();
+          else if (typeof window.safeStartInternal === 'function') await window.safeStartInternal();
+          else if (typeof window.boot === 'function') await window.boot();
+          else if (typeof window.startGame === 'function') await window.startGame();
+        }catch(e){ console.error('safeStart failed:', e); }
+        try{ if (typeof window.startRenderLoopSafe === 'function') window.startRenderLoopSafe(); }catch(_){}
+        // Hide title screen after starting
+        var screen = byId('title-screen') || byId('titleScreen');
+        if (screen) screen.style.display = 'none';
+      };
+    }
+    // Avoid double-binding
+    btn.onclick = window.safeStart;
+    btn.onkeydown = function(e){ if (e && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); window.safeStart(e); } };
+    return true;
+  }
+  document.addEventListener('DOMContentLoaded', bindStart);
+  // Also retry after 1s in case button is injected late
+  setTimeout(bindStart, 1000);
+})();
+</script>
+
 </body>
 </html>
