@@ -219,6 +219,46 @@
   bind('dev-rain', ()=>{ if(typeof setWeather==='function') setWeather('Rain'); });
   bind('dev-snow', ()=>{ if(typeof setWeather==='function') setWeather('Snow'); });
 })();
+
+async function loadMoon() {
+  try {
+    let moonMesh;
+    let moonMat = new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    try {
+      moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
+    } catch {
+      moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+    }
+    moonMesh = await BABYLON.SceneLoader.ImportMeshAsync(
+      "", "./assets/models/sky/", "moon.glb", scene
+    ).then(res => res.meshes.find(m=>m && m.name!=="__root__") || res.meshes[0]);
+    if (!moonMesh) throw new Error("moon.glb had no meshes");
+    moonMesh.isPickable = false;
+    moonMesh.checkCollisions = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+    moonMesh.material = moonMat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+    if (typeof applyMoonTintForWeather === 'function') applyMoonTintForWeather();
+  } catch (e) {
+    console.warn("loadMoon failed, using sphere:", e);
+    let moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", { diameter: 60, segments: 18 }, scene);
+    moonMesh.isPickable = false;
+    moonMesh.applyFog = false;
+    moonMesh.renderingGroupId = 1;
+    let moonMat = new BABYLON.StandardMaterial("moonMat", scene);
+    moonMat.disableLighting = true;
+    try {
+      moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
+    } catch {
+      moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+    }
+    moonMesh.material = moonMat;
+    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+  }
+}
+
 </script>
   <script src="./cdn/earcut.min.js">
 /* === Dev Options Gate (ESC -> Yes -> password) === */
@@ -1804,55 +1844,6 @@ function sanityTick(dt){
 
 /* === loadMoon (robust) === */
 
-async function loadMoon() {
-  try {
-    let moonMesh;
-    let moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-
-    try {
-      moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
-    } catch {
-      moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
-    }
-
-    moonMesh = await BABYLON.SceneLoader.ImportMeshAsync(
-      "", "./assets/models/sky/", "moon.glb", scene
-    ).then(res => res.meshes.find(m=>m && m.name!=="__root__") || res.meshes[0]);
-
-    if (!moonMesh) {
-      throw new Error("moon.glb had no meshes");
-    }
-
-    moonMesh.isPickable = false;
-    moonMesh.checkCollisions = false;
-    moonMesh.applyFog = false;
-    moonMesh.renderingGroupId = 1;
-
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    if (typeof applyMoonTintForWeather === 'function') applyMoonTintForWeather();
-
-  } catch (e) {
-    console.warn("loadMoon failed, using sphere:", e);
-    let moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", { diameter: 60, segments: 18 }, scene);
-    moonMesh.isPickable = false;
-    moonMesh.applyFog = false;
-    moonMesh.renderingGroupId = 1;
-
-    let moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    try {
-      moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene);
-    } catch {
-      moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
-    }
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-  }
-}
-
-);
       if(!res.ok) throw new Error("moon.glb not reachable (status "+res.status+")");
       const ct = (res.headers.get("content-type")||"");
       if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
