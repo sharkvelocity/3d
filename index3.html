@@ -14,17 +14,38 @@
 function capLightsAndMaterials(maxLights){
   try{
     maxLights = Math.max(1, Math.min(maxLights||6, 8));
-    const lights = scene.lights || [];
-    // Enable only the first N lights with shadows for the first 1-2
+    const lights = (window.scene && scene.lights) ? scene.lights : [];
     for(let i=0;i<lights.length;i++){
       const L = lights[i];
       const on = i < maxLights;
-      L.setEnabled(on);
-      if (L.getShadowGenerator && L.getShadowGenerator()){
-        // keep shadows on only for the first two enabled lights
-        L.getShadowGenerator().forceBackFacesOnly = true;
-        if (i >= 2) L.getShadowGenerator().dispose();
+      try { L.setEnabled(on); } catch(_) {}
+      // keep shadows for first two only
+      try {
+        const sg = L.getShadowGenerator && L.getShadowGenerator();
+        if (sg && i >= 2) { sg.dispose(); }
+      } catch(_) {}
+    }
+    // Clamp existing materials
+    if (window.scene && scene.materials){
+      scene.materials.forEach(m=>{
+        if ('maxSimultaneousLights' in m){
+          try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+        }
+      });
+      // Clamp new materials created later
+      if (scene.onNewMaterialAddedObservable){
+        scene.onNewMaterialAddedObservable.add(m=>{
+          if ('maxSimultaneousLights' in m){
+            try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+          }
+        });
       }
+    }
+  }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+}
+
+
+
     }
     // Clamp material light counts
     (scene.materials||[]).forEach(m=>{
