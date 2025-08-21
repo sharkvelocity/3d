@@ -422,6 +422,75 @@ async function loadMoon(){
 
 )();
 </script>
+
+<script>
+/* === GLOBAL HELPERS (standalone) === */
+(function(){
+  // capLightsAndMaterials (global)
+  if (typeof window.capLightsAndMaterials !== 'function') {
+    window.capLightsAndMaterials = function(maxLights){
+      try{
+        maxLights = Math.max(1, Math.min(maxLights||6, 8));
+        const lights = (window.scene && scene.lights) ? scene.lights : [];
+        for(let i=0;i<lights.length;i++){
+          const L = lights[i];
+          const on = i < maxLights;
+          try { L.setEnabled(on); } catch(_) {}
+          try {
+            const sg = L.getShadowGenerator && L.getShadowGenerator();
+            if (sg && i >= 2) { sg.dispose(); }
+          } catch(_) {}
+        }
+        if (window.scene && scene.materials){
+          scene.materials.forEach(m=>{
+            if ('maxSimultaneousLights' in m){
+              try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+            }
+          });
+          if (scene.onNewMaterialAddedObservable){
+            scene.onNewMaterialAddedObservable.add(m=>{
+              if ('maxSimultaneousLights' in m){
+                try { m.maxSimultaneousLights = Math.min(m.maxSimultaneousLights||maxLights, maxLights); } catch(_) {}
+              }
+            });
+          }
+        }
+      }catch(e){ try{ console.warn('capLightsAndMaterials error', e); }catch(_e){} }
+    };
+  }
+  // make direct calls work
+  if (typeof capLightsAndMaterials === 'undefined') { try { var capLightsAndMaterials = window.capLightsAndMaterials; } catch(_) {} }
+
+  // loadMoon shim (global)
+  if (typeof window.loadMoon !== 'function') {
+    window.loadMoon = async function(){
+      try {
+        const res = await fetch("./assets/models/sky/moon.glb", { method: "GET" });
+        if (!res.ok) throw new Error("moon.glb not reachable: " + res.status);
+        const ct = (res.headers.get("content-type")||"");
+        if (ct.includes("text/html")) throw new Error("moon.glb served as HTML");
+        const imp = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+        let moonMesh = imp.meshes.find(m=>m && m.name!=="__root__") || imp.meshes[0];
+        if (!moonMesh) throw new Error("moon.glb had no meshes");
+        moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
+        moonMesh.renderingGroupId=1;
+        const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        moonMesh.material = mat;
+      } catch (e){
+        console.warn("loadMoon shim fallback:", e);
+        const moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
+        moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+        const mat = new BABYLON.StandardMaterial("moonMat", scene);
+        mat.disableLighting=true; mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+        moonMesh.material = mat; moonMesh.position = new BABYLON.Vector3(0,350,380);
+      }
+    };
+  }
+  if (typeof loadMoon === 'undefined') { try { var loadMoon = window.loadMoon; } catch(_) {} }
+})();
+</script>
+
   <script src="./cdn/meshopt_decoder.js">
 /* === Dev Options Gate (ESC -> Yes -> password) === */
 (function(){
