@@ -1,126 +1,122 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>PhasmaPhoney — Play Build (WASD + Touch Halves + Inspector)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-<meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
-<meta name="author" content="Shark-Blades" />
+  <meta charset="utf-8" />
+  <title>PhasmaPhoney — Procedural Rain + Fixed Inputs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <meta name="author" content="Shark-Blades" />
+  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
 
-<!-- Babylon (LOCAL) -->
-<script src="./cdn/babylon.js"></script>
-<script src="./cdn/earcut.min.js"></script>
-<script src="./cdn/meshopt_decoder.js"></script>
-<script src="./cdn/draco_decoder_gltf.js"></script>
-<script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
-<script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-<script src="./cdn/gui/babylon.gui.min.js"></script>
-<!-- Inspector is optional; loaded on demand from local -->
-<!-- <script src="./cdn/inspector/babylon.inspector.bundle.js"></script> -->
+  <!-- Babylon core + loaders (LOCAL) -->
+  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/earcut.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js"></script>
+  <script src="./cdn/draco_decoder_gltf.js"></script>
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <!-- Optional Inspector (enabled via button in UI) -->
+  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
-<style>
-  html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
-  #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
+  <style>
+    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
+    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
 
-  /* Title */
-  #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
-  #title-content{ text-align:center; max-width:90vw;}
-  #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
-  #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
-  #start-button:active{ transform:translateY(1px); }
+    /* Title screen */
+    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
+      display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
+    #title-content{ text-align:center; max-width:90vw;}
+    #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
+    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
+    #start-button:active{ transform:translateY(1px); }
 
-  /* HUD (left) */
-  #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
-  #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
-  #hud .label{ color:#9ff; }
-  #hud .value{ color:#0ff; font-weight:bold; }
-  #weather{ font-size:12px; color:#aff; opacity:0.9; }
-  #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
+    /* HUD (left) */
+    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066;
+      padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
+    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    #hud .label{ color:#9ff; }
+    #hud .value{ color:#0ff; font-weight:bold; }
+    #weather{ font-size:12px; color:#aff; opacity:0.9; }
+    #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
 
-  /* HUD (right) */
-  #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
+    /* HUD (right) XYZ */
+    #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
 
-  /* Toast */
-  #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+    /* Toast */
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066;
+      border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
 
-  /* Action Bar & Belt */
-  .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
-  #action-bar { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:10px; z-index:6500; }
-  #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
-  .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
-  .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
-  .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+    /* Action bar & Belt */
+    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
+    .hud-btn:active{ transform:translateY(1px); }
+    #action-bar { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:10px; z-index:6500; }
+    #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center;
+      background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa;
+      background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
+    .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
+    .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
 
-  /* Dev buttons */
-  #dev-buttons { position:fixed; right:12px; bottom:16px; z-index:7000; display:flex; flex-direction:column; gap:8px; }
-  #dev-buttons .hud-btn { padding:8px 10px; }
+    /* Touch halves overlay — full width split, lowered 20% from top */
+    .touch-half { position:fixed; top:20%; bottom:0; width:50vw; z-index:5000; }
+    #touch-left { left:0; }
+    #touch-right{ right:0; }
 
-  /* Touch halves: true 50%/50%, vertical start from JS (we set top px) */
-  .touch-half { position:fixed; left:0; right:auto; width:50vw; bottom:0; z-index:5000; }
-  #touch-left { left:0; }
-  #touch-right{ left:auto; right:0; }
-  /* invisible hit-areas (debug: uncomment to see) */
-  /* .touch-half { background:rgba(0,255,255,0.08); } */
-</style>
+    /* Flash overlay for lightning */
+    #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
+  </style>
 </head>
 <body>
-
-<!-- Title -->
-<div id="title-screen">
-  <div id="title-content">
-    <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-    <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
-    <button id="start-button">Start Investigation</button>
+  <!-- Title -->
+  <div id="title-screen">
+    <div id="title-content">
+      <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
+      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <button id="start-button">Start Investigation</button>
+    </div>
   </div>
-</div>
 
-<!-- Canvas -->
-<canvas id="renderCanvas"></canvas>
+  <!-- Canvas -->
+  <canvas id="renderCanvas"></canvas>
 
-<!-- HUD left -->
-<div id="hud">
-  <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
-  <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
-  <div id="weather">Weather: <span id="hud-weather">Clear</span></div>
-  <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
-</div>
+  <!-- HUD left -->
+  <div id="hud">
+    <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
+    <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
+    <div id="weather">Weather: <span id="hud-weather">Clear</span></div>
+    <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
+  </div>
 
-<!-- HUD right -->
-<div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
+  <!-- HUD right: XYZ -->
+  <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
 
-<!-- Action Bar -->
-<div id="action-bar" style="display:none;">
-  <button id="btn-use" class="hud-btn">Use</button>
-  <button id="btn-place" class="hud-btn">Place</button>
-  <button id="btn-toss" class="hud-btn">Toss</button>
-  <button id="btn-slot-prev" class="hud-btn">◀</button>
-  <button id="btn-slot-next" class="hud-btn">▶</button>
-  <button id="btn-notebook" class="hud-btn">Notebook</button>
-</div>
+  <!-- Action Bar -->
+  <div id="action-bar">
+    <button id="btn-use" class="hud-btn">Use</button>
+    <button id="btn-place" class="hud-btn">Place</button>
+    <button id="btn-toss" class="hud-btn">Toss</button>
+    <button id="btn-slot-prev" class="hud-btn">◀</button>
+    <button id="btn-slot-next" class="hud-btn">▶</button>
+    <button id="btn-notebook" class="hud-btn">Notebook</button>
+    <button id="btn-inspector" class="hud-btn">Inspector</button>
+  </div>
 
-<!-- Belt -->
-<div id="belt" style="display:none;"></div>
+  <!-- Belt -->
+  <div id="belt"></div>
 
-<!-- Dev / Inspector -->
-<div id="dev-buttons">
-  <button id="btn-inspector" class="hud-btn">Toggle Inspector</button>
-  <button id="btn-debug" class="hud-btn">Log Debug</button>
-  <label class="hud-btn" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-    <input id="invertY" type="checkbox" />
-    Invert Y
-  </label>
-</div>
+  <!-- Touch halves (invisible) -->
+  <div id="touch-left"  class="touch-half"></div>
+  <div id="touch-right" class="touch-half"></div>
 
-<!-- Touch halves -->
-<div id="touch-left"  class="touch-half"></div>
-<div id="touch-right" class="touch-half"></div>
+  <!-- Flash for lightning -->
+  <div id="flash-overlay"></div>
 
-<!-- Toast -->
-<div id="toast"></div>
+  <!-- Toast -->
+  <div id="toast"></div>
 
 <script>
 /* ============================================================
-   Core globals (minimal)
+   GLOBALS (minimal scaffolding)
    ============================================================ */
 const canvas = document.getElementById('renderCanvas');
 let engine, scene, camera, skybox;
@@ -128,47 +124,32 @@ let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat
 let hemiLight = null;
 
 let houseLights = []; let housePower = true;
+let houseRoot = null;
 
 let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false };
 let controls = { forward:false, back:false, left:false, right:false };
 
-let houseRoot = null;
-
 const weather = { state:'Clear', rainPS:null, snowPS:null, lightningTimer:0, nextStrike: 5 };
 function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
+function lightningStrike(){ const overlay=document.getElementById('flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
 
-function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
-function inVanZone(){ return false; } // your real logic can override
-function updatePlayerFootsteps(dt){} // placeholder
-function rebuildBelt(){} // placeholder
-function updateGhost(dt){} // placeholder
+function toast(msg, ms=1500){
+  const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block';
+  setTimeout(()=>t.style.display='none', ms);
+}
+function inVanZone(pos){ return false; } // replace with your real van zone if needed
+function updatePlayerFootsteps(dt){}  // placeholder, your real routine can override
+function rebuildBelt(){}              // placeholder
+function updateGhost(dt){}            // placeholder
 
 /* ============================================================
-   Audio unlock without altering your flow
-   ============================================================ */
-const __audioUnlock = {
-  unlocked: false,
-  sounds: [],
-  add(a){ this.sounds.push(a); },
-  tryUnlock(){
-    if(this.unlocked) return;
-    this.unlocked = true;
-    for(const a of this.sounds){ try{ a.muted=false; a.play().then(()=>{ a.pause(); a.currentTime=0; }).catch(()=>{}); }catch{} }
-  }
-};
-// example sounds registry (your real audio system can push its Audio objects into __audioUnlock.add(audioObj))
-</script>
-
-<script>
-/* ============================================================
-   Input System (WASD + pointer-lock mouse + touch halves)
+   INPUT SYSTEM (WASD + pointer-lock mouse + touch halves)
    ============================================================ */
 const InputSystem = (()=>{
   let move = {x:0,z:0}, running=false;
   let lookDelta = {x:0,y:0};
   let actionsQueue = [];
   let pointerLocked = false;
-  let invertY = false;
 
   const keys = new Set();
   const keyMap = {
@@ -179,7 +160,6 @@ const InputSystem = (()=>{
     'KeyN':'openNotebook',
     'KeyF':'toggleFlash','KeyU':'toggleUV','KeyI':'toggleIR'
   };
-  const preventKeys = new Set(['w','a','s','d','ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ']);
 
   function recomputeMove(){
     const f = (keys.has('fw')?1:0) + (keys.has('bk')?-1:0);
@@ -190,8 +170,6 @@ const InputSystem = (()=>{
   function onKey(e,down){
     const tag = keyMap[e.code];
     if(tag){
-      // keep the page from scrolling / focusing
-      if (preventKeys.has(e.key)) e.preventDefault();
       if(down) keys.add(tag); else keys.delete(tag);
       recomputeMove();
       if(down && /^slot[1-5]|openNotebook|toggle(F|U|IR)$/.test(tag)) actionsQueue.push(tag);
@@ -209,87 +187,46 @@ const InputSystem = (()=>{
     });
   }
 
-  // visual viewport helper for iPad toolbars etc.
-  function vh(px){ const vv = window.visualViewport; return vv ? vv.height * (px/100) : window.innerHeight * (px/100); }
-
-  // Touch halves: real 50/50, vertical top set to 20% of visual viewport
-  function positionTouchHalves(){
-    const topPx = Math.round(vh(20));
-    const L = document.getElementById('touch-left');
-    const R = document.getElementById('touch-right');
-    L.style.top = topPx + 'px';
-    R.style.top = topPx + 'px';
-  }
-  window.addEventListener('resize', positionTouchHalves);
-  window.visualViewport && window.visualViewport.addEventListener('resize', positionTouchHalves);
-
+  // Touch halves: left=move, right=look (each 50% width), start at 20% screen height
   function bindTouchHalves(){
-    positionTouchHalves();
     const left  = document.getElementById('touch-left');
     const right = document.getElementById('touch-right');
     let leftId=null, rightId=null;
-    let leftAnchor=null, rightAnchor=null;
-
-    // helper: clamp small jitter
-    const dead=10;
-    const norm = v => (Math.abs(v)<dead?0:v);
+    let lastRight = null;
 
     left.addEventListener('touchstart', e=>{
-      __audioUnlock.tryUnlock();
-      for(const t of e.changedTouches){
-        if(leftId===null){
-          const r = left.getBoundingClientRect();
-          if(t.clientX>=r.left && t.clientX<=r.right && t.clientY>=r.top && t.clientY<=r.bottom){
-            leftId=t.identifier;
-            leftAnchor={x:t.clientX, y:t.clientY};
-            e.preventDefault();
-            break;
-          }
-        }
-      }
+      for(const t of e.changedTouches) if(leftId===null){ leftId=t.identifier; break; }
+    }, {passive:false});
+    right.addEventListener('touchstart', e=>{
+      for(const t of e.changedTouches) if(rightId===null){ rightId=t.identifier; lastRight={x:t.clientX,y:t.clientY}; break; }
     }, {passive:false});
 
-    right.addEventListener('touchstart', e=>{
-      __audioUnlock.tryUnlock();
-      for(const t of e.changedTouches){
-        if(rightId===null){
-          const r = right.getBoundingClientRect();
-          if(t.clientX>=r.left && t.clientX<=r.right && t.clientY>=r.top && t.clientY<=r.bottom){
-            rightId=t.identifier;
-            rightAnchor={x:t.clientX, y:t.clientY};
-            e.preventDefault();
-            break;
-          }
-        }
-      }
-    }, {passive:false});
+    function norm(v,dead=10){ return Math.abs(v)<dead?0:v; }
 
     window.addEventListener('touchmove', e=>{
       for(const t of e.changedTouches){
         if(t.identifier===leftId){
-          // movement based on delta from your finger anchor (comfortable zone)
-          const dx = norm(t.clientX - leftAnchor.x);
-          const dy = norm(t.clientY - leftAnchor.y);
-          // strafe by dx, forward/back by -dy
-          move.x = Math.sign(dx);
-          move.z = Math.sign(-dy);
-          e.preventDefault();
+          const cx = t.clientX, cy = t.clientY;
+          const midX = window.innerWidth*0.25; // center of left half
+          const refY = window.innerHeight*0.70; // comfort vertical center
+          const vx = norm(cx - midX);
+          const vy = norm(cy - refY);
+          move.x = Math.sign(vx);
+          move.z = vy<0 ? 1 : (vy>0 ? -1 : 0);
         } else if(t.identifier===rightId){
-          // look based on finger deltas (not full-screen travel)
-          const dx = t.clientX - rightAnchor.x;
-          const dy = t.clientY - rightAnchor.y;
-          rightAnchor = {x:t.clientX, y:t.clientY};
-          lookDelta.x += dx * 1.25;   // sensitivity multiplier (less travel needed)
-          lookDelta.y += dy * 1.25;
-          e.preventDefault();
+          if(lastRight){
+            lookDelta.x += (t.clientX - lastRight.x);
+            lookDelta.y += (t.clientY - lastRight.y);
+          }
+          lastRight = {x:t.clientX, y:t.clientY};
         }
       }
     }, {passive:false});
 
     window.addEventListener('touchend', e=>{
       for(const t of e.changedTouches){
-        if(t.identifier===leftId){ leftId=null; leftAnchor=null; move.x=0; move.z=0; e.preventDefault(); }
-        if(t.identifier===rightId){ rightId=null; rightAnchor=null; e.preventDefault(); }
+        if(t.identifier===leftId){ leftId=null; move.x=0; move.z=0; }
+        if(t.identifier===rightId){ rightId=null; lastRight=null; }
       }
     }, {passive:false});
   }
@@ -297,20 +234,29 @@ const InputSystem = (()=>{
   function bindUIButtons(){
     const push = a=>actionsQueue.push(a);
     const byId = id=>document.getElementById(id);
-    const map = [['btn-use','use'],['btn-place','place'],['btn-toss','toss'],
-                 ['btn-slot-prev','slotPrev'],['btn-slot-next','slotNext'],
-                 ['btn-notebook','openNotebook']];
-    map.forEach(([id,a])=>{ const el=byId(id); if(el) el.onclick=()=>push(a); });
-    const inv = document.getElementById('invertY');
-    if(inv) inv.addEventListener('change', ()=>{ invertY = inv.checked; });
+    [
+      ['btn-use','use'],['btn-place','place'],['btn-toss','toss'],
+      ['btn-slot-prev','slotPrev'],['btn-slot-next','slotNext'],
+      ['btn-notebook','openNotebook']
+    ].forEach(([id,a])=>{ const el=byId(id); if(el) el.onclick=()=>push(a); });
+
+    // Inspector toggle
+    const insp = byId('btn-inspector');
+    if (insp){
+      insp.onclick = ()=>{
+        try{
+          if (!scene) return;
+          if (scene.debugLayer.isVisible()) scene.debugLayer.hide();
+          else scene.debugLayer.show({ overlay:true });
+        }catch(e){ console.warn('Inspector load failed', e); }
+      };
+    }
   }
 
   return {
     init(canvas){
-      document.addEventListener('keydown', e=>onKey(e,true), {capture:true});
-      document.addEventListener('keyup',   e=>onKey(e,false), {capture:true});
-      canvas.addEventListener('mousedown', ()=> __audioUnlock.tryUnlock());
-      canvas.addEventListener('touchstart',()=> __audioUnlock.tryUnlock(), {passive:true});
+      document.addEventListener('keydown', e=>onKey(e,true));
+      document.addEventListener('keyup',   e=>onKey(e,false));
       bindPointerLock(canvas);
       bindTouchHalves();
       bindUIButtons();
@@ -319,7 +265,7 @@ const InputSystem = (()=>{
       const out = {
         moveVec: { x: move.x, z: move.z },
         running,
-        lookDelta: { x: lookDelta.x, y: (invertY ? -lookDelta.y : lookDelta.y) },
+        lookDelta: { x: lookDelta.x, y: lookDelta.y },
         actions: actionsQueue.splice(0)
       };
       lookDelta.x = 0; lookDelta.y = 0;
@@ -331,7 +277,7 @@ const InputSystem = (()=>{
 
 <script>
 /* ============================================================
-   Movement & Look
+   Movement & Look helpers (invert Y for look)
    ============================================================ */
 function handleMovementFromInput(input, dt){
   if(!window.camera || !window.scene) return;
@@ -351,58 +297,164 @@ function handleMovementFromInput(input, dt){
 }
 function applyLookFromInput(lookDelta){
   if(!window.camera) return;
-  const sens = 0.0024; // bumped: less travel needed
+  const sens = 0.0022;     // higher = less hand travel needed
   camera.rotation.y += lookDelta.x * sens;
+  const invertY = -1;      // invert up/down as requested
   const minPitch = -Math.PI/2 + 0.15;
   const maxPitch =  Math.PI/2 - 0.15;
-  const pitch = (camera.rotation.x || 0) + (-lookDelta.y * sens * 0.8);
+  const pitch = (camera.rotation.x || 0) + (invertY * lookDelta.y * sens * 0.8);
   camera.rotation.x = Math.min(maxPitch, Math.max(minPitch, pitch));
 }
 </script>
 
 <script>
 /* ============================================================
-   Minimal scene helpers you already use
+   Procedural RAIN (no external texture) + Weather
    ============================================================ */
-function setupNightAtmosphere(){
+let __rainDynTex = null;
+function makeRainTexture(scene){
+  if (__rainDynTex) return __rainDynTex;
+  // a 2x32 vertical streak, soft gradient
+  const w=2, h=32;
+  const dt = new BABYLON.DynamicTexture("rainDynTex", {width:w, height:h}, scene, false);
+  const ctx = dt.getContext();
+  ctx.clearRect(0,0,w,h);
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0.00, "rgba(255,255,255,0.00)");
+  g.addColorStop(0.20, "rgba(255,255,255,0.40)");
+  g.addColorStop(0.50, "rgba(255,255,255,0.85)");
+  g.addColorStop(0.80, "rgba(255,255,255,0.40)");
+  g.addColorStop(1.00, "rgba(255,255,255,0.00)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,w,h);
+  dt.update(false);
+  __rainDynTex = dt;
+  return dt;
+}
+
+function ensureRainPS(scene){
+  if (weather.rainPS) return weather.rainPS;
+  const ps = new BABYLON.ParticleSystem("rain", 3500, scene);
+  ps.particleTexture = makeRainTexture(scene);
+  ps.minEmitBox = new BABYLON.Vector3(-90, 55, -90);
+  ps.maxEmitBox = new BABYLON.Vector3( 90, 55,  90);
+  ps.minSize = 0.8; ps.maxSize = 1.2;
+  ps.minLifeTime = 0.6; ps.maxLifeTime = 1.0;
+  ps.direction1 = new BABYLON.Vector3(-0.2, -1.6, 0.1);
+  ps.direction2 = new BABYLON.Vector3( 0.2, -1.4,-0.1);
+  ps.gravity = new BABYLON.Vector3(0, -9.8, 0);
+  ps.emitRate = 1800;
+  ps.updateSpeed = 0.015;
+  ps.color1 = new BABYLON.Color4(0.95, 0.98, 1.00, 0.85);
+  ps.color2 = new BABYLON.Color4(0.95, 0.98, 1.00, 0.55);
+  ps.colorDead = new BABYLON.Color4(1,1,1,0.0);
+  ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  ps.disposeOnStop = false;
+  weather.rainPS = ps;
+  return ps;
+}
+
+function setWeather(state){
+  weather.state = state;
+  const label = document.getElementById('hud-weather');
+  if (label) label.textContent = state;
+
+  if (weather.rainPS) weather.rainPS.stop();
+  if (weather.snowPS) weather.snowPS.stop();
+
+  // Clear
+  if (state === 'Clear'){
+    applyNightPalette?.();
+    return;
+  }
+
+  // Snow (simple procedural flake)
+  if (state === 'Snow'){
+    applyNightPalette?.();
+    if (!weather.snowPS){
+      const ps = new BABYLON.ParticleSystem("snow", 2200, scene);
+      const snowTex = new BABYLON.DynamicTexture("snowTex",{width:8,height:8},scene,false);
+      const ctx = snowTex.getContext(); ctx.clearRect(0,0,8,8);
+      ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(4,4,3,0,Math.PI*2); ctx.fill(); snowTex.update(false);
+      ps.particleTexture = snowTex;
+      ps.minEmitBox = new BABYLON.Vector3(-80, 42, -80);
+      ps.maxEmitBox = new BABYLON.Vector3( 80, 42,  80);
+      ps.minSize = 0.06; ps.maxSize = 0.14;
+      ps.minLifeTime = 2.0; ps.maxLifeTime = 3.6;
+      ps.emitRate = 1100;
+      ps.direction1 = new BABYLON.Vector3(-0.15, -0.7, 0.1);
+      ps.direction2 = new BABYLON.Vector3( 0.15, -0.9,-0.1);
+      ps.gravity = new BABYLON.Vector3(0,-0.2,0);
+      ps.updateSpeed = 0.02;
+      ps.color1 = new BABYLON.Color4(1,1,1,0.95);
+      ps.color2 = new BABYLON.Color4(1,1,1,0.70);
+      ps.disposeOnStop = false;
+      weather.snowPS = ps;
+    }
+    weather.snowPS.start();
+    return;
+  }
+
+  // Rain + Blood Moon (rain + lightning)
+  if (state === 'Rain' || state === 'Blood Moon'){
+    if (state === 'Blood Moon'){
+      applyBloodMoonPalette?.();
+      applyMoonTintForWeather?.();
+    } else {
+      applyNightPalette?.();
+    }
+    const ps = ensureRainPS(scene);
+    ps.start();
+    scheduleNextLightning();
+    return;
+  }
+}
+</script>
+
+<script>
+/* ============================================================
+   Minimal palette helpers + moon tint hook
+   ============================================================ */
+function applyNightPalette(){
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
+  scene.imageProcessingConfiguration.exposure = 0.8;
+  scene.imageProcessingConfiguration.contrast = 1.15;
+  scene.environmentIntensity = 0.25;
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 }
-function setWeather(state){
-  weather.state = state;
-  const el = document.getElementById('hud-weather'); if(el) el.textContent = state;
-  if(state==='Rain' || state==='Blood Moon'){
-    scheduleNextLightning();
-    if(!weather.rainPS){
-      const ps = new BABYLON.ParticleSystem("rain", 2500, scene);
-      ps.particleTexture = new BABYLON.Texture("./assets/images/nosignal.gif", scene); // replace with streak texture if desired
-      ps.minEmitBox = new BABYLON.Vector3(-80, 50, -80);
-      ps.maxEmitBox = new BABYLON.Vector3(80, 50, 80);
-      ps.minSize = 0.05; ps.maxSize = 0.1;
-      ps.minLifeTime = 0.9; ps.maxLifeTime = 1.4;
-      ps.emitRate = 1200;
-      ps.direction1 = new BABYLON.Vector3(0, -1.2, 0);
-      ps.direction2 = new BABYLON.Vector3(0, -1.0, 0);
-      ps.gravity = new BABYLON.Vector3(0,-9.8,0);
-      ps.disposeOnStop = false;
-      weather.rainPS = ps;
-    }
-    weather.rainPS.start();
+function applyBloodMoonPalette(){
+  scene.clearColor = new BABYLON.Color4(0.02,0,0.02,1);
+  scene.ambientColor = new BABYLON.Color3(0.04,0.01,0.02);
+  scene.imageProcessingConfiguration.exposure = 0.5;
+  scene.imageProcessingConfiguration.contrast = 1.2;
+  scene.environmentIntensity = 0.25;
+  scene.fogDensity = 0.005;
+  scene.fogColor = new BABYLON.Color3(0.06,0.01,0.02);
+}
+function applyMoonTintForWeather(){
+  const node = scene.getMeshByName("MoonMesh");
+  if (!node) return;
+  const mat = node.material;
+  if (weather.state === 'Blood Moon'){
+    if (mat && mat.emissiveColor) mat.emissiveColor = new BABYLON.Color3(0.9, 0.16, 0.16);
   } else {
-    if(weather.rainPS) weather.rainPS.stop();
+    if (mat && mat.emissiveColor) mat.emissiveColor = new BABYLON.Color3(1,1,1);
   }
 }
+</script>
 
+<script>
+/* ============================================================
+   LOADERS: Map, Moon, Ghost (with cube fallback)
+   ============================================================ */
 async function loadMap(){
   try{
     const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
     houseRoot = result.meshes[0] || result.meshes.find(m=>m.name==="__root__");
     result.meshes.forEach(m=>{ m.checkCollisions = true; m.isPickable = true; m.receiveShadows = true; });
-    // spawn near van-ish if present; otherwise keep default
-    const spawn = new BABYLON.Vector3(43.657, 3, -119.008);
-    camera.position = spawn.clone();
   }catch(e){
     console.warn("Map load failed, using ground fallback", e);
     const ground = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:160, height:160 }, scene);
@@ -418,28 +470,27 @@ function buildHouseLights(){
   const p=new BABYLON.PointLight("houseLight_0", new BABYLON.Vector3(0,4,0), scene);
   p.intensity=0.0; p.range=14; houseLights.push({light:p, mesh:null});
 }
-async function loadItems(){ /* your GLB items loader can live here */ }
 
 async function loadMoon(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
     const moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
     if(moonMesh){
-      moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.position = new BABYLON.Vector3(0,350,380);
-      moonMesh.renderingGroupId = 1;
+      moonMesh.name = "MoonMesh";
+      moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
+      const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
+      mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1); moonMesh.material = mat;
+      moonMesh.position = new BABYLON.Vector3(0, 350, 380);
+      // gentle drift
+      scene.onBeforeRenderObservable.add(()=>{
+        const t = performance.now()*0.00002;
+        moonMesh.position.x = Math.cos(t)*380;
+        moonMesh.position.z = Math.sin(t)*380;
+        moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
+      });
     }
-  }catch(e){
-    console.warn("Moon load failed:", e);
-    // tiny fallback sphere so it's never blank
-    const m = BABYLON.MeshBuilder.CreateSphere("moon",{diameter:60,segments:18},scene);
-    const mat = new BABYLON.StandardMaterial("moonMat", scene);
-    try{ mat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
-    catch{ mat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
-    m.material = mat; m.applyFog=false; m.position = new BABYLON.Vector3(0,350,380);
-  }
+  }catch(e){ console.warn("Moon load failed", e); }
 }
-
-function setupBreathFX(){ /* optional in this trimmed build */ }
 
 async function loadGhost(){
   try{
@@ -455,22 +506,24 @@ async function loadGhost(){
       g.scaling = new BABYLON.Vector3(scale, scale, scale);
       g.position = new BABYLON.Vector3(43.657, 1.2, -119.008);
       window.ghost = { mesh:g, hunting:false, stepInterval:0.55, footAudible:18, visible:false };
+      return;
     }
   }catch(e){
-    // Fallback cube ghost only if glb missing
-    const m = BABYLON.MeshBuilder.CreateBox("fallbackGhost",{size:1.2},scene);
-    const mat = new BABYLON.StandardMaterial("fgMat", scene);
-    mat.alpha=0.35; mat.emissiveColor=new BABYLON.Color3(0.6,0.6,1);
-    m.material=mat; m.isPickable=false;
-    m.position = new BABYLON.Vector3(43.657, 1.2, -119.008);
-    window.ghost = { mesh:m, hunting:false, stepInterval:0.55, footAudible:18, visible:true };
+    console.warn("Ghost GLB failed, using cube fallback", e);
   }
+  // Fallback translucent cube ghost
+  const m = BABYLON.MeshBuilder.CreateBox("fallbackGhost",{size:1.2},scene);
+  const mat = new BABYLON.StandardMaterial("fgMat", scene);
+  mat.alpha=0.35; mat.emissiveColor=new BABYLON.Color3(0.6,0.6,1);
+  m.material=mat; m.isPickable=false;
+  m.position = new BABYLON.Vector3(43.657, 1.2, -119.008);
+  window.ghost = { mesh:m, hunting:false, stepInterval:0.55, footAudible:18, visible:true };
 }
 </script>
 
 <script>
 /* ============================================================
-   BOOT (kept close to your structure)
+   BOOT
    ============================================================ */
 async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
@@ -481,6 +534,7 @@ async function boot(){
   scene.collisionsEnabled = true;
   scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
 
+  // Camera
   camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(43.657, 3, -119.008), scene);
   camera.attachControl(canvas, true);
   camera.applyGravity = true;
@@ -489,79 +543,52 @@ async function boot(){
   camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
   camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
   camera.minZ = 0.1; camera.inertia = 0;
+  // We'll handle movement ourselves:
   camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  setupNightAtmosphere();
-  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene); hemiLight.intensity = 0.06;
+  // Lights & palette
+  applyNightPalette();
+  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+  hemiLight.intensity = 0.06;
 
   await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
-  await loadItems().catch(()=>{});
   await loadGhost().catch(()=>{});
-  await loadMoon().catch(()=>{});     /* ✅ moon load ensured */
-  setupBreathFX();
+  await loadMoon().catch(()=>{});
 
-  // basic flash/uv/ir lights so toggles do something
-  flashLight = new BABYLON.SpotLight("flashLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 10, scene);
-  flashLight.parent = camera; flashLight.intensity = 0; flashLight.range = 40;
-  flashShadows = new BABYLON.ShadowGenerator(1024, flashLight);
-  uvLight = new BABYLON.SpotLight("uvLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/3, 8, scene);
-  uvLight.parent = camera; uvLight.intensity = 0; uvLight.range = 30;
-  irLight = new BABYLON.SpotLight("irLight", new BABYLON.Vector3(0,0,0), new BABYLON.Vector3(0,0,1), Math.PI/2, 10, scene);
-  irLight.parent = camera; irLight.intensity = 0;
-
-  // Input & UI
+  // UI/input
   InputSystem.init(canvas);
   document.getElementById("hud").style.display="block";
-  document.getElementById("action-bar").style.display="flex";
-  document.getElementById("belt").style.display="flex";
 
-  // Dev buttons
-  document.getElementById('btn-inspector').onclick = async ()=>{
-    // lazy-load inspector if not present
-    if (!BABYLON.Inspector) {
-      const s=document.createElement('script'); s.src='./cdn/inspector/babylon.inspector.bundle.js'; document.head.appendChild(s);
-      s.onload = ()=> BABYLON.Inspector.Show(scene, { embedMode:false });
-      s.onerror = ()=> toast('Inspector bundle missing.', 1200);
-    } else {
-      if (scene && !scene.debugLayer.isVisible()) BABYLON.Inspector.Show(scene, { embedMode:false });
-      else if (scene && scene.debugLayer.isVisible()) scene.debugLayer.hide();
-    }
-  };
-  document.getElementById('btn-debug').onclick = ()=>{
-    console.log('[DEBUG] Camera', camera?.position, 'Ghost', window.ghost?.mesh?.position);
-    toast('Debug logged to console.', 900);
-  };
+  toast("WASD to move • Pointer-Lock look • F=Flash, U=UV, I=IR", 2600);
 
-  // Render loop
+  // Main tick
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
 
-    // Inputs
     const input = InputSystem.snapshot();
     handleMovementFromInput(input, dt);
     applyLookFromInput(input.lookDelta);
 
-    // Basic HUD updates
+    // HUD gunk
     document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`;
-    document.getElementById('hud-room').textContent = player.room||'—';
-
-    // Weather drizzle
-    if (weather.state==='Rain' || weather.state==='Blood Moon'){
-      weather.lightningTimer += dt;
-      if(weather.lightningTimer > weather.nextStrike){ scheduleNextLightning(); }
-      if (weather.rainPS){ weather.rainPS.emitRate = inVanZone(camera.position) ? 0 : 1800; }
-    }
-
-    // XYZ HUD
-    const xyzBox = document.getElementById('hud-xyz');
-    if (xyzBox && camera){
-      xyzBox.style.display = 'block';
+    if (camera){
+      document.getElementById('hud-xyz').style.display = 'block';
       document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
       document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
       document.getElementById('hud-z').textContent = camera.position.z.toFixed(2);
     }
+
+    // Weather loop
+    if (weather.state==='Rain' || weather.state==='Blood Moon'){
+      weather.lightningTimer += dt;
+      if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
+      if (weather.rainPS){ weather.rainPS.emitRate = inVanZone(camera.position) ? 0 : 1800; }
+    }
+
+    updateGhost(dt);
+    updatePlayerFootsteps(dt);
   });
 
   engine.runRenderLoop(()=> scene.render());
@@ -571,11 +598,11 @@ async function boot(){
 
 <script>
 /* ============================================================
-   Start wiring (robust, no “safe start” gymnastics)
+   START FLOW (robust binding)
    ============================================================ */
 let __started=false, __starting=false;
 
-async function startGame(){
+async function safeStart(){
   if(__started || __starting) return;
   __starting = true;
 
@@ -584,47 +611,49 @@ async function startGame(){
     __starting = false; return;
   }
 
-  // hide title, unlock audio
   const screen = document.getElementById('title-screen');
-  if (screen) screen.style.display='none';
-  __audioUnlock.tryUnlock();
+  const btn    = document.getElementById('start-button');
 
   try{
+    if(btn){ btn.disabled = true; btn.textContent = 'Starting…'; }
+    if(screen) screen.style.display='none';
+
     await boot();
-    // choose weather
+
+    // Pick initial weather
     const r = Math.random();
     const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
     setWeather(w);
     toast(`Investigation started. Weather: ${w}.`, 1600);
+
     __started = true;
   }catch(err){
-    console.error('Startup error', err);
-    if (screen) screen.style.display='flex';
+    console.error('[Start] error', err);
+    if(screen){ screen.style.display='flex'; if(btn){ btn.disabled=false; btn.textContent='Start Investigation'; } }
   }finally{
     __starting = false;
   }
 }
-
-function bindStart(){
-  const btn = document.getElementById('start-button');
+function bindStartControls(){
+  const btn    = document.getElementById('start-button');
   const screen = document.getElementById('title-screen');
   if(btn && !btn.__wired){
     btn.__wired = true;
-    btn.addEventListener('click', ()=> startGame());
-    btn.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.code==='Space'){ e.preventDefault(); startGame(); }});
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); safeStart(); });
+    btn.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.code==='Space'){ e.preventDefault(); safeStart(); }});
   }
   if(screen && !screen.__wired){
     screen.__wired = true;
-    screen.addEventListener('click', (e)=>{ if(e.target===screen) startGame(); });
+    screen.addEventListener('click', (e)=>{ if(e.target===screen) safeStart(); });
   }
 }
-document.addEventListener('DOMContentLoaded', bindStart);
-window.addEventListener('load', bindStart);
+document.addEventListener('DOMContentLoaded', bindStartControls);
+window.addEventListener('load', bindStartControls);
 window.addEventListener('keydown', (e)=>{
-  const scr=document.getElementById('title-screen');
-  if(scr && scr.style.display!=='none'){ if(e.key==='Enter'||e.code==='Space'){ e.preventDefault(); startGame(); } }
+  const screen=document.getElementById('title-screen');
+  if(!screen || screen.style.display==='none') return;
+  if(e.key==='Enter' || e.code==='Space'){ e.preventDefault(); safeStart(); }
 });
 </script>
-
 </body>
 </html>
