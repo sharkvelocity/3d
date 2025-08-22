@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Procedural Rain + Fixed Inputs</title>
+  <title>PhasmaPhoney — Items + Random Ghost Spawn + Flicker Profiles</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
   <meta name="author" content="Shark-Blades" />
   <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
@@ -15,7 +15,7 @@
   <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
-  <!-- Optional Inspector (enabled via button in UI) -->
+  <!-- Optional Inspector (button toggles it) -->
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
   <style>
@@ -53,8 +53,9 @@
     #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center;
       background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
     .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa;
-      background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
+      background:rgba(0,20,20,0.6); position:relative; cursor:pointer; user-select:none; }
     .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
+    .slot .label{ font-size:12px; color:#adf; text-align:center; line-height:1.1; padding:4px; }
     .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
 
     /* Touch halves overlay — full width split, lowered 20% from top */
@@ -62,7 +63,7 @@
     #touch-left { left:0; }
     #touch-right{ right:0; }
 
-    /* Flash overlay for lightning */
+    /* Flash overlay for lightning & ghost flicker pop */
     #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
   </style>
 </head>
@@ -101,14 +102,14 @@
     <button id="btn-inspector" class="hud-btn">Inspector</button>
   </div>
 
-  <!-- Belt -->
+  <!-- Belt (Item Bar) -->
   <div id="belt"></div>
 
   <!-- Touch halves (invisible) -->
   <div id="touch-left"  class="touch-half"></div>
   <div id="touch-right" class="touch-half"></div>
 
-  <!-- Flash for lightning -->
+  <!-- Flash for lightning & optional ghost pop -->
   <div id="flash-overlay"></div>
 
   <!-- Toast -->
@@ -116,13 +117,11 @@
 
 <script>
 /* ============================================================
-   GLOBALS (minimal scaffolding)
+   GLOBALS & MINIMUM STUBS
    ============================================================ */
 const canvas = document.getElementById('renderCanvas');
-let engine, scene, camera, skybox;
-let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat;
+let engine, scene, camera;
 let hemiLight = null;
-
 let houseLights = []; let housePower = true;
 let houseRoot = null;
 
@@ -132,18 +131,56 @@ let controls = { forward:false, back:false, left:false, right:false };
 const weather = { state:'Clear', rainPS:null, snowPS:null, lightningTimer:0, nextStrike: 5 };
 function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
 function lightningStrike(){ const overlay=document.getElementById('flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
-
-function toast(msg, ms=1500){
-  const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block';
-  setTimeout(()=>t.style.display='none', ms);
-}
+function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
 function inVanZone(pos){ return false; } // replace with your real van zone if needed
-function updatePlayerFootsteps(dt){}  // placeholder, your real routine can override
-function rebuildBelt(){}              // placeholder
-function updateGhost(dt){}            // placeholder
 
 /* ============================================================
-   INPUT SYSTEM (WASD + pointer-lock mouse + touch halves)
+   ITEMS / BELT
+   ============================================================ */
+const INVENTORY = [
+  { id:'flash',  name:'Flashlight'   },
+  { id:'uv',     name:'UV Light'     },
+  { id:'emf',    name:'EMF Reader'   },
+  { id:'salt',   name:'Salt'         },
+  { id:'camera', name:'Photo Camera' }
+];
+let activeItemSlot = 1;
+
+function rebuildBelt(){
+  const belt = document.getElementById('belt');
+  if(!belt) return;
+  belt.innerHTML = '';
+  for(let i=0;i<INVENTORY.length;i++){
+    const slot = document.createElement('div');
+    slot.className = 'slot' + (i+1===activeItemSlot?' active':'');
+    slot.title = INVENTORY[i].name;
+    const key = document.createElement('div'); key.className='key'; key.textContent = (i+1);
+    const label = document.createElement('div'); label.className='label'; label.textContent = INVENTORY[i].name;
+    slot.appendChild(key); slot.appendChild(label);
+    slot.onclick = ()=>{ activeItemSlot = i+1; rebuildBelt(); };
+    belt.appendChild(slot);
+  }
+}
+function selectSlot(n){ if(n>=1 && n<=INVENTORY.length){ activeItemSlot=n; rebuildBelt(); } }
+
+function useActiveItem(){
+  const item = INVENTORY[activeItemSlot-1];
+  if(!item) return;
+  toast(`Use: ${item.name}`, 700);
+}
+function placeActiveItem(){
+  const item = INVENTORY[activeItemSlot-1];
+  if(!item) return;
+  toast(`Place: ${item.name}`, 700);
+}
+function tossActiveItem(){
+  const item = INVENTORY[activeItemSlot-1];
+  if(!item) return;
+  toast(`Toss: ${item.name}`, 700);
+}
+
+/* ============================================================
+   Input System (WASD + pointer-lock mouse + touch halves)
    ============================================================ */
 const InputSystem = (()=>{
   let move = {x:0,z:0}, running=false;
@@ -158,7 +195,8 @@ const InputSystem = (()=>{
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot1','Digit2':'slot2','Digit3':'slot3','Digit4':'slot4','Digit5':'slot5',
     'KeyN':'openNotebook',
-    'KeyF':'toggleFlash','KeyU':'toggleUV','KeyI':'toggleIR'
+    'KeyF':'toggleFlash','KeyU':'toggleUV','KeyI':'toggleIR',
+    'KeyQ':'slotPrev','KeyE':'slotNext'
   };
 
   function recomputeMove(){
@@ -172,7 +210,7 @@ const InputSystem = (()=>{
     if(tag){
       if(down) keys.add(tag); else keys.delete(tag);
       recomputeMove();
-      if(down && /^slot[1-5]|openNotebook|toggle(F|U|IR)$/.test(tag)) actionsQueue.push(tag);
+      if(down && /^slot(Prev|Next|[1-5])|openNotebook|toggle(F|U|IR)$/.test(tag)) actionsQueue.push(tag);
     }
   }
 
@@ -273,9 +311,7 @@ const InputSystem = (()=>{
     }
   };
 })();
-</script>
 
-<script>
 /* ============================================================
    Movement & Look helpers (invert Y for look)
    ============================================================ */
@@ -305,6 +341,11 @@ function applyLookFromInput(lookDelta){
   const pitch = (camera.rotation.x || 0) + (invertY * lookDelta.y * sens * 0.8);
   camera.rotation.x = Math.min(maxPitch, Math.max(minPitch, pitch));
 }
+
+/* ============================================================
+   Simple belt action routing for input actions
+   ============================================================ */
+function wireActionButtons(){ /* InputSystem already wires DOM buttons */ }
 </script>
 
 <script>
@@ -331,7 +372,6 @@ function makeRainTexture(scene){
   __rainDynTex = dt;
   return dt;
 }
-
 function ensureRainPS(scene){
   if (weather.rainPS) return weather.rainPS;
   const ps = new BABYLON.ParticleSystem("rain", 3500, scene);
@@ -353,7 +393,6 @@ function ensureRainPS(scene){
   weather.rainPS = ps;
   return ps;
 }
-
 function setWeather(state){
   weather.state = state;
   const label = document.getElementById('hud-weather');
@@ -362,13 +401,10 @@ function setWeather(state){
   if (weather.rainPS) weather.rainPS.stop();
   if (weather.snowPS) weather.snowPS.stop();
 
-  // Clear
   if (state === 'Clear'){
     applyNightPalette?.();
     return;
   }
-
-  // Snow (simple procedural flake)
   if (state === 'Snow'){
     applyNightPalette?.();
     if (!weather.snowPS){
@@ -394,27 +430,17 @@ function setWeather(state){
     weather.snowPS.start();
     return;
   }
-
-  // Rain + Blood Moon (rain + lightning)
   if (state === 'Rain' || state === 'Blood Moon'){
-    if (state === 'Blood Moon'){
-      applyBloodMoonPalette?.();
-      applyMoonTintForWeather?.();
-    } else {
-      applyNightPalette?.();
-    }
+    if (state === 'Blood Moon'){ applyBloodMoonPalette?.(); applyMoonTintForWeather?.(); }
+    else { applyNightPalette?.(); }
     const ps = ensureRainPS(scene);
     ps.start();
     scheduleNextLightning();
     return;
   }
 }
-</script>
 
-<script>
-/* ============================================================
-   Minimal palette helpers + moon tint hook
-   ============================================================ */
+/* Night/BloodMoon palettes + moon tint */
 function applyNightPalette(){
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.ambientColor = new BABYLON.Color3(0.02,0.02,0.05);
@@ -448,7 +474,7 @@ function applyMoonTintForWeather(){
 
 <script>
 /* ============================================================
-   LOADERS: Map, Moon, Ghost (with cube fallback)
+   LOADERS: Map, Moon, Ghost (random spawn + visibility control)
    ============================================================ */
 async function loadMap(){
   try{
@@ -481,7 +507,6 @@ async function loadMoon(){
       const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
       mat.disableLighting = true; mat.emissiveColor = new BABYLON.Color3(1,1,1); moonMesh.material = mat;
       moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-      // gentle drift
       scene.onBeforeRenderObservable.add(()=>{
         const t = performance.now()*0.00002;
         moonMesh.position.x = Math.cos(t)*380;
@@ -492,7 +517,85 @@ async function loadMoon(){
   }catch(e){ console.warn("Moon load failed", e); }
 }
 
+/* ---------------- Ghost data & flicker profile ---------------- */
+const GHOST_TYPES = ['Phantom', 'Oni', 'Wraith', 'Spirit', 'Revenant'];
+let currentGhostType = null;
+
+function randomPointInHouse(){
+  if (!houseRoot){
+    return new BABYLON.Vector3(43.657, 1.2, -119.008);
+  }
+  const bb = houseRoot.getHierarchyBoundingVectors(true);
+  const x = BABYLON.Scalar.Lerp(bb.min.x+2, bb.max.x-2, Math.random());
+  const z = BABYLON.Scalar.Lerp(bb.min.z+2, bb.max.z-2, Math.random());
+  // Try to drop to the nearest pick under a high Y
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, (bb.max.y||8)+4, z), new BABYLON.Vector3(0,-1,0), 40);
+  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  const y = hit?.pickedPoint ? (hit.pickedPoint.y+0.05) : 1.2;
+  return new BABYLON.Vector3(x, y, z);
+}
+
+function makeGhostVisibilityController(mesh){
+  if(!mesh) return null;
+  // A tiny state machine that sets mesh.visibility (or material alpha) based on pattern
+  let t=0, on=false, next=0;
+  let alphaWhenOn = 0.85;
+  return {
+    reset(){ t=0; on=false; next=0; },
+    setSolid(v){ alphaWhenOn = v; },
+    tick(dt, mode, profile){
+      // mode: 'idle' | 'event' | 'hunt'
+      // profile: 'Phantom' | 'Oni' | 'Default'
+      t += dt;
+      // idle -> invisible
+      if (mode==='idle'){
+        apply(0);
+        return;
+      }
+      if (t>=next){
+        // schedule next burst segment
+        // "a couple of fast flickers followed by one slightly slower"
+        const fast = (Math.random()*0.08)+0.05; // 50–130ms
+        const slow = (Math.random()*0.22)+0.28; // 280–500ms
+        // Phantom: less visible, often fully invisible ~1s
+        // Oni: appears more solid, less flicker; longer visible periods
+        let onDur, offDur;
+        if (profile==='Phantom'){
+          onDur  = fast * 0.6;
+          offDur = 1.0 + Math.random()*0.6; // roughly ~1s invisible between flashes
+        } else if (profile==='Oni'){
+          onDur  = 0.30 + Math.random()*0.25; // 0.30–0.55s solid
+          offDur = 0.70; // spread about every 0.7–1.0s (see next assignment)
+          // add variety
+          if (Math.random()<0.5) offDur = 1.0;
+        } else {
+          onDur  = fast;     // fast
+          offDur = slow;     // then slower
+        }
+        on = true; next = t + onDur;
+        apply(alphaWhenOn);
+        // After onDur, go off for offDur
+        setTimeout(()=>{ on=false; apply(0); }, onDur*1000);
+        setTimeout(()=>{ /* allow next segment */ }, (onDur+offDur)*1000);
+        next += offDur; // schedule next on-segment after offDur
+      } else {
+        apply(on ? alphaWhenOn : 0);
+      }
+
+      function apply(a){
+        if (!mesh) return;
+        if (mesh.material && 'alpha' in mesh.material){
+          mesh.material.alpha = a;
+        } else {
+          mesh.visibility = a;
+        }
+      }
+    }
+  };
+}
+
 async function loadGhost(){
+  currentGhostType = GHOST_TYPES[(Math.random()*GHOST_TYPES.length)|0];
   try{
     const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
     const pick = list[(Math.random()*list.length)|0];
@@ -504,8 +607,26 @@ async function loadGhost(){
       const height = bb.max.y - bb.min.y;
       const scale = (1.9 / (height || 1));
       g.scaling = new BABYLON.Vector3(scale, scale, scale);
-      g.position = new BABYLON.Vector3(43.657, 1.2, -119.008);
-      window.ghost = { mesh:g, hunting:false, stepInterval:0.55, footAudible:18, visible:false };
+      g.position = randomPointInHouse();
+      // Material ensure alpha channel
+      if (!g.material){
+        g.material = new BABYLON.StandardMaterial("ghostMat", scene);
+        g.material.emissiveColor = new BABYLON.Color3(0.6,0.7,1.0);
+      }
+      if (g.material){ g.material.alpha = 0.0; }
+
+      const vis = makeGhostVisibilityController(g);
+      window.ghost = {
+        mesh:g,
+        visible:false,
+        mode:'idle', // 'idle' | 'event' | 'hunt'
+        flicker: vis,
+        stepInterval:0.55,
+        footAudible:18
+      };
+      // Phantom less visible; Oni more solid
+      if (currentGhostType==='Phantom') vis.setSolid(0.45);
+      else if (currentGhostType==='Oni') vis.setSolid(0.95);
       return;
     }
   }catch(e){
@@ -514,23 +635,26 @@ async function loadGhost(){
   // Fallback translucent cube ghost
   const m = BABYLON.MeshBuilder.CreateBox("fallbackGhost",{size:1.2},scene);
   const mat = new BABYLON.StandardMaterial("fgMat", scene);
-  mat.alpha=0.35; mat.emissiveColor=new BABYLON.Color3(0.6,0.6,1);
+  mat.alpha=0.0; // invisible initially
+  mat.emissiveColor=new BABYLON.Color3(0.6,0.6,1);
   m.material=mat; m.isPickable=false;
-  m.position = new BABYLON.Vector3(43.657, 1.2, -119.008);
-  window.ghost = { mesh:m, hunting:false, stepInterval:0.55, footAudible:18, visible:true };
+  m.position = randomPointInHouse();
+  const vis = makeGhostVisibilityController(m);
+  if (currentGhostType==='Phantom') vis.setSolid(0.45);
+  else if (currentGhostType==='Oni') vis.setSolid(0.95);
+  window.ghost = { mesh:m, visible:false, mode:'idle', flicker:vis, stepInterval:0.55, footAudible:18 };
 }
 </script>
 
 <script>
 /* ============================================================
-   BOOT
+   BOOT + MAIN LOOP (includes belt rebuild + ghost state)
    ============================================================ */
 async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
   try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
   scene = new BABYLON.Scene(engine);
   scene.environmentTexture = null;
-  const oldSky = scene.getMeshByName("BackgroundSkybox"); if (oldSky) oldSky.dispose();
   scene.collisionsEnabled = true;
   scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
 
@@ -543,38 +667,62 @@ async function boot(){
   camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
   camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
   camera.minZ = 0.1; camera.inertia = 0;
-  // We'll handle movement ourselves:
   camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  // Lights & palette
+  // Atmosphere
   applyNightPalette();
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
 
+  // Content
   await loadMap().catch(()=>{});
   afterMapLoadedForShadows();
   if (!adoptExistingGltfLights()) buildHouseLights();
   await loadGhost().catch(()=>{});
   await loadMoon().catch(()=>{});
 
-  // UI/input
+  // UI / Input
   InputSystem.init(canvas);
   document.getElementById("hud").style.display="block";
+  rebuildBelt();
 
-  toast("WASD to move • Pointer-Lock look • F=Flash, U=UV, I=IR", 2600);
+  toast("WASD to move • Pointer-Lock look • Inspector button for tools", 2600);
 
-  // Main tick
+  // Simple ghost behavior timers: random events, and hunts (placeholder triggers)
+  let eventTimer = 0, nextEvent = 8 + Math.random()*10;
+  let huntTimer  = 0, nextHunt  = 45 + Math.random()*30;
+
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
 
     const input = InputSystem.snapshot();
+
+    // Movement & look
     handleMovementFromInput(input, dt);
     applyLookFromInput(input.lookDelta);
 
-    // HUD gunk
+    // Item actions
+    for (const a of input.actions){
+      switch(a){
+        case 'use': useActiveItem(); break;
+        case 'place': placeActiveItem(); break;
+        case 'toss': tossActiveItem(); break;
+        case 'openNotebook': toast("Notebook (placeholder)", 800); break;
+        case 'toggleFlash': /* not implemented here */ break;
+        case 'toggleUV':    /* not implemented here */ break;
+        case 'toggleIR':    /* not implemented here */ break;
+        case 'slot1': case 'slot2': case 'slot3': case 'slot4': case 'slot5':
+          selectSlot(parseInt(a.replace('slot',''),10)); break;
+        case 'slotNext': activeItemSlot = activeItemSlot>=5 ? 1 : (activeItemSlot+1); rebuildBelt(); break;
+        case 'slotPrev': activeItemSlot = activeItemSlot<=1 ? 5 : (activeItemSlot-1); rebuildBelt(); break;
+      }
+    }
+
+    // HUD
     document.getElementById('hud-sanity').textContent = `${player.sanity|0}%`;
     if (camera){
-      document.getElementById('hud-xyz').style.display = 'block';
+      const xyz = document.getElementById('hud-xyz');
+      xyz.style.display='block';
       document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
       document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
       document.getElementById('hud-z').textContent = camera.position.z.toFixed(2);
@@ -587,8 +735,52 @@ async function boot(){
       if (weather.rainPS){ weather.rainPS.emitRate = inVanZone(camera.position) ? 0 : 1800; }
     }
 
-    updateGhost(dt);
-    updatePlayerFootsteps(dt);
+    // ---- Ghost behavior ----
+    if (window.ghost && ghost.mesh){
+      // random mild wandering inside bounds
+      if (houseRoot){
+        if (!ghost._wanderDir || Math.random()<0.01){
+          const angle = Math.random()*Math.PI*2;
+          const speed = 0.25; // m/s walk
+          ghost._wanderDir = new BABYLON.Vector3(Math.cos(angle)*speed, 0, Math.sin(angle)*speed);
+        }
+        const pos = ghost.mesh.position;
+        const step = ghost._wanderDir.scale(dt);
+        const bb = houseRoot.getHierarchyBoundingVectors(true);
+        const next = pos.add(step);
+        if (next.x>bb.min.x+1 && next.x<bb.max.x-1 && next.z>bb.min.z+1 && next.z<bb.max.z-1){
+          ghost.mesh.position = next;
+        } else {
+          ghost._wanderDir = null; // pick new
+        }
+      }
+
+      // state timers
+      eventTimer += dt; huntTimer += dt;
+      if (ghost.mode!=='hunt' && eventTimer>nextEvent){
+        ghost.mode = 'event';
+        eventTimer = 0; nextEvent = 10 + Math.random()*12;
+      }
+      if (huntTimer>nextHunt){
+        ghost.mode = 'hunt';
+        huntTimer = 0; nextHunt = 55 + Math.random()*40;
+        document.getElementById('hud-hunt-state').textContent = 'HUNTING';
+      }
+
+      // auto-fallout of states
+      if (ghost.mode==='event'){
+        ghost._eventDur = (ghost._eventDur||0) + dt;
+        if (ghost._eventDur>4.0){ ghost._eventDur=0; ghost.mode='idle'; }
+      } else if (ghost.mode==='hunt'){
+        ghost._huntDur = (ghost._huntDur||0) + dt;
+        if (ghost._huntDur>8.0){ ghost._huntDur=0; ghost.mode='idle'; document.getElementById('hud-hunt-state').textContent='Calm'; }
+      }
+
+      // visibility flicker controller
+      const profile = (currentGhostType==='Phantom')?'Phantom':(currentGhostType==='Oni')?'Oni':'Default';
+      const mode = ghost.mode||'idle';
+      ghost.flicker && ghost.flicker.tick(dt, mode, profile);
+    }
   });
 
   engine.runRenderLoop(()=> scene.render());
@@ -605,11 +797,7 @@ let __started=false, __starting=false;
 async function safeStart(){
   if(__started || __starting) return;
   __starting = true;
-
-  if(!window.BABYLON || !BABYLON.Engine){
-    toast("Engine not ready. Check Babylon includes.", 2200);
-    __starting = false; return;
-  }
+  if(!window.BABYLON || !BABYLON.Engine){ toast("Engine not ready. Check Babylon includes.", 2200); __starting=false; return; }
 
   const screen = document.getElementById('title-screen');
   const btn    = document.getElementById('start-button');
