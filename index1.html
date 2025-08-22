@@ -2,10 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Fixed Input + Audio</title>
+  <title>PhasmaPhoney — Fixed Input + Audio + Moon</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-  <meta name="author" content="Shark-Blades" />
-  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
 
   <!-- Babylon core + loaders (LOCAL) -->
   <script src="./cdn/babylon.js"></script>
@@ -16,10 +14,9 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
 
   <style>
-    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
-    /* give body a default touch-action none to avoid browser gestures interfering */
-    html, body { touch-action:none; }
+    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
     #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
+
     /* Title */
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
       display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
@@ -28,30 +25,34 @@
     #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
     #start-button:active{ transform:translateY(1px); }
 
-    /* HUD (right) XYZ */
-    #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
+    /* HUD XYZ */
+    #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066;
+      padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
 
     /* Belt */
-    #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center;
+    #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%);
+      display:flex; gap:12px; z-index:6000; align-items:center;
       background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
-    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa;
-      background:rgba(0,20,20,0.6); position:relative; cursor:pointer; user-select:none; }
+    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center;
+      border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6);
+      position:relative; cursor:pointer; user-select:none; }
     .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
     .slot .label{ font-size:12px; color:#adf; text-align:center; line-height:1.1; padding:4px; }
     .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
 
-    /* Buttons on right */
+    /* Buttons */
     .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
     #action-bar { position:fixed; right:12px; bottom:18px; display:flex; gap:10px; z-index:6500; }
 
-    /* Touch halves — full width split; lowered 20vh, leave 12vh for belt; ensure they capture touches */
+    /* Touch halves — 20vh from top to 12vh above bottom, split 50/50 */
     .touch-half { position:fixed; top:20vh; bottom:12vh; width:50vw; z-index:7000; touch-action:none; }
     #touch-left { left:0; }
     #touch-right{ right:0; }
 
     /* Toast */
-    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066;
-      border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%);
+      background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff;
+      z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
 </head>
 <body>
@@ -63,7 +64,6 @@
     </div>
   </div>
 
-  <!-- tabindex needed so canvas can take keyboard focus -->
   <canvas id="renderCanvas" tabindex="0"></canvas>
 
   <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
@@ -85,43 +85,32 @@
 <script>
 const canvas = document.getElementById('renderCanvas');
 let engine, scene, camera;
-let ambientSound=null;
 
-function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
+/* Toast */
+function toast(msg, ms=1500){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.style.display='block';
+  setTimeout(()=>t.style.display='none', ms);
+}
 
-/* ---------------- Audio unlock + ambient ---------------- */
-// --- Ambient Audio (looping, mobile-safe unlock) ---
+/* ---------------- Ambient Audio ---------------- */
 const AudioSys = {
   ambient: null,
   ensure(scene){
-    if (this.ambient) return this.ambient;
-    // create but don't autoplay (mobile restrictions)
-    this.ambient = new BABYLON.Sound(
-      "ambient",
-      "./assets/audio/ambient.mp3",
-      scene,
-      null,
-      { loop: true, autoplay: false, volume: 0.35 }
-    );
-    // auto-resume if tab regains focus
+    if(this.ambient) return this.ambient;
+    this.ambient = new BABYLON.Sound("ambient","./assets/audio/ambient.mp3",scene,null,
+      { loop:true, autoplay:false, volume:0.35 });
     document.addEventListener("visibilitychange", ()=>{
-      if (!document.hidden && this.ambient && !this.ambient.isPlaying) {
-        try { this.ambient.play(); } catch {}
+      if(!document.hidden && this.ambient && !this.ambient.isPlaying){
+        try{ this.ambient.play(); }catch{}
       }
     });
     return this.ambient;
   },
-  play(){
-    try {
-      // iOS/Safari unlock on user gesture
-      BABYLON.Engine.audioEngine?.unlock?.();
-      this.ambient?.play();
-    } catch {}
-  },
-  stop(){ try { this.ambient?.stop(); } catch {} }
+  play(){ try{ BABYLON.Engine.audioEngine?.unlock?.(); this.ambient?.play(); }catch{} }
 };
 
-/* ---------------- Inventory (belt) ---------------- */
+/* ---------------- Belt ---------------- */
 const INVENTORY=[{id:"flash",name:"Flashlight"},{id:"uv",name:"UV Light"},{id:"emf",name:"EMF Reader"},{id:"salt",name:"Salt"},{id:"camera",name:"Photo Camera"}];
 let activeItemSlot=1;
 function rebuildBelt(){
@@ -136,16 +125,15 @@ function rebuildBelt(){
   });
 }
 
-/* ---------------- Input System (WASD + pointer lock + multi-touch) ---------------- */
-const InputSystem = (()=>{
-  let move={x:0,z:0}, running=false, lookDelta={x:0,y:0}, actionsQueue=[];
+/* ---------------- Input System ---------------- */
+const InputSystem=(()=>{
+  let move={x:0,z:0},running=false,lookDelta={x:0,y:0};
   let pointerLocked=false;
   const keys=new Set();
   const keyMap={
-    'KeyW':'fw','ArrowUp':'fw','KeyS':'bk','ArrowDown':'bk',
-    'KeyA':'lt','ArrowLeft':'lt','KeyD':'rt','ArrowRight':'rt',
-    'ShiftLeft':'run','ShiftRight':'run',
-    'Digit1':'slot1','Digit2':'slot2','Digit3':'slot3','Digit4':'slot4','Digit5':'slot5'
+    'KeyW':'fw','KeyS':'bk','KeyA':'lt','KeyD':'rt',
+    'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
+    'ShiftLeft':'run','ShiftRight':'run'
   };
   function recomputeMove(){
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
@@ -154,214 +142,99 @@ const InputSystem = (()=>{
   }
   function onKey(e,down){
     const tag=keyMap[e.code];
-    if(tag){
-      // prevent page scroll on arrows/space etc.
-      e.preventDefault();
-      if(down) keys.add(tag); else keys.delete(tag);
-      recomputeMove();
-    }
-  }
-  function tryPointerLock(){
-    try{
-      if(document.pointerLockElement!==canvas){
-        canvas.requestPointerLock?.();
-      }
-    }catch{}
+    if(tag){ e.preventDefault(); if(down) keys.add(tag); else keys.delete(tag); recomputeMove(); }
   }
   function bindPointerLock(){
-    // Acquire on start + any click in the window
-    document.addEventListener('click', ()=>tryPointerLock(), {capture:true});
+    document.addEventListener('click', ()=>canvas.requestPointerLock?.(), {capture:true});
     document.addEventListener('pointerlockchange', ()=>{ pointerLocked=(document.pointerLockElement===canvas); });
-    document.addEventListener('mousemove', (e)=>{
-      if(!pointerLocked) return;
-      lookDelta.x += e.movementX||0;
-      lookDelta.y += e.movementY||0;
-    });
+    document.addEventListener('mousemove', e=>{ if(pointerLocked){ lookDelta.x+=e.movementX||0; lookDelta.y+=e.movementY||0; }});
   }
   function bindTouchHalves(){
-    const left=document.getElementById('touch-left');
-    const right=document.getElementById('touch-right');
+    const left=document.getElementById('touch-left'), right=document.getElementById('touch-right');
     let leftId=null,leftCenter=null,rightId=null,lastRight=null;
-    const DEAD=14, MAX=110;
+    const DEAD=14,MAX=110;
     function norm(v){ return Math.abs(v)<DEAD?0:v; }
-    function clamp(v, m){ return Math.max(-m, Math.min(m, v)); }
-
-    left.addEventListener('touchstart', e=>{
-      for(const t of e.changedTouches){ if(leftId===null){ leftId=t.identifier; leftCenter={x:t.clientX, y:t.clientY}; break; } }
-      e.preventDefault();
-    }, {passive:false});
-    right.addEventListener('touchstart', e=>{
-      for(const t of e.changedTouches){ if(rightId===null){ rightId=t.identifier; lastRight={x:t.clientX, y:t.clientY}; break; } }
-      e.preventDefault();
-    }, {passive:false});
-    window.addEventListener('touchmove', e=>{
+    function clamp(v,m){ return Math.max(-m,Math.min(m,v)); }
+    left.addEventListener('touchstart',e=>{for(const t of e.changedTouches){if(leftId===null){leftId=t.identifier;leftCenter={x:t.clientX,y:t.clientY};break;}} e.preventDefault();},{passive:false});
+    right.addEventListener('touchstart',e=>{for(const t of e.changedTouches){if(rightId===null){rightId=t.identifier;lastRight={x:t.clientX,y:t.clientY};break;}} e.preventDefault();},{passive:false});
+    window.addEventListener('touchmove',e=>{
       for(const t of e.changedTouches){
-        if(t.identifier===leftId && leftCenter){
-          const dx=clamp(t.clientX-leftCenter.x, MAX), dy=clamp(t.clientY-leftCenter.y, MAX);
-          const nx=norm(dx)/MAX, ny=norm(dy)/MAX;
-          move.x = Math.sign(nx);
-          move.z = ny<0 ? 1 : (ny>0 ? -1 : 0);
-          e.preventDefault();
-        } else if(t.identifier===rightId){
-          if(lastRight){
-            lookDelta.x += (t.clientX-lastRight.x);
-            lookDelta.y += (t.clientY-lastRight.y);
-          }
-          lastRight={x:t.clientX, y:t.clientY};
-          e.preventDefault();
+        if(t.identifier===leftId&&leftCenter){
+          const dx=clamp(t.clientX-leftCenter.x,MAX),dy=clamp(t.clientY-leftCenter.y,MAX);
+          move.x=Math.sign(norm(dx)); move.z=dy<0?1:(dy>0?-1:0); e.preventDefault();
+        }else if(t.identifier===rightId){
+          if(lastRight){ lookDelta.x+=(t.clientX-lastRight.x); lookDelta.y+=(t.clientY-lastRight.y); }
+          lastRight={x:t.clientX,y:t.clientY}; e.preventDefault();
         }
       }
-    }, {passive:false});
-    window.addEventListener('touchend', e=>{
+    },{passive:false});
+    window.addEventListener('touchend',e=>{
       for(const t of e.changedTouches){
         if(t.identifier===leftId){ leftId=null; leftCenter=null; move.x=0; move.z=0; }
         if(t.identifier===rightId){ rightId=null; lastRight=null; }
-      }
-      e.preventDefault();
-    }, {passive:false});
+      } e.preventDefault();
+    },{passive:false});
   }
   return {
-    init(){
-      document.addEventListener('keydown', e=>onKey(e,true), {passive:false});
-      document.addEventListener('keyup',   e=>onKey(e,false), {passive:false});
-      bindPointerLock();
-      bindTouchHalves();
-    },
-    snapshot(){
-      const out={ moveVec:{x:move.x,z:move.z}, running, lookDelta:{x:lookDelta.x,y:lookDelta.y}, actions:actionsQueue.splice(0)};
-      lookDelta.x=0; lookDelta.y=0; return out;
-    }
+    init(){ document.addEventListener('keydown',e=>onKey(e,true),{passive:false}); document.addEventListener('keyup',e=>onKey(e,false),{passive:false}); bindPointerLock(); bindTouchHalves(); },
+    snapshot(){ const out={moveVec:{x:move.x,z:move.z},running,lookDelta:{x:lookDelta.x,y:lookDelta.y}}; lookDelta.x=0;lookDelta.y=0; return out;}
   };
 })();
 
 /* ---------------- Movement & Look ---------------- */
-function handleMovementFromInput(input, dt){
+function handleMovementFromInput(input,dt){
   if(!camera) return;
-  const speedWalk=0.9, speedRun=1.8;
-  const speed=input.running?speedRun:speedWalk;
+  const speed=input.running?1.8:0.9;
   const fwd=camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
-  const right=BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+  const right=BABYLON.Vector3.Cross(fwd,BABYLON.Axis.Y).scale(-1);
   const desired=fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
-  if(desired.lengthSquared()>0){ const v=desired.normalize().scale(speed*dt*60*0.0167); camera.cameraDirection=v; } else { camera.cameraDirection=BABYLON.Vector3.Zero(); }
+  if(desired.lengthSquared()>0){ camera.cameraDirection=desired.normalize().scale(speed*dt*60*0.0167);} else camera.cameraDirection=BABYLON.Vector3.Zero();
 }
 function applyLookFromInput(lookDelta){
   if(!camera) return;
   const sens=0.0026;
-  camera.rotation.y += lookDelta.x * sens;
-  const invertY = 1;
-  const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
-  const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
-  camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
+  camera.rotation.y+=lookDelta.x*sens;
+  const invertY=-1; // FIX: up = up
+  const pitch=(camera.rotation.x||0)+(invertY*lookDelta.y*sens*0.85);
+  camera.rotation.x=Math.min(Math.PI/2-0.15,Math.max(-Math.PI/2+0.15,pitch));
 }
 
-/* ---------------- Loaders (map + moon minimal) ---------------- */
-let houseRoot=null;
-async function loadMap(){
-  try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
-    houseRoot = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-    r.meshes.forEach(m=>{ m.checkCollisions=true; m.isPickable=true; m.receiveShadows=true; });
-  }catch(e){
-    const g=BABYLON.MeshBuilder.CreateGround("g",{width:200,height:200},scene); g.checkCollisions=true;
-  }
-}
-<script>
-async function loadMoon(){
-  try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
-    const moon = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
-    if (moon){
-      moon.name = "MoonMesh";
-      moon.isPickable = false;
-      moon.applyFog = false;
-      // draw on top of skybox
-      moon.renderingGroupId = 1;
-      // bright, unlit
-      const mat = moon.material || new BABYLON.StandardMaterial("moonMat", scene);
-      mat.disableLighting = true;
-      mat.emissiveColor = new BABYLON.Color3(1,1,1);
-      moon.material = mat;
+/* ---------------- Loaders ---------------- */
+async function loadMap(){ try{ const r=await BABYLON.SceneLoader.ImportMeshAsync("","./assets/models/map/","Abandoned_House.glb",scene); r.meshes.forEach(m=>{m.checkCollisions=true;m.isPickable=true;m.receiveShadows=true;}); }catch(e){ BABYLON.MeshBuilder.CreateGround("g",{width:200,height:200},scene).checkCollisions=true; } }
+async function loadMoon(){ try{ const r=await BABYLON.SceneLoader.ImportMeshAsync("","./assets/models/sky/","moon.glb",scene); const moon=r.meshes.find(m=>m.name&&m.name!=="__root__")||r.meshes[0]; if(moon){ moon.name="MoonMesh"; moon.isPickable=false; moon.applyFog=false; moon.renderingGroupId=1; const mat=moon.material||new BABYLON.StandardMaterial("moonMat",scene); mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(1,1,1); moon.material=mat; moon.position.copyFromFloats(0,350,380); scene.onBeforeRenderObservable.add(()=>{const t=performance.now()*0.00002; moon.position.x=Math.cos(t)*380; moon.position.z=Math.sin(t)*380; moon.position.y=340+Math.sin(t*1.7)*10;}); } }catch(e){console.warn("Moon load failed",e);} }
 
-      // put it in front of the skybox and gently animate it
-      moon.position.copyFromFloats(0, 350, 380);
-      scene.onBeforeRenderObservable.add(()=>{
-        const t = performance.now()*0.00002;
-        moon.position.x = Math.cos(t)*380;
-        moon.position.z = Math.sin(t)*380;
-        moon.position.y = 340 + Math.sin(t*1.7)*10;
-      });
-    }
-  }catch(e){ console.warn("Moon load failed:", e); }
-}
-</script>
-/* ---------------- Boot & Start ---------------- */
+/* ---------------- Boot ---------------- */
 async function boot(){
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
-  scene  = new BABYLON.Scene(engine);
-  scene.gravity = new BABYLON.Vector3(0,-0.5,0);
-  scene.collisionsEnabled=true;
+  engine=new BABYLON.Engine(canvas,true);
+  scene=new BABYLON.Scene(engine);
+  scene.gravity=new BABYLON.Vector3(0,-0.5,0); scene.collisionsEnabled=true;
+  camera=new BABYLON.UniversalCamera("playerCam",new BABYLON.Vector3(46.16,2,-105.52),scene);
+  camera.attachControl(canvas,true); camera.applyGravity=true; camera.checkCollisions=true;
+  camera.ellipsoid=new BABYLON.Vector3(0.35,0.9,0.35); camera.ellipsoidOffset=new BABYLON.Vector3(0,0.4,0); camera.minZ=0.1; camera.inertia=0; camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,2,0), scene);
-  camera.attachControl(canvas, true);
-  camera.applyGravity=true; camera.checkCollisions=true;
-  camera.ellipsoid=new BABYLON.Vector3(0.35,0.9,0.35); camera.ellipsoidOffset=new BABYLON.Vector3(0,0.4,0);
-  camera.minZ=0.1; camera.inertia=0; camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
-
-  // Atmosphere
   scene.clearColor=new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.fogMode=BABYLON.Scene.FOGMODE_EXP2; scene.fogDensity=0.0045; scene.fogColor=new BABYLON.Color3(0.02,0.03,0.05);
-  new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene).intensity=0.06;
+  new BABYLON.HemisphericLight("hemi",new BABYLON.Vector3(0,1,0),scene).intensity=0.06;
 
   await loadMap();
   await loadMoon();
-await boot();                // already there
-AudioSys.play();             // <-- add this right after boot resolves
-  spawnAtXZ(46.16, -105.52);
 
-  // inputs
-  InputSystem.init();
-  // focus canvas for WASD immediately
-  setTimeout(()=>{ canvas.focus(); }, 0);
+  InputSystem.init(); canvas.focus();
+  AudioSys.ensure(scene); AudioSys.play();
 
-  // audio
-  AudioSys.ensure(scene); 
-
-  // UI
   rebuildBelt();
 
-  scene.onBeforeRenderObservable.add(()=>{
-    const dt=engine.getDeltaTime()/1000;
-    const input=InputSystem.snapshot();
-    handleMovementFromInput(input, dt);
-    applyLookFromInput(input.lookDelta);
-    // HUD XYZ
-    const xyz=document.getElementById('hud-xyz'); xyz.style.display='block';
-    document.getElementById('hud-x').textContent=camera.position.x.toFixed(2);
-    document.getElementById('hud-y').textContent=camera.position.y.toFixed(2);
-    document.getElementById('hud-z').textContent=camera.position.z.toFixed(2);
-  });
+  scene.onBeforeRenderObservable.add(()=>{ const dt=engine.getDeltaTime()/1000; const input=InputSystem.snapshot(); handleMovementFromInput(input,dt); applyLookFromInput(input.lookDelta); const xyz=document.getElementById('hud-xyz'); xyz.style.display='block'; document.getElementById('hud-x').textContent=camera.position.x.toFixed(2); document.getElementById('hud-y').textContent=camera.position.y.toFixed(2); document.getElementById('hud-z').textContent=camera.position.z.toFixed(2); });
+
   engine.runRenderLoop(()=>scene.render());
-  window.addEventListener('resize', ()=>engine.resize());
+  window.addEventListener('resize',()=>engine.resize());
 }
 
+/* ---------------- Start ---------------- */
 let __started=false;
-async function safeStart(){
-  if(__started) return;
-  __started=true;
-  document.getElementById('title-screen').style.display='none';
-  // ensure gesture occurs before audio start/pointerlock
-  await boot();
-  // request pointer lock and start audio after boot
-  try{
-    canvas.focus();
-    canvas.click(); // helps Mobile Safari route a gesture to canvas
-  }catch{}
-  startAudioFromGesture();
-}
-
-document.getElementById('start-button').addEventListener('click', ()=>safeStart());
-// Also allow keyboard Enter on title
-document.addEventListener('keydown', (e)=>{ if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(); } });
+async function safeStart(){ if(__started) return; __started=true; document.getElementById('title-screen').style.display='none'; await boot(); }
+document.getElementById('start-button').addEventListener('click',()=>safeStart());
+document.addEventListener('keydown',e=>{if(!__started&&(e.key==='Enter'||e.code==='Space')){e.preventDefault();safeStart();}});
 </script>
 </body>
 </html>
