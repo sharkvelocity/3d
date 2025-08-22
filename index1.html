@@ -695,115 +695,242 @@ async function loadMoon(){
 </script>
 
 <script>
+<script>
 /*** ==========================================================
-    MAP LOADING + GLB VIEWER + MARKER TOOL
+    MARKER TOOL (left-click add, right-click remove, auto-link,
+    close polygon by clicking near first point; save/clear)
     ========================================================== ***/
-async function loadMap(){
-  // NOTE: your Abandoned_House.glb; marks meshes pickable/collidable
-  try{
-    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
-    houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
-    res.meshes.forEach(m=>{ m.checkCollisions=true; m.isPickable=true; m.receiveShadows=true; });
-  }catch(e){
-    console.warn('Map load failed; building ground fallback', e);
-    const g=BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true;
-  }
-} // NOTE: loads main map
-
-// --- GLB viewer: pick/drag files into scene ---
-document.getElementById('file-input').addEventListener('change', async (e)=>{
-  const f=e.target.files?.[0]; if(!f) return;
-  try{
-    const blobUrl = URL.createObjectURL(f);
-    await BABYLON.SceneLoader.AppendAsync("", blobUrl, scene); // NOTE: append to current scene
-    toast('Imported '+f.name, 1600);
-  }catch(err){ console.error(err); toast('Import failed'); }
-}); // NOTE: quick GLB loader append
-
-// Drag-drop import
-window.addEventListener('dragover', e=>{ e.preventDefault(); });
-window.addEventListener('drop', async (e)=>{
-  e.preventDefault();
-  if(!e.dataTransfer?.files?.length) return;
-  const f=e.dataTransfer.files[0];
-  try{
-    const url=URL.createObjectURL(f);
-    await BABYLON.SceneLoader.AppendAsync("", url, scene);
-    toast('Imported '+f.name, 1600);
-  }catch(err){ console.error(err); toast('Import failed'); }
-}); // NOTE: drop files to import
-
-// --- Marker Tool (polygon with fill & save JSON) ---
 const MarkerTool = (()=>{
-  let enabled=false, interior=true, points=[]; // NOTE: interior/exterior fill choice
-  let mesh=null, mat=null;
+  // ---- State ----
+  let enabled = false;         // NOTE: tool on/off
+  let interior = true;         // NOTE: fill color mode
+  let closed = false;          // NOTE: whether polygon is closed
+  const points = [];           // NOTE: {x,y,z} objects in world space
+  let lineMesh = null;         // NOTE: BABYLON.Lines mesh connecting points
+  let fillMesh = null;         // NOTE: polygon fill mesh (when closed)
+  const dotMeshes = [];        // NOTE: small spheres for visualizing vertices
 
-  function toggle(){ enabled=!enabled; toast('Markers '+(enabled?'enabled':'disabled')); }
-  function toggleFill(){ interior=!interior; document.getElementById('btn-marker-fill').textContent = 'Fill: ' + (interior?'Interior':'Exterior'); redraw(); }
-  function clear(){ points.length=0; redraw(); }
+  // ---- Config ----
+  const SCREEN_PICK_RADIUS_ADD   = 14; // px — click near first to close
+  const SCREEN_PICK_RADIUS_REMOVE= 16; // px — right-click remove nearest
+  const DOT_SIZE = 0.075;
 
-  function redraw(){
-    if(mesh){ mesh.dispose(); mesh=null; }
-    if(points.length<3) return;
-    const shape = points.map(p=> new BABYLON.Vector3(p.x, p.y, p.z));
-    // Triangulate in XZ plane
-    const path2D = points.map(p=> new BABYLON.Vector2(p.x, p.z));
-    const tri = BABYLON.PolygonMeshBuilder.BuildFromPoints("poly", path2D, scene);
-    mesh = tri || BABYLON.MeshBuilder.CreatePolygon("poly",{shape: path2D, depth:0.02}, scene);
-    if(!mat){
-      mat = new BABYLON.StandardMaterial("polyMat", scene);
-      mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
-      mat.alpha = 0.35;
-    }else{
-      mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
+  // ---- Utilities ----
+  function toVec3(p){ return new BABYLON.Vector3(p.x, p.y, p.z); } // NOTE: helper
+
+  function projectToScreen(vec3){
+    // NOTE: project a world position to screen coordinates (pixels)
+    const p = BABYLON.Vector3.Project(
+      vec3,
+      BABYLON.Matrix.Identity(),
+      scene.getTransformMatrix(),
+      camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight())
+    );
+    return { x: p.x, y: p.y };
+  }
+
+  function screenDist(a, b){
+    const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy);
+  }
+
+  function pickGroundPoint(){
+    // NOTE: raycast into scene using the current pointer
+    const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
+    const hit = scene.pickWithRay(ray, (m)=> m && m.isPickable!==false);
+    return hit?.pickedPoint ? hit.pickedPoint.clone() : null;
+  }
+
+  function rebuildDots(){
+    // Dispose old
+    while(dotMeshes.length){ dotMeshes.pop().dispose(); }
+    // Rebuild spheres at each point
+    for(const p of points){
+      const s = BABYLON.MeshBuilder.CreateSphere("mkDot", {diameter: DOT_SIZE}, scene);
+      s.position.copyFromFloats(p.x, p.y + 0.01, p.z);
+      const mat = new BABYLON.StandardMaterial("mkDotMat", scene);
+      mat.emissiveColor = new BABYLON.Color3(0.2, 1.0, 1.0);
+      mat.disableLighting = true;
+      mat.alpha = 0.95;
+      s.material = mat;
+      s.isPickable = false;
+      dotMeshes.push(s);
     }
-    mesh.material = mat;
-    // lift slightly
-    const y = shape[0].y + 0.05;
-    mesh.position.y = y;
+  }
+
+  function rebuildLines(){
+    // Dispose old line if needed
+    if (lineMesh) lineMesh.dispose(), lineMesh=null;
+
+    if (points.length < 2){
+      return; // nothing to draw
+    }
+
+    // Build array of Vector3 positions; if closed, add first at end
+    const positions = points.map(toVec3);
+    if (closed) positions.push(toVec3(points[0]));
+
+    lineMesh = BABYLON.MeshBuilder.CreateLines("mkLines", {
+      points: positions,
+      updatable: false
+    }, scene);
+    lineMesh.color = new BABYLON.Color3(0.0, 0.9, 0.9);
+    lineMesh.alpha = 0.95;
+    lineMesh.isPickable = false;
+  }
+
+  function rebuildFill(){
+    // Remove previous fill
+    if (fillMesh){ fillMesh.dispose(); fillMesh=null; }
+
+    if (!closed || points.length < 3) return;
+
+    // Build polygon in XZ plane
+    const shape2D = points.map(p => new BABYLON.Vector2(p.x, p.z));
+    // Try polygon builder; if earcut is loaded, this triangulates a filled mesh
+    try{
+      const builder = new BABYLON.PolygonMeshBuilder("mkPoly", shape2D, scene);
+      fillMesh = builder.build(false, 0.02);
+    }catch(e){
+      // Fallback: simple CreatePolygon (requires earcut in newer versions too)
+      fillMesh = BABYLON.MeshBuilder.CreatePolygon("mkPoly", { shape: shape2D, depth: 0.02 }, scene);
+    }
+
+    // Material
+    const mat = new BABYLON.StandardMaterial("mkPolyMat", scene);
+    mat.diffuseColor = interior ? new BABYLON.Color3(0, 0.35, 0.35) : new BABYLON.Color3(0.35, 0, 0.35);
+    mat.emissiveColor = new BABYLON.Color3(0, 0.1, 0.1);
+    mat.alpha = 0.35;
+    mat.backFaceCulling = false;
+    fillMesh.material = mat;
+    fillMesh.isPickable = false;
+
+    // Set Y to sit just above ground (use first point’s Y)
+    fillMesh.position.y = points[0].y + 0.02;
+  }
+
+  function redrawAll(){
+    rebuildDots();
+    rebuildLines();
+    rebuildFill();
+  }
+
+  function tryClosePolygonWith(p){
+    // Only close if we have ≥3 points and current click is near first point
+    if (points.length < 3) return false;
+    const first = points[0];
+    const scrFirst = projectToScreen(toVec3(first));
+    const scrNow   = projectToScreen(p);
+    if (screenDist(scrFirst, scrNow) <= SCREEN_PICK_RADIUS_ADD){
+      closed = true;
+      redrawAll();
+      return true;
+    }
+    return false;
+  }
+
+  function addPointAt(pickedPoint){
+    // If closed already, starting a new point should reopen the polygon
+    if (closed){
+      closed = false;
+      if (fillMesh){ fillMesh.dispose(); fillMesh=null; }
+    }
+    points.push({ x:pickedPoint.x, y:pickedPoint.y, z:pickedPoint.z });
+    redrawAll();
+  }
+
+  function removeNearestAtPointer(){
+    if (!points.length) return;
+    // Compute screen position of each point and remove the closest within threshold
+    const cursor = { x: scene.pointerX, y: scene.pointerY };
+    let bestIdx = -1, bestDist = Number.POSITIVE_INFINITY;
+    for (let i=0;i<points.length;i++){
+      const scr = projectToScreen(toVec3(points[i]));
+      const d = screenDist(scr, cursor);
+      if (d < bestDist){ bestDist = d; bestIdx = i; }
+    }
+    if (bestIdx !== -1 && bestDist <= SCREEN_PICK_RADIUS_REMOVE){
+      points.splice(bestIdx, 1);
+      // Removing any vertex breaks closure
+      if (closed){ closed = false; if (fillMesh){ fillMesh.dispose(); fillMesh=null; } }
+      redrawAll();
+    }
+  }
+
+  // ---- Public API ----
+  function toggle(){
+    enabled = !enabled;
+    toast('Markers ' + (enabled ? 'enabled' : 'disabled'));
+  }
+
+  function toggleFill(){
+    interior = !interior;
+    // reflect on button label
+    const btn = document.getElementById('btn-marker-fill');
+    if (btn) btn.textContent = 'Fill: ' + (interior ? 'Interior' : 'Exterior');
+    if (fillMesh && fillMesh.material){
+      const m = fillMesh.material;
+      m.diffuseColor = interior ? new BABYLON.Color3(0, 0.35, 0.35) : new BABYLON.Color3(0.35, 0, 0.35);
+    }
+  }
+
+  function clear(){
+    points.length = 0;
+    closed = false;
+    if (lineMesh){ lineMesh.dispose(); lineMesh=null; }
+    if (fillMesh){ fillMesh.dispose(); fillMesh=null; }
+    while(dotMeshes.length){ dotMeshes.pop().dispose(); }
   }
 
   function save(){
-    const data = { interior, points: points.map(p=>({x:p.x,y:p.y,z:p.z})) };
-    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+    const data = { interior, closed, points: points.map(p=>({x:p.x,y:p.y,z:p.z})) };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'markers.json';
     a.click();
   }
 
-  function pickPoint(){
-    const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
-    const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
-    if(hit?.pickedPoint){
-      const p = hit.pickedPoint.clone();
-      points.push({x:p.x, y:p.y, z:p.z});
-      redraw();
-    }
-  }
+  // ---- Pointer wiring ----
+  scene.onPointerObservable.add((pi)=>{
+    if (!enabled) return;
 
-  // click to add point
-  scene?.onPointerObservable?.add((pi)=>{
-    if(!enabled) return;
-    if(pi.type===BABYLON.PointerEventTypes.POINTERDOWN){
-      pickPoint();
+    // We only care about pointerdown events
+    if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+
+    const evt = pi.event;
+    const isLeft  = (evt.button === 0);
+    const isRight = (evt.button === 2);
+
+    if (isLeft){
+      const p = pickGroundPoint();
+      if (!p) return;
+
+      // If we can close, do it; otherwise add a new point
+      if (!closed && tryClosePolygonWith(p)){
+        toast('Polygon closed');
+      } else {
+        addPointAt(p);
+      }
+    } else if (isRight){
+      removeNearestAtPointer();
     }
   });
 
-  return { toggle, toggleFill, save, clear };
-})(); // NOTE: polygon marker with save
+  return { toggle, toggleFill, save, clear, get enabled(){ return enabled; } };
+})();
 
-// Toolbar wiring
-document.getElementById('btn-marker').onclick=()=>MarkerTool.toggle();
-document.getElementById('btn-marker-fill').onclick=()=>MarkerTool.toggleFill();
-document.getElementById('btn-marker-save').onclick=()=>MarkerTool.save();
+// Toolbar wiring (unchanged)
+document.getElementById('btn-marker').onclick     = ()=>MarkerTool.toggle();
+document.getElementById('btn-marker-fill').onclick= ()=>MarkerTool.toggleFill();
+document.getElementById('btn-marker-save').onclick= ()=>MarkerTool.save();
 document.getElementById('btn-marker-clear').onclick=()=>MarkerTool.clear();
 
-// Reload map shortcut
-document.getElementById('btn-load-map').onclick=async ()=>{ await loadMap(); toast('Map reloaded'); };
+// Prevent context menu while marker tool is active (so right-click works)
+window.addEventListener('contextmenu', (e)=>{
+  if (MarkerTool.enabled) { e.preventDefault(); }
+}, { capture:true });
 </script>
 
-<script>
 /*** ==========================================================
     GHOST SYSTEM (spawn, flicker, wander, hunt)
     ========================================================== ***/
