@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PhasmaPhoney — Spawn+TouchPatch</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <meta name="author" content="Shark-Blades" />
+  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
+
+  <!-- Babylon core + loaders (LOCAL) -->
+  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/earcut.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js"></script>
+  <script src="./cdn/draco_decoder_gltf.js"></script>
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+
+  <style>
+    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
+    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
+
+    /* Title screen */
+    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
+      display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
+    #title-content{ text-align:center; max-width:90vw;}
+    #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
+    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
+    #start-button:active{ transform:translateY(1px); }
+
+    /* HUD (left) */
+    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066;
+      padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
+    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    #hud .label{ color:#9ff; }
+    #hud .value{ color:#0ff; font-weight:bold; }
+    #weather{ font-size:12px; color:#aff; opacity:0.9; }
+    #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
+
+    /* HUD (right) XYZ */
+    #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
+
+    /* Toast */
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066;
+      border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+    /* Action bar pinned to RIGHT per request */
+    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
+    .hud-btn:active{ transform:translateY(1px); }
+    #action-bar { position:fixed; right:12px; bottom:18px; display:flex; gap:10px; z-index:6500; }
+    #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center;
+      background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa;
+      background:rgba(0,20,20,0.6); position:relative; cursor:pointer; user-select:none; }
+    .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
+    .slot .label{ font-size:12px; color:#adf; text-align:center; line-height:1.1; padding:4px; }
+    .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+
+    /* Touch halves overlay — full width split, lowered from top and above belt */
+    .touch-half { position:fixed; top:12vh; bottom:14vh; width:50vw; z-index:5000; }
+    #touch-left { left:0; }
+    #touch-right{ right:0; }
+
+    /* Flash overlay */
+    #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
+  </style>
+</head>
+<body>
+  <div id="title-screen">
+    <div id="title-content">
+      <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
+      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <button id="start-button">Start Investigation</button>
+    </div>
+  </div>
+
+  <canvas id="renderCanvas"></canvas>
+
+  <div id="hud">
+    <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
+    <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
+    <div id="weather">Weather: <span id="hud-weather">Clear</span></div>
+    <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
+  </div>
+
+  <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
+
+  <div id="action-bar">
+    <button id="btn-use" class="hud-btn">Use</button>
+    <button id="btn-place" class="hud-btn">Place</button>
+    <button id="btn-toss" class="hud-btn">Toss</button>
+    <button id="btn-slot-prev" class="hud-btn">◀</button>
+    <button id="btn-slot-next" class="hud-btn">▶</button>
+    <button id="btn-notebook" class="hud-btn">Notebook</button>
+    <button id="btn-inspector" class="hud-btn">Inspector</button>
+  </div>
+
+  <div id="belt"></div>
+
+  <div id="touch-left"  class="touch-half"></div>
+  <div id="touch-right" class="touch-half"></div>
+
+  <div id="flash-overlay"></div>
+  <div id="toast"></div>
+
+<script>
+// === Globals (minimal needed for the patch demo) ===
+const canvas = document.getElementById('renderCanvas');
+let engine, scene, camera;
+let houseRoot = null;
+let player = { sanity:100, speedWalk:0.9, speedRun:1.8 };
+const weather = { state:'Clear', rainPS:null, snowPS:null, lightningTimer:0, nextStrike:5 };
+function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
+</script>
+
+<script>
+// === Inventory (belt) ===
+const INVENTORY = [
+  { id:'flash',  name:'Flashlight' },
+  { id:'uv',     name:'UV Light'   },
+  { id:'emf',    name:'EMF Reader' },
+  { id:'salt',   name:'Salt'       },
+  { id:'camera', name:'Photo Camera' }
+];
+let activeItemSlot=1;
+function rebuildBelt(){
+  const belt=document.getElementById('belt'); if(!belt) return;
+  belt.innerHTML='';
+  INVENTORY.forEach((it,i)=>{
+    const d=document.createElement('div'); d.className='slot'+(i+1===activeItemSlot?' active':''); d.title=it.name;
+    const k=document.createElement('div'); k.className='key'; k.textContent=(i+1);
+    const l=document.createElement('div'); l.className='label'; l.textContent=it.name;
+    d.appendChild(k); d.appendChild(l);
+    d.onclick=()=>{ activeItemSlot=i+1; rebuildBelt(); };
+    belt.appendChild(d);
+  });
+}
+function selectSlot(n){ if(n>=1 && n<=INVENTORY.length){ activeItemSlot=n; rebuildBelt(); } }
+</script>
+
+<script>
+// === Input System with improved touch regions & multi-touch joystick ===
+const InputSystem = (()=>{
+  let move = {x:0,z:0}, running=false;
+  let lookDelta = {x:0,y:0};
+  let actionsQueue = [];
+  let pointerLocked=false;
+
+  const keys=new Set();
+  const keyMap={
+    'KeyW':'fw','ArrowUp':'fw','KeyS':'bk','ArrowDown':'bk',
+    'KeyA':'lt','ArrowLeft':'lt','KeyD':'rt','ArrowRight':'rt',
+    'ShiftLeft':'run','ShiftRight':'run',
+    'Digit1':'slot1','Digit2':'slot2','Digit3':'slot3','Digit4':'slot4','Digit5':'slot5',
+    'KeyN':'openNotebook','KeyF':'toggleFlash','KeyU':'toggleUV','KeyI':'toggleIR',
+    'KeyQ':'slotPrev','KeyE':'slotNext'
+  };
+  function recomputeMove(){
+    const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
+    const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
+    move.z=f; move.x=r; running=keys.has('run');
+  }
+  function onKey(e,down){
+    const tag=keyMap[e.code];
+    if(tag){ if(down) keys.add(tag); else keys.delete(tag); recomputeMove();
+      if(down && /^slot(Prev|Next|[1-5])|openNotebook|toggle(F|U|IR)$/.test(tag)) actionsQueue.push(tag);
+    }
+  }
+
+  function bindPointerLock(canvas){
+    function pl(){ try{ canvas.requestPointerLock && canvas.requestPointerLock(); }catch{} }
+    canvas.addEventListener('click', pl);
+    document.addEventListener('pointerlockchange', ()=>{ pointerLocked=document.pointerLockElement===canvas; });
+    document.addEventListener('mousemove', (e)=>{ if(!pointerLocked) return; lookDelta.x+=e.movementX||0; lookDelta.y+=e.movementY||0; });
+  }
+
+  function bindTouchHalves(){
+    const left=document.getElementById('touch-left');
+    const right=document.getElementById('touch-right');
+    let leftId=null,rightId=null;
+    let leftCenter=null;
+    let lastRight=null;
+
+    const DEAD=14, MAX=110; // px
+    function norm(v){ return Math.abs(v)<DEAD?0:v; }
+    function clamp(v, m){ return Math.max(-m, Math.min(m, v)); }
+
+    left.addEventListener('touchstart', e=>{
+      e.preventDefault();
+      for(const t of e.changedTouches){ if(leftId===null){ leftId=t.identifier; leftCenter={x:t.clientX,y:t.clientY}; break; } }
+    }, {passive:false});
+    right.addEventListener('touchstart', e=>{
+      e.preventDefault();
+      for(const t of e.changedTouches){ if(rightId===null){ rightId=t.identifier; lastRight={x:t.clientX,y:t.clientY}; break; } }
+    }, {passive:false});
+
+    window.addEventListener('touchmove', e=>{
+      for(const t of e.changedTouches){
+        if(t.identifier===leftId && leftCenter){
+          e.preventDefault();
+          const dx=clamp(t.clientX-leftCenter.x, MAX), dy=clamp(t.clientY-leftCenter.y, MAX);
+          const nx=norm(dx)/MAX, ny=norm(dy)/MAX;
+          move.x = Math.sign(nx);         // strafe
+          move.z = ny<0 ? 1 : (ny>0 ? -1 : 0); // forward/back
+        } else if(t.identifier===rightId){
+          e.preventDefault();
+          if(lastRight){ lookDelta.x += (t.clientX-lastRight.x); lookDelta.y += (t.clientY-lastRight.y); }
+          lastRight={x:t.clientX,y:t.clientY};
+        }
+      }
+    }, {passive:false});
+
+    window.addEventListener('touchend', e=>{
+      for(const t of e.changedTouches){
+        if(t.identifier===leftId){ leftId=null; leftCenter=null; move.x=0; move.z=0; }
+        if(t.identifier===rightId){ rightId=null; lastRight=null; }
+      }
+    }, {passive:false});
+  }
+
+  function bindUIButtons(){
+    const push=a=>actionsQueue.push(a);
+    const byId=id=>document.getElementById(id);
+    [['btn-use','use'],['btn-place','place'],['btn-toss','toss'],
+     ['btn-slot-prev','slotPrev'],['btn-slot-next','slotNext'],
+     ['btn-notebook','openNotebook']].forEach(([id,a])=>{ const el=byId(id); if(el) el.onclick=()=>push(a); });
+    const insp=byId('btn-inspector'); if(insp){ insp.onclick=()=>{ try{ if(!scene) return; if(scene.debugLayer.isVisible()) scene.debugLayer.hide(); else scene.debugLayer.show({overlay:true}); }catch(e){} }; }
+  }
+
+  return {
+    init(canvas){ document.addEventListener('keydown', e=>onKey(e,true)); document.addEventListener('keyup', e=>onKey(e,false)); bindPointerLock(canvas); bindTouchHalves(); bindUIButtons(); },
+    snapshot(){ const out={ moveVec:{x:move.x,z:move.z}, running, lookDelta:{x:lookDelta.x,y:lookDelta.y}, actions:actionsQueue.splice(0)}; lookDelta.x=0; lookDelta.y=0; return out; }
+  };
+})();
+</script>
+
+<script>
+// === Movement & Look ===
+function handleMovementFromInput(input, dt){
+  if(!window.camera||!window.scene) return;
+  const speedWalk=player.speedWalk||0.9, speedRun=player.speedRun||1.8;
+  const speed=input.running?speedRun:speedWalk;
+  const fwd=camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
+  const right=BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+  const desired=fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
+  if(desired.lengthSquared()>0){ const v=desired.normalize().scale(speed*dt*60*0.0167); camera.cameraDirection=v; } else camera.cameraDirection=BABYLON.Vector3.Zero();
+}
+function applyLookFromInput(lookDelta){
+  if(!window.camera) return;
+  const sens=0.0026; // a bit higher = less travel
+  camera.rotation.y += lookDelta.x * sens;
+  const invertY=-1;
+  const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
+  const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
+  camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
+}
+</script>
+
+<script>
+// === Minimal loaders + spawn helper ===
+async function loadMap(){
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
+    houseRoot = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
+    r.meshes.forEach(m=>{ m.checkCollisions=true; m.isPickable=true; m.receiveShadows=true; });
+  }catch(e){ const g=BABYLON.MeshBuilder.CreateGround("g",{width:200,height:200},scene); g.checkCollisions=true; }
+}
+async function loadMoon(){
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
+    const m = r.meshes.find(x=>x.name && x.name!=="__root__")||r.meshes[0];
+    if(m){ m.name="MoonMesh"; m.isPickable=false; m.applyFog=false; m.renderingGroupId=1;
+      const mat = m.material || new BABYLON.StandardMaterial("moonMat",scene); mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(1,1,1); m.material=mat;
+      m.position = new BABYLON.Vector3(0, 350, 380);
+    }
+  }catch(e){}
+}
+function spawnAtXZ(x,z){
+  const startY = 30;
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(x,startY,z), new BABYLON.Vector3(0,-1,0), startY+40);
+  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  const y = hit?.pickedPoint ? hit.pickedPoint.y + 1.7 : 1.7;
+  camera.position.copyFromFloats(x,y,z);
+}
+</script>
+
+<script>
+// === Boot & loop (compact) ===
+async function boot(){
+  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  scene  = new BABYLON.Scene(engine);
+  scene.gravity = new BABYLON.Vector3(0,-0.5,0);
+  scene.collisionsEnabled=true;
+
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,2,0), scene);
+  camera.attachControl(canvas, true);
+  camera.applyGravity=true; camera.checkCollisions=true;
+  camera.ellipsoid=new BABYLON.Vector3(0.35,0.9,0.35); camera.ellipsoidOffset=new BABYLON.Vector3(0,0.4,0);
+  camera.minZ=0.1; camera.inertia=0; camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
+
+  // Atmosphere
+  scene.clearColor=new BABYLON.Color4(0.01,0.01,0.02,1);
+  scene.fogMode=BABYLON.Scene.FOGMODE_EXP2; scene.fogDensity=0.0045; scene.fogColor=new BABYLON.Color3(0.02,0.03,0.05);
+  new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene).intensity=0.06;
+
+  await loadMap();
+  await loadMoon();
+
+  // Spawn at requested location (from your screenshot)
+  spawnAtXZ(46.16, -105.52);
+
+  InputSystem.init(canvas);
+  document.getElementById('hud').style.display='block';
+  rebuildBelt();
+
+  scene.onBeforeRenderObservable.add(()=>{
+    const dt = engine.getDeltaTime()/1000;
+    const input = InputSystem.snapshot();
+    handleMovementFromInput(input, dt);
+    applyLookFromInput(input.lookDelta);
+    const xyzBox=document.getElementById('hud-xyz'); xyzBox.style.display='block';
+    document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
+    document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
+    document.getElementById('hud-z').textContent = camera.position.z.toFixed(2);
+  });
+
+  engine.runRenderLoop(()=>scene.render());
+  window.addEventListener('resize', ()=>engine.resize());
+}
+</script>
+
+<script>
+// === Start button binding (simple) ===
+let __started=false;
+function safeStart(){ if(__started) return; __started=true; document.getElementById('title-screen').style.display='none'; boot().catch(e=>{console.error(e); toast('Boot failed'); __started=false;}); }
+document.getElementById('start-button').addEventListener('click', ()=>safeStart());
+</script>
+</body>
+</html>
