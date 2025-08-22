@@ -90,28 +90,36 @@ let ambientSound=null;
 function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
 
 /* ---------------- Audio unlock + ambient ---------------- */
-function initAudio(){
-  try{
-    // Babylon attaches its own AudioEngine; ensure it's unlocked
-    BABYLON.Engine.audioEngine?.unlock();
-  }catch{}
-  try{
-    ambientSound = new BABYLON.Sound(
+// --- Ambient Audio (looping, mobile-safe unlock) ---
+const AudioSys = {
+  ambient: null,
+  ensure(scene){
+    if (this.ambient) return this.ambient;
+    // create but don't autoplay (mobile restrictions)
+    this.ambient = new BABYLON.Sound(
       "ambient",
       "./assets/audio/ambient.mp3",
       scene,
       null,
-      { loop:true, autoplay:false, volume:0.25 }
+      { loop: true, autoplay: false, volume: 0.35 }
     );
-  }catch(e){ console.warn("Ambient load failed", e); }
-}
-async function startAudioFromGesture(){
-  try{
-    const ctx = BABYLON.Engine.audioEngine?.audioContext;
-    if (ctx && ctx.state !== "running"){ await ctx.resume(); }
-    ambientSound && ambientSound.play();
-  }catch(e){ console.warn("Audio start failed", e); }
-}
+    // auto-resume if tab regains focus
+    document.addEventListener("visibilitychange", ()=>{
+      if (!document.hidden && this.ambient && !this.ambient.isPlaying) {
+        try { this.ambient.play(); } catch {}
+      }
+    });
+    return this.ambient;
+  },
+  play(){
+    try {
+      // iOS/Safari unlock on user gesture
+      BABYLON.Engine.audioEngine?.unlock?.();
+      this.ambient?.play();
+    } catch {}
+  },
+  stop(){ try { this.ambient?.stop(); } catch {} }
+};
 
 /* ---------------- Inventory (belt) ---------------- */
 const INVENTORY=[{id:"flash",name:"Flashlight"},{id:"uv",name:"UV Light"},{id:"emf",name:"EMF Reader"},{id:"salt",name:"Salt"},{id:"camera",name:"Photo Camera"}];
@@ -257,24 +265,35 @@ async function loadMap(){
     const g=BABYLON.MeshBuilder.CreateGround("g",{width:200,height:200},scene); g.checkCollisions=true;
   }
 }
+<script>
 async function loadMoon(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
-    const m = r.meshes.find(x=>x.name && x.name!=="__root__")||r.meshes[0];
-    if(m){ m.name="MoonMesh"; m.isPickable=false; m.applyFog=false; m.renderingGroupId=1;
-      const mat = m.material || new BABYLON.StandardMaterial("moonMat",scene); mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(1,1,1); m.material=mat;
-      m.position = new BABYLON.Vector3(0, 350, 380);
-    }
-  }catch(e){}
-}
-function spawnAtXZ(x,z){
-  const startY = 30;
-  const ray = new BABYLON.Ray(new BABYLON.Vector3(x,startY,z), new BABYLON.Vector3(0,-1,0), startY+40);
-  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
-  const y = hit?.pickedPoint ? hit.pickedPoint.y + 1.82 : 1.82;
-  camera.position.copyFromFloats(x,y,z);
-}
+    const moon = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+    if (moon){
+      moon.name = "MoonMesh";
+      moon.isPickable = false;
+      moon.applyFog = false;
+      // draw on top of skybox
+      moon.renderingGroupId = 1;
+      // bright, unlit
+      const mat = moon.material || new BABYLON.StandardMaterial("moonMat", scene);
+      mat.disableLighting = true;
+      mat.emissiveColor = new BABYLON.Color3(1,1,1);
+      moon.material = mat;
 
+      // put it in front of the skybox and gently animate it
+      moon.position.copyFromFloats(0, 350, 380);
+      scene.onBeforeRenderObservable.add(()=>{
+        const t = performance.now()*0.00002;
+        moon.position.x = Math.cos(t)*380;
+        moon.position.z = Math.sin(t)*380;
+        moon.position.y = 340 + Math.sin(t*1.7)*10;
+      });
+    }
+  }catch(e){ console.warn("Moon load failed:", e); }
+}
+</script>
 /* ---------------- Boot & Start ---------------- */
 async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
