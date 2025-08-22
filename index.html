@@ -889,38 +889,116 @@ function setWeather(state){
 function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 3 + Math.random()*10; }
 function lightningStrike(){ const overlay=document.getElementById('flash-overlay'); overlay.style.opacity='0.6'; setTimeout(()=>overlay.style.opacity='0', 120); }
 
-/* ===========================================================
-   BOOT / STARTUP
-   =========================================================== */
-let __started = false;
-async function safeStart(){
-  if(__started) return;
-  __started = true;
-  if(!window.BABYLON || !BABYLON.Engine){ toast("Engine not ready. Check Babylon includes.", 2200); __started = false; return; }
-  const scr = document.getElementById('title-screen'); if (scr) scr.style.display = 'none';
+/* ============================================================
+   START FLOW (robust binding + diagnostics)
+   ============================================================ */
+let __started=false, __starting=false;
+let currentGhostKey = window.currentGhostKey || null;
 
-  try{ await boot(); }
-  catch(err){
-    __started = false; console.error(err); toast("Startup failed: " + (err?.message||err), 2800); if (scr) scr.style.display = 'flex'; return;
+function requestPointerLock(){
+  const c=document.getElementById('renderCanvas');
+  const pl=c && (c.requestPointerLock||c.mozRequestPointerLock||c.webkitRequestPointerLock);
+  try{ if(pl) pl.call(c); }catch(e){}
+}
+
+async function safeStart(){
+  if(__started || __starting) { console.debug('[Start] ignored (already starting/started)'); return; }
+  __starting = true;
+
+  // Require Babylon to be present
+  if(!window.BABYLON || !BABYLON.Engine){
+    toast("Engine not ready. Check Babylon includes.", 2200);
+    __starting = false;
+    return;
   }
 
-  const r = Math.random();
-  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
-  setWeather(w);
-
-  const keys = Object.keys(GHOSTS);
-  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
-  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
-
-  toast(`Investigation started. Weather: ${w}.`, 1600);
-}
-(function bindStart(){
-  const btn = document.getElementById('start-button');
   const screen = document.getElementById('title-screen');
-  if (btn){ btn.onclick = safeStart; btn.onkeydown = e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); safeStart(); } }; }
-  if (screen){ screen.addEventListener('click', e=>{ if(e.target===screen) safeStart(); }); }
-  window.addEventListener('keydown', e=>{ const screen=document.getElementById('title-screen'); if(screen && screen.style.display!=='none'){ if(e.key==='Enter'||e.code==='Space'){ e.preventDefault(); safeStart(); } } });
-})();
+  const hud    = document.getElementById('hud');
+  const btn    = document.getElementById('start-button');
+
+  try{
+    // Hide title immediately so audio can be allowed by user gesture
+    if(btn){ btn.disabled = true; btn.textContent = 'Starting…'; }
+    if(screen) screen.style.display = 'none';
+    if(hud)    hud.style.display = 'block';
+
+    // Best-effort pointer lock for mouse look
+    requestPointerLock();
+
+    // Boot your engine/scene
+    await boot();
+
+    // Post-boot game init (unchanged from your version)
+    const r = Math.random();
+    const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
+    setWeather(w);
+
+    const keys = Object.keys(GHOSTS);
+    currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+    if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
+
+    toast(`Investigation started. Weather: ${w}.`, 1600);
+
+    __started = true;
+    console.debug('[Start] boot complete');
+  }catch(err){
+    console.error('[Start] startup error', err);
+    // Restore title if something failed
+    if(hud) hud.style.display='none';
+    if(screen){
+      screen.style.display='flex';
+      // restore button state
+      if(btn){ btn.disabled=false; btn.textContent='Start Investigation'; }
+    }
+  }finally{
+    __starting = false;
+  }
+}
+
+// Expose manual trigger for console debugging
+window.startInvestigation = safeStart;
+
+function bindStartControls(){
+  const btn    = document.getElementById('start-button');
+  const screen = document.getElementById('title-screen');
+
+  if(btn && !btn.__wired){
+    btn.__wired = true;
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); safeStart(); });
+    btn.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' || e.code==='Space'){ e.preventDefault(); safeStart(); }
+    });
+    console.debug('[Start] bound start-button');
+  }
+
+  if(screen && !screen.__wired){
+    screen.__wired = true;
+    // clicking the dark backdrop also starts
+    screen.addEventListener('click', (e)=>{ if(e.target===screen) safeStart(); });
+    console.debug('[Start] bound title-screen backdrop');
+  }
+}
+
+// First binding pass
+document.addEventListener('DOMContentLoaded', bindStartControls);
+window.addEventListener('load', bindStartControls);
+
+// Keyboard start while title is visible
+window.addEventListener('keydown', (e)=>{
+  const screen=document.getElementById('title-screen');
+  if(!screen || screen.style.display==='none') return;
+  if(e.key==='Enter' || e.code==='Space'){
+    e.preventDefault();
+    safeStart();
+  }
+});
+
+// Rebind periodically until started (covers hot reload / DOM swaps)
+const __startBindTick = setInterval(()=>{
+  if(__started){ clearInterval(__startBindTick); return; }
+  bindStartControls();
+}, 500);
+
 
 /* ===========================================================
    ENGINE & SCENE
