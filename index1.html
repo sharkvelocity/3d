@@ -93,23 +93,121 @@ function toast(msg, ms=1500){
   setTimeout(()=>t.style.display='none', ms);
 }
 
-/* ---------------- Ambient Audio ---------------- */
-const AudioSys = {
-  ambient: null,
-  ensure(scene){
-    if(this.ambient) return this.ambient;
-    this.ambient = new BABYLON.Sound("ambient","./assets/audio/ambient.mp3",scene,null,
-      { loop:true, autoplay:false, volume:0.35 });
-    document.addEventListener("visibilitychange", ()=>{
-      if(!document.hidden && this.ambient && !this.ambient.isPlaying){
-        try{ this.ambient.play(); }catch{}
-      }
-    });
-    return this.ambient;
-  },
-  play(){ try{ BABYLON.Engine.audioEngine?.unlock?.(); this.ambient?.play(); }catch{} }
-};
+// --- Weather-aware audio (drop-in replacement for AudioSys) ---
+const WeatherAudio = (()=> {
+  let sceneRef = null;
+  let current = null;      // "Clear" | "Rain" | "Snow" | "Blood Moon"
+  let fading = false;
 
+  // Tracks we actually have in /assets/audio:
+  // - clearWeather.mp3 (calm night)
+  // - rainstorm.mp3    (rain + distant thunder bed)
+  // - ambient.mp3      (generic hum; we reuse for Snow/Blood layer)
+  const tracks = {
+    clear:  null,
+    rain:   null,
+    snow:   null,   // will alias to ambient
+    drone:  null    // extra ominous bed layered for Blood Moon
+  };
+
+  function ensure(scene){
+    if (sceneRef) return;
+    sceneRef = scene;
+    tracks.clear = new BABYLON.Sound("clear","./assets/audio/clearWeather.mp3",sceneRef,null,{ loop:true, autoplay:false, volume:0.45 });
+    tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null, { loop:true, autoplay:false, volume:0.55 });
+    tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.30 });
+    tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.22 });
+
+    // Auto-resume when tab regains focus
+    document.addEventListener("visibilitychange", ()=>{
+      if (document.hidden) return;
+      try {
+        BABYLON.Engine.audioEngine?.unlock?.();
+        // resume current bed if it was paused
+        switch(current){
+          case "Clear":      if (!tracks.clear.isPlaying) tracks.clear.play(); break;
+          case "Rain":       if (!tracks.rain.isPlaying)  tracks.rain.play();  break;
+          case "Snow":       if (!tracks.snow.isPlaying)  tracks.snow.play();  break;
+          case "Blood Moon": if (!tracks.rain.isPlaying)  tracks.rain.play();
+                             if (!tracks.drone.isPlaying) tracks.drone.play();
+                             break;
+        }
+      } catch {}
+    });
+  }
+
+  function fadeTo(targetState){
+    if (!sceneRef) return;
+    if (current === targetState) return;
+    if (fading) return;
+    fading = true;
+
+    const dur = 800; // ms
+    const steps = 16;
+    const stepMs = dur/steps;
+
+    // Determine which should be up/down per target
+    const want = {
+      clear:      (targetState==="Clear"),
+      rain:       (targetState==="Rain" || targetState==="Blood Moon"),
+      snow:       (targetState==="Snow"),
+      drone:      (targetState==="Blood Moon")
+    };
+
+    // Start any new ones at volume 0
+    if (want.clear && !tracks.clear.isPlaying){ tracks.clear.setVolume(0); tracks.clear.play(); }
+    if (want.rain  && !tracks.rain.isPlaying ){ tracks.rain.setVolume(0);  tracks.rain.play(); }
+    if (want.snow  && !tracks.snow.isPlaying ){ tracks.snow.setVolume(0);  tracks.snow.play(); }
+    if (want.drone && !tracks.drone.isPlaying){ tracks.drone.setVolume(0); tracks.drone.play(); }
+
+    // Target volumes
+    const tgt = {
+      clear: want.clear ? 0.45 : 0,
+      rain:  want.rain  ? 0.55 : 0,
+      snow:  want.snow  ? 0.30 : 0,
+      drone: want.drone ? 0.22 : 0
+    };
+
+    // Capture starting vols
+    const start = {
+      clear: tracks.clear.getVolume(),
+      rain:  tracks.rain.getVolume(),
+      snow:  tracks.snow.getVolume(),
+      drone: tracks.drone.getVolume()
+    };
+
+    let i=0;
+    const tick = setInterval(()=>{
+      i++;
+      const a = i/steps;
+      // simple ease
+      const ease = (x)=> x<0?0: x>1?1 : (x<0.5? 2*x*x : -1+(4-2*x)*x);
+
+      ["clear","rain","snow","drone"].forEach(k=>{
+        const v = start[k] + (tgt[k]-start[k]) * ease(a);
+        tracks[k].setVolume(v);
+      });
+
+      if (i>=steps){
+        clearInterval(tick);
+        // stop any fully faded-out tracks
+        ["clear","rain","snow","drone"].forEach(k=>{
+          if (tgt[k]===0 && tracks[k].isPlaying){ try{ tracks[k].stop(); }catch{} }
+        });
+        current = targetState;
+        fading = false;
+      }
+    }, stepMs);
+  }
+
+  return {
+    init(scene){ ensure(scene); },
+    set(state){
+      try { BABYLON.Engine.audioEngine?.unlock?.(); } catch {}
+      fadeTo(state);
+    }
+  };
+})();
 /* ---------------- Belt ---------------- */
 const INVENTORY=[{id:"flash",name:"Flashlight"},{id:"uv",name:"UV Light"},{id:"emf",name:"EMF Reader"},{id:"salt",name:"Salt"},{id:"camera",name:"Photo Camera"}];
 let activeItemSlot=1;
@@ -229,7 +327,13 @@ async function boot(){
   engine.runRenderLoop(()=>scene.render());
   window.addEventListener('resize',()=>engine.resize());
 }
+// After boot is complete:
+const r = Math.random();
+const w = r < 0.40 ? 'Clear' : r < 0.70 ? 'Rain' : r < 0.88 ? 'Snow' : 'Blood Moon';
 
+// Initialize audio for the scene and switch to the picked weather
+WeatherAudio.init(scene);
+setWeather(w);
 /* ---------------- Start ---------------- */
 let __started=false;
 async function safeStart(){ if(__started) return; __started=true; document.getElementById('title-screen').style.display='none'; await boot(); }
