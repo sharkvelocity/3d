@@ -13,13 +13,11 @@
   <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script> <!-- NOTE: GLTF loader -->
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script> <!-- NOTE: convenience loaders bundle -->
   <script src="./cdn/gui/babylon.gui.min.js"></script> <!-- NOTE: optional GUI -->
-  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script> <!-- NOTE: Inspector we toggle by button -->
+  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script> <!-- NOTE: Inspector toggle -->
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
-    /* NOTE: touch-action none suppresses browser gestures so our touch halves receive deltas */
-
-    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; } /* NOTE: main Babylon canvas */
+    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; } /* main Babylon canvas */
 
     /* Title screen */
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
@@ -27,11 +25,11 @@
     #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
     #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; }
     #title-tools{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; }
-    #file-input{ display:none; } /* NOTE: GLB import file input */
+    #file-input{ display:none; } /* hidden file input for GLB import */
 
-    /* HUD */
+    /* HUD chips */
     #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066;
-      padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; } /* NOTE: XYZ display */
+      padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
     #hud-top-left { position:fixed; top:10px; left:10px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; z-index:6000; display:flex; gap:12px; align-items:center; }
     .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; }
 
@@ -49,7 +47,7 @@
     .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
     #action-bar { position:fixed; right:12px; bottom:18px; display:flex; gap:10px; z-index:6500; }
 
-    /* Touch halves — 20vh from top to 12vh above bottom, split 50/50, invisible capture zones */
+    /* Touch halves — invisible capture zones */
     .touch-half { position:fixed; top:20vh; bottom:12vh; width:50vw; z-index:7000; touch-action:none; }
     #touch-left { left:0; }
     #touch-right{ right:0; }
@@ -62,7 +60,7 @@
     #possible-ghosts{ margin-top:12px; font-weight:bold; color:#9ff; }
     #notebook-controls{ margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
 
-    /* Polygon marker tool */
+    /* Marker tool bar */
     #marker-toolbar{ position:fixed; top:72px; right:12px; z-index:6500; display:flex; gap:8px; }
     .toggle{ background:#102; color:#9ef; border:1px solid #066; border-radius:6px; padding:6px 10px; cursor:pointer; }
 
@@ -77,21 +75,21 @@
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
     <div id="title-tools">
-      <label class="hud-btn" for="file-input">Import GLB</label> <!-- NOTE: GLB viewer entry -->
+      <label class="hud-btn" for="file-input">Import GLB</label>
       <input id="file-input" type="file" accept=".glb,.gltf,.zip,.bin,.json,.png,.jpg"/>
-      <button id="btn-load-map" class="hud-btn">Reload Map</button> <!-- NOTE: map reload shortcut -->
+      <button id="btn-load-map" class="hud-btn">Reload Map</button>
     </div>
     <button id="start-button">Start Investigation</button>
   </div>
 
   <!-- Canvas -->
-  <canvas id="renderCanvas" tabindex="0"></canvas> <!-- NOTE: tabindex lets canvas grab focus for WASD -->
+  <canvas id="renderCanvas" tabindex="0"></canvas>
 
   <!-- HUD -->
   <div id="hud-top-left">
-    <div class="chip">Weather: <span id="hud-weather">—</span></div> <!-- NOTE: weather label -->
-    <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div> <!-- NOTE: hunt state -->
-    <div class="chip">Room: <span id="hud-room">Van</span></div> <!-- NOTE: room label (updates on triggers; stubbed here) -->
+    <div class="chip">Weather: <span id="hud-weather">—</span></div>
+    <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div>
+    <div class="chip">Room: <span id="hud-room">Van</span></div>
   </div>
   <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
 
@@ -103,7 +101,7 @@
     <button id="btn-use" class="hud-btn">Use</button>
     <button id="btn-place" class="hud-btn">Place</button>
     <button id="btn-toss" class="hud-btn">Toss</button>
-    <button id="btn-lighter" class="hud-btn">Lighter</button> <!-- NOTE: separate lighter -->
+    <button id="btn-lighter" class="hud-btn">Lighter</button>
     <button id="btn-notebook" class="hud-btn">Notebook</button>
     <button id="btn-inspector" class="hud-btn">Inspector</button>
   </div>
@@ -135,45 +133,46 @@
   <div id="toast"></div>
 
 <script>
-/*** ==========================================================
+/*** =========================================
     GLOBALS
-    ========================================================== ***/
-const canvas = document.getElementById('renderCanvas'); // NOTE: Babylon canvas
-let engine, scene, camera, hemiLight; // NOTE: core Babylon refs
-let houseRoot = null; // NOTE: root of map once loaded
-let navMesh = null;   // NOTE: reserved for future
-let moonMesh = null;  // NOTE: moon GLB
-let rng = Math.random; // NOTE: deterministic seed stub if you want later
+    ========================================= ***/
+const canvas = document.getElementById('renderCanvas'); // Babylon canvas
+let engine, scene, camera, hemiLight; // core Babylon refs
+let houseRoot = null;  // root of map once loaded
+let moonMesh  = null;  // moon GLB
+let rng = Math.random; // swap with a seeded RNG if needed
 
-const player = { // NOTE: player config/state
-  speedWalk: 1.1, // NOTE: walk speed m/s
-  speedRun: 2.2,  // NOTE: run speed m/s
-  sanity: 100,
+const player = { // player config/state
+  speedWalk: 1.1, // walk speed m/s
+  speedRun:  2.2, // run speed m/s
+  sanity:   100,
   room: 'Van',
-  stepUpMax: 0.45 // NOTE: max ledge height we can auto-step
+  stepUpMax: 0.45 // max ledge height for auto-step
 };
 
-const weather = { // NOTE: weather state + particles
+const weather = { // weather state + particles
   state: 'Clear',
   rainPS: null,
   snowPS: null,
-  lightningTimer:0,
+  lightningTimer: 0,
   nextStrike: 6
 };
-function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 4 + Math.random()*10; } // NOTE: random lightning cadence
+function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 4 + Math.random()*10; } // random lightning cadence
 
-/*** ==========================================================
+/*** =========================================
     TOAST (HUD message)
-    ========================================================== ***/
+    ========================================= ***/
 function toast(msg, ms=1500){
   const t=document.getElementById('toast');
   t.textContent=msg; t.style.display='block';
   setTimeout(()=>t.style.display='none', ms);
-} // NOTE: small HUD message at top center
+} // simple HUD pop-up
+</script>
 
-/*** ==========================================================
+<script>
+/*** =========================================
     WEATHER AUDIO (crossfaded ambience)
-    ========================================================== ***/
+    ========================================= ***/
 const WeatherAudio = (()=>{
   let sceneRef=null, current=null, fading=false;
   const tracks={ clear:null, rain:null, snow:null, drone:null };
@@ -185,22 +184,22 @@ const WeatherAudio = (()=>{
     tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null, { loop:true, autoplay:false, volume:0.55 });
     tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.30 });
     tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,   { loop:true, autoplay:false, volume:0.22 });
+
     document.addEventListener("visibilitychange", ()=>{
       if (document.hidden) return;
       try { BABYLON.Engine.audioEngine?.unlock?.(); } catch{}
-      // NOTE: gently attempt resume but only if current state expects it
       switch(current){
         case 'Clear':      if(!tracks.clear.isPlaying) tracks.clear.play(); break;
-        case 'Rain':       if(!tracks.rain.isPlaying) tracks.rain.play(); break;
-        case 'Snow':       if(!tracks.snow.isPlaying) tracks.snow.play(); break;
-        case 'Blood Moon': if(!tracks.rain.isPlaying) tracks.rain.play(); if(!tracks.drone.isPlaying) tracks.drone.play(); break;
+        case 'Rain':       if(!tracks.rain.isPlaying)  tracks.rain.play();  break;
+        case 'Snow':       if(!tracks.snow.isPlaying)  tracks.snow.play();  break;
+        case 'Blood Moon': if(!tracks.rain.isPlaying)  tracks.rain.play();
+                           if(!tracks.drone.isPlaying) tracks.drone.play(); break;
       }
     });
-  } // NOTE: prepares audio buffers; no autoplay for mobile compliance
+  } // prepare audio buffers; obey mobile autoplay rules
 
   function fadeTo(target){
-    if(!sceneRef) return;
-    if(current===target || fading) return;
+    if(!sceneRef || current===target || fading) return;
     fading=true;
 
     const want={
@@ -209,16 +208,17 @@ const WeatherAudio = (()=>{
       snow:  target==='Snow',
       drone: target==='Blood Moon'
     };
-    // start needed tracks at 0
+
+    // start needed tracks at 0 volume
     if (want.clear && !tracks.clear.isPlaying){ tracks.clear.setVolume(0); tracks.clear.play(); }
     if (want.rain  && !tracks.rain.isPlaying ){ tracks.rain.setVolume(0);  tracks.rain.play();  }
     if (want.snow  && !tracks.snow.isPlaying ){ tracks.snow.setVolume(0);  tracks.snow.play();  }
     if (want.drone && !tracks.drone.isPlaying){ tracks.drone.setVolume(0); tracks.drone.play(); }
 
-    const tgt = { clear: want.clear?0.45:0, rain:want.rain?0.55:0, snow:want.snow?0.30:0, drone:want.drone?0.22:0 };
-    const start={ clear:tracks.clear.getVolume(), rain:tracks.rain.getVolume(), snow:tracks.snow.getVolume(), drone:tracks.drone.getVolume() };
+    const tgt   = { clear: want.clear?0.45:0, rain:want.rain?0.55:0, snow:want.snow?0.30:0, drone:want.drone?0.22:0 };
+    const start = { clear: tracks.clear.getVolume(), rain: tracks.rain.getVolume(), snow: tracks.snow.getVolume(), drone: tracks.drone.getVolume() };
 
-    let i=0, steps=16, stepMs=50; // NOTE: 800ms fade
+    let i=0, steps=16, stepMs=50; // 800ms crossfade
     const tick=setInterval(()=>{
       i++;
       const a=i/steps; const ease=(x)=>x<.5?2*x*x:-1+(4-2*x)*x;
@@ -234,14 +234,16 @@ const WeatherAudio = (()=>{
         current=target; fading=false;
       }
     }, stepMs);
-  } // NOTE: crossfade implementation
+  } // crossfade
 
   return { init:(s)=>ensure(s), set:(state)=>{ try{BABYLON.Engine.audioEngine?.unlock?.();}catch{} fadeTo(state);} };
-})(); // NOTE: module for ambience
+})(); // ambience module
+</script>
 
-/*** ==========================================================
+<script>
+/*** =========================================
     ITEM SYSTEM (3-slot belt, separate lighter)
-    ========================================================== ***/
+    ========================================= ***/
 const ALL_ITEMS=[
   {id:'flash',  name:'Flashlight'},
   {id:'uv',     name:'UV Light'},
@@ -254,16 +256,16 @@ const ALL_ITEMS=[
   {id:'book',   name:'Ghost Writing Book'},
   {id:'cruci',  name:'Crucifix'},
   {id:'smudge', name:'Smudge Sticks'}
-]; // NOTE: available items (expand as you like)
+]; // available items
 
-let belt = ['flash','emf','camera']; // NOTE: exactly 3 slots chosen
-let activeSlot = 0; // NOTE: which belt slot is active (0..2)
-let lighterOn = false; // NOTE: separate lighter toggle
+let belt = ['flash','emf','camera']; // exactly 3 unique items
+let activeSlot = 0; // 0..2
+let lighterOn = false; // separate lighter toggle
 
-// Runtime item nodes
+// runtime item nodes
 const held = { flash:null, uv:null, dots:null, light:null, uvLight:null };
 
-function itemById(id){ return ALL_ITEMS.find(x=>x.id===id); } // NOTE: helper
+function itemById(id){ return ALL_ITEMS.find(x=>x.id===id); } // lookup
 
 function rebuildBelt(){
   const el=document.getElementById('belt'); el.innerHTML='';
@@ -271,76 +273,73 @@ function rebuildBelt(){
     const d=document.createElement('div'); d.className='slot'+(i===activeSlot?' active':'');
     const item=itemById(id);
     d.innerHTML = `<div class="label">${item?.name||id}</div>`;
-    d.onclick=()=>{ activeSlot=i; rebuildBelt(); }; // NOTE: select slot
-    d.oncontextmenu=(e)=>{ e.preventDefault(); cycleSlot(i); }; // NOTE: right-click cycles available items
+    d.onclick=()=>{ activeSlot=i; rebuildBelt(); };                 // select slot
+    d.oncontextmenu=(e)=>{ e.preventDefault(); cycleSlot(i); };     // right-click cycle
     el.appendChild(d);
   });
-} // NOTE: rebuilds 3-slot belt UI
+} // render 3-slot belt UI
 
 function cycleSlot(i){
   const idx = ALL_ITEMS.findIndex(x=>x.id===belt[i]);
-  const next = (idx+1)%ALL_ITEMS.length;
-  // prevent duplicates in belt (optional)
-  let j=next;
+  let j=(idx+1)%ALL_ITEMS.length;
   for(let k=0;k<ALL_ITEMS.length;k++){
     const cand = ALL_ITEMS[j].id;
     if(!belt.includes(cand)){ belt[i]=cand; break; }
     j=(j+1)%ALL_ITEMS.length;
   }
   rebuildBelt();
-} // NOTE: rotates slot to next available unique item
+} // rotate to next unique item
 
-// ==== Item actions (use/place/toss/light) ====
-function activeItem(){ return itemById(belt[activeSlot]); } // NOTE: current item data
+// helpers
+function activeItem(){ return itemById(belt[activeSlot]); } // current item
 
 function useActiveItem(){
   const it = activeItem(); if(!it){ toast('Empty slot'); return; }
   switch(it.id){
-    case 'flash': toggleFlash(true); break;
-    case 'uv': toggleUV(true); break;
-    case 'emf': pingEMF(); break;
-    case 'spirit': spiritBoxTalk(); break;
-    case 'camera': takePhoto(); break;
-    case 'salt': placeSalt(); break;
-    case 'thermo': readTemp(); break;
-    case 'dots': toggleDOTS(); break;
-    case 'book': dropWritingBook(); break;
-    case 'cruci': useCrucifix(); break;
-    case 'smudge': burnSmudge(); break;
-    default: toast('Use '+it.name); break;
+    case 'flash':  toggleFlash(true); break;
+    case 'uv':     toggleUV(true);    break;
+    case 'emf':    pingEMF();         break;
+    case 'spirit': spiritBoxTalk();   break;
+    case 'camera': takePhoto();       break;
+    case 'salt':   placeSalt();       break;
+    case 'thermo': readTemp();        break;
+    case 'dots':   toggleDOTS();      break;
+    case 'book':   dropWritingBook(); break;
+    case 'cruci':  useCrucifix();     break;
+    case 'smudge': burnSmudge();      break;
+    default: toast('Use '+it.name);   break;
   }
-} // NOTE: routes primary use to item behavior
+} // primary use router
 
 function placeActiveItem(){
   const it = activeItem(); if(!it){ toast('Empty slot'); return; }
   switch(it.id){
     case 'camera': placeTripodCamera(); break;
-    case 'dots': placeDOTS(); break;
-    case 'book': placeWritingBook(); break;
-    case 'salt': placeSalt(); break;
-    default: toast('Place '+it.name); break;
+    case 'dots':   placeDOTS();         break;
+    case 'book':   placeWritingBook();  break;
+    case 'salt':   placeSalt();         break;
+    default: toast('Place '+it.name);   break;
   }
-} // NOTE: placing logic by item
+} // placement router
 
-function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); } // NOTE: basic toss (expand with physics if you want)
+function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); } // demo toss
+function toggleLighter(){ lighterOn=!lighterOn; toast(lighterOn?'Lighter ON':'Lighter OFF'); } // lighter toggle
 
-function toggleLighter(){ lighterOn=!lighterOn; toast(lighterOn?'Lighter ON':'Lighter OFF'); } // NOTE: lighter separate control
-
-// ---- Implementations (minimal but real) ----
+// concrete item implementations (minimal but real)
 function ensureHeldLight(){
   if(!held.light){
     held.light = new BABYLON.SpotLight("handFlash", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/6, 12, scene);
-    held.light.intensity = 0; // off
+    held.light.intensity = 0;  // off by default
     held.light.range = 18;
   }
   return held.light;
-} // NOTE: creates player flashlight
+} // create flashlight node
 
-function toggleFlash(explicit){
+function toggleFlash(){
   const lamp = ensureHeldLight();
   lamp.intensity = lamp.intensity>0 ? 0 : 1.2;
   toast(lamp.intensity>0?'Flashlight ON':'Flashlight OFF');
-} // NOTE: toggles flashlight intensity
+} // toggle flashlight
 
 function ensureHeldUV(){
   if(!held.uvLight){
@@ -350,44 +349,44 @@ function ensureHeldUV(){
     held.uvLight.intensity = 0;
   }
   return held.uvLight;
-} // NOTE: creates player UV cone
+} // create UV cone
 
 function toggleUV(){
   const uv = ensureHeldUV();
   uv.intensity = uv.intensity>0 ? 0 : 1.0;
   toast(uv.intensity>0?'UV ON':'UV OFF');
-} // NOTE: toggles UV cone
+} // toggle UV
 
-function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); } // NOTE: cheap EMF demo; tied to ghost proximity
-
-function spiritBoxTalk(){ if(ghost?.mode==='hunt') toast('Spirit Box: *static*'); else toast('Spirit Box: ...'); } // NOTE: stubbed “response” logic
+function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); } // tied to ghost proximity
+function spiritBoxTalk(){ if(ghost?.mode==='hunt') toast('Spirit Box: *static*'); else toast('Spirit Box: ...'); } // demo stub
 
 function takePhoto(){
-  // NOTE: quick flash effect + chance to “catch” ghost if visible
+  // quick flash effect + success message if ghost visible
   const flash = document.createElement('div');
   flash.style.cssText='position:fixed;inset:0;background:#fff;opacity:.8;pointer-events:none;z-index:12001;';
   document.body.appendChild(flash);
   setTimeout(()=>flash.style.opacity='0',40);
   setTimeout(()=>flash.remove(),180);
   if(ghost && ghost.visible) toast('Ghost captured!');
-} // NOTE: photo flash + feedback
+} // photo effect
 
-function placeSalt(){ toast('Salt placed'); } // NOTE: minimal placement
-function readTemp(){ toast('Temp: '+(ghost?.room===player.room?'3°C':'11°C')); } // NOTE: colder in ghost room
-function toggleDOTS(){ toast('DOTS toggled'); } // NOTE: handheld toggle
+function placeSalt(){ toast('Salt placed'); } // demo placement
+function readTemp(){ toast('Temp: '+(ghost?.room===player.room?'3°C':'11°C')); } // colder in ghost room
+function toggleDOTS(){ toast('DOTS toggled'); }
 function placeDOTS(){ toast('DOTS placed'); }
 function dropWritingBook(){ toast('Book dropped'); }
 function placeWritingBook(){ toast('Book placed'); }
 function useCrucifix(){ if(ghost?.mode==='hunt'){ ghostAbortHunt('Crucifix'); } else toast('Crucifix readied'); }
 function burnSmudge(){ if(ghost){ ghost.smudgedUntil = performance.now()+6000; toast('Smudge in effect (6s)'); } }
+</script>
 
-/*** ==========================================================
-    EVIDENCE & GHOST PROFILES (with Mimic & Goryo)
-    ========================================================== ***/
-const EVIDENCE = ['EMF5','Spirit Box','Ghost Writing','Freezing Temps','Orbs','Dots','Fingerprints']; // NOTE: core set
-const found = Object.fromEntries(EVIDENCE.map(e=>[e,false])); // NOTE: checked boxes map
+<script>
+/*** =========================================
+    EVIDENCE & GHOST PROFILES
+    ========================================= ***/
+const EVIDENCE = ['EMF5','Spirit Box','Ghost Writing','Freezing Temps','Orbs','Dots','Fingerprints']; // evidence set
+const found = Object.fromEntries(EVIDENCE.map(e=>[e,false])); // checkbox state
 
-// NOTE: condensed Phasmophobia-style table (key ones you referenced):
 const GHOSTS = [
   { name:'Spirit',  ev:['EMF5','Spirit Box','Ghost Writing'], rules:{wander:8, roomChange:true} },
   { name:'Wraith',  ev:['EMF5','Spirit Box','Dots'],          rules:{wander:10,roomChange:true} },
@@ -402,17 +401,17 @@ const GHOSTS = [
   { name:'Yurei',    ev:['Freezing Temps','Orbs','Dots'], rules:{wander:8,roomChange:true} },
   { name:'Oni',      ev:['EMF5','Freezing Temps','Dots'], rules:{flicker:'oni', wander:10, roomChange:true} },
   { name:'Hantu',    ev:['Freezing Temps','Fingerprints','Orbs'], rules:{wander:8,roomChange:true} },
-  { name:'Goryo',    ev:['EMF5','Fingerprints','Dots'], rules:{wander:4, roomChange:false} }, // NOTE: cannot change rooms; 4m wander
+  { name:'Goryo',    ev:['EMF5','Fingerprints','Dots'], rules:{wander:4, roomChange:false} },
   { name:'Myling',   ev:['Ghost Writing','EMF5','Fingerprints'], rules:{wander:8,roomChange:true} },
   { name:'Onryo',    ev:['Freezing Temps','Spirit Box','Orbs'], rules:{wander:8,roomChange:true} },
   { name:'The Twins',ev:['EMF5','Spirit Box','Freezing Temps'], rules:{wander:8,roomChange:true} },
   { name:'Raiju',    ev:['EMF5','Orbs','Dots'], rules:{wander:8,roomChange:true} },
   { name:'Obake',    ev:['EMF5','Fingerprints','Orbs'], rules:{wander:8,roomChange:true} },
-  { name:'The Mimic',ev:['Spirit Box','Freezing Temps','Fingerprints'], rules:{mimicOrbs:true, wander:8, roomChange:true} }, // NOTE: shows fake orbs
+  { name:'The Mimic',ev:['Spirit Box','Freezing Temps','Fingerprints'], rules:{mimicOrbs:true, wander:8, roomChange:true} },
   { name:'Moroi',    ev:['Freezing Temps','Spirit Box','Ghost Writing'], rules:{wander:8,roomChange:true} },
   { name:'Deogen',   ev:['Spirit Box','Ghost Writing','Dots'], rules:{wander:8,roomChange:true} },
   { name:'Thaye',    ev:['Ghost Writing','Freezing Temps','Orbs'], rules:{wander:8,roomChange:true} }
-]; // NOTE: enough to drive filtering & per-type rules
+]; // ghost table
 
 function openNotebook(){
   const box=document.getElementById('notebook-modal');
@@ -428,26 +427,25 @@ function openNotebook(){
   });
   updatePossible();
   box.style.display='block';
-} // NOTE: creates the evidence checklist UI
+} // build evidence checklist
 
-function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; } // NOTE: hides notebook
-
-function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); } // NOTE: clears all checks
+function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; } // hide notebook
+function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); } // clear checks
 
 function updatePossible(){
-  // NOTE: treat Mimic special (adds Orbs decoy even if not checked)
   const result = GHOSTS.filter(g=>{
     const ghostEv = new Set(g.ev);
-    if (g.rules?.mimicOrbs) ghostEv.add('Orbs'); // NOTE: Mimic can show orbs regardless
-    // every checked must be in ghostEv
+    if (g.rules?.mimicOrbs) ghostEv.add('Orbs'); // Mimic always can show orbs
     return Object.entries(found).every(([e,has])=>!has || ghostEv.has(e));
   }).map(g=>g.name);
   document.getElementById('possible-ghosts').textContent = 'Possible: ' + (result.length? result.join(', ') : 'None');
-} // NOTE: filters ghosts based on ticked evidence
+} // filter ghosts by checked evidence
+</script>
 
-/*** ==========================================================
+<script>
+/*** =========================================
     INPUT SYSTEM (WASD + Pointer Lock + Multi-touch)
-    ========================================================== ***/
+    ========================================= ***/
 const InputSystem = (()=>{
   let move={x:0,z:0}, running=false, lookDelta={x:0,y:0};
   let pointerLocked=false;
@@ -464,7 +462,7 @@ const InputSystem = (()=>{
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
     move.z=f; move.x=r; running=keys.has('run');
-  } // NOTE: translate held keys to movement vector
+  } // keyboard → move vector
 
   function onKey(e,down){
     const tag=keyMap[e.code];
@@ -476,7 +474,7 @@ const InputSystem = (()=>{
       if(idx>=0 && idx<3){ activeSlot=idx; rebuildBelt(); }
     }
     recomputeMove();
-  } // NOTE: keyboard handler
+  } // key handler
 
   function bindPointerLock(){
     document.addEventListener('click', ()=>{ if(document.pointerLockElement!==canvas) canvas.requestPointerLock?.(); }, {capture:true});
@@ -486,7 +484,7 @@ const InputSystem = (()=>{
       lookDelta.x += e.movementX||0;
       lookDelta.y += e.movementY||0;
     });
-  } // NOTE: mouse look (relative) with pointer lock
+  } // relative mouse look
 
   function bindTouchHalves(){
     const left=document.getElementById('touch-left'), right=document.getElementById('touch-right');
@@ -530,7 +528,7 @@ const InputSystem = (()=>{
       }
       e.preventDefault();
     },{passive:false});
-  } // NOTE: two-thumb control regions
+  } // twin touch zones
 
   return {
     init(){
@@ -545,11 +543,13 @@ const InputSystem = (()=>{
       return out;
     }
   };
-})(); // NOTE: input module
+})(); // input module
+</script>
 
-/*** ==========================================================
+<script>
+/*** =========================================
     MOVEMENT, LOOK & STEP-UP
-    ========================================================== ***/
+    ========================================= ***/
 function handleMovement(input, dt){
   if(!camera) return;
   const speed = input.running ? player.speedRun : player.speedWalk;
@@ -559,36 +559,34 @@ function handleMovement(input, dt){
 
   if (desired.lengthSquared()>0){
     const v = desired.normalize().scale(speed*dt);
-    // tentative next
     const next = camera.position.add(v);
-    // step-up check: ray from chest forward, then down to see if small ledge
+    // step-up probe
     const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
     const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
     const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
     if(hit && hit.pickedPoint){
-      // allow stepping if height difference <= stepUpMax
       const deltaY = hit.pickedPoint.y + 1.7 - camera.position.y;
       if(deltaY<=player.stepUpMax) camera.position = new BABYLON.Vector3(next.x, hit.pickedPoint.y+1.7, next.z);
       else camera.position = next;
-    } else {
-      camera.position = next;
-    }
+    } else camera.position = next;
   }
-} // NOTE: free-walk + small step-up ledge handling
+} // free-walk + ledge step-up
 
 function applyLook(lookDelta){
   if(!camera) return;
   const sens = 0.0026;
   camera.rotation.y += lookDelta.x * sens;
-  const invertY = 1; // NOTE: up = up (as requested)
+  const invertY = 1; // up = up
   const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
   const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
   camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
-} // NOTE: mouse/touch look, with correct “up = up”
+} // look control
+</script>
 
-/*** ==========================================================
+<script>
+/*** =========================================
     WEATHER RENDERING + MOON
-    ========================================================== ***/
+    ========================================= ***/
 let __rainTex = null;
 function makeRainTexture(){
   if(__rainTex) return __rainTex;
@@ -603,14 +601,14 @@ function makeRainTexture(){
   g.addColorStop(1.00,"rgba(255,255,255,0.00)");
   ctx.fillStyle=g; ctx.fillRect(0,0,w,h); dt.update(false);
   __rainTex=dt; return dt;
-} // NOTE: procedural streak texture (no external GIF)
+} // procedural streak texture
 
 function ensureRain(){
   if(weather.rainPS) return weather.rainPS;
   const ps=new BABYLON.ParticleSystem("rain", 3200, scene);
   ps.particleTexture=makeRainTexture();
   ps.minEmitBox=new BABYLON.Vector3(-70, 36, -70);
-  ps.maxEmitBox=new BABYLON.Vector3( 70, 36,  70); // NOTE: lower ceiling than before
+  ps.maxEmitBox=new BABYLON.Vector3( 70, 36,  70);
   ps.minSize=0.9; ps.maxSize=1.3;
   ps.minLifeTime=0.7; ps.maxLifeTime=1.0;
   ps.direction1=new BABYLON.Vector3(-0.15,-1.5, 0.1);
@@ -623,7 +621,7 @@ function ensureRain(){
   ps.colorDead=new BABYLON.Color4(1,1,1,0.0);
   ps.disposeOnStop=false;
   weather.rainPS=ps; return ps;
-} // NOTE: rain emitter tuned lower & thinner
+} // rain emitter
 
 function ensureSnow(){
   if(weather.snowPS) return weather.snowPS;
@@ -633,7 +631,7 @@ function ensureSnow(){
   ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(4,4,3,0,Math.PI*2); ctx.fill(); snowTex.update(false);
   ps.particleTexture=snowTex;
   ps.minEmitBox=new BABYLON.Vector3(-60, 28, -60);
-  ps.maxEmitBox=new BABYLON.Vector3( 60, 28,  60); // NOTE: lower snow height
+  ps.maxEmitBox=new BABYLON.Vector3( 60, 28,  60);
   ps.minSize=0.06; ps.maxSize=0.13;
   ps.minLifeTime=2.0; ps.maxLifeTime=3.2;
   ps.emitRate=900;
@@ -645,22 +643,17 @@ function ensureSnow(){
   ps.color2=new BABYLON.Color4(1,1,1,0.70);
   ps.disposeOnStop=false;
   weather.snowPS=ps; return ps;
-} // NOTE: snow tuned for gentler fall & lower ceiling
+} // snow emitter
 
 function setWeather(state){
   weather.state=state;
   document.getElementById('hud-weather').textContent=state;
   WeatherAudio.set(state);
-
   if(weather.rainPS) weather.rainPS.stop();
   if(weather.snowPS) weather.snowPS.stop();
-
-  if(state==='Clear'){ /* palette unchanged */ }
   if(state==='Snow'){ ensureSnow().start(); }
-  if(state==='Rain'){ ensureRain().start(); scheduleNextLightning(); }
-  if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
-
-} // NOTE: switches particle systems and audio theme
+  if(state==='Rain' || state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
+} // switch weather + audio
 
 async function loadMoon(){
   try{
@@ -672,7 +665,7 @@ async function loadMoon(){
       const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
       mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(1,1,1);
       moonMesh.material=mat;
-      moonMesh.position.copyFromFloats(0, 280, 320); // NOTE: in front of skybox
+      moonMesh.position.copyFromFloats(0, 280, 320);
       scene.onBeforeRenderObservable.add(()=>{
         const t=performance.now()*0.00002;
         moonMesh.position.x=Math.cos(t)*320;
@@ -681,177 +674,162 @@ async function loadMoon(){
       });
     }
   }catch(e){ console.warn('Moon load failed', e); }
-} // NOTE: loads & animates moon in front of skybox
+} // load & animate moon
+</script>
 
+<script>
+/*** =========================================
+    MAP LOADING + GLB VIEWER + MARKER TOOL
+    ========================================= ***/
+async function loadMap(){
+  try{
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
+    houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
+    res.meshes.forEach(m=>{ m.checkCollisions=true; m.isPickable=true; m.receiveShadows=true; });
+  }catch(e){
+    console.warn('Map load failed; building ground fallback', e);
+    const g=BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true;
+  }
+} // load map GLB
 
-/*** ==========================================================
-    MARKER TOOL (left-click add, right-click remove, auto-link,
-    close polygon by clicking near first point; save/clear)
-    ========================================================== ***/
-// --- Marker Tool (left add, right remove, auto-link & close) ---
-const MarkerTool = (() => {
-  let enabled = false;         // are we editing?
-  let closed  = false;         // polygon closed?
-  let points  = [];            // [{x,y,z}, ...]
-  let lineMesh = null;         // dynamic line
-  let polyMesh = null;         // filled polygon
-  let polyMat  = null;         // material for polygon
-  let sceneRef = null, camRef = null;
+// File picker import
+document.getElementById('file-input').addEventListener('change', async (e)=>{
+  const f=e.target.files?.[0]; if(!f) return;
+  try{
+    const blobUrl = URL.createObjectURL(f);
+    await BABYLON.SceneLoader.AppendAsync("", blobUrl, scene);
+    toast('Imported '+f.name, 1600);
+  }catch(err){ console.error(err); toast('Import failed'); }
+}); // append GLB into scene
 
-  const CLOSE_EPS = 0.75;      // meters to snap back to first point
-  const REMOVE_EPS = 1.25;     // meters to consider a point “nearest”
+// Drag-drop import
+window.addEventListener('dragover', e=>{ e.preventDefault(); });
+window.addEventListener('drop', async (e)=>{
+  e.preventDefault();
+  if(!e.dataTransfer?.files?.length) return;
+  const f=e.dataTransfer.files[0];
+  try{
+    const url=URL.createObjectURL(f);
+    await BABYLON.SceneLoader.AppendAsync("", url, scene);
+    toast('Imported '+f.name, 1600);
+  }catch(err){ console.error(err); toast('Import failed'); }
+}); // drop to import
 
-  function bind(scene, camera) {
-    sceneRef = scene; camRef = camera;
+// --- Marker Tool (left-add, right-remove, close loop) ---
+const MarkerTool = (()=>{
+  let enabled=false, interior=true, points=[];   // state
+  let mesh=null, mat=null;                       // renderables
+  let _scene=null, _camera=null;                 // bound scene/camera
+  const CLOSE_DIST=0.8;                          // world units to close polygon
 
-    // Pointer handler – add/remove
-    scene.onPointerObservable.add((pi) => {
-      if (!enabled) return;
-      if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+  function bind(scene, camera){
+    _scene=scene; _camera=camera;
+    // Pointer observable is valid *after* scene exists
+    _scene.onPointerObservable.add((pi)=>{
+      if(!enabled) return;
+      if(pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+      const evt = pi.event;
+      const isLeft  = (evt.button===0);
+      const isRight = (evt.button===2);
 
-      const btn = (pi.event && typeof pi.event.button === 'number') ? pi.event.button : 0;
-      const isLeft = btn === 0;
-      const isRight = btn === 2;
-
-      const hit = scene.pick(scene.pointerX, scene.pointerY, (m) => m && m.isPickable !== false);
-      if (!hit || !hit.pickedPoint) return;
-      const p = hit.pickedPoint;
-
-      if (isLeft) {
-        addPoint(p);
-      } else if (isRight) {
-        removeNearestTo(p);
+      if(isLeft){
+        const p = pickGroundPoint();
+        if(!p) return;
+        // If close to first point and >= 2 points, close the loop by adding the first again
+        if(points.length>=2 && dist3(p, points[0])<=CLOSE_DIST){
+          addPoint(points[0]); // closes shape
+          redraw(true);
+        }else{
+          addPoint(p);
+        }
+      } else if(isRight){
+        removeNearestAtPointer();
       }
     });
+  } // attach listeners to a real scene (prevents undefined errors)
 
-    // Stop the browser context menu when editing (so right-click works)
-    window.addEventListener('contextmenu', (e) => {
-      if (enabled) { e.preventDefault(); }
-    });
-  }
+  function toggle(){ enabled=!enabled; toast('Markers '+(enabled?'enabled':'disabled')); }
+  function toggleFill(){ interior=!interior; document.getElementById('btn-marker-fill').textContent = 'Fill: ' + (interior?'Interior':'Exterior'); redraw(false); }
+  function clear(){ points.length=0; redraw(false); }
 
-  function toggle() {
-    enabled = !enabled;
-    toast(`Markers ${enabled ? 'enabled' : 'disabled'}`);
-  }
+  function addPoint(p){ points.push({x:p.x,y:p.y,z:p.z}); redraw(false); } // add vertex
 
-  function clear() {
-    points.length = 0;
-    closed = false;
-    disposeMeshes();
-    redraw();
-  }
+  function removeNearestAtPointer(){
+    const p = pickGroundPoint(); if(!p || points.length===0) return;
+    let best=-1, bd=1e9;
+    for(let i=0;i<points.length;i++){ const d=dist3(p, points[i]); if(d<bd){ bd=d; best=i; } }
+    if(best>=0){ points.splice(best,1); redraw(false); }
+  } // remove closest vertex to cursor
 
-  function save() {
-    const data = { closed, points };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  function pickGroundPoint(){
+    const ray = _scene.createPickingRay(_scene.pointerX, _scene.pointerY, BABYLON.Matrix.Identity(), _camera);
+    const hit = _scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+    return hit?.pickedPoint ? hit.pickedPoint.clone() : null;
+  } // screen → world point
+
+  function dist3(a,b){ const dx=a.x-b.x, dy=(a.y||0)-(b.y||0), dz=a.z-b.z; return Math.sqrt(dx*dx+dy*dy+dz*dz); } // euclidean
+
+  function redraw(closed){
+    if(mesh){ mesh.dispose(); mesh=null; }
+    if(points.length<2) return;
+
+    // Build a thin polygonal line (and filled area if 3+)
+    const path2D = points.map(p=> new BABYLON.Vector2(p.x, p.z));
+    const y = (points[0].y||0) + 0.05;
+
+    // outline as ribbon
+    const path3D = points.map(p=> new BABYLON.Vector3(p.x, y, p.z));
+    const ribbon = BABYLON.MeshBuilder.CreateLines("polyline",{points:path3D, updatable:false}, _scene);
+    ribbon.color = new BABYLON.Color3(0,1,1);
+
+    // filled polygon if enough points
+    if(points.length>=3){
+      const builder = new BABYLON.PolygonMeshBuilder("polyFill", path2D, _scene, earcut);
+      const poly = builder.build(null, 0.02); // thin depth
+      if(!mat){
+        mat = new BABYLON.StandardMaterial("polyMat", _scene);
+        mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
+        mat.alpha = 0.35;
+      }else{
+        mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
+      }
+      poly.material = mat;
+      poly.position.y = y;
+      mesh = poly;
+    } else {
+      mesh = ribbon; // only lines for 2 points
+    }
+  } // re-render polygon/lines
+
+  function save(){
+    const data = { interior, closed: (points.length>=3 && dist3(points[0], points[points.length-1])<1e-3), points: points.map(p=>({x:p.x,y:p.y,z:p.z})) };
+    const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'markers.json';
     a.click();
-  }
+  } // download JSON
 
-  function disposeMeshes() {
-    if (lineMesh) { lineMesh.dispose(); lineMesh = null; }
-    if (polyMesh) { polyMesh.dispose(); polyMesh = null; }
-  }
+  return { bind, toggle, toggleFill, save, clear, get enabled(){ return enabled; } };
+})(); // marker tool
 
-  function toVec3(p) { return new BABYLON.Vector3(p.x, p.y, p.z); }
+// Toolbar wiring
+document.getElementById('btn-marker').onclick=()=>MarkerTool.toggle();
+document.getElementById('btn-marker-fill').onclick=()=>MarkerTool.toggleFill();
+document.getElementById('btn-marker-save').onclick=()=>MarkerTool.save();
+document.getElementById('btn-marker-clear').onclick=()=>MarkerTool.clear();
 
-  function redraw() {
-    if (!sceneRef) return;
+// Prevent context menu while tool is active (so right-click works)
+window.addEventListener('contextmenu', (e)=>{ if(MarkerTool.enabled){ e.preventDefault(); } }, {capture:true});
 
-    // Clear old meshes
-    disposeMeshes();
+// Reload map shortcut
+document.getElementById('btn-load-map').onclick=async ()=>{ await loadMap(); toast('Map reloaded'); };
+</script>
 
-    // Lines
-    if (points.length >= 2) {
-      const pts = points.map(toVec3);
-      if (closed) pts.push(toVec3(points[0])); // loop back when closed
-      lineMesh = BABYLON.MeshBuilder.CreateLines("markerLines", { points: pts }, sceneRef);
-      lineMesh.color = new BABYLON.Color3(0.2, 1.0, 1.0);
-    }
-
-    // Fill (when closed & ≥3 points)
-    if (closed && points.length >= 3) {
-      const shape2D = points.map(p => new BABYLON.Vector2(p.x, p.z));
-      const builder = new BABYLON.PolygonMeshBuilder("markerPoly", shape2D, sceneRef, earcut);
-      polyMesh = builder.build(true, 0.02); // depth for a tiny slab
-      if (!polyMat) {
-        polyMat = new BABYLON.StandardMaterial("markerPolyMat", sceneRef);
-        polyMat.diffuseColor = new BABYLON.Color3(0, 0.35, 0.35);
-        polyMat.emissiveColor = new BABYLON.Color3(0, 0.15, 0.15);
-        polyMat.alpha = 0.35;
-      }
-      polyMesh.material = polyMat;
-      // Slightly lift above ground to avoid z-fight
-      polyMesh.position.y = points[0].y + 0.03;
-    }
-  }
-
-  function addPoint(vec3) {
-    if (!vec3) return;
-    const p = { x: vec3.x, y: vec3.y, z: vec3.z };
-
-    // If we already have ≥3 points and this click is near the first, close the loop
-    if (!closed && points.length >= 3) {
-      const first = points[0];
-      const dx = p.x - first.x, dz = p.z - first.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist <= CLOSE_EPS) {
-        closed = true;
-        redraw();
-        toast('Polygon closed');
-        return;
-      }
-    }
-
-    // If already closed, starting a new shape: reset
-    if (closed) {
-      points.length = 0;
-      closed = false;
-    }
-
-    points.push(p);
-    redraw();
-  }
-
-  function removeNearestTo(vec3) {
-    if (!points.length) return;
-
-    // When closed, opening it first feels nicer for editing
-    if (closed) { closed = false; }
-
-    let bestIdx = -1, bestDist = Infinity;
-    for (let i = 0; i < points.length; i++) {
-      const dx = vec3.x - points[i].x;
-      const dz = vec3.z - points[i].z;
-      const d = Math.hypot(dx, dz);
-      if (d < bestDist) { bestDist = d; bestIdx = i; }
-    }
-
-    if (bestIdx >= 0 && bestDist <= REMOVE_EPS) {
-      points.splice(bestIdx, 1);
-      if (points.length < 3) closed = false;
-      redraw();
-      toast('Marker removed');
-    } else {
-      toast('No marker close enough to remove');
-    }
-  }
-
-  // Public API
-  return {
-    bind, toggle, clear, save,
-    get enabled() { return enabled; },
-    get closed()  { return closed;  },
-    get points()  { return points.slice(); }
-  };
-})();
-
-/*** ==========================================================
+<script>
+/*** =========================================
     GHOST SYSTEM (spawn, flicker, wander, hunt)
-    ========================================================== ***/
+    ========================================= ***/
 const ghost = {
   mesh: null,
   type: null,
@@ -863,22 +841,20 @@ const ghost = {
   flicker: null,
   smudgedUntil: 0,
   nearPlayer: false
-}; // NOTE: central ghost state
+}; // central ghost state
 
 function randomPointInHouse(){
   if(!houseRoot){
     return new BABYLON.Vector3(46.16, 1.7, -105.52);
   }
   const bb = houseRoot.getHierarchyBoundingVectors(true);
-  // margin away from walls
   const x = BABYLON.Scalar.Lerp(bb.min.x+3, bb.max.x-3, Math.random());
   const z = BABYLON.Scalar.Lerp(bb.min.z+3, bb.max.z-3, Math.random());
-  // drop to floor
   const ray = new BABYLON.Ray(new BABYLON.Vector3(x, (bb.max.y||10)+4, z), new BABYLON.Vector3(0,-1,0), 40);
   const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
   const y = hit?.pickedPoint ? hit.pickedPoint.y + 0.05 : 1.7;
   return new BABYLON.Vector3(x,y,z);
-} // NOTE: finds a plausible floor point inside house bounds
+} // plausible floor point
 
 function makeFlickerController(mesh){
   let t=0, on=false, next=0, solid=0.85;
@@ -889,8 +865,8 @@ function makeFlickerController(mesh){
       t+=dt;
       if(mode==='idle'){ apply(0); return; }
       if(t>=next){
-        const fast = 0.05 + Math.random()*0.07; // 50-120ms on
-        const slow = 0.28 + Math.random()*0.22; // 280-500ms off
+        const fast = 0.05 + Math.random()*0.07;
+        const slow = 0.28 + Math.random()*0.22;
         let onDur, offDur;
         if(profile==='phantom'){ onDur = fast*0.6; offDur = 0.9 + Math.random()*0.6; }
         else if(profile==='oni'){ onDur = 0.30 + Math.random()*0.25; offDur = (Math.random()<0.5)?0.7:1.0; }
@@ -905,16 +881,14 @@ function makeFlickerController(mesh){
       }
     }
   };
-} // NOTE: parametric flicker matching Phantom/Oni variants
+} // flicker profile
 
 async function spawnGhost(){
-  // Pick a ghost type consistent with evidence dynamics later (random for now)
   const profile = GHOSTS[(Math.random()*GHOSTS.length)|0];
   ghost.type = profile.name;
   ghost.wanderRadius = profile.rules?.wander ?? 8;
   ghost.canChangeRoom = profile.rules?.roomChange !== false;
 
-  // Spawn mesh (GLB if available else translucent box fallback)
   try{
     const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
     const pick = list[(Math.random()*list.length)|0];
@@ -938,33 +912,26 @@ async function spawnGhost(){
   ghost.mesh.position.copyFrom(ghost.roomCenter);
   ghost.visible=false;
 
-  // Flicker controller
   ghost.flicker = makeFlickerController(ghost.mesh);
   if(ghost.type==='Phantom') ghost.flicker.setSolid(0.45);
   if(ghost.type==='Oni')     ghost.flicker.setSolid(0.95);
-} // NOTE: creates ghost with per-type wander rules and flicker profile
+} // spawn ghost
 
 function wanderGhost(dt){
   if(!ghost.mesh) return;
-  if(ghost.mode!=='idle' && ghost.mode!=='event') return; // NOTE: no wander while hunting (or minor during event)
+  if(ghost.mode!=='idle' && ghost.mode!=='event') return;
   if(!ghost._dir || Math.random()<0.02){
     const ang=Math.random()*Math.PI*2;
-    const spd=0.28; // m/s ghost idle walk
-    ghost._dir = new BABYLON.Vector3(Math.cos(ang)*spd,0,Math.sin(ang)*spd);
+    const spd=0.28; ghost._dir = new BABYLON.Vector3(Math.cos(ang)*spd,0,Math.sin(ang)*spd);
   }
-  // Stay within wander radius of roomCenter (Goryo 4m, Shade 6m, default 8m etc.)
   const step = ghost._dir.scale(dt);
   const candidate = ghost.mesh.position.add(step);
   const center = ghost.roomCenter;
-  if(candidate.subtract(center).length() <= ghost.wanderRadius){
-    ghost.mesh.position = candidate;
-  }else{
-    ghost._dir = null;
-  }
-} // NOTE: constrained wandering
+  if(candidate.subtract(center).length() <= ghost.wanderRadius) ghost.mesh.position = candidate;
+  else ghost._dir = null;
+} // constrained wander
 
 function ghostEventTick(dt){
-  // NOTE: random short “event” flashes when not hunting
   if(!ghost._eventTimer){ ghost._eventTimer=0; ghost._nextEvent= 8+Math.random()*12; }
   ghost._eventTimer += dt;
   if(ghost.mode!=='hunt' && ghost._eventTimer>ghost._nextEvent){
@@ -976,69 +943,67 @@ function ghostEventTick(dt){
     ghost._eventLeft -= dt;
     if(ghost._eventLeft<=0) ghost.mode='idle';
   }
-} // NOTE: schedules small events
+} // ambient events
 
 function huntTick(dt){
   if(!ghost._huntTimer){ ghost._huntTimer=0; ghost._nextHunt=50+Math.random()*40; }
   if(ghost.mode==='hunt'){
-    // smudge suppression
     if(performance.now() < (ghost.smudgedUntil||0)) return;
-    // chase player: move toward camera
     const dir = camera.position.subtract(ghost.mesh.position); dir.y=0;
     const dist = dir.length();
     ghost.nearPlayer = dist<3.0;
     if(dist>0.02){
       dir.normalize();
-      const spd = (ghost.type==='Revenant' && player.sanity<50) ? 2.8 : 1.4; // NOTE: faster if Rev style case
+      const spd = (ghost.type==='Revenant' && player.sanity<50) ? 2.8 : 1.4;
       ghost.mesh.position.addInPlace(dir.scale(spd*dt));
     }
-    // end hunt after duration
     ghost._huntLeft -= dt;
     if(ghost._huntLeft<=0){ ghost.mode='idle'; document.getElementById('hud-hunt').textContent='Calm'; }
   } else {
     ghost._huntTimer += dt;
     if(ghost._huntTimer>ghost._nextHunt){
       ghost._huntTimer=0; ghost._nextHunt=55+Math.random()*45;
-      if(player.sanity<65){ startHunt(); } // NOTE: simple sanity gate
+      if(player.sanity<65){ startHunt(); }
     }
   }
-} // NOTE: handles starting/ending hunts
+} // hunt loop
 
 function startHunt(){
   ghost.mode='hunt'; ghost._huntLeft = 8 + Math.random()*5;
   document.getElementById('hud-hunt').textContent='Hunting';
   toast('Hunt started!');
-} // NOTE: begins hunt
+} // begin hunt
 
 function ghostAbortHunt(reason){
   ghost.mode='idle'; document.getElementById('hud-hunt').textContent='Calm';
   toast('Hunt stopped by '+reason);
-} // NOTE: ends hunt due to crucifix/smudge etc.
+} // stop hunt
 
 function ghostVisibilityTick(dt){
   const profile = (ghost.type==='Phantom')?'phantom':(ghost.type==='Oni')?'oni':'default';
-  const mode = ghost.mode;
-  ghost.flicker?.tick(dt, mode, profile);
+  ghost.flicker?.tick(dt, ghost.mode, profile);
   ghost.visible = (ghost.mesh.material?.alpha ?? ghost.mesh.visibility) > 0.05;
-} // NOTE: drives flicker per state
+} // flicker driver
+</script>
 
-/*** ==========================================================
+<script>
+/*** =========================================
     BOOT, WEATHER PICK & MAIN LOOP
-    ========================================================== ***/
+    ========================================= ***/
 async function boot(){
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false }); // NOTE: engine
-  scene  = new BABYLON.Scene(engine); // NOTE: scene
-  scene.collisionsEnabled = true;     // NOTE: collisions on
-  scene.gravity = new BABYLON.Vector3(0,-0.5,0); // NOTE: gravity
+  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  scene  = new BABYLON.Scene(engine);
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0,-0.5,0);
 
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(46.16, 2.0, -105.52), scene); // NOTE: spawn near your coords
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(46.16, 2.0, -105.52), scene);
   camera.attachControl(canvas, true);
   camera.checkCollisions = true;
   camera.applyGravity = true;
   camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
   camera.minZ = 0.1; camera.inertia=0;
-  camera.inputs.removeByType("FreeCameraKeyboardMoveInput"); // NOTE: we handle keyboard
+  camera.inputs.removeByType("FreeCameraKeyboardMoveInput"); // we handle input
 
   // Atmosphere
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
@@ -1048,19 +1013,22 @@ async function boot(){
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
 
-  await loadMap();  // NOTE: load house GLB
-  await loadMoon(); // NOTE: load moon
-MarkerTool.bind(scene, camera);
+  await loadMap();   // load house GLB
+  await loadMoon();  // load moon GLB
+
+  // 🔹 Bind marker tool AFTER scene+camera exist (fixes onPointerObservable undefined)
+  MarkerTool.bind(scene, camera);
+
   // Weather pick AFTER scene exists
-  WeatherAudio.init(scene); // NOTE: set up audio engine
+  WeatherAudio.init(scene);
   const r=Math.random();
   const w = r<0.40?'Clear' : r<0.70?'Rain' : r<0.88?'Snow' : 'Blood Moon';
   setWeather(w);
 
   // Items & inputs
-  rebuildBelt(); // NOTE: build belt UI
-  InputSystem.init(); // NOTE: keyboard + pointer lock + touch
-  canvas.focus(); // NOTE: grab focus so WASD works immediately
+  rebuildBelt();
+  InputSystem.init();
+  canvas.focus();
 
   // Ghost spawn
   await spawnGhost();
@@ -1073,14 +1041,11 @@ MarkerTool.bind(scene, camera);
   document.getElementById('btn-notebook').onclick=openNotebook;
   document.getElementById('btn-inspector').onclick=()=>{ try{ scene.debugLayer.isVisible()?scene.debugLayer.hide():scene.debugLayer.show({overlay:true}); }catch(e){} };
 
-  // Title “reload map” button rebind (already wired; noop if pressed later)
-
   // Main loop
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
     const input = InputSystem.snapshot();
 
-    // movement + look
     handleMovement(input, dt);
     applyLook(input.lookDelta);
 
@@ -1088,7 +1053,7 @@ MarkerTool.bind(scene, camera);
     if(held.light){ held.light.position = camera.position.add(new BABYLON.Vector3(0,0.3,0)); held.light.setDirectionToTarget(camera.position.add(camera.getForwardRay().direction)); }
     if(held.uvLight){ held.uvLight.position = camera.position.add(new BABYLON.Vector3(0,0.3,0)); held.uvLight.setDirectionToTarget(camera.position.add(camera.getForwardRay().direction)); }
 
-    // weather loop: lightning pacing
+    // weather tick
     if(weather.state==='Rain' || weather.state==='Blood Moon'){
       weather.lightningTimer += dt;
       if(weather.lightningTimer > weather.nextStrike){ lightningFlash(); scheduleNextLightning(); }
@@ -1102,49 +1067,45 @@ MarkerTool.bind(scene, camera);
     wanderGhost(dt);
     ghostVisibilityTick(dt);
 
-    // HUD XYZ
-const xyz = document.getElementById('hud-xyz');
-xyz.style.display = 'block';
-document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
-document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
-document.getElementById('hud-z').textContent = camera.position.z.toFixed(2);
+    // HUD XYZ (fixed)
+    const xyz=document.getElementById('hud-xyz'); xyz.style.display='block';
+    document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
+    document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
+    document.getElementById('hud-z').textContent = camera.position.z.toFixed(2);
+  });
 
-  // render + resize hooks
-  engine.runRenderLoop(()=>scene.render()); // NOTE: drive Babylon render loop
-  window.addEventListener('resize', ()=>engine.resize()); // NOTE: keep canvas sized
-} // NOTE: end boot()
+  engine.runRenderLoop(()=>scene.render());
+  window.addEventListener('resize', ()=>engine.resize());
+} // boot scene, bind systems, start loop
 
-/*** ==========================================================
+/*** =========================================
     LIGHTNING FLASH (quick white pop)
-    ========================================================== ***/
+    ========================================= ***/
 function lightningFlash(){
-  // NOTE: ephemeral overlay so we don't need a permanent DOM node
   const d=document.createElement('div');
   d.style.cssText='position:fixed;inset:0;background:#fff;opacity:.0;pointer-events:none;z-index:12000;transition:opacity 90ms ease-out;';
   document.body.appendChild(d);
-  // pop to ~0.55 then fade
   requestAnimationFrame(()=>{ d.style.opacity='0.55'; });
   setTimeout(()=>{ d.style.opacity='0'; }, 110);
   setTimeout(()=>{ d.remove(); }, 260);
-} // NOTE: used by weather lightning pacing
+} // transient overlay for lightning
 
-/*** ==========================================================
+/*** =========================================
     START FLOW (title → game)
-    ========================================================== ***/
+    ========================================= ***/
 let __started=false;
 async function safeStart(){
-  if(__started) return;                 // NOTE: guard against double start
+  if(__started) return;
   __started = true;
-  document.getElementById('title-screen').style.display='none'; // NOTE: hide title
-  await boot();                         // NOTE: build scene, load map/moon/ghost, wire systems
+  document.getElementById('title-screen').style.display='none';
+  await boot(); // build scene & start
 
-  // small UX: try to grab focus & unlock audio context once we have a gesture
   try{ canvas.focus(); }catch{}
   try{ BABYLON.Engine.audioEngine?.unlock?.(); }catch{}
-} // NOTE: user gesture entry point (button press / Enter)
+} // gesture entry
 
-document.getElementById('start-button').addEventListener('click', ()=>safeStart()); // NOTE: Start button
-document.addEventListener('keydown', (e)=>{ if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(); } }); // NOTE: Enter/Space from title
+document.getElementById('start-button').addEventListener('click', ()=>safeStart());
+document.addEventListener('keydown', (e)=>{ if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(); } });
 </script>
 </body>
 </html>
