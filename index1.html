@@ -113,6 +113,8 @@
   </style>
 </head>
 <body>
+  <script>window.MAP_DEF = window.MAP_DEF || null;</script>
+
   <!-- Title -->
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
@@ -421,7 +423,7 @@ loadMap = async function(){
 
 /* Fallback helpers for exterior bounds */
 function getExteriorBounds(){
-  if(window.MAP_DEF?.exterior?.length){
+  if(window.window.MAP_DEF?.exterior?.length){
     const ext = MAP_DEF.exterior;
     let minx=Infinity, maxx=-Infinity, minz=Infinity, maxz=-Infinity;
     for(const p of ext){ if(p.x<minx) minx=p.x; if(p.x>maxx) maxx=p.x; if(p.z<minz) minz=p.z; if(p.z>maxz) maxz=p.z; }
@@ -497,6 +499,128 @@ document.getElementById('viewer-file').addEventListener('change', (e)=>viewerLoa
   });
 })();
 
+</script>
+
+<script>
+/*** ==========================================================
+    OVER-THE-SHOULDER THIRD-PERSON (SPRING ARM)
+    ========================================================== ***/
+let __avatar = { root:null, mesh:null, enabled:false, height:1.8 };
+const OTS = {
+  enabled:false,
+  cam:null,
+  shoulderX: 0.5,     // right offset (meters)
+  shoulderY: 1.2,     // height of camera target above feet
+  boomLen: 3.4,       // default boom length behind the player
+  boomMin: 1.2,
+  boomMax: 4.8,
+  collideMargin: 0.25,
+  lerpPos: 0.18,      // smoothing (0..1, higher = snappier)
+  lerpAim: 0.25
+};
+
+async function ensurePlayerModel(){
+  if(__avatar.mesh) return __avatar.mesh;
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/player/", "main_player.glb", scene);
+    const mesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+    __avatar.root = new BABYLON.TransformNode("playerAvatar", scene);
+    mesh.parent = __avatar.root;
+    mesh.isPickable = false;
+    // normalize height to ~1.8m
+    const bb = mesh.getHierarchyBoundingVectors(true);
+    const h = Math.max(0.5, (bb.max.y - bb.min.y) || 1.8);
+    const s = 1.8 / h;
+    mesh.scaling.set(s,s,s);
+    mesh.setEnabled(false);
+    __avatar.mesh = mesh;
+  }catch(e){ console.warn("main_player.glb failed to load", e); }
+  return __avatar.mesh;
+}
+
+function setThirdPersonOTS(on){
+  OTS.enabled = !!on;
+  if(OTS.enabled){
+    ensurePlayerModel().then(()=>{ if(__avatar.mesh) __avatar.mesh.setEnabled(true); });
+    ensureThirdCam();
+    scene.activeCamera = OTS.cam;
+  }else{
+    if(__avatar.mesh) __avatar.mesh.setEnabled(false);
+    scene.activeCamera = camera;
+  }
+  toast(OTS.enabled ? "Third-person (OTS) ON" : "Third-person OFF");
+}
+function toggleThirdPersonOTS(){ setThirdPersonOTS(!OTS.enabled); }
+
+function ensureThirdCam(){
+  if(OTS.cam) return OTS.cam;
+  OTS.cam = new BABYLON.UniversalCamera("thirdCam", camera.position.clone(), scene);
+  OTS.cam.minZ = 0.1;
+  OTS.cam.inertia = 0;
+  OTS.cam.inputs.removeByType("FreeCameraKeyboardMoveInput");
+  return OTS.cam;
+}
+
+// Utility: exponential smoothing factor based on frame time
+function smoothStep(alpha, dt){ return 1 - Math.pow(1-alpha, Math.max(1, dt*60)); }
+
+function updatePlayerAvatarTPS(dt){
+  if(!__avatar.mesh) return;
+  if(!OTS.enabled){ __avatar.mesh.setEnabled(false); return; }
+  __avatar.mesh.setEnabled(true);
+  // anchor is the first-person camera (acts as player capsule center at eye level)
+  const anchor = camera.position;
+  // Ray down to get feet height
+  const footRay = new BABYLON.Ray(anchor.add(new BABYLON.Vector3(0,1.2,0)), new BABYLON.Vector3(0,-1,0), 3.0);
+  const hit = scene.pickWithRay(footRay, m=>m && m.isPickable!==false);
+  const footY = hit?.pickedPoint ? hit.pickedPoint.y : (anchor.y - __avatar.height);
+  // Place avatar at anchor xz and on ground
+  __avatar.root.position.copyFrom(new BABYLON.Vector3(anchor.x, footY, anchor.z));
+  // Face same yaw as camera
+  __avatar.root.rotation.y = camera.rotation.y;
+}
+
+// Compute OTS camera position with collision and smoothing
+function updateThirdCam(dt){
+  if(!OTS.enabled || !OTS.cam) return;
+  const anchor = camera.position.clone();
+  // basis from camera yaw
+  const f = camera.getForwardRay().direction.clone(); f.y = 0; f.normalize();
+  const r = BABYLON.Vector3.Cross(BABYLON.Axis.Y, f).normalize(); // right
+  const target = new BABYLON.Vector3(anchor.x, anchor.y - 1.7 + OTS.shoulderY, anchor.z);
+  const shoulder = target.add(r.scale(OTS.shoulderX));
+
+  // desired boom end (behind target along -f)
+  const desired = shoulder.subtract(f.scale(OTS.boomLen));
+
+  // collision: ray from shoulder to desired
+  const dir = desired.subtract(shoulder); const dist = dir.length();
+  let boomPos = desired;
+  if(dist > 0.001){
+    const ray = new BABYLON.Ray(shoulder, dir.scale(1/dist), dist);
+    const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false && m !== __avatar.mesh);
+    if(hit?.hit && hit.pickedPoint){
+      const len = Math.max(OTS.boomMin, Math.min(hit.distance - OTS.collideMargin, OTS.boomMax));
+      boomPos = shoulder.subtract(f.scale(len));
+    }
+  }
+  // clamp boom length
+  const clamped = shoulder.subtract(f.scale(Math.max(OTS.boomMin, Math.min(OTS.boomMax, BABYLON.Vector3.Distance(shoulder, boomPos)))));
+  // smoothing
+  const ap = smoothStep(OTS.lerpPos, dt);
+  OTS.cam.position = BABYLON.Vector3.Lerp(OTS.cam.position || clamped, clamped, ap);
+
+  // aim a bit ahead to reduce head occlusion
+  const aim = shoulder.add(f.scale(1.0));
+  const ar = smoothStep(OTS.lerpAim, dt);
+  const curTarget = OTS.cam.getTarget ? OTS.cam.getTarget() : aim;
+  const nextTarget = new BABYLON.Vector3(
+    curTarget.x + (aim.x - curTarget.x) * ar,
+    curTarget.y + (aim.y - curTarget.y) * ar,
+    curTarget.z + (aim.z - curTarget.z) * ar
+  );
+  OTS.cam.setTarget(nextTarget);
+}
 </script>
 
 <script>
@@ -664,7 +788,7 @@ const InputSystem = (()=>{
     'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
-    'KeyE':'pickup', 'KeyG':'drop', 'Backslash':'tp'
+    'KeyE':'pickup', 'KeyG':'drop', 'Backslash':'third', 'Backslash':'tp'
   };
 
   function recomputeMove(){
@@ -685,6 +809,7 @@ const InputSystem = (()=>{
     }
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
+    if(tag==='third' && down)  toggleThirdPersonOTS();
     if(tag==='tp' && down && typeof toggleThirdPerson==='function') toggleThirdPerson();
     recomputeMove();
   }
@@ -1145,7 +1270,7 @@ function gridAround(origin, n, cols=5, spacing=0.75){
   return pts;
 }
 async function spawnToolsInVan(){
-  const vanPoly = (MAP_DEF?.rooms||[]).find(r=>r.name==='Van')?.poly;
+  const vanPoly = (window.MAP_DEF?.rooms||[]).find(r=>r.name==='Van')?.poly;
   if(!vanPoly?.length){
     // fallback: drop tools near current camera start
     const base = camera?.position || new BABYLON.Vector3(0,1.7,0);
@@ -1183,7 +1308,7 @@ async function spawnToolsInVan(){
 }
 function spawnWorldItems(){
   // Spawn a few lightweight, non-pickable props inside rooms for ghost tossing.
-  const rooms = (MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
+  const rooms = (window.MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
   if(rooms.length===0) return;
   const count = 12;
   for(let i=0;i<count;i++){
@@ -1332,7 +1457,7 @@ function makeFlickerController(mesh){
   };
 }
 function randomInsideExterior(){
-  const poly = MAP_DEF?.exterior || [{x:-10,z:-10},{x:10,z:-10},{x:10,z:10},{x:-10,z:10}];
+  const poly = window.MAP_DEF?.exterior || [{x:-10,z:-10},{x:10,z:-10},{x:10,z:10},{x:-10,z:10}];
   return randomPointInRoomPoly(poly);
 }
 async function spawnGhost(){
@@ -1546,7 +1671,7 @@ async function boot(){
   scene.collisionsEnabled = true;
   scene.gravity = new BABYLON.Vector3(0,-0.5,0);
 
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(MAP_DEF?.vanSpawn?.x||0, MAP_DEF?.vanSpawn?.y||2, MAP_DEF?.vanSpawn?.z||24), scene);
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(window.MAP_DEF?.vanSpawn?.x||0, window.MAP_DEF?.vanSpawn?.y||2, window.MAP_DEF?.vanSpawn?.z||24), scene);
   camera.attachControl(canvas, true);
   camera.checkCollisions = true;
   camera.applyGravity = false; // handled by groundSnapTick()
@@ -1563,7 +1688,7 @@ async function boot(){
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
 
-  await loadMap();
+  await loadSelectedMap();
   await loadMoon();
   WeatherAudio.init(scene);
   MarkerTool.init();
@@ -1665,53 +1790,6 @@ function lightningFlash(){
 
 
 <script>
-/*** ==========================================================
-    SIMPLE THIRD-PERSON AVATAR (inline)
-    ========================================================== ***/
-let __avatar = { root:null, mesh:null, enabled:false, height:1.7, dist:1.6 };
-
-async function ensurePlayerModel(){
-  if(__avatar.mesh) return __avatar.mesh;
-  try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync(\"\", \"./assets/models/player/\", \"main_player.glb\", scene);
-    const mesh = r.meshes.find(m=>m.name && m.name!==\"__root__\") || r.meshes[0];
-    __avatar.root = new BABYLON.TransformNode(\"playerAvatar\", scene);
-    mesh.parent = __avatar.root;
-    mesh.isPickable = false;
-    // scale to ~1.8m tall if needed
-    const bb = mesh.getHierarchyBoundingVectors(true);
-    const h = (bb.max.y - bb.min.y) || 1.8;
-    const s = 1.8 / h;
-    mesh.scaling.set(s,s,s);
-    mesh.setEnabled(false);
-    __avatar.mesh = mesh;
-    console.log(\"Avatar loaded\");
-  }catch(e){ console.warn(\"main_player.glb failed to load\", e); }
-  return __avatar.mesh;
-}
-
-function setThirdPerson(on){
-  __avatar.enabled = !!on;
-  if(__avatar.mesh) __avatar.mesh.setEnabled(__avatar.enabled);
-  toast(__avatar.enabled?\"Third-person ON\":\"Third-person OFF\");
-}
-function toggleThirdPerson(){ setThirdPerson(!__avatar.enabled); }
-
-// Keep avatar positioned in front of the camera so it’s visible
-function updatePlayerAvatar(dt){
-  if(!__avatar.mesh) return;
-  if(!__avatar.enabled){ __avatar.mesh.setEnabled(false); return; }
-  __avatar.mesh.setEnabled(true);
-  const f = camera.getForwardRay().direction.clone(); f.y = 0; f.normalize();
-  const pos = camera.position.add(f.scale(__avatar.dist));
-  // find ground for feet placement
-  const ray = new BABYLON.Ray(new BABYLON.Vector3(pos.x, pos.y+2, pos.z), new BABYLON.Vector3(0,-1,0), 5);
-  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
-  const y = hit?.pickedPoint ? hit.pickedPoint.y : (camera.position.y - __avatar.height);
-  __avatar.root.position.copyFrom(new BABYLON.Vector3(pos.x, y, pos.z));
-  // face same yaw as camera
-  __avatar.root.rotation.y = camera.rotation.y;
-}
 </script>
 
 <script>
