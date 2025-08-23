@@ -472,9 +472,11 @@ function disturbSaltAt(pos){
         ps.colorDead = new BABYLON.Color4(1,1,1,0);
         ps.start();
         setTimeout(()=>{ try{ps.stop(); ps.dispose(); } catch(e){}}, 800);
-      }
-try{s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){}// footprints appear for ~1 minute
-      try{spawnUVFootprints(pos, 2, 0.4); } catch(e){}}
+      } catch(e) { /* particle system failed; ignore */ }
+      // footprints appear for ~1 minute
+      try{ s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){}
+      try{ spawnUVFootprints(pos, 2, 0.4); } catch(e){}
+    }
   }
 }
 function useActiveItem(){
@@ -1191,7 +1193,7 @@ function updateEventAudioGains(){
   }else{
     ghost.audio.heartbeat.setVolume(0);
     ghost.audio.singing.setVolume(0);
-    if(ghost.audio.singing.isPlaying) ghost.audio.singing.stop();
+    if(ghost.audio.singing.isPlaying)   ghost.audio.singing.stop();
   }
 }
 </script>
@@ -1257,8 +1259,15 @@ async function boot(){
 
   await loadSelectedMap();
 
-  // Force player start at world origin for consistent authoring
-  try { camera.position = new BABYLON.Vector3(0, 1.8, 0); } catch(e){}
+  // Start position: use map-defined spawn if available, else origin
+  try {
+    const sp = (window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.vanSpawn)) ? (MAP_DEF.spawn || MAP_DEF.vanSpawn) : null;
+    if (sp) {
+      camera.position = new BABYLON.Vector3(sp.x ?? 0, (sp.y ?? 1.8), sp.z ?? 0);
+    } else {
+      camera.position = new BABYLON.Vector3(0, 1.8, 0);
+    }
+  } catch(e){ /* ignore */ }
 
   await loadMoon();
   WeatherAudio.init(scene);
@@ -1367,9 +1376,12 @@ let __started=false;
 async function safeStart(){
   if(__started) return;
   __started = true;
-  try{CURRENT_MAP = getSelectedMap(); } catch(e){}document.getElementById('title-screen').style.display='none';
+  try{CURRENT_MAP = getSelectedMap(); } catch(e){}
+  document.getElementById('title-screen').style.display='none';
   await boot();
-  try{canvas.focus(); } catch(e){}try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(e){}}
+  try{canvas.focus(); } catch(e){}
+  try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(e){}
+}
 function startNow(e){
   e?.preventDefault?.();
   safeStart();
