@@ -252,7 +252,6 @@ const WeatherAudio = (()=>{
     if(!sceneRef) return;
     if(current===target) return;
 
-    // Treat Sunset like Clear for audio
     const want={ clear:(target==='Clear'||target==='Sunset'), rain:(target==='Rain'||target==='Blood Moon'), snow:target==='Snow', drone:target==='Blood Moon' };
     for(const k of Object.keys(tracks)){
       const snd = tracks[k];
@@ -986,7 +985,7 @@ function burnSmudge(){ toast('Smudge in effect (6s)'); }
 
 <script>
 /*** ==========================================================
-    BOOT + MAIN LOOP
+    BOOT + MAIN LOOP  (PATCHED)
     ========================================================== ***/
 function currentRoomName(){
   if(!window.MAP_DEF) return player.inside?'House':'Exterior';
@@ -1018,13 +1017,30 @@ async function boot(){
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
-  setupSun(); setupMoon();
-  \1if(!(window.__mapConfig && window.__mapConfig.spawn)){
-    camera.position = getSpawnForMap(typeof currentMapFile!=='undefined' ? currentMapFile : (MAP_FILES[parseInt(document.getElementById('map-select')?.value||'0',10)||0]?.file||''));
-  }
+  setupSun();
+  setupMoon();
+
   await loadMoon();
   WeatherAudio.init(scene);
 
+  // Load player body so you can see arms/body in first person
+  await PlayerRig.load();
+
+  // Load selected map (and its .js def if present)
+  await loadSelectedMap();
+
+  // Spawn logic: prefer MAP_DEF.spawn if provided, else map-based default
+  try {
+    if (window.MAP_DEF && window.MAP_DEF.spawn) {
+      const s = window.MAP_DEF.spawn;
+      camera.position = new BABYLON.Vector3(s.x||0, s.y||1.8, s.z||0);
+    } else {
+      const sel = getSelectedMap();
+      camera.position = getSpawnForMap(sel?.file || "");
+    }
+  } catch(e){ console.warn("Spawn fallback", e); }
+
+  // Random weather after world is ready
   const r=Math.random();
   const w = r<0.30?'Sunset' : r<0.55?'Clear' : r<0.80?'Rain' : r<0.92?'Snow' : 'Blood Moon';
   setWeather(w);
@@ -1043,7 +1059,9 @@ async function boot(){
 
     try{ disturbSaltAt(camera.position.clone()); }catch(e){}
 
+    // Placeholder: mark as inside so HUD shows; plug real room/exterior later
     player.inside = true;
+
     document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
     const fill = document.getElementById('sanity-fill'); fill.style.width = Math.round(player.sanity)+'%'; 
 
@@ -1098,6 +1116,16 @@ document.addEventListener('keydown', (e)=>{
 }, {passive:false});
 
 window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === "function") loadManifest(); });
+
+// Simple buttons wiring
+document.getElementById('btn-use').onclick = useActiveItem;
+document.getElementById('btn-place').onclick = placeActiveItem;
+document.getElementById('btn-toss').onclick = tossActiveItem;
+document.getElementById('btn-lighter').onclick = toggleLighter;
+document.getElementById('btn-notebook').onclick = ()=>document.getElementById('notebook-modal').style.display='block';
+document.getElementById('btn-inspector').onclick = ()=>{ try{ scene.debugLayer.show({ embedMode:false }); }catch(e){ toast('Inspector not available'); } };
+function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
+function resetEvidence(){ toast('Evidence reset'); }
 </script>
 
 <script>
@@ -1107,30 +1135,10 @@ function getSpawnForMap(file){
     // Fully Furnished House spawn
     return new BABYLON.Vector3(-334.56, 3.76, -377.44);
   }
-  // Default fallback spawn (existing value or a safe exterior)
+  // Default fallback spawn (safe exterior)
   return new BABYLON.Vector3(44.91, 1.17, -104.00);
 }
 </script>
 
 </body>
 </html>
-<script>
-
-async function loadMapConfig(file){
-  try{
-    const base = (file||'').toLowerCase().replace(/\.(glb|gltf)$/,'').replace(/[^a-z0-9_\-]/g,'');
-    const candidates = [
-      `./assets/models/map/${base}.config.js`,
-      `./assets/models/map/${base}.js`,
-      `./assets/models/${base}.config.js`,
-      `./${base}.config.js`,
-    ];
-    for(const url of candidates){
-      try{ const mod = await import(url+`?v=${Date.now()}`); return mod; }catch(e){}
-    }
-  }catch(e){}
-  return null;
-}
-
-</script>
-
