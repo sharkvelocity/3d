@@ -256,6 +256,7 @@ function applyWeather(state){
   }
 }
 
+
 // ===== Precipitation (Snow/Rain) =====
 let precipPS=null, precipEmitter=null, precipType='none', precipBaseRate=0;
 
@@ -277,32 +278,82 @@ function createSnow(){
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(16,16,14,0,Math.PI*2); ctx.fill(); tex.update();
 
   if (BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported){
-    precipPS = new BABYLON.GPUParticleSystem("snow", {capacity: 5000}, scene);
+    precipPS = new BABYLON.GPUParticleSystem("snow", {capacity: 6000}, scene);
   } else {
-    precipPS = new BABYLON.ParticleSystem("snow", 5000, scene);
+    precipPS = new BABYLON.ParticleSystem("snow", 6000, scene);
   }
   precipPS.particleTexture = tex;
   precipPS.emitter = precipEmitter;
-  precipPS.minEmitBox = new BABYLON.Vector3(-10, 6, -10);
-  precipPS.maxEmitBox = new BABYLON.Vector3( 10, 9,  10);
+  precipPS.minEmitBox = new BABYLON.Vector3(-12, 7, -12);
+  precipPS.maxEmitBox = new BABYLON.Vector3( 12,10,  12);
   precipPS.direction1 = new BABYLON.Vector3(-0.1, -1.0, 0.1);
   precipPS.direction2 = new BABYLON.Vector3( 0.1, -1.0,-0.1);
   precipPS.gravity = new BABYLON.Vector3(0, -0.15, 0);
   precipPS.minLifeTime = 4.0; precipPS.maxLifeTime = 7.0;
   precipPS.minSize = 0.08; precipPS.maxSize = 0.18;
-  precipPS.emitRate = precipBaseRate = 1200;
+  precipPS.emitRate = precipBaseRate = 1500;
   precipPS.updateSpeed = 0.02;
   precipPS.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
   precipPS.start();
   precipType = 'snow';
 }
 
+// Tall streak texture for rain
+function makeRainTexture(){
+  const tex = new BABYLON.DynamicTexture("rainStreak", {width:32, height:128}, scene, false);
+  const ctx = tex.getContext();
+  ctx.clearRect(0,0,32,128);
+  // thin vertical streak with soft edges
+  const grad = ctx.createLinearGradient(0,0,0,128);
+  grad.addColorStop(0.0,"rgba(255,255,255,0.0)");
+  grad.addColorStop(0.15,"rgba(200,220,255,0.6)");
+  grad.addColorStop(0.85,"rgba(200,220,255,0.6)");
+  grad.addColorStop(1.0,"rgba(255,255,255,0.0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(14,0,4,128); // 4px wide line
+  // slight glow
+  ctx.fillStyle = "rgba(200,220,255,0.15)";
+  ctx.fillRect(12,0,8,128);
+  tex.update();
+  return tex;
+}
+
+function createRain(){
+  precipEmitter = new BABYLON.TransformNode("precipEmitter", scene);
+  const tex = makeRainTexture();
+
+  if (BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported){
+    precipPS = new BABYLON.GPUParticleSystem("rain", {capacity: 12000}, scene);
+  } else {
+    precipPS = new BABYLON.ParticleSystem("rain", 12000, scene);
+  }
+  precipPS.particleTexture = tex;
+  precipPS.emitter = precipEmitter;
+  // Big box around camera
+  precipPS.minEmitBox = new BABYLON.Vector3(-14, 9, -14);
+  precipPS.maxEmitBox = new BABYLON.Vector3( 14,12,  14);
+  // Fast downward fall with tiny sideways jitter
+  precipPS.direction1 = new BABYLON.Vector3(-0.15, -8.0, 0.10);
+  precipPS.direction2 = new BABYLON.Vector3( 0.15, -10.0,-0.10);
+  precipPS.gravity = new BABYLON.Vector3(0, -1.5, 0);
+  // Short lifetime so streaks don't hang
+  precipPS.minLifeTime = 0.6; precipPS.maxLifeTime = 1.1;
+  // Use larger size to make streak texture visible
+  precipPS.minSize = 0.8; precipPS.maxSize = 1.6;
+  precipPS.emitRate = precipBaseRate = 4500;
+  precipPS.updateSpeed = 0.015;
+  precipPS.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  precipPS.start();
+  precipType = 'rain';
+}
+
 function ensurePrecipitation(state){
   const s = (state||'').toLowerCase();
-  const want = (s==='snow') ? 'snow' : 'none';
+  const want = (s==='snow') ? 'snow' : (s==='rain' ? 'rain' : 'none');
   if (want === precipType) return;
   disposePrecip();
   if (want === 'snow'){ createSnow(); }
+  else if (want === 'rain'){ createRain(); }
 }
 
 function updatePrecipFollow(){
@@ -312,6 +363,7 @@ function updatePrecipFollow(){
   const pos = camera.position.add(forward.scale(2)).add(new BABYLON.Vector3(0,7,0));
   precipEmitter.position.copyFrom(pos);
   if(precipPS){
+    // Disable emission indoors
     const rate = player.inside ? 0 : precipBaseRate;
     if (precipPS.emitRate !== rate) precipPS.emitRate = rate;
   }
