@@ -601,15 +601,15 @@ const InputSystem = (()=>{
     isTouch: ()=>isTouchMode
   };
 })();
+</script>
+
+<script>
 /*** ==========================================================
     PLAYER MODEL (Visible Body in First Person)
-    - Expects: ./assets/models/player/main_player.glb
-    - Shows full body when you look down; hides only the head.
-    - No movement rewrite: we follow your existing camera.
     ========================================================== ***/
 const PlayerRig = (()=>{
-  let root = null;          // Transform node for the player
-  let meshRoot = null;      // First real mesh under the import
+  let root = null;
+  let meshRoot = null;
   let loaded = false;
   let headHidden = false;
   let scaleApplied = false;
@@ -617,16 +617,15 @@ const PlayerRig = (()=>{
   const CONFIG = {
     modelDir: "./assets/models/player/",
     modelFile: "main_player.glb",
-    bodyYOffset: 1.70,     // distance from camera down to approximate foot level
-    bodyForward: 0.06,     // tiny push forward so you see chest when looking down
-    minScale: 0.6,         // sane scale bounds for odd assets
+    bodyYOffset: 1.70,
+    bodyForward: 0.06,
+    minScale: 0.6,
     maxScale: 1.6
   };
 
   function _hideHeadIfFound(node) {
     if (!node) return;
     const name = (node.name||"").toLowerCase();
-    // common head name patterns (Mixamo, GLB exports)
     const looksLikeHead = name.includes("head") || name.includes("mixamorig:head") || name.includes("bone_head");
     if (looksLikeHead && node.getClassName && node.getClassName()!=="TransformNode") {
       try { node.isVisible = false; headHidden = true; } catch(_){}
@@ -637,19 +636,14 @@ const PlayerRig = (()=>{
   function _tuneMaterials(node) {
     if (!node || !node.material) return;
     try {
-      node.material.backFaceCulling = true; // avoid weird inside-face artifacts
+      node.material.backFaceCulling = true;
       if (node.material.albedoTexture) node.material.albedoTexture.hasAlpha = false;
       if (node.material.opacityTexture) node.material.opacityTexture.getAlphaFromRGB = false;
     } catch(_){}
   }
 
   function _fitScaleToHuman(meshes) {
-    // Simple heuristic to prevent “giant” or “tiny” avatars
     try {
-      const bbox = BABYLON.Mesh.CreateBox("tmp_bb", 0.1, scene); // temp holder
-      bbox.isVisible = false; bbox.isPickable = false;
-      meshes.forEach(m => { try{ if (m.getBoundingInfo) bbox.refreshBoundingInfo(true, true); }catch(_){} });
-      // Use first skinned mesh to get bounds instead
       const m0 = meshes.find(m=> m.getClassName && m.getClassName()!=="TransformNode");
       if (!m0) return;
       const bi = m0.getBoundingInfo();
@@ -666,7 +660,6 @@ const PlayerRig = (()=>{
     root = new BABYLON.TransformNode("playerRoot", scene);
     try {
       const r = await BABYLON.SceneLoader.ImportMeshAsync("", CONFIG.modelDir, CONFIG.modelFile, scene);
-      // find the first non-__root__ mesh
       meshRoot = r.meshes.find(m => (m.name||"") !== "__root__") || r.meshes[0];
       r.meshes.forEach(m=>{
         try {
@@ -676,16 +669,9 @@ const PlayerRig = (()=>{
           _tuneMaterials(m);
         } catch(_){}
       });
-      // Prevent shadow-casting from body (optional)
       try { r.meshes.forEach(m => m.receiveShadows = false); } catch(_){}
-
-      // Scale to reasonable human size
       _fitScaleToHuman(r.meshes);
-
-      // Hide head only (so body & arms are visible looking down)
       _hideHeadIfFound(root);
-
-      // If we couldn’t find a head mesh, fallback: hide the top-most small piece (~failsafe)
       if (!headHidden) {
         try {
           const tallest = r.meshes
@@ -694,11 +680,9 @@ const PlayerRig = (()=>{
           if (tallest && (tallest.name||"").toLowerCase().includes("head")) { tallest.isVisible = false; headHidden = true; }
         } catch(_){}
       }
-
       loaded = true;
     } catch (e) {
       console.warn("Player model load failed, creating capsule proxy.", e);
-      // fallback capsule so you still see a body when looking down
       const capsule = BABYLON.MeshBuilder.CreateCapsule("fp_capsule", {height:1.7, radius:0.25, tessellation:10}, scene);
       const m = new BABYLON.StandardMaterial("fp_capsule_mat", scene);
       m.diffuseColor = new BABYLON.Color3(0.75,0.75,0.8);
@@ -709,23 +693,15 @@ const PlayerRig = (()=>{
     }
   }
 
-  // Keep body under the camera & aligned to yaw
   function update() {
     if (!loaded || !camera || !root) return;
-
     const fwd = camera.getForwardRay().direction.clone(); fwd.y = 0; fwd.normalize();
-    const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
     const yaw = Math.atan2(fwd.z, fwd.x);
-
-    // Position: place body slightly forward and down from camera, so it’s visible when you look down
     const bodyPos = camera.position
-      .add(fwd.scale(CONFIG.bodyForward))           // tiny forward nudge
-      .add(new BABYLON.Vector3(0, -CONFIG.bodyYOffset, 0)); // drop to feet
-
+      .add(fwd.scale(CONFIG.bodyForward))
+      .add(new BABYLON.Vector3(0, -CONFIG.bodyYOffset, 0));
     root.position.copyFrom(bodyPos);
     root.rotation.y = yaw;
-
-    // Ensure sane scale even if importer didn’t give us one
     if (!scaleApplied) try { root.scaling = root.scaling || new BABYLON.Vector3(1,1,1); } catch(_){}
   }
 
@@ -733,25 +709,23 @@ const PlayerRig = (()=>{
 })();
 </script>
 
+<script>
 /*** ==========================================================
-    MOVEMENT (with temporary gravity disable) + LOOK
+    MOVEMENT (with temporary gravity disable) + LOOK (global)
     ========================================================== ***/
-function handleMovement(input, dt){
-  if(!camera) return;
+window.handleMovement = function(input, dt){
+  if(!window.camera) return;
 
   const baseWalk = player.speedWalk * (input.analog||1);
   const speed = input.running ? player.speedRun : baseWalk;
 
-  // move on XZ from camera yaw
   const fwd = camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
   const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
   const desired = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
 
-  // vertical intent from PageUp/PageDown
   const vert = input.moveVec.y || 0;
   const wantsFly = vert !== 0;
 
-  // if flying, pause gravity just for this frame
   const prevGravity = camera.applyGravity;
   if (wantsFly) camera.applyGravity = false;
 
@@ -759,7 +733,6 @@ function handleMovement(input, dt){
   if (desired.lengthSquared() > 0) next = next.add(desired.normalize().scale(speed * dt));
   if (wantsFly) next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
 
-  // ground snap only when not flying
   if (!wantsFly && desired.lengthSquared() > 0) {
     const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
     const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
@@ -775,15 +748,11 @@ function handleMovement(input, dt){
     camera.position = next;
   }
 
-  // restore gravity
   camera.applyGravity = prevGravity;
+};
 
-  // OPTIONAL noclip while flying:
-  // camera.checkCollisions = !wantsFly;
-}
-
-function applyLook(lookDelta){
-  if(!camera) return;
+window.applyLook = function(lookDelta){
+  if(!window.camera) return;
   const sens = 0.0028;
   camera.rotation.y += lookDelta.x * sens;
 
@@ -791,7 +760,7 @@ function applyLook(lookDelta){
   const maxPitch =  Math.PI/2 - 0.15;
   const next = (camera.rotation.x || 0) + (lookDelta.y * sens * 0.85);
   camera.rotation.x = Math.max(minPitch, Math.min(maxPitch, next));
-}
+};
 </script>
 
 <script>
@@ -833,7 +802,6 @@ function markShadowable(meshes){
 
 let __rainTex = null;
 function makeRainTexture(){
-  // 1px x 64px vertical streak with soft ends
   if(__rainTex) return __rainTex;
   const w = 1, h = 64;
   const dt = new BABYLON.DynamicTexture("rainTex",{width:w,height:h},scene,false);
@@ -854,40 +822,26 @@ function makeRainTexture(){
 
 function ensureRain(){
   if(weather.rainPS) return weather.rainPS;
-
-  // Use GPU particles if available for density at low cost
   const cap = 16000;
   const ps = (BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported)
     ? new BABYLON.GPUParticleSystem("rain", { capacity: cap }, scene)
     : new BABYLON.ParticleSystem("rain", cap, scene);
 
   ps.particleTexture = makeRainTexture();
-
-  // Big “cloud” over the playable area
   ps.emitter = new BABYLON.Vector3(0, 16, 0);
   ps.minEmitBox = new BABYLON.Vector3(-12, 0, -12);
   ps.maxEmitBox = new BABYLON.Vector3( 12, 0,  12);
-
-  // MUCH smaller drops (streaks)
   ps.minSize = 0.03;
   ps.maxSize = 0.06;
-
-  // Alpha (standard) blending
   ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-
-  // Downward motion with a touch of wind slant
   ps.direction1 = new BABYLON.Vector3(-0.05, -2.6,  0.05);
   ps.direction2 = new BABYLON.Vector3( 0.05, -3.0, -0.05);
-
   ps.gravity = new BABYLON.Vector3(0, -9.8, 0);
-
   ps.minLifeTime = 0.55;
   ps.maxLifeTime = 0.85;
-
   ps.emitRate = 12000;
   ps.updateSpeed = 0.01;
 
-  // billboard + stretch along velocity (if supported)
   try {
     ps.isBillboardBased = true;
     if (BABYLON.ParticleSystem.BILLBOARDMODE_STRETCHED !== undefined) {
@@ -900,7 +854,6 @@ function ensureRain(){
   ps.color1 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.85);
   ps.color2 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.65);
   ps.colorDead = new BABYLON.Color4(1, 1, 1, 0.0);
-
   ps.disposeOnStop = false;
 
   weather.rainPS = ps;
@@ -935,7 +888,6 @@ function setWeather(state){
   document.getElementById('hud-weather').textContent=state;
   WeatherAudio.set(state);
 
-  // baseline
   if(hemiLight) hemiLight.dispose();
   setupSun(); setupMoon();
   if(weather.rainPS) weather.rainPS.stop();
@@ -947,7 +899,6 @@ function setWeather(state){
     moonLight.intensity = 0.35;
   }
   if(state==='Sunset'){
-    // Brighter, warmer everywhere
     scene.fogDensity = 0.0022;
     sunLight.direction = new BABYLON.Vector3(-0.18,-1,0.12).normalize();
     sunLight.intensity = 1.45;
@@ -960,7 +911,6 @@ function setWeather(state){
   if(state==='Rain'){ ensureRain().start(); scheduleNextLightning(); scene.fogDensity=0.0048; }
   if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); scene.fogDensity=0.006; moonLight.intensity=0.6; }
 
-  // make sure world receives shadows
   try{ markShadowable(scene.meshes||[]); } catch(e){}
 }
 
@@ -981,7 +931,6 @@ async function loadMoon(){
         moonMesh.position.x=Math.cos(t)*180;
         moonMesh.position.z=Math.sin(t)*180;
         moonMesh.position.y=115+Math.sin(t*1.7)*6;
-        // point moonlight roughly opposite moon position
         if(moonLight){
           const dir = moonMesh.position.scale(-1).add(new BABYLON.Vector3(0,-60,0)).normalize();
           moonLight.direction = dir;
@@ -1054,7 +1003,6 @@ window.loadSelectedMap = async function(){
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
-    // House meshes receive and cast shadows
     try{
       res.meshes.forEach(m=>{
         m.receiveShadows = true;
@@ -1116,54 +1064,45 @@ async function boot(){
   camera.minZ = 0.1; camera.inertia=0;
   camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  // hemispheric fill (subtle, most light from sun/moon)
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.35;
 
-  // Atmosphere
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
-  // Sun + Moon
   setupSun(); setupMoon();
   await loadSelectedMap();
   await PlayerRig.load();
 
-  // Spawn at map-defined spawn OR fallback to requested position
-  const sp = (window.MAP_DEF && MAP_DEF.spawn) ? MAP_DEF.spawn : { x:14.15, y:1.80, z:11.09 };
-  try{ camera.position = new BABYLON.Vector3(sp.x||0, sp.y||1.8, sp.z||0); }catch(e){}
+  /* Force your starting location */
+  camera.position = new BABYLON.Vector3(44.91, 1.17, -104.00);
 
   await loadMoon();
   WeatherAudio.init(scene);
 
-  // Weather (weighted to show Sunset sometimes)
   const r=Math.random();
   const w = r<0.30?'Sunset' : r<0.55?'Clear' : r<0.80?'Rain' : r<0.92?'Snow' : 'Blood Moon';
   setWeather(w);
 
-  // Items & inputs
   rebuildBelt();
   InputSystem.init();
   canvas.focus();
 
-  // Main loop
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
     const input = InputSystem.snapshot();
-    handleMovement(input, dt);
-    applyLook(input.lookDelta);
+    if (typeof window.handleMovement === 'function') window.handleMovement(input, dt);
+    if (typeof window.applyLook === 'function') window.applyLook(input.lookDelta);
     PlayerRig.update();
-    // Salt disturbance check near camera (demo)
+
     try{ disturbSaltAt(camera.position.clone()); }catch(e){}
 
-    // Sanity (simplified)
     player.inside = true;
     document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
     const fill = document.getElementById('sanity-fill'); fill.style.width = Math.round(player.sanity)+'%'; 
 
-    // HUD XYZ
     const xyz=document.getElementById('hud-xyz'); xyz.style.display='block';
     document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
     document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
@@ -1214,7 +1153,6 @@ document.addEventListener('keydown', (e)=>{
   if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); startNow(e); }
 }, {passive:false});
 
-// Load manifest asap
 window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === "function") loadManifest(); });
 </script>
 </body>
