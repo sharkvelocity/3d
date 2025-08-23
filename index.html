@@ -145,8 +145,8 @@ const rng = Math.random;
 
 // --- Player state ---
 const player = {
-  speedWalk: 1.35,
-  speedRun: 3.0,
+  speedWalk: 1.65,
+  speedRun: 3.2,
   sanity: 100,
   room: 'Van',
   inside: false,
@@ -252,7 +252,6 @@ const WeatherAudio = (()=>{
     if(!sceneRef) return;
     if(current===target) return;
 
-    // Treat Sunset like Clear for audio
     const want={ clear:(target==='Clear'||target==='Sunset'), rain:(target==='Rain'||target==='Blood Moon'), snow:target==='Snow', drone:target==='Blood Moon' };
     for(const k of Object.keys(tracks)){
       const snd = tracks[k];
@@ -287,7 +286,7 @@ function rebuildBelt(){
   belt.forEach((id,i)=>{
     const d=document.createElement('div'); d.className='slot'+(i===activeSlot?' active':'');
     const item=itemById(id);
-    d.innerHTML = `<div class="label">${item?.name||id}</div>`;
+    d.innerHTML = '<div class="label">'+(item?item.name:id)+'</div>';
     d.onclick=()=>{ activeSlot=i; rebuildBelt(); };
     d.oncontextmenu=(e)=>{ e.preventDefault(); cycleSlot(i); };
     el.appendChild(d);
@@ -333,18 +332,16 @@ function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (l.intensity>0?
 function toggleUV(){ const u=ensureHeldUV(); u.intensity = (u.intensity>0?0:1.3); toast(u.intensity>0?'UV ON':'UV OFF'); }
 function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); }
 
-// ===== SALT System: place salt lines and disturb logic =====
-const SALT_LINES = []; // array of {mesh, a:Vector3, b:Vector3, disturbed:false}
-let saltCharges = 6; // basic total lines available
+// ===== SALT System =====
+const SALT_LINES = [];
+let saltCharges = 6;
 
 function _aimPointOnGround(maxDist=3.5){
   const origin = camera.position.clone();
   const dir = camera.getForwardRay().direction.clone();
   const ray = new BABYLON.Ray(origin, dir, maxDist);
   const pick = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
-  if(pick && pick.hit){
-    return pick.pickedPoint;
-  }
+  if(pick && pick.hit){ return pick.pickedPoint; }
   const ahead = origin.add(dir.scale(Math.min(maxDist, 3.5)));
   ahead.y = 0.02;
   return ahead;
@@ -398,10 +395,12 @@ function spawnUVFootprints(origin, count=2, step=0.35){
     m.specularColor = new BABYLON.Color3(0,0,0);
     m.alpha = 0.0; // fade in
     quad.material = m;
+    // fade in
     let t=0; const fadeIn = scene.onBeforeRenderObservable.add(()=>{
       t += engine.getDeltaTime()/1000; m.alpha = Math.min(0.9, t*3);
       if(m.alpha>=0.9) scene.onBeforeRenderObservable.remove(fadeIn);
     });
+    // hold ~60s then fade out and dispose
     setTimeout(()=>{
       let f=1;
       const h = scene.onBeforeRenderObservable.add(()=>{
@@ -415,7 +414,7 @@ function spawnUVFootprints(origin, count=2, step=0.35){
 
 <script>
 /*** ==========================================================
-    DISTURB SALT (fixed try/catch)
+    DISTURB SALT
     ========================================================== ***/
 function disturbSaltAt(pos){
   if((ghost?.type||'').toLowerCase()==='wraith') return;
@@ -472,32 +471,32 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 
 <script>
 /*** ==========================================================
-    INPUT (KBD/Touch) + PICKUP — with PageUp/PageDown/Space/Ctrl fly + noclip
+    INPUT (KBD/Touch) + PICKUP — WASD + Sprint + Fly + Noclip
     ========================================================== ***/
 const InputSystem = (()=>{
 
-  // NOTE: add y in move so we can fly up/down
   let move={x:0,y:0,z:0}, running=false, lookDelta={x:0,y:0};
   const keys = new Set();
   let isTouchMode=false;
   let _tapSprint=false;
   let _analogScale=1.0;
-  let _noclip=false;
+  let noclip=false;
 
   const keyMap = {
     'KeyW':'fw','KeyS':'bk','KeyA':'lt','KeyD':'rt',
     'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
-    'KeyE':'pickup', 'KeyG':'drop',
-    'PageUp':'up', 'PageDown':'down',   // ← vertical fly keys
-    'KeyN':'noclip', 'Space':'up', 'ControlLeft':'down'
+    'KeyE':'pickup','KeyG':'drop',
+    'PageUp':'up','PageDown':'down',
+    'Space':'up','ControlLeft':'down',
+    'KeyN':'noclip'
   };
 
   function recomputeMove(){
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
-    const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0); // ← vertical
+    const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0);
     move.z=f; move.x=r; move.y=v;
     running=keys.has('run') || _tapSprint;
   }
@@ -505,20 +504,23 @@ const InputSystem = (()=>{
   function onKey(e,down){
     const tag=keyMap[e.code];
     if(!tag) return;
-    e.preventDefault();
+    // only prevent default for keys that tend to scroll the page
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
     if(down) keys.add(tag); else keys.delete(tag);
-
-    if(tag==='noclip' && down){
-      _noclip=!_noclip;
-      toast('Noclip '+(_noclip?'ON':'OFF'));
-    }
-
     if(tag.startsWith('slot') && down){
       const idx = parseInt(tag.replace('slot',''),10);
       if(idx>=0 && idx<3){ activeSlot=idx; rebuildBelt(); }
     }
     if(tag==='pickup' && down) tryPickup();
-    if(tag==='drop' && down)   tryDrop();
+    if(tag==='drop'   && down) tryDrop();
+    if(tag==='noclip' && down){
+      noclip=!noclip;
+      if (camera){
+        camera.applyGravity = !noclip;
+        camera.checkCollisions = !noclip;
+      }
+      toast('Noclip: ' + (noclip?'ON':'OFF'));
+    }
     recomputeMove();
   }
 
@@ -556,38 +558,10 @@ const InputSystem = (()=>{
       e.preventDefault();
     },{passive:false});
 
-    // mobile sprint toggle
     const sprintWrap = document.getElementById('mobile-sprint');
     const sprintBtn  = document.getElementById('btn-sprint');
     sprintWrap.style.display='block';
     sprintBtn.onclick = ()=>{ _tapSprint=!_tapSprint; sprintBtn.textContent = 'Sprint: ' + (_tapSprint?'ON':'OFF'); };
-  }
-
-  function tryPickup(){
-    const ray = camera.getForwardRay(2.2);
-    const hit = scene.pickWithRay(ray, m=>m && m.metadata?.itemId);
-    if(hit?.pickedMesh?.metadata?.itemId){
-      const id = hit.pickedMesh.metadata.itemId;
-      if(!belt.includes(id)){
-        const empty = belt.findIndex(s=>!s);
-        if(empty>=0) belt[empty]=id; else belt[activeSlot]=id;
-        rebuildBelt();
-      }
-      hit.pickedMesh.dispose();
-      const i = WORLD_ITEMS.findIndex(x=>x===hit.pickedMesh); if(i>=0) WORLD_ITEMS.splice(i,1);
-      toast('Picked up '+itemById(id).name);
-    }
-  }
-  function tryDrop(){
-    const it = activeItem(); if(!it) return;
-    const box = BABYLON.MeshBuilder.CreateBox("drop_"+it.id,{size:0.25},scene);
-    box.position = camera.position.add(new BABYLON.Vector3(0,-0.9,0)).add(camera.getForwardRay().direction.scale(0.6));
-    box.isPickable=true; box.checkCollisions=false;
-    box.metadata={ itemId: it.id };
-    const mat = new BABYLON.StandardMaterial("im_"+it.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2,0.6,0.7);
-    box.material=mat;
-    WORLD_ITEMS.push(box);
-    toast('Dropped '+it.name);
   }
 
   return {
@@ -600,8 +574,7 @@ const InputSystem = (()=>{
       const out={ moveVec:{...move}, running, lookDelta:{...lookDelta}, analog:_analogScale };
       lookDelta.x=0; lookDelta.y=0; return out;
     },
-    isTouch: ()=>isTouchMode,
-    isNoclip: ()=>_noclip
+    isTouch: ()=>isTouchMode
   };
 })();
 </script>
@@ -612,7 +585,6 @@ const InputSystem = (()=>{
     ========================================================== ***/
 const PlayerRig = (()=>{
   let root = null;
-  let meshRoot = null;
   let loaded = false;
   let headHidden = false;
   let scaleApplied = false;
@@ -663,7 +635,6 @@ const PlayerRig = (()=>{
     root = new BABYLON.TransformNode("playerRoot", scene);
     try {
       const r = await BABYLON.SceneLoader.ImportMeshAsync("", CONFIG.modelDir, CONFIG.modelFile, scene);
-      meshRoot = r.meshes.find(m => (m.name||"") !== "__root__") || r.meshes[0];
       r.meshes.forEach(m=>{
         try {
           m.isPickable = false;
@@ -675,14 +646,6 @@ const PlayerRig = (()=>{
       try { r.meshes.forEach(m => m.receiveShadows = false); } catch(_){}
       _fitScaleToHuman(r.meshes);
       _hideHeadIfFound(root);
-      if (!headHidden) {
-        try {
-          const tallest = r.meshes
-            .filter(m=>m.getBoundingInfo)
-            .sort((a,b)=>b.getBoundingInfo().boundingBox.maximumWorld.y - a.getBoundingInfo().boundingBox.maximumWorld.y)[0];
-          if (tallest && (tallest.name||"").toLowerCase().includes("head")) { tallest.isVisible = false; headHidden = true; }
-        } catch(_){}
-      }
       loaded = true;
     } catch (e) {
       console.warn("Player model load failed, creating capsule proxy.", e);
@@ -692,7 +655,7 @@ const PlayerRig = (()=>{
       m.emissiveColor = new BABYLON.Color3(0.05,0.08,0.1);
       capsule.material = m;
       capsule.isPickable = false; capsule.checkCollisions = false;
-      root = capsule; meshRoot = capsule; loaded = true; headHidden = true;
+      root = capsule; loaded = true; headHidden = true;
     }
   }
 
@@ -714,7 +677,7 @@ const PlayerRig = (()=>{
 
 <script>
 /*** ==========================================================
-    MOVEMENT (with temporary gravity disable) + LOOK (global)
+    MOVEMENT + LOOK (global functions the loop calls)
     ========================================================== ***/
 window.handleMovement = function(input, dt){
   if(!window.camera) return;
@@ -728,27 +691,13 @@ window.handleMovement = function(input, dt){
 
   const vert = input.moveVec.y || 0;
   const wantsFly = vert !== 0;
-  const noclipActive = (window.InputSystem && InputSystem.isNoclip && InputSystem.isNoclip()) || false;
-
-  // remember prior states
-  const prevGravity = camera.applyGravity;
-  const prevCollisions = camera.checkCollisions;
-
-  if (noclipActive){
-    camera.applyGravity = false;
-    camera.checkCollisions = false;
-  } else if (wantsFly){
-    camera.applyGravity = false; // temporary
-  } else {
-    camera.applyGravity = true;
-    camera.checkCollisions = true;
-  }
 
   let next = camera.position.clone();
   if (desired.lengthSquared() > 0) next = next.add(desired.normalize().scale(speed * dt));
-  if (wantsFly || noclipActive) next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
+  if (wantsFly) next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
 
-  if (!wantsFly && !noclipActive && desired.lengthSquared() > 0) {
+  // If collisions are on, do a gentle ground snap
+  if (camera.checkCollisions && !wantsFly && desired.lengthSquared() > 0) {
     const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
     const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
     const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
@@ -761,12 +710,6 @@ window.handleMovement = function(input, dt){
     }
   } else {
     camera.position = next;
-  }
-
-  // restore if we only temporarily disabled gravity
-  if (!noclipActive && !wantsFly){
-    camera.applyGravity = prevGravity;
-    camera.checkCollisions = prevCollisions;
   }
 };
 
@@ -786,8 +729,6 @@ window.applyLook = function(lookDelta){
 /*** ==========================================================
     WEATHER, SUN, MOON + SHADOWS
     ========================================================== ***/
-const LAYERS = { EXTERIOR: 0x10000000, INTERIOR: 0x20000000, ALL: 0x0fffffff };
-
 function setupSun(){
   if(sunLight) return;
   sunLight = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-0.35,-1,0.25).normalize(), scene);
@@ -819,160 +760,32 @@ function markShadowable(meshes){
   }catch(e){}
 }
 
-let __rainTex = null;
-function makeRainTexture(){
-  if(__rainTex) return __rainTex;
-  const w = 1, h = 64;
-  const dt = new BABYLON.DynamicTexture("rainTex",{width:w,height:h},scene,false);
-  const ctx = dt.getContext();
-  ctx.clearRect(0,0,w,h);
-  const g = ctx.createLinearGradient(0,0,0,h);
-  g.addColorStop(0.00,"rgba(255,255,255,0.00)");
-  g.addColorStop(0.15,"rgba(255,255,255,0.20)");
-  g.addColorStop(0.50,"rgba(255,255,255,0.85)");
-  g.addColorStop(0.85,"rgba(255,255,255,0.20)");
-  g.addColorStop(1.00,"rgba(255,255,255,0.00)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0,0,w,h);
-  dt.update(false);
-  __rainTex = dt;
-  return dt;
-}
-
-function ensureRain(){
-  if(weather.rainPS) return weather.rainPS;
-  const cap = 16000;
-  const ps = (BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported)
-    ? new BABYLON.GPUParticleSystem("rain", { capacity: cap }, scene)
-    : new BABYLON.ParticleSystem("rain", cap, scene);
-
-  ps.particleTexture = makeRainTexture();
-  ps.emitter = new BABYLON.Vector3(0, 16, 0);
-  ps.minEmitBox = new BABYLON.Vector3(-12, 0, -12);
-  ps.maxEmitBox = new BABYLON.Vector3( 12, 0,  12);
-  ps.minSize = 0.03;
-  ps.maxSize = 0.06;
-  ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-  ps.direction1 = new BABYLON.Vector3(-0.05, -2.6,  0.05);
-  ps.direction2 = new BABYLON.Vector3( 0.05, -3.0, -0.05);
-  ps.gravity = new BABYLON.Vector3(0, -9.8, 0);
-  ps.minLifeTime = 0.55;
-  ps.maxLifeTime = 0.85;
-  ps.emitRate = 12000;
-  ps.updateSpeed = 0.01;
-
-  try {
-    ps.isBillboardBased = true;
-    if (BABYLON.ParticleSystem.BILLBOARDMODE_STRETCHED !== undefined) {
-      ps.billboardMode = BABYLON.ParticleSystem.BILLBOARDMODE_STRETCHED;
-      ps.useVelocityStretching = true;
-      ps.velocityStretchScale = 10.0;
-    }
-  } catch(e){}
-
-  ps.color1 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.85);
-  ps.color2 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.65);
-  ps.colorDead = new BABYLON.Color4(1, 1, 1, 0.0);
-  ps.disposeOnStop = false;
-
-  weather.rainPS = ps;
-  return ps;
-}
-
-function ensureSnow(){
-  if(weather.snowPS) return weather.snowPS;
-  const ps=new BABYLON.ParticleSystem("snow", 1800, scene);
-  const snowTex=new BABYLON.DynamicTexture("snowTex",{width:8,height:8},scene,false);
-  const ctx=snowTex.getContext(); ctx.clearRect(0,0,8,8);
-  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(4,4,3,0,Math.PI*2); ctx.fill(); snowTex.update(false);
-  ps.particleTexture=snowTex;
-  ps.emitter = new BABYLON.Vector3(0,12,0);
-  ps.minEmitBox=new BABYLON.Vector3(-10, 0, -10);
-  ps.maxEmitBox=new BABYLON.Vector3( 10, 0,  10);
-  ps.minSize=0.06; ps.maxSize=0.12;
-  ps.minLifeTime=2.0; ps.maxLifeTime=3.2;
-  ps.emitRate=900;
-  ps.direction1=new BABYLON.Vector3(-0.12,-0.7, 0.08);
-  ps.direction2=new BABYLON.Vector3( 0.12,-0.9,-0.08);
-  ps.gravity=new BABYLON.Vector3(0,-0.25,0);
-  ps.updateSpeed=0.02;
-  ps.color1=new BABYLON.Color4(1,1,1,0.95);
-  ps.color2=new BABYLON.Color4(1,1,1,0.70);
-  ps.disposeOnStop=false;
-  weather.snowPS=ps; return ps;
-}
-
-function setWeather(state){
-  weather.state=state;
-  document.getElementById('hud-weather').textContent=state;
-  WeatherAudio.set(state);
-
-  if(hemiLight) hemiLight.dispose();
-  setupSun(); setupMoon();
-  if(weather.rainPS) weather.rainPS.stop();
-  if(weather.snowPS) weather.snowPS.stop();
-
-  if(state==='Clear'){
-    scene.fogDensity = 0.0045;
-    sunLight.intensity = 0.9;
-    moonLight.intensity = 0.35;
-  }
-  if(state==='Sunset'){
-    scene.fogDensity = 0.0022;
-    sunLight.direction = new BABYLON.Vector3(-0.18,-1,0.12).normalize();
-    sunLight.intensity = 1.45;
-    sunLight.diffuse = new BABYLON.Color3(1.0,0.86,0.58);
-    sunLight.specular = new BABYLON.Color3(1.0,0.9,0.8);
-    moonLight.intensity = 0.25;
-    scene.clearColor = new BABYLON.Color4(0.10,0.06,0.05,1);
-  }
-  if(state==='Snow'){ ensureSnow().start(); scene.fogDensity=0.0032; sunLight.intensity=0.8; moonLight.intensity=0.35; }
-  if(state==='Rain'){ ensureRain().start(); scheduleNextLightning(); scene.fogDensity=0.0048; }
-  if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); scene.fogDensity=0.006; moonLight.intensity=0.6; }
-
-  try{ markShadowable(scene.meshes||[]); } catch(e){}
-}
-</script>
-
-<script>
-/*** STATIC MOON (no orbit) ***/
 async function loadMoon(){
-  const MOON_SIZE = 16;
-  const MOON_POS  = new BABYLON.Vector3(0, 160, 260);
-
-  function makeMat(){
-    const mat = new BABYLON.StandardMaterial("moonMatVisible", scene);
-    mat.disableLighting = true;
-    mat.emissiveColor   = new BABYLON.Color3(1,1,1);
-    mat.diffuseColor    = new BABYLON.Color3(1,1,1);
-    mat.specularColor   = new BABYLON.Color3(0,0,0);
-    mat.backFaceCulling = false; // double-sided so it never disappears
-    mat.alpha           = 1;
-    mat.disableDepthWrite = true;
-    return mat;
-  }
-
+  // Static disc moon, high in sky
+  const MOON_SIZE = 14;
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
     moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
   }catch(e){
-    moonMesh = BABYLON.MeshBuilder.CreateDisc("MoonMesh",{radius:MOON_SIZE*0.5, tessellation:48, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, scene);
+    moonMesh = BABYLON.MeshBuilder.CreateDisc("MoonMesh",{radius:MOON_SIZE*0.5, tessellation:64, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, scene);
   }
-
-  moonMesh.material = makeMat();
+  const mat = new BABYLON.StandardMaterial("moonMat", scene);
+  mat.disableLighting = true;
+  mat.emissiveColor   = new BABYLON.Color3(1,1,1);
+  mat.backFaceCulling = false;
+  moonMesh.material   = mat;
   moonMesh.isPickable = false;
   moonMesh.applyFog   = false;
-  moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // always face camera
+  moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
   moonMesh.renderingGroupId = 2;
-  moonMesh.layerMask = 0x10000000; // EXTERIOR
-
+  moonMesh.layerMask = 0x10000000;
+  moonMesh.position = new BABYLON.Vector3(0, 120, 180);
   moonMesh.scaling.setAll(MOON_SIZE);
-  moonMesh.position.copyFrom(MOON_POS);
 
-  // Aim moonlight toward the world using moon position
+  // Aim the moonlight from the moon's direction
   if (moonLight){
-    const dir = moonMesh.position.subtract(new BABYLON.Vector3(0,0,0)).normalize().scale(-1);
-    moonLight.direction = dir;
+    const dir = moonMesh.position.normalize().scale(-1);
+    moonLight.direction = new BABYLON.Vector3(dir.x, dir.y, dir.z);
     moonLight.intensity = 0.55;
   }
 }
@@ -980,7 +793,7 @@ async function loadMoon(){
 
 <script>
 /*** ==========================================================
-    MAP SELECTOR + DYNAMIC DEF LOADER (via maps.json)
+    MAP SELECTOR + DYNAMIC DEF LOADER
     ========================================================== ***/
 let MAP_FILES = [];
 let CURRENT_MAP = null;
@@ -998,20 +811,16 @@ async function loadManifest() {
       { file:"furnished_house.glb", title:"Furnished House" }
     ];
   }
-  populateMapSelector();
-}
-
-function populateMapSelector(){
-  const sel = document.getElementById('map-select'); if(!sel) return;
-  if (!MAP_FILES.length) { sel.innerHTML = `<option value="-1">(no maps found)</option>`; return; }
-  sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join('');
+  const sel = document.getElementById('map-select');
+  if (!MAP_FILES.length) { sel.innerHTML = '<option value=\"-1\">(no maps found)</option>'; return; }
+  sel.innerHTML = MAP_FILES.map((m,i)=>'<option value=\"'+i+'\">'+(m.title||m.file)+'</option>').join('');
   sel.value = "0";
   sel.addEventListener('change', ()=>{ try{window.CURRENT_MAP = getSelectedMap(); } catch(e){} });
 }
 
 function getSelectedMap(){
   const sel = document.getElementById('map-select');
-  const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value||"0",10) || 0));
+  const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value||'0',10) || 0));
   return MAP_FILES[idx];
 }
 
@@ -1026,7 +835,7 @@ function loadScriptOnce(src){
 }
 async function loadMatchingMapDef(mapFile, explicitDef){
   const base = (explicitDef || mapFile.replace(/\.[^.]+$/,'') + ".js");
-  const path = `./assets/models/map/${base}`;
+  const path = "./assets/models/map/"+base;
   const ok = await loadScriptOnce(path);
   if(!ok){ window.MAP_DEF = undefined; }
 }
@@ -1090,28 +899,26 @@ async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
   scene  = new BABYLON.Scene(engine);
   scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0,-0.9,0); // gravity enabled
+  scene.gravity = new BABYLON.Vector3(0,-0.9,0);
 
   camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, 24), scene);
   camera.attachControl(canvas, true);
   camera.checkCollisions = true;
-  camera.applyGravity = true; // gravity ON by default
+  camera.applyGravity = true;
   camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
   camera.minZ = 0.1; camera.inertia=0;
-  camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
+  // keep the default keyboard move input enabled to ensure WASD works even if our custom loop is interrupted
+  // camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-  // hemispheric fill (subtle, most light from sun/moon)
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.35;
 
-  // Atmosphere
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
-  // Sun + Moon
   setupSun(); setupMoon();
   await loadSelectedMap();
   await PlayerRig.load();
@@ -1126,12 +933,11 @@ async function boot(){
   const w = r<0.30?'Sunset' : r<0.55?'Clear' : r<0.80?'Rain' : r<0.92?'Snow' : 'Blood Moon';
   setWeather(w);
 
-  // Items & inputs
   rebuildBelt();
   InputSystem.init();
   canvas.focus();
+  window.addEventListener('click', ()=>canvas.focus());
 
-  // Main loop
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
     const input = InputSystem.snapshot();
@@ -1141,12 +947,10 @@ async function boot(){
 
     try{ disturbSaltAt(camera.position.clone()); }catch(e){}
 
-    // Sanity (simplified)
     player.inside = true;
     document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
     const fill = document.getElementById('sanity-fill'); fill.style.width = Math.round(player.sanity)+'%'; 
 
-    // HUD XYZ
     const xyz=document.getElementById('hud-xyz'); xyz.style.display='block';
     document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
     document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
