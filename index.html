@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Full Build (Loader after Start, Inspector Topmost)</title>
+  <title>PhasmaPhoney — Full Build (Loader after Start, Inspector Topmost, Fixed Movement)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -274,9 +274,9 @@ const Loader = (() => {
 
   function show(){ if(box()) box().style.display='flex'; }
   function hide(){ if(box()) box().style.display='none'; }
-  function label(s){ if(text()) text().textContent = s; }
+  function label(s){ if(text()) text.textContent = s; }
   function pct(){ return totalWeight ? Math.max(0, Math.min(100, (progressed/totalWeight)*100)) : 0; }
-  function draw(){ if(fill()) fill().style.width = pct().toFixed(1) + '%'; }
+  function draw(){ if(fill()) fill.style.width = pct().toFixed(1) + '%'; }
 
   function addStep(label, fnOrPromise, weight=1){
     queue.push({label, run: fnOrPromise, weight});
@@ -582,7 +582,7 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 
 <script>
 /*** ==========================================================
-    INPUT (KBD/Touch) + PICKUP + NOCLIP
+    INPUT (KBD/Touch) + PICKUP + NOCLIP + MOUSE LOOK
     ========================================================== ***/
 const InputSystem = (()=>{
   let move={x:0,y:0,z:0}, running=false, lookDelta={x:0,y:0};
@@ -591,15 +591,25 @@ const InputSystem = (()=>{
   let _tapSprint=false;
   let _analogScale=1.0;
 
-  const keyMap = {
-    'KeyW':'fw','KeyS':'bk','KeyA':'lt','KeyD':'rt',
-    'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
-    'ShiftLeft':'run','ShiftRight':'run',
-    'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
-    'KeyE':'pickup','KeyG':'drop',
-    'PageUp':'up','PageDown':'down','Space':'up','ControlLeft':'down',
-    'KeyN':'noclip'
-  };
+  // Normalize keys from both e.code and e.key
+  function mapKey(e){
+    const k = (e.key||'').toLowerCase();
+    const c = e.code||'';
+    if (c==='KeyW' || k==='w' || c==='ArrowUp')    return 'fw';
+    if (c==='KeyS' || k==='s' || c==='ArrowDown')  return 'bk';
+    if (c==='KeyA' || k==='a' || c==='ArrowLeft')  return 'lt';
+    if (c==='KeyD' || k==='d' || c==='ArrowRight') return 'rt';
+    if (c==='ShiftLeft'||c==='ShiftRight' || k==='shift') return 'run';
+    if (c==='PageUp' || k===' ')  return 'up';
+    if (c==='PageDown' || k==='control') return 'down';
+    if (c==='Digit1' || k==='1') return 'slot0';
+    if (c==='Digit2' || k==='2') return 'slot1';
+    if (c==='Digit3' || k==='3') return 'slot2';
+    if (c==='KeyE' || k==='e')   return 'pickup';
+    if (c==='KeyG' || k==='g')   return 'drop';
+    if (c==='KeyN' || k==='n')   return 'noclip';
+    return '';
+  }
 
   function recomputeMove(){
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
@@ -609,27 +619,48 @@ const InputSystem = (()=>{
   }
 
   function onKey(e,down){
-    const tag=keyMap[e.code]; if(!tag) return;
-    e.preventDefault();
+    const tag = mapKey(e);
+    if(!tag) return; // don’t block unrelated keys
+    e.preventDefault(); // only block when we actually handle it
     if(down) keys.add(tag); else keys.delete(tag);
 
     if(tag==='noclip' && down && window.camera){
       const noclipNow = !(camera.checkCollisions);
-      camera.checkCollisions = noclipNow ? false : true;
-      camera.applyGravity = noclipNow ? false : true;
+      camera.checkCollisions = !noclipNow;
+      camera.applyGravity   = !noclipNow;
       toast(noclipNow ? 'Noclip: ON' : 'Noclip: OFF');
     }
     if(tag.startsWith('slot') && down){
-      const idx = parseInt(tag.replace('slot',''),10);
+      const idx = Number(tag.slice(-1));
       if(idx>=0 && idx<3){ activeSlot=idx; rebuildBelt(); }
     }
     if(tag==='pickup' && down) tryPickup();
-    if(tag==='drop' && down)   tryDrop();
+    if(tag==='drop'   && down) tryDrop();
     recomputeMove();
   }
 
+  // Desktop mouse look via Pointer Lock
+  function bindMouseLook(){
+    const c = document.getElementById('renderCanvas');
+    if(!c) return;
+    function onMove(e){
+      if (document.pointerLockElement !== c) return;
+      lookDelta.x += e.movementX||0;
+      lookDelta.y += e.movementY||0;
+    }
+    c.addEventListener('mousemove', onMove);
+    // click to lock
+    c.addEventListener('mousedown', ()=>{ if(document.pointerLockElement!==c) c.requestPointerLock?.(); });
+    // escape unlock → small hint
+    document.addEventListener('pointerlockchange', ()=>{
+      if(document.pointerLockElement!==c) toast('Pointer unlocked (click canvas to lock)');
+    });
+  }
+
+  // Touch halves
   function bindTouchHalves(){
     const left=document.getElementById('touch-left'), right=document.getElementById('touch-right');
+    if(!left||!right) return;
     let leftId=null, leftCenter=null, rightId=null, lastRight=null;
     const DEAD=14, MAX=110;
     const norm=(v)=> Math.abs(v)<DEAD?0:v;
@@ -664,41 +695,17 @@ const InputSystem = (()=>{
 
     const sprintWrap = document.getElementById('mobile-sprint');
     const sprintBtn  = document.getElementById('btn-sprint');
-    sprintWrap.style.display='block';
-    sprintBtn.onclick = ()=>{ _tapSprint=!_tapSprint; sprintBtn.textContent = 'Sprint: ' + (_tapSprint?'ON':'OFF'); };
-  }
-
-  function tryPickup(){
-    const ray = camera.getForwardRay(2.2);
-    const hit = scene.pickWithRay(ray, m=>m && m.metadata?.itemId);
-    if(hit?.pickedMesh?.metadata?.itemId){
-      const id = hit.pickedMesh.metadata.itemId;
-      if(!belt.includes(id)){
-        const empty = belt.findIndex(s=>!s);
-        if(empty>=0) belt[empty]=id; else belt[activeSlot]=id;
-        rebuildBelt();
-      }
-      hit.pickedMesh.dispose();
-      const i = WORLD_ITEMS.findIndex(x=>x===hit.pickedMesh); if(i>=0) WORLD_ITEMS.splice(i,1);
-      toast('Picked up '+itemById(id).name);
+    if(sprintWrap && sprintBtn){
+      sprintWrap.style.display='block';
+      sprintBtn.onclick = ()=>{ _tapSprint=!_tapSprint; sprintBtn.textContent = 'Sprint: ' + (_tapSprint?'ON':'OFF'); };
     }
-  }
-  function tryDrop(){
-    const it = activeItem(); if(!it) return;
-    const box = BABYLON.MeshBuilder.CreateBox("drop_"+it.id,{size:0.25},scene);
-    box.position = camera.position.add(new BABYLON.Vector3(0,-0.9,0)).add(camera.getForwardRay().direction.scale(0.6));
-    box.isPickable=true; box.checkCollisions=false;
-    box.metadata={ itemId: it.id };
-    const mat = new BABYLON.StandardMaterial("im_"+it.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2,0.6,0.7);
-    box.material=mat;
-    WORLD_ITEMS.push(box);
-    toast('Dropped '+it.name);
   }
 
   return {
     init(){
       document.addEventListener('keydown', e=>onKey(e,true), {passive:false});
       document.addEventListener('keyup',   e=>onKey(e,false), {passive:false});
+      bindMouseLook();
       bindTouchHalves();
     },
     snapshot(){
@@ -859,11 +866,11 @@ window.handleMovement = function(input, dt){
 
 window.applyLook = function(lookDelta){
   if(!window.camera) return;
-  const sens = 0.0028;
-  camera.rotation.y += lookDelta.x * sens;
+  const sens = 0.0025;
+  camera.rotation.y += (lookDelta.x || 0) * sens;
   const minPitch = -Math.PI/2 + 0.15;
   const maxPitch =  Math.PI/2 - 0.15;
-  const next = (camera.rotation.x || 0) + (lookDelta.y * sens * 0.85);
+  const next = (camera.rotation.x || 0) + ((lookDelta.y || 0) * sens * 0.85);
   camera.rotation.x = Math.max(minPitch, Math.min(maxPitch, next));
 };
 </script>
@@ -1257,6 +1264,11 @@ async function safeStart(e){
 
   try{canvas.focus(); } catch(_){}
   try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(_){}
+
+  // Auto-request pointer lock once everything is ready (desktop convenience)
+  if (canvas?.requestPointerLock) {
+    setTimeout(()=>{ try{ canvas.requestPointerLock(); }catch(_){/* user gesture rule */} }, 0);
+  }
 }
 
 document.getElementById('start-button')?.addEventListener('click', safeStart, {passive:false});
