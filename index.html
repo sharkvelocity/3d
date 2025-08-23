@@ -229,12 +229,45 @@ function setupMoon(){
   moonLight.intensity = 0.35;
 }
 
+
 async function loadMoon(){
   const MOON_DIAM = 40;
-  const MOON_DIR = new BABYLON.Vector3(0.25, 0.85, -0.2).normalize(); // fixed sky azimuth/elevation
-  // Build a soft disc texture (simple moon look)
+  const MOON_DIR = new BABYLON.Vector3(0.25, 0.85, -0.2).normalize();
   const texSize = 256;
   const dt = new BABYLON.DynamicTexture("moonDynTex", {width:texSize, height:texSize}, scene, false);
+  const ctx = dt.getContext();
+  ctx.clearRect(0,0,texSize,texSize);
+  const g = ctx.createRadialGradient(texSize/2, texSize/2, 4, texSize/2, texSize/2, texSize/2 - 2);
+  g.addColorStop(0.00, "#ffffff");
+  g.addColorStop(0.60, "#f2f2ff");
+  g.addColorStop(1.00, "#dcdcf0");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(texSize/2, texSize/2, texSize/2-2, 0, Math.PI*2); ctx.fill();
+  function crater(x,y,r,a){ ctx.fillStyle = "rgba(150,160,200,"+a+")"; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
+  crater(160, 90, 22, 0.20); crater(90,140, 28, 0.18); crater(120,110, 16, 0.16); crater(70,80,14,0.12);
+  dt.update();
+
+  moonMesh = BABYLON.MeshBuilder.CreateDisc("moon", {radius: MOON_DIAM*0.5, tessellation: 64}, scene);
+  moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+  const m = new BABYLON.StandardMaterial("moonMat", scene);
+  m.disableLighting = true;
+  m.emissiveTexture = dt;
+  m.emissiveColor = new BABYLON.Color3(1,1,1);
+  m.backFaceCulling = false;
+  moonMesh.material = m;
+  moonMesh.isPickable = false;
+  moonMesh.applyFog = false;
+  moonMesh.alwaysSelectAsActiveMesh = true;
+  moonMesh.renderingGroupId = 0;
+
+  const SKY_DIST = 800;
+  scene.onBeforeRenderObservable.add(()=>{
+    if (!camera || !moonMesh) return;
+    const base = camera.position.add(MOON_DIR.scale(SKY_DIST));
+    moonMesh.position.copyFrom(base);
+  });
+}
+, scene, false);
   const ctx = dt.getContext();
   ctx.clearRect(0,0,texSize,texSize);
   // base disc
@@ -1018,7 +1051,7 @@ if(startBtn){
   startBtn.addEventListener('touchend',  startNow, {passive:false});
   startBtn.addEventListener('touchstart', startNow, {passive:false});
 }
-window.addEventListener("DOMContentLoaded", () => loadManifest());
+window.addEventListener("DOMContentLoaded", () => { try { if (typeof loadManifest==='function') loadManifest(); } catch(e){} });
 document.addEventListener('keydown', (e)=>{
   if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(); }
 }, {passive:false});
