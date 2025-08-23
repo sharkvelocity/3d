@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — index1 (FIXED + Sunset)</title>
+  <title>PhasmaPhoney — index1 (FIXED)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -280,21 +280,15 @@ const WeatherAudio = (()=>{
     if(!sceneRef) return;
     if(current===target) return;
 
-    // Treat "Sunset" like "Clear" for audio
-    const want={
-      clear:(target==='Clear'||target==='Sunset'),
-      rain:(target==='Rain'||target==='Blood Moon'),
-      snow:(target==='Snow'),
-      drone:(target==='Blood Moon')
-    };
-
+    // Sunset uses the same bed as Clear
+    const want={ clear:(target==='Clear'||target==='Sunset'), rain:(target==='Rain'||target==='Blood Moon'), snow:target==='Snow', drone:target==='Blood Moon' };
     for(const k of Object.keys(tracks)){
       const snd = tracks[k];
       if(!snd) continue;
       const tgt = (k==='clear'&&want.clear)?0.40:
                   (k==='rain' &&want.rain )?0.55:
                   (k==='snow' &&want.snow )?0.28:
-                  (k==='drone'&&want.drone)?0.18:0.0;
+                  (k==='drone&&want.drone')?0.18:0.0;
       if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){}} }
       const start = snd.getVolume();
       let i=0, steps=18, stepMs=40;
@@ -423,7 +417,7 @@ function _pointToSegmentDistance(p, a, b){
 let UV_ACTIVE = false;
 const UV_FOOT_MATS = [];
 function _refreshUVFootprintMaterials(){
-  // For now, nothing dynamic is required; placeholder if we later add different shaders.
+  // placeholder for future shader changes
 }
 function spawnUVFootprints(origin, count=2, step=0.35){
   for(let i=0;i<count;i++){
@@ -457,7 +451,7 @@ function spawnUVFootprints(origin, count=2, step=0.35){
 
 <script>
 /*** ==========================================================
-    DISTURB SALT (ties to UV footprints) + ITEM ACTIONS
+    DISTURB SALT (with fixed try/catch) + ITEM ACTIONS
     ========================================================== ***/
 function disturbSaltAt(pos){
   // Wraith does NOT disturb salt
@@ -467,6 +461,8 @@ function disturbSaltAt(pos){
     const d = _pointToSegmentDistance(pos, s.a, s.b);
     if(d < 0.18){
       s.disturbed = true;
+
+      // ---- FIXED: outer try now has a catch ----
       try{
         const ps = new BABYLON.ParticleSystem("saltPuff", 400, scene);
         ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene);
@@ -478,10 +474,12 @@ function disturbSaltAt(pos){
         ps.color2 = new BABYLON.Color4(1,1,1,0.4);
         ps.colorDead = new BABYLON.Color4(1,1,1,0);
         ps.start();
-        setTimeout(()=>{ try{ps.stop(); ps.dispose(); } catch(e){}}, 800);
-      }
-try{s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){}// footprints appear for ~1 minute
-      try{spawnUVFootprints(pos, 2, 0.4); } catch(e){}}
+        setTimeout(()=>{ try{ps.stop(); ps.dispose(); } catch(e){} }, 800);
+      } catch(e){}
+
+      try{s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){}
+      try{spawnUVFootprints(pos, 2, 0.4); } catch(e){}
+    }
   }
 }
 function useActiveItem(){
@@ -529,7 +527,6 @@ const InputSystem = (()=>{
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
     'KeyE':'pickup', 'KeyG':'drop'
-    // (tps/swap removed)
   };
 
   function recomputeMove(){
@@ -549,8 +546,6 @@ const InputSystem = (()=>{
     }
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
-    // removed: if(tag==='tps' && down)    toggleThirdPerson();
-    // removed: if(tag==='swap' && down)   swapShoulder();
     recomputeMove();
   }
 
@@ -639,13 +634,10 @@ const InputSystem = (()=>{
 
 <script>
 /*** ==========================================================
-    MOVEMENT & LOOK  +  THIRD-PERSON SPRING ARM
+    MOVEMENT & LOOK  (updated for gravity-friendly motion)
     ========================================================== ***/
 let OTS={ enabled:false, shoulder:1, dist:3.6, height:1.55, yaw:0 };
 let __camTarget = new BABYLON.Vector3(0,1.6,0);
-
-function toggleThirdPerson(){ OTS.enabled=!OTS.enabled; toast(OTS.enabled?'Third-person ON':'Third-person OFF'); }
-function swapShoulder(){ OTS.shoulder*=-1; }
 
 function handleMovement(input, dt){
   if(!camera) return;
@@ -657,15 +649,22 @@ function handleMovement(input, dt){
   if (desired.lengthSquared()>0){
     const v = desired.normalize().scale(speed*dt);
     const next = camera.position.add(v);
-    // simple ground snap
-    const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
-    const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
-    const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
-    if(hit && hit.pickedPoint){
-      const deltaY = hit.pickedPoint.y + 1.7 - camera.position.y;
-      if(deltaY<=player.stepUpMax) camera.position = new BABYLON.Vector3(next.x, hit.pickedPoint.y+1.7, next.z);
-      else camera.position = next;
-    } else camera.position = next;
+
+    if (camera.applyGravity) {
+      // Let gravity/collisions handle Y; only move XZ
+      camera.position.x = next.x;
+      camera.position.z = next.z;
+    } else {
+      // legacy ground-snap path
+      const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
+      const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
+      const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
+      if(hit && hit.pickedPoint){
+        const deltaY = hit.pickedPoint.y + 1.7 - camera.position.y;
+        if(deltaY<=player.stepUpMax) camera.position = new BABYLON.Vector3(next.x, hit.pickedPoint.y+1.7, next.z);
+        else camera.position = next;
+      } else camera.position = next;
+    }
   }
 }
 function applyLook(lookDelta){
@@ -677,30 +676,13 @@ function applyLook(lookDelta){
   const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
   camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
 }
-
-function springArmTick(dt){
-  if(!OTS.enabled || !camera) return;
-  const target = __camTarget = camera.position.clone().add(new BABYLON.Vector3(0, OTS.height-1.6, 0));
-  const yaw = camera.rotation.y + (OTS.shoulder>0?0:Math.PI);
-  const side = new BABYLON.Vector3(Math.sin(yaw),0, -Math.cos(yaw)).scale(0.7*OTS.shoulder);
-  const back = new BABYLON.Vector3(-Math.cos(yaw),0,-Math.sin(yaw)).scale(OTS.dist);
-  const ideal = target.add(side).add(back);
-
-  // collision check for camera (ignore thin glass/foliage by min thickness)
-  const ray = new BABYLON.Ray(target, ideal.subtract(target).normalize(), OTS.dist+1.0);
-  const hit = scene.pickWithRay(ray, (m)=>m && m.isPickable!==false && (m.getBoundingInfo()?.boundingBox?._max?.subtract(m.getBoundingInfo()?.boundingBox?._min).length()>0.1));
-  const camPos = (hit?.pickedPoint) ? BABYLON.Vector3.Lerp(target, hit.pickedPoint, 0.8) : ideal;
-  camera.position = camPos;
-}
 </script>
 
 <script>
 /*** ==========================================================
-    WEATHER & MOON
+    WEATHER & MOON (adds "Sunset")
     ========================================================== ***/
 let __rainTex = null;
-let __sunsetDir = null; // NEW: warm low sun for Sunset
-
 function makeRainTexture(){
   if(__rainTex) return __rainTex;
   const w=2, h=32;
@@ -758,42 +740,22 @@ function ensureSnow(){
   weather.snowPS=ps; return ps;
 }
 
-// NEW: warm dusk ambience helpers
-function ensureSunsetLight(){
-  if (__sunsetDir) return __sunsetDir;
-  __sunsetDir = new BABYLON.DirectionalLight("sunsetSun",
-    new BABYLON.Vector3(-0.35, -1.0, 0.25), scene);
-  __sunsetDir.position = new BABYLON.Vector3(40, 60, -80);
-  __sunsetDir.diffuse  = new BABYLON.Color3(1.00, 0.64, 0.35);
-  __sunsetDir.specular = new BABYLON.Color3(1.00, 0.60, 0.30);
-  __sunsetDir.intensity = 0.7;
-  __sunsetDir.includeOnlyWithLayerMask = LAYERS.EXTERIOR;
-  return __sunsetDir;
-}
-function removeSunsetLight(){
-  if (__sunsetDir){ try{ __sunsetDir.dispose(); }catch(e){} __sunsetDir=null; }
-}
-function applyDefaultAmbience(){
-  scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
-  scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
-  scene.fogDensity = 0.0045;
-  if (hemiLight){
-    hemiLight.intensity = 0.6;
-    hemiLight.diffuse = new BABYLON.Color3(1,1,1);
-    hemiLight.groundColor = new BABYLON.Color3(0.2,0.2,0.25);
+function applyAtmosphereForWeather(state){
+  // tweak sky/fog/light; audio & particles handled elsewhere
+  if(!scene || !hemiLight) return;
+  if(state==='Sunset'){
+    scene.clearColor = new BABYLON.Color4(0.04,0.02,0.01,1);
+    scene.fogColor   = new BABYLON.Color3(0.08,0.04,0.02);
+    hemiLight.diffuse     = new BABYLON.Color3(1.0,0.72,0.42);
+    hemiLight.groundColor = new BABYLON.Color3(0.35,0.18,0.12);
+    hemiLight.intensity   = 0.75;
+  } else if(state==='Clear'){
+    scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+    scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
+    hemiLight.diffuse     = new BABYLON.Color3(1,1,1);
+    hemiLight.groundColor = new BABYLON.Color3(0.5,0.5,0.5);
+    hemiLight.intensity   = 0.6;
   }
-  removeSunsetLight();
-}
-function applySunsetAmbience(){
-  scene.clearColor = new BABYLON.Color4(0.15,0.08,0.04,1);
-  scene.fogColor   = new BABYLON.Color3(0.20,0.12,0.08);
-  scene.fogDensity = 0.0035;
-  if (hemiLight){
-    hemiLight.intensity = 0.75;
-    hemiLight.diffuse = new BABYLON.Color3(1.00, 0.75, 0.50);
-    hemiLight.groundColor = new BABYLON.Color3(0.05,0.05,0.08);
-  }
-  ensureSunsetLight();
 }
 
 function setWeather(state){
@@ -803,13 +765,11 @@ function setWeather(state){
 
   if(weather.rainPS) weather.rainPS.stop();
   if(weather.snowPS) weather.snowPS.stop();
+  if(state==='Snow'){ ensureSnow().start(); }
+  if(state==='Rain'){ ensureRain().start(); scheduleNextLightning(); }
+  if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
 
-  if(state==='Clear'){ applyDefaultAmbience(); }
-  if(state==='Sunset'){ applySunsetAmbience(); } // NEW
-  if(state==='Snow'){ applyDefaultAmbience(); ensureSnow().start(); }
-  if(state==='Rain'){ applyDefaultAmbience(); ensureRain().start(); scheduleNextLightning(); }
-  if(state==='Blood Moon'){ applyDefaultAmbience(); ensureRain().start(); scheduleNextLightning(); }
-
+  applyAtmosphereForWeather(state);
   updateEmitterToBounds();
 }
 
@@ -937,10 +897,10 @@ window.loadSelectedMap = async function(){
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
     // Layer the house meshes as INTERIOR for light scoping
     try{res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
-    } catch(e){}// Force-origin mode
+    } catch(e){}
     const FORCE_ORIGIN = true;
 
-        // Apply map transform if provided by MAP_DEF
+    // Apply map transform if provided by MAP_DEF
     try {
       const s = (window.MAP_DEF && (MAP_DEF.scale||MAP_DEF.scaling)) ? (MAP_DEF.scale||MAP_DEF.scaling) : null;
       if (s && houseRoot && houseRoot.scaling) { houseRoot.scaling.set(s, s, s); }
@@ -951,7 +911,9 @@ window.loadSelectedMap = async function(){
     } catch(e) { console.warn('Map transform apply failed', e); }
 
     // Force each GLB root to origin (0,0,0)
-    try{if (FORCE_ORIGIN && houseRoot && houseRoot.position) { houseRoot.position.set(0,0,0); } } catch(e){}// WORLD_BOUNDS
+    try{if (FORCE_ORIGIN && houseRoot && houseRoot.position) { houseRoot.position.set(0,0,0); } } catch(e){}
+
+    // WORLD_BOUNDS
     const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
     WORLD_BOUNDS = bb ? { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z } : null;
     updateEmitterToBounds();
@@ -1110,7 +1072,8 @@ async function spawnGhost(){
     ghost.audio.heartbeat = new BABYLON.Sound("heartbeat","./assets/audio/whisper.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:false });
     ghost.audio.singing   = new BABYLON.Sound("singing","./assets/audio/Radio.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:true, distanceModel:"linear", maxDistance:20 });
   }
-  try{ghost.audio.singing.attachToMesh(ghost.mesh); } catch(e){}}
+  try{ghost.audio.singing.attachToMesh(ghost.mesh); } catch(e){}
+}
 function wanderGhost(dt){
   if(!ghost.mesh) return;
   if(ghost.mode!=='idle' && ghost.mode!=='event') return;
@@ -1122,7 +1085,8 @@ function wanderGhost(dt){
   const step = ghost._dir.scale(dt);
   const cand = ghost.mesh.position.add(step);
   if(isInsideExterior(cand)) ghost.mesh.position = cand; else ghost._dir=null;
-  try{disturbSaltAt(ghost.mesh.position); } catch(e){}}
+  try{disturbSaltAt(ghost.mesh.position); } catch(e){}
+}
 function isInsideExterior(p){
   if(!window.MAP_DEF) return true;
   return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
@@ -1273,7 +1237,7 @@ function burnSmudge(){ if(ghost){ ghost.smudgedUntil = performance.now()+6000; t
 
 <script>
 /*** ==========================================================
-    BOOT + MAIN LOOP (touch friendly; no pointer-lock)
+    BOOT + MAIN LOOP (spawn + gravity + Sunset)
     ========================================================== ***/
 function currentRoomName(){
   if(!window.MAP_DEF) return player.inside?'House':'Exterior';
@@ -1291,7 +1255,7 @@ async function boot(){
   camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, 24), scene);
   camera.attachControl(canvas, true);
   camera.checkCollisions = true;
-  camera.applyGravity = false; // handled by ground snap
+  camera.applyGravity = true; // <<< gravity ON
   camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
   camera.minZ = 0.1; camera.inertia=0;
@@ -1302,7 +1266,7 @@ async function boot(){
   hemiLight.intensity = 0.6;
   hemiLight.includeOnlyWithLayerMask = LAYERS.EXTERIOR;
 
-  // Atmosphere
+  // Atmosphere defaults (will be overridden by setWeather)
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
@@ -1310,20 +1274,19 @@ async function boot(){
 
   await loadSelectedMap();
 
-  // Force player start at world origin for consistent authoring
-  try { camera.position = new BABYLON.Vector3(0, 1.8, 0); } catch(e){}
+  // Spawn: prefer MAP_DEF.spawn/vanSpawn; else your fixed spot
+  try {
+    const sp = (window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.vanSpawn)) ? (MAP_DEF.spawn || MAP_DEF.vanSpawn)
+              : { x:14.15, y:1.80, z:11.09 };
+    camera.position = new BABYLON.Vector3(sp.x||0, (sp.y!=null?sp.y:1.8), sp.z||0);
+  } catch(e){ camera.position = new BABYLON.Vector3(14.15, 1.80, 11.09); }
 
   await loadMoon();
   WeatherAudio.init(scene);
 
-  // Weather: now includes "Sunset"
+  // Weather (includes new "Sunset")
   const r=Math.random();
-  const w =
-    r < 0.30 ? 'Clear'   :
-    r < 0.55 ? 'Sunset'  :
-    r < 0.80 ? 'Rain'    :
-    r < 0.94 ? 'Snow'    :
-               'Blood Moon';
+  const w = r<0.35 ? 'Clear' : r<0.60 ? 'Sunset' : r<0.82 ? 'Rain' : r<0.94 ? 'Snow' : 'Blood Moon';
   setWeather(w);
 
   // Items & inputs
@@ -1350,7 +1313,6 @@ async function boot(){
 
     handleMovement(input, dt);
     applyLook(input.lookDelta);
-    // removed: springArmTick(dt);
 
     // Attach held lights to camera (force off outdoors)
     const camForward = camera.getForwardRay().direction;
@@ -1402,7 +1364,6 @@ async function boot(){
 }
 </script>
 
-
 <script>
 /*** ==========================================================
     LIGHTNING FLASH FX
@@ -1425,9 +1386,12 @@ let __started=false;
 async function safeStart(){
   if(__started) return;
   __started = true;
-  try{CURRENT_MAP = getSelectedMap(); } catch(e){}document.getElementById('title-screen').style.display='none';
+  try{CURRENT_MAP = getSelectedMap(); } catch(e){}
+  document.getElementById('title-screen').style.display='none';
   await boot();
-  try{canvas.focus(); } catch(e){}try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(e){}}
+  try{canvas.focus(); } catch(e){}
+  try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(e){}
+}
 function startNow(e){
   e?.preventDefault?.();
   safeStart();
