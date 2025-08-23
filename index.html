@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Full Build (Ghosts+Evidence+Items+DevTools)</title>
+  <title>PhasmaPhoney — Particle Mist Build</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -127,11 +127,11 @@
       <button class="dev-btn" id="dev-under-reticle">Inspect Under Reticle</button>
       <button class="dev-btn" id="dev-list-textures">List All Textures</button>
     </div>
-    <pre id="dev-info">Press "Scene Stats" to list meshes/materials from the loaded GLB(s).</pre>
+    <pre id="dev-info">Press "Scene Stats" to list meshes/materials from loaded assets.</pre>
     <div id="dev-textures" class="tex-grid"></div>
   </div>
 
-  <!-- Touch pads -->
+  <!-- Touch pads (for future on-screen joysticks) -->
   <div id="touch-left"></div>
   <div id="touch-right"></div>
 
@@ -380,10 +380,8 @@ function rayFromCamera(len=3){
 function useActiveItem(){
   const it = BELT[activeSlot];
   if(!it) return;
-  // Reticle priority: if looking at an item that can be "used" in world, do that first (stub)
   const hit = rayFromCamera(2.0);
   if(hit && hit.pickedMesh && hit.pickedMesh.name.startsWith('door')){ toast('Door toggled'); return; }
-  // Else use item
   if(it.use) it.use();
 }
 
@@ -396,7 +394,6 @@ function placeActiveItem(){
 function tossActiveItem(){
   const it = BELT[activeSlot];
   if(!it){ toast('Empty slot'); return; }
-  // create a small proxy mesh and throw forward
   const proxy = BABYLON.MeshBuilder.CreateSphere('toss',{diameter:0.18}, scene);
   proxy.position = camera.position.add(new BABYLON.Vector3(0, -0.2, 0));
   let v = camera.getForwardRay().direction.scale(0.32);
@@ -425,9 +422,62 @@ function toggleLighter(){ const on = !(lighterLight && lighterLight.intensity>0)
 
 <script>
 /*** ==========================================================
-    GHOSTS: ENTITY + AI + EVENTS + HUNTS (unchanged core)
+    PARTICLE MIST (no GLB)
     ========================================================== ***/
-let ghostMesh=null, mistMesh=null;
+let ghostMesh=null, mistPS=null, mistEmitter=null;
+
+function initMistParticles(){
+  if(mistPS) return;
+
+  // Emitter follows ghost
+  mistEmitter = new BABYLON.TransformNode("mistEmitter", scene);
+
+  // Dynamic soft-circle sprite
+  const dt = new BABYLON.DynamicTexture("mistTex", {width:64, height:64}, scene, false);
+  const ctx = dt.getContext();
+  const grd = ctx.createRadialGradient(32,32,2,32,32,32);
+  grd.addColorStop(0,"rgba(255,255,255,0.85)");
+  grd.addColorStop(0.5,"rgba(255,255,255,0.35)");
+  grd.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.clearRect(0,0,64,64);
+  ctx.fillStyle = grd; ctx.fillRect(0,0,64,64);
+  dt.update();
+
+  if (BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported){
+    mistPS = new BABYLON.GPUParticleSystem("mistPS", {capacity: 2000}, scene);
+  } else {
+    mistPS = new BABYLON.ParticleSystem("mistPS", 2000, scene);
+  }
+  mistPS.emitter = mistEmitter;
+  mistPS.particleTexture = dt;
+  mistPS.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  mistPS.minEmitBox = new BABYLON.Vector3(-0.4, 0.0, -0.4);
+  mistPS.maxEmitBox = new BABYLON.Vector3(0.4, 1.2, 0.4);
+  mistPS.emitRate = 450;
+  mistPS.minLifeTime = 1.4; mistPS.maxLifeTime=2.8;
+  mistPS.minSize = 0.6; mistPS.maxSize=1.6;
+  mistPS.minAngularSpeed=-0.2; mistPS.maxAngularSpeed=0.2;
+  mistPS.minInitialRotation = 0; mistPS.maxInitialRotation = Math.PI*2;
+  mistPS.direction1 = new BABYLON.Vector3(-0.2, 0.6, -0.2);
+  mistPS.direction2 = new BABYLON.Vector3(0.2, 0.8, 0.2);
+  mistPS.color1 = new BABYLON.Color4(0.8, 0.9, 1.0, 0.55);
+  mistPS.color2 = new BABYLON.Color4(0.6, 0.75, 1.0, 0.35);
+  mistPS.colorDead = new BABYLON.Color4(0.6,0.75,1.0,0.0);
+  mistPS.updateSpeed = 0.02;
+  if (mistPS.preWarmCycles !== undefined){ mistPS.preWarmCycles = 60; mistPS.preWarmStepOffset = 10; }
+  mistPS.stop();
+}
+
+function mistShow(on){
+  if(!mistPS) initMistParticles();
+  if(on){ mistPS.start(); } else { mistPS.stop(); mistPS.reset(); }
+}
+</script>
+
+<script>
+/*** ==========================================================
+    GHOSTS: ENTITY + AI + EVENTS + HUNTS
+    ========================================================== ***/
 let lastMimicSwitch=0, thayeAge=0;
 
 async function spawnGhost(){
@@ -442,18 +492,6 @@ async function spawnGhost(){
   m.diffuseColor = new BABYLON.Color3(0.9,0.9,1); m.alpha=0.8; m.emissiveColor=new BABYLON.Color3(0.1,0.1,0.2);
   ghostMesh.material = m;
   ghostMesh.position = new BABYLON.Vector3(0,1.2,0);
-}
-
-async function ensureMist(){
-  if(mistMesh) return;
-  try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/ghosts/', 'mist.glb', scene);
-    mistMesh = r.meshes.find(m=>!m.parent) || r.meshes[0];
-  }catch(e){
-    mistMesh = BABYLON.MeshBuilder.CreateSphere('mist',{diameter:0.8}, scene);
-  }
-  mistMesh.isPickable=false; mistMesh.visibility=0; mistMesh.material = new BABYLON.StandardMaterial('mistMat', scene);
-  mistMesh.material.alpha = 0.5; mistMesh.material.diffuseColor = new BABYLON.Color3(0.7,0.9,1.0);
 }
 
 function pickGhost(){
@@ -499,8 +537,8 @@ function pickEventType(){
 
 function setGhostVisible(v, form='entity'){
   game.ghostVisible = !!v;
-  if(ghostMesh) ghostMesh.visibility = v && form==='entity' ? 1 : 0;
-  if(mistMesh)  mistMesh.visibility  = v && form==='mist'   ? 0.7 : 0;
+  if(ghostMesh) ghostMesh.visibility = (form==='entity' && v) ? 1 : 0;
+  if(form==='mist'){ mistShow(v); } else { mistShow(false); }
 }
 
 function moveGhostToward(pos, speed, dt){
@@ -551,7 +589,6 @@ function stopHunt(){
 async function triggerEvent(){
   const type = pickEventType();
   const g = game.ghost?.tags||{};
-  await ensureMist();
 
   if(type==='singing' || type==='redFlicker'){
     setGhostVisible(true,'entity');
@@ -571,29 +608,29 @@ async function triggerEvent(){
     toast('Bulb shattered', 900);
   }
   else if(type==='mist'){
+    initMistParticles();
     setGhostVisible(true,'mist');
     let t=0; const handle = scene.onBeforeRenderObservable.add(()=>{
-      t += engine.getDeltaTime()/1000;
-      const p = camera.position.add(new BABYLON.Vector3(Math.sin(t*3)*0.6,0,0));
-      moveGhostToward(p, 1.8, engine.getDeltaTime()/1000);
+      const dt = engine.getDeltaTime()/1000; t += dt;
+      const target = camera.position.add(new BABYLON.Vector3(Math.sin(t*3)*0.6,0,0));
+      moveGhostToward(target, 1.8, dt);
+      if(mistEmitter && ghostMesh){ mistEmitter.position.copyFrom(ghostMesh.position); }
       if(t>3.0){ scene.onBeforeRenderObservable.remove(handle); setGhostVisible(false); }
     });
     toast('Misty apparition', 900);
   }
   else if(type==='footsteps'){
-    // UV footprints: visible with UV light, expire in 60s
     const pos = camera.position.clone().add(new BABYLON.Vector3(0,0,1));
     const step = BABYLON.MeshBuilder.CreateDisc('uvstep',{radius:0.12, tessellation:24}, scene);
     step.position = pos.add(new BABYLON.Vector3((Math.random()-0.5)*0.4, -0.85, (Math.random()-0.5)*0.4));
     const mat = new BABYLON.StandardMaterial('uvstepMat', scene);
     mat.emissiveColor = new BABYLON.Color3(0.7,0.2,0.9);
-    mat.alpha = 0.0; // hidden unless UV is on
+    mat.alpha = 0.0;
     step.material = mat; step.isPickable=false;
     game.footprints.push({pos:step.position.clone(), expireAt: game.time+60, mesh:step});
     toast('Footsteps (UV evidence)', 1200);
   }
 
-  // Poltergeist throws
   if(g.polter){
     const box = BABYLON.MeshBuilder.CreateBox('throw',{size:0.2}, scene);
     box.position = ghostMesh ? ghostMesh.position.add(new BABYLON.Vector3(0,1,0)) : camera.position.add(new BABYLON.Vector3(0,1,-1));
@@ -617,17 +654,15 @@ function updateGhost(dt){
   }
   if(game.ghostVisible){
     const speed = ghostBaseSpeed();
-    // Wraith avoids salt: if near a 'salt' mesh, it won't step through (simple steer)
     if(game.ghost.tags.wraith){
       const salts = scene.meshes.filter(m=>m.name.startsWith('salt'));
       for(const s of salts){
-        if(BABYLON.Vector3.Distance(s.position, ghostMesh.position) < 1.1){
-          return; // skip moving this frame
-        }
+        if(BABYLON.Vector3.Distance(s.position, ghostMesh.position) < 1.1) return;
       }
     }
     moveGhostToward(camera.position, speed, dt);
   }
+  if(mistEmitter && ghostMesh){ mistEmitter.position.copyFrom(ghostMesh.position); }
 }
 </script>
 
@@ -773,14 +808,9 @@ function listAllTextures(){
     const name = t.name || t.url || '(embedded)';
     const p = document.createElement('div'); p.textContent = name;
     card.appendChild(p);
-
-    // Build a downloadable link if possible (for data/HTTP URLs)
     let href = null;
-    if(typeof t.url === 'string'){
-      href = t.url;
-    } else if (t._texture && t._texture.url) {
-      href = t._texture.url;
-    }
+    if(typeof t.url === 'string'){ href = t.url; }
+    else if (t._texture && t._texture.url) { href = t._texture.url; }
     if(href){
       const a = document.createElement('a'); a.href = href; a.textContent='open'; a.target='_blank';
       card.appendChild(a);
@@ -830,7 +860,7 @@ async function boot(){
   await loadSelectedMap();
   await loadMoon();
   await spawnGhost();
-  await ensureMist();
+  initMistParticles(); // particle system instead of GLB
 
   // Place player
   camera.position = new BABYLON.Vector3(44.91, 1.17, -104.00);
