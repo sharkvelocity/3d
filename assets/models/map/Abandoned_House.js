@@ -3,14 +3,17 @@
   window.MAP_DEF = {
     title: "Abandoned House",
     file:  "Abandoned_House.glb",
-    // Keep scale tweak if model feels large; adjust later if needed
+
+    // model transform (keep/tweak as needed)
     scale: 0.12,
     rotationY: 0,
     offset: { x: 0, y: 0, z: 0 },
 
-    // Force player/van semantics to origin for now
-    spawn:    { x: 0, y: 1.8, z: 0 },
-    vanSpawn: { x: 0, y: 1.8, z: 0 },
+    // === player/van spawn (center of your Van poly) ===
+    // Van centroid: x=49.951885, z=-103.113540
+    spawn:    { x: 49.951885, y: 1.8, z: -103.113540 },
+    vanSpawn: { x: 49.951885, y: 1.8, z: -103.113540 },
+    // (optional) if you want a facing: spawnYawDeg: 180,
 
     // Your polygon is an indoor boundary
     exteriorMode: "interior",
@@ -30,6 +33,7 @@
       { "x": 48.05179, "z": -118.37990 },
       { "x": 57.19205, "z": -118.05119 }
     ],
+
     rooms: [
       {
         name: "Van",
