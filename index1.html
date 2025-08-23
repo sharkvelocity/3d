@@ -110,9 +110,15 @@
     #viewer-ui input[type="text"]{ background:#0a2a2f; border:1px solid #0a8; color:#aef; padding:6px 8px; border-radius:8px; min-width:320px; }
     #viewer-canvas{ position:absolute; inset:0; }
 
+  
+    /* Mobile sprint button */
+    #mobile-sprint{ position:fixed; right:12px; bottom:96px; z-index:6500; display:none; }
+    #btn-sprint.on{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.4) inset; }
+
   </style>
 </head>
 <body>
+  <script>window.MAP_DEF = window.MAP_DEF || null;</script>
   <script>window.MAP_DEF = window.MAP_DEF || null;</script>
 
   <!-- Title -->
@@ -144,6 +150,8 @@
   <div id="belt"></div>
 
   <!-- Actions -->
+  <div id="mobile-sprint"><button id="btn-sprint" class="hud-btn">Sprint: Off</button></div>
+
   <div id="action-bar">
     <button id="btn-use" class="hud-btn">Use</button>
     <button id="btn-place" class="hud-btn">Place</button>
@@ -213,6 +221,9 @@ const canvas = document.getElementById('renderCanvas');
 let engine, scene, camera, hemiLight, houseRoot, moonMesh;
 
 const rng = Math.random;
+
+// Look sensitivity per mode
+const LOOK = { sensFPS: 0.0026, sensOTS: 0.0021, invertY: 1 };
 
 // --- Player state ---
 const player = {
@@ -355,6 +366,22 @@ function updateSanityUI(pct){
 
 /*** ==========================================================
     MAP SELECTOR + DYNAMIC DEF + VIEWER
+// --- Global map loader ---
+window.loadSelectedMap = async function(){
+  const mapFile = (window.CURRENT_MAP && window.CURRENT_MAP.file) ? window.CURRENT_MAP.file : "Abandoned_House.glb";
+  try { await loadMatchingMapDef(mapFile); } catch {}
+  try {
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
+    houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
+    res.meshes.forEach(m=>{ m.checkCollisions=true; m.isPickable=true; m.receiveShadows=true; });
+    const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
+    window.WORLD_BOUNDS = bb ? { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z } : null;
+  } catch(e){
+    console.warn("Map load failed; building ground fallback", e);
+    const g = BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true;
+  }
+};
+
     ========================================================== ***/
 const MAP_FILES = [
   { file:"Abandoned_House.glb", title:"Abandoned House", def:"Abandoned_House.js" },
@@ -398,8 +425,8 @@ async function loadMatchingMapDef(mapFile){
 }
 
 /* Override loadMap to use CURRENT_MAP and compute WORLD_BOUNDS */
-const __orig_loadMap = loadMap;
-loadMap = async function(){
+
+/*removed loadMap override*/ function __unused(){{
   let mapFile = CURRENT_MAP?.file || "Abandoned_House.glb";
   try{
     await loadMatchingMapDef(mapFile);
@@ -424,7 +451,7 @@ loadMap = async function(){
 /* Fallback helpers for exterior bounds */
 function getExteriorBounds(){
   if(window.window.MAP_DEF?.exterior?.length){
-    const ext = MAP_DEF.exterior;
+    const ext = window.MAP_DEF.exterior;
     let minx=Infinity, maxx=-Infinity, minz=Infinity, maxz=-Infinity;
     for(const p of ext){ if(p.x<minx) minx=p.x; if(p.x>maxx) maxx=p.x; if(p.z<minz) minz=p.z; if(p.z>maxz) maxz=p.z; }
     return {minx,maxx,minz,maxz};
@@ -551,6 +578,7 @@ function setThirdPersonOTS(on){
   toast(OTS.enabled ? "Third-person (OTS) ON" : "Third-person OFF");
 }
 function toggleThirdPersonOTS(){ setThirdPersonOTS(!OTS.enabled); }
+function toggleShoulderSide(){ OTS.shoulderX = -OTS.shoulderX; toast(OTS.shoulderX>0 ? 'Shoulder: Right' : 'Shoulder: Left'); }
 
 function ensureThirdCam(){
   if(OTS.cam) return OTS.cam;
@@ -598,7 +626,19 @@ function updateThirdCam(dt){
   let boomPos = desired;
   if(dist > 0.001){
     const ray = new BABYLON.Ray(shoulder, dir.scale(1/dist), dist);
-    const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false && m !== __avatar.mesh);
+    const hit = scene.pickWithRay(ray, m=>{
+      if(!m || m===__avatar.mesh) return false;
+      if(m.isPickable===false) return false;
+      // Heuristics: ignore glass/foliage/lightweight props
+      const n = (m.name||'').toLowerCase();
+      if(/glass|window|leaf|leaves|foliage|plant|bush|grate/.test(n)) return false;
+      // metadata opt-out: mesh.metadata?.noCameraCollision === true
+      if(m.metadata && (m.metadata.noCameraCollision===true)) return false;
+      // very transparent materials are not blockers
+      const mat = m.material; const alpha = (mat && 'alpha' in mat) ? (mat.alpha ?? 1) : 1;
+      if(alpha < 0.25) return false;
+      return true;
+    });
     if(hit?.hit && hit.pickedPoint){
       const len = Math.max(OTS.boomMin, Math.min(hit.distance - OTS.collideMargin, OTS.boomMax));
       boomPos = shoulder.subtract(f.scale(len));
@@ -780,6 +820,7 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 const InputSystem = (()=>{
   let move={x:0,z:0}, running=false, lookDelta={x:0,y:0};
   let speedScalar=0; // 0..1 analog speed from touch/keys
+  let mobileRun=false; // tap-to-sprint toggle
   let pointerLocked=false;
 
   const keys = new Set();
@@ -788,7 +829,7 @@ const InputSystem = (()=>{
     'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
-    'KeyE':'pickup', 'KeyG':'drop', 'Backslash':'third', 'Backslash':'tp'
+    'KeyE':'pickup', 'KeyG':'drop', 'Backslash':'third', 'KeyV':'shoulder', 'Backslash':'tp'
   };
 
   function recomputeMove(){
@@ -810,6 +851,7 @@ const InputSystem = (()=>{
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
     if(tag==='third' && down)  toggleThirdPersonOTS();
+    if(tag==='shoulder' && down)  toggleShoulderSide();
     if(tag==='tp' && down && typeof toggleThirdPerson==='function') toggleThirdPerson();
     recomputeMove();
   }
@@ -905,9 +947,11 @@ const InputSystem = (()=>{
       bindTouchHalves();
     },
     snapshot(){
-      const out={ moveVec:{...move}, running, speedScalar, lookDelta:{...lookDelta} };
+      const out={ moveVec:{...move}, running, speedScalar, mobileRun, lookDelta:{...lookDelta} };
       lookDelta.x=0; lookDelta.y=0; return out;
-    }
+    },
+    toggleMobileRun(){ mobileRun = !mobileRun; return mobileRun; },
+    isMobileRun(){ return mobileRun; }
   };
 })();
 </script>
@@ -918,7 +962,8 @@ const InputSystem = (()=>{
     ========================================================== ***/
 function handleMovement(input, dt){
   if(!camera) return;
-  const t = Math.max(0, Math.min(1, (input.speedScalar!==undefined ? input.speedScalar : (input.running?1:0))));
+  let t = Math.max(0, Math.min(1, (input.speedScalar!==undefined ? input.speedScalar : (input.running?1:0))));
+  if(input.mobileRun) t = Math.max(t, 1);
   const speed = player.speedWalk + (player.speedRun - player.speedWalk) * t;
   const fwd = camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
   const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
@@ -939,11 +984,10 @@ function handleMovement(input, dt){
 }
 function applyLook(lookDelta){
   if(!camera) return;
-  const sens = 0.0026;
+  const sens = (typeof OTS !== 'undefined' && OTS.enabled) ? LOOK.sensOTS : LOOK.sensFPS;
   camera.rotation.y += lookDelta.x * sens;
-  const invertY = 1;
   const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
-  const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
+  const pitch=(camera.rotation.x||0)+(LOOK.invertY * lookDelta.y * sens * 0.85);
   camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
 }
 </script>
@@ -1077,12 +1121,12 @@ async function loadMoon(){
 function currentRoomName(){
   if(!window.MAP_DEF) return player.inside?'House':'Exterior';
   const pos = {x:camera.position.x, z:camera.position.z};
-  for(const r of MAP_DEF.rooms){ if(pointInPolyXZ(pos, r.poly)) return r.name; }
+  for(const r of window.MAP_DEF.rooms){ if(pointInPolyXZ(pos, r.poly)) return r.name; }
   return player.inside ? 'House' : 'Exterior';
 }
 function isInsideExterior(p){
   if(!window.MAP_DEF) return true;
-  return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
+  return pointInPolyXZ({x:p.x, z:p.z}, window.MAP_DEF.exterior);
 }
 async function loadMap(){
   try{
@@ -1688,7 +1732,7 @@ async function boot(){
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
 
-  await loadSelectedMap();
+  await window.loadSelectedMap();
   await loadMoon();
   WeatherAudio.init(scene);
   MarkerTool.init();
@@ -1708,6 +1752,20 @@ async function boot(){
   spawnWorldItems();
   await spawnToolsInVan();
   if (typeof ensurePlayerModel==='function') ensurePlayerModel();
+
+  
+// Mobile sprint button wiring
+(function(){
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints>0);
+  const wrap = document.getElementById('mobile-sprint');
+  const btn = document.getElementById('btn-sprint');
+  if(isTouch && wrap && btn){
+    wrap.style.display='block';
+    const update = ()=>{ const on = InputSystem.isMobileRun(); btn.classList.toggle('on', on); btn.textContent = 'Sprint: ' + (on?'On':'Off'); };
+    btn.addEventListener('click', ()=>{ InputSystem.toggleMobileRun(); update(); });
+    update();
+  }
+})();
 
   // Buttons
   document.getElementById('btn-use').onclick=useActiveItem;
