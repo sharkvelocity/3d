@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — index1 (CLEAN)</title>
+  <title>PhasmaPhoney — index1 (FIXED)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -14,8 +14,6 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
-
-  <!-- Optional map DEF (room polys) gets loaded dynamically, so no <script> here -->
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
@@ -64,7 +62,7 @@
     #mobile-sprint{ position:fixed; left:14px; bottom:18px; z-index:6500; display:none; }
     #mobile-sprint button{ border:1px solid #066; background:#102; color:#9ef; padding:8px 12px; border-radius:10px; }
 
-    /* Notebook (kept simple, still legible) */
+    /* Notebook */
     #notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#0ff; display:none; z-index:12000; padding:18px; overflow:auto; }
 
     /* Toast */
@@ -253,7 +251,7 @@ function pointInPolyXZ(p, poly){
   let inside = false;
   for(let i=0,j=poly.length-1;i<poly.length;j=i++){
     const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
-    const intersect = ((zi>p.z)!==(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/( (zj-zi)||1e-9 ) + xi);
+    const intersect = ((zi>p.z)!==(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(((zj-zi)||1e-9)) + xi);
     if(intersect) inside = !inside;
   }
   return inside;
@@ -353,7 +351,7 @@ function ensureHeldUV(){
 }
 function ensureHeldLighter(){
   if(!held.lighter){
-    held.lighter = new BABYLON.PointLight("handLighter", new BABYLON.Vector3(0,1.6,0); attachInteriorLight(lighter), scene);
+    held.lighter = new BABYLON.PointLight("handLighter", new BABYLON.Vector3(0,1.6,0), scene);
     held.lighter.intensity = 0; held.lighter.range = 6;
   }
   return held.lighter;
@@ -362,14 +360,11 @@ function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (l.intensity>0?
 function toggleUV(){ const u=ensureHeldUV(); u.intensity = (u.intensity>0?0:1.3); UV_ACTIVE = (u.intensity>0); _refreshUVFootprintMaterials(); toast(u.intensity>0?'UV ON':'UV OFF'); }
 function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); }
 
-// Item actions
-
 // ===== SALT System: place salt lines and disturb logic =====
 const SALT_LINES = []; // array of {mesh, a:Vector3, b:Vector3, disturbed:false}
 let saltCharges = 6; // basic total lines available (tune as desired)
 
 function _aimPointOnGround(maxDist=3.5){
-  // Ray from camera forward to ground (y=0 approx); fallback to ahead of player
   const origin = camera.position.clone();
   const dir = camera.getForwardRay().direction.clone();
   const ray = new BABYLON.Ray(origin, dir, maxDist);
@@ -389,7 +384,6 @@ function placeSalt(){
   const half = 0.6;
   const a = new BABYLON.Vector3(center.x - Math.cos(yaw)*half, 0.01, center.z - Math.sin(yaw)*half);
   const b = new BABYLON.Vector3(center.x + Math.cos(yaw)*half, 0.01, center.z + Math.sin(yaw)*half);
-  // Thin quad strip
   const path = [a, b];
   const mesh = BABYLON.MeshBuilder.CreateTube("salt_line", {path, radius:0.05, tessellation:4}, scene);
   const mat = new BABYLON.StandardMaterial("salt_mat", scene);
@@ -398,7 +392,7 @@ function placeSalt(){
   mat.emissiveColor = new BABYLON.Color3(0.05,0.05,0.05);
   mat.alpha = 0.9;
   mesh.material = mat;
-  mesh.layerMask = LAYERS.INTERIOR | LAYERS.EXTERIOR; // visible anywhere on ground
+  mesh.layerMask = LAYERS.INTERIOR | LAYERS.EXTERIOR;
   SALT_LINES.push({mesh, a, b, disturbed:false, mat});
   saltCharges--;
   toast('Salt line placed ('+saltCharges+' left)');
@@ -413,7 +407,51 @@ function _pointToSegmentDistance(p, a, b){
   const dx = p.x - proj.x, dz = p.z - proj.z;
   return Math.sqrt(dx*dx + dz*dz);
 }
+</script>
 
+<script>
+/*** ==========================================================
+    UV FOOTPRINTS (1 minute lifetime)
+    ========================================================== ***/
+let UV_ACTIVE = false;
+const UV_FOOT_MATS = [];
+function _refreshUVFootprintMaterials(){
+  // For now, nothing dynamic is required; placeholder if we later add different shaders.
+}
+function spawnUVFootprints(origin, count=2, step=0.35){
+  for(let i=0;i<count;i++){
+    const quad = BABYLON.MeshBuilder.CreatePlane("uv_foot_"+i, {size:0.18}, scene);
+    quad.rotation.x = Math.PI/2;
+    quad.position = new BABYLON.Vector3(origin.x + (Math.random()-0.5)*0.3 + i*step*0.6, origin.y+0.02, origin.z + (Math.random()-0.5)*0.3 + i*step);
+    quad.isPickable=false;
+    const m = new BABYLON.StandardMaterial("uv_mat_"+Math.random(), scene);
+    m.diffuseColor = new BABYLON.Color3(0.6,0.3,1.0);
+    m.emissiveColor = new BABYLON.Color3(0.2,0.1,0.6);
+    m.specularColor = new BABYLON.Color3(0,0,0);
+    m.alpha = 0.0; // fade in
+    quad.material = m;
+    UV_FOOT_MATS.push(m);
+    // fade in
+    let t=0; const fadeIn = scene.onBeforeRenderObservable.add(()=>{
+      t += engine.getDeltaTime()/1000; m.alpha = Math.min(0.9, t*3);
+      if(m.alpha>=0.9) scene.onBeforeRenderObservable.remove(fadeIn);
+    });
+    // hold ~60s then fade out and dispose
+    setTimeout(()=>{
+      let f=1;
+      const h = scene.onBeforeRenderObservable.add(()=>{
+        f -= engine.getDeltaTime()/3; m.alpha = Math.max(0, f*0.9);
+        if(m.alpha<=0){ scene.onBeforeRenderObservable.remove(h); try{ quad.dispose(); }catch{} }
+      });
+    }, 60000);
+  }
+}
+</script>
+
+<script>
+/*** ==========================================================
+    DISTURB SALT (ties to UV footprints) + ITEM ACTIONS
+    ========================================================== ***/
 function disturbSaltAt(pos){
   // Wraith does NOT disturb salt
   if((ghost?.type||'').toLowerCase()==='wraith') return;
@@ -422,10 +460,9 @@ function disturbSaltAt(pos){
     const d = _pointToSegmentDistance(pos, s.a, s.b);
     if(d < 0.18){
       s.disturbed = true;
-      // Particle puff
       try{
         const ps = new BABYLON.ParticleSystem("saltPuff", 400, scene);
-        ps.particleTexture = new BABYLON.Texture("./assets/textures/particles/smoke.png", scene);
+        ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene);
         ps.emitter = s.mesh;
         ps.minSize = 0.02; ps.maxSize = 0.08;
         ps.minEmitPower = 0.4; ps.maxEmitPower = 1.0;
@@ -436,9 +473,8 @@ function disturbSaltAt(pos){
         ps.start();
         setTimeout(()=>{ try{ ps.stop(); ps.dispose(); }catch{} }, 800);
       }catch{}
-      // Visual change: dull + scatter tint
       try{ s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; }catch{}
-      // Optional: spawn UV footprints right after disturbance
+      // footprints appear for ~1 minute
       try{ spawnUVFootprints(pos, 2, 0.4); }catch{}
     }
   }
@@ -473,7 +509,7 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 
 <script>
 /*** ==========================================================
-    INPUT (KBD/Touch) + PICKUP   (no pointer-lock; touch-friendly)
+    INPUT (KBD/Touch) + PICKUP
     ========================================================== ***/
 const InputSystem = (()=>{
   let move={x:0,z:0}, running=false, lookDelta={x:0,y:0};
@@ -518,18 +554,17 @@ const InputSystem = (()=>{
     let leftId=null, leftCenter=null, rightId=null, lastRight=null;
     const DEAD=14, MAX=110;
     const norm=(v)=> Math.abs(v)<DEAD?0:v;
-    const clamp=(v,m)=> Math.max(-m, Math.min(m, v));
+    const clampv=(v,m)=> Math.max(-m, Math.min(m, v));
 
-    const onStart = (e)=>{ isTouchMode=true; };
+    const onStart = ()=>{ isTouchMode=true; };
     left.addEventListener('touchstart', e=>{ onStart(); for(const t of e.changedTouches){ if(leftId===null){ leftId=t.identifier; leftCenter={x:t.clientX,y:t.clientY}; break; } } e.preventDefault(); },{passive:false});
     right.addEventListener('touchstart', e=>{ onStart(); for(const t of e.changedTouches){ if(rightId===null){ rightId=t.identifier; lastRight={x:t.clientX,y:t.clientY}; break; } } e.preventDefault(); },{passive:false});
 
     window.addEventListener('touchmove', e=>{
       for(const t of e.changedTouches){
         if(t.identifier===leftId && leftCenter){
-          const dx=clamp(t.clientX-leftCenter.x,MAX), dy=clamp(t.clientY-leftCenter.y,MAX);
+          const dx=clampv(t.clientX-leftCenter.x,MAX), dy=clampv(t.clientY-leftCenter.y,MAX);
           const nx=norm(dx)/MAX, ny=norm(dy)/MAX;
-          // analog ramping: further drag -> faster
           _analogScale = Math.min(1, Math.hypot(nx,ny));
           move.x = Math.sign(nx);
           move.z = ny<0 ? 1 : (ny>0 ? -1 : 0);
@@ -727,7 +762,7 @@ function setWeather(state){
   if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
   updateEmitterToBounds();
 }
-async async function loadMoon(){
+async function loadMoon(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
     moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
@@ -784,14 +819,9 @@ async function loadManifest() {
 function populateMapSelector(){
   const sel = document.getElementById('map-select'); if(!sel) return;
   if (!MAP_FILES.length) { sel.innerHTML = `<option value="-1">(no maps found)</option>`; return; }
-(function(){
-  const sel = document.getElementById('map-select');
-  if(sel){
-    sel.addEventListener('change', ()=>{ try{ window.CURRENT_MAP = getSelectedMap(); }catch{} });
-  }
-})();
   sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join('');
   sel.value = "0";
+  sel.addEventListener('change', ()=>{ try{ window.CURRENT_MAP = getSelectedMap(); }catch{} });
 }
 
 function getSelectedMap(){
@@ -816,6 +846,14 @@ async function loadMatchingMapDef(mapFile, explicitDef){
   if(!ok){ window.MAP_DEF = undefined; }
 }
 
+// Light/Layer helpers
+function markExteriorMesh(mesh){
+  try { mesh.layerMask = (mesh.layerMask|0) | LAYERS.EXTERIOR; } catch{}
+}
+function attachInteriorLight(light){
+  try { light.includeOnlyWithLayerMask = LAYERS.INTERIOR; } catch{}
+}
+
 function updateEmitterToBounds(){
   if(!WORLD_BOUNDS) return;
   const cx = (WORLD_BOUNDS.minx + WORLD_BOUNDS.maxx) * 0.5;
@@ -836,22 +874,11 @@ window.loadSelectedMap = async function(){
   const map = (window.CURRENT_MAP = getSelectedMap());
   const mapFile = map?.file || "Abandoned_House.glb";
 
-  try { await loadMatchingMapDef(mapFile, map?.def); }
-
-// Light/Layer helpers
-function markExteriorMesh(mesh){
-  try { mesh.layerMask = (mesh.layerMask|0) | LAYERS.EXTERIOR; } catch{}
-}
-function attachInteriorLight(light){
-  try { light.includeOnlyWithLayerMask = LAYERS.INTERIOR; } catch{}
-  // NOTE: ShadowGen can be added per-light later if needed for wall occlusion.
-}
- catch{}
+  await loadMatchingMapDef(mapFile, map?.def);
 
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
-    \1
     // Layer the house meshes as INTERIOR for light scoping
     try {
       res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
@@ -974,6 +1001,12 @@ function randomInsideExterior(){
   const poly = MAP_DEF?.exterior || [{x:-10,z:-10},{x:10,z:-10},{x:10,z:10},{x:-10,z:10}];
   return randomPointInRoomPoly(poly);
 }
+function randomInsideRoom(){
+  const rooms = (MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
+  if(!rooms.length) return new BABYLON.Vector3(0,1.7,0);
+  const room = rooms[(Math.random()*rooms.length)|0];
+  return randomPointInRoomPoly(room.poly);
+}
 async function spawnGhost(){
   const profile = GHOSTS[(Math.random()*GHOSTS.length)|0];
   ghost.type = profile.name;
@@ -1007,8 +1040,8 @@ async function spawnGhost(){
   if(ghost.type==='Oni')     ghost.flicker.setSolid(0.95);
 
   if(!ghost.audio.heartbeat){
-    ghost.audio.heartbeat = new BABYLON.Sound("heartbeat","./assets/audio/heartbeat.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:false });
-    ghost.audio.singing   = new BABYLON.Sound("singing","./assets/audio/singing_loop.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:true, distanceModel:"linear", maxDistance:20 });
+    ghost.audio.heartbeat = new BABYLON.Sound("heartbeat","./assets/audio/whisper.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:false });
+    ghost.audio.singing   = new BABYLON.Sound("singing","./assets/audio/Radio.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:true, distanceModel:"linear", maxDistance:20 });
   }
   try{ ghost.audio.singing.attachToMesh(ghost.mesh); }catch{}
 }
@@ -1023,12 +1056,14 @@ function wanderGhost(dt){
   const step = ghost._dir.scale(dt);
   const cand = ghost.mesh.position.add(step);
   if(isInsideExterior(cand)) ghost.mesh.position = cand; else ghost._dir=null;
-}
   try{ disturbSaltAt(ghost.mesh.position); }catch{}
 }
 function isInsideExterior(p){
   if(!window.MAP_DEF) return true;
   return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
+}
+function isInsideHouse(p){
+  return !isInsideExterior(p);
 }
 function startEvent(){
   ghost.mode='event';
@@ -1119,7 +1154,6 @@ function sanityTick(dt){
   if(player.room==='Van') recover += 0.040;
 
   // Apply + animated bar
-  const prev = player.sanity;
   player.sanity = clamp(player.sanity + (recover - drain)*dt*60, 0, 100);
   document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
   const fill = document.getElementById('sanity-fill');
@@ -1160,7 +1194,6 @@ function takePhoto(){
 }
 function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); }
 function readTemp(){ toast('Temp: '+(player.room!=='Van' ? (ghost.visible?'-1°C':'5°C') : '18°C')); }
-function placeSalt(){ toast('Salt placed'); }
 function toggleDOTS(){ toast('DOTS toggled'); }
 function placeDOTS(){ toast('DOTS placed'); }
 function dropWritingBook(){ toast('Book dropped'); }
@@ -1195,13 +1228,18 @@ async function boot(){
   camera.minZ = 0.1; camera.inertia=0;
   camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
+  // Exterior hemispheric light
+  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.2,1,0.2), scene);
+  hemiLight.intensity = 0.6;
+  hemiLight.includeOnlyWithLayerMask = LAYERS.EXTERIOR;
+
   // Atmosphere
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
-  \1hemiLight.includeOnlyWithLayerMask = LAYERS.EXTERIOR;
-await loadSelectedMap();
+
+  await loadSelectedMap();
   await loadMoon();
   WeatherAudio.init(scene);
 
@@ -1242,15 +1280,18 @@ await loadSelectedMap();
       held.light.position = camera.position.add(new BABYLON.Vector3(0,0.3,0));
       held.light.setDirectionToTarget(camera.position.add(camForward));
       if(!player.inside) held.light.intensity=0;
+      else attachInteriorLight(held.light);
     }
     if(held.uvLight){
       held.uvLight.position = camera.position.add(new BABYLON.Vector3(0,0.3,0));
       held.uvLight.setDirectionToTarget(camera.position.add(camForward));
       if(!player.inside) held.uvLight.intensity=0;
+      else attachInteriorLight(held.uvLight);
     }
     if(held.lighter){
       held.lighter.position = camera.position.add(new BABYLON.Vector3(0,0.2,0));
       if(!player.inside) held.lighter.intensity=0;
+      else attachInteriorLight(held.lighter);
     }
 
     // Weather: lightning pacing
