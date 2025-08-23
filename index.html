@@ -885,7 +885,7 @@ window.loadSelectedMap = async function(){
     } catch(e) {}
 
 // Force-origin mode
-    const FORCE_ORIGIN = true;
+    const FORCE_ORIGIN = false;
 
         // Apply map transform if provided by MAP_DEF
     try {
@@ -1406,240 +1406,104 @@ document.addEventListener('keydown', (e)=>{
 (function(){ loadManifest(); })();
 </script>
 
-
 <script>
-/* HumanoidController — animate skeleton Idle/Walk/Run with fallback */
-(function(){
-  function findFirstSkeleton(root){
-    const meshes = root.getChildMeshes ? root.getChildMeshes(false) : [];
-    for (const m of meshes) if (m.skeleton) return { mesh:m, skel:m.skeleton };
-    return null;
-  }
-  function getAnimGroups(scene, root){
-    const groups = scene.animationGroups || [];
-    const underRoot = new Set((root.getChildMeshes?.(false) || []).map(m=>m.uniqueId));
-    function touchesRoot(g){
-      return g.targetedAnimations.some(ta => underRoot.has(ta.target?.uniqueId));
-    }
-    const ours = groups.filter(touchesRoot);
-    const by = (name) => ours.filter(g => new RegExp(name, "i").test(g.name));
-    return { idle: by("idle|stand"), walk: by("walk"), run: by("run|jog"), all: ours };
-  }
-  function setWeights(groups, idleW, walkW, runW){
-    const setW = (arr, w)=> arr.forEach(g=> g.setWeightForAllAnimatables(w));
-    setW(groups.idle, idleW); setW(groups.walk, walkW); setW(groups.run, runW);
-  }
-  function ensurePlaying(groups){
-    const playAll = arr => arr.forEach(g=>{ if (!g.isPlaying) g.start(true, 1.0, g.from, g.to, true); });
-    playAll(groups.idle); playAll(groups.walk); playAll(groups.run);
-  }
-  function mapBonesByName(skel){
-    const names = skel.bones.map(b=>b.name);
-    function find(rx){ return skel.bones.find(b=> rx.test(b.name)); }
-    return {
-      hips:   find(/Hips|Pelvis|Root/i), spine:  find(/Spine(\b|_)/i), head:   find(/Head/i),
-      armL:   find(/(Upper)?Arm_L|Shoulder_L/i), armR:   find(/(Upper)?Arm_R|Shoulder_R/i),
-      foreL:  find(/ForeArm_L|LowerArm_L/i),     foreR:  find(/ForeArm_R|LowerArm_R/i),
-      legL:   find(/Thigh_L|UpLeg_L/i),          legR:   find(/Thigh_R|UpLeg_R/i),
-      shinL:  find(/Calf_L|Leg_L|LowerLeg_L/i),  shinR:  find(/Calf_R|Leg_R|LowerLeg_R/i),
-      footL:  find(/Foot_L/i),                   footR:  find(/Foot_R/i),
-      names
-    };
-  }
-  function initHumanoidController(scene, playerRoot, opts = {}){
-    const found = findFirstSkeleton(playerRoot);
-    const mesh = found?.mesh, skel = found?.skel;
-    const groups = getAnimGroups(scene, playerRoot);
-    const bones  = skel ? mapBonesByName(skel) : null;
-
-    const speedWalk   = opts.speedWalk ?? 1.8;
-    const speedRun    = opts.speedRun  ?? 3.2;
-    const accel       = opts.accel     ?? 10.0;
-    const decel       = opts.decel     ?? 14.0;
-    const turnRateDeg = opts.turnRate  ?? 360.0;
-    const getDesiredVelocity = opts.getDesiredVelocity;
-
-    const v = new BABYLON.Vector3(0,0,0);
-    let tProc = 0;
-
-    if (groups.all.length) ensurePlaying(groups);
-
-    function blendClips(speed){
-      const wWalk = BABYLON.Scalar.Clamp(speed / speedWalk, 0, 1);
-      const wRun  = BABYLON.Scalar.Clamp((speed - speedWalk) / (speedRun - speedWalk), 0, 1);
-      const wIdle = Math.max(0, 1 - Math.max(wWalk, wRun));
-      setWeights(groups, wIdle, Math.max(0,wWalk - wRun*0.2), wRun);
-    }
-    function faceMoveDir(root, desiredWorld, dt){
-      if (desiredWorld.lengthSquared() < 1e-6) return;
-      const fwd = new BABYLON.Vector3(0,0,1);
-      const rot = root.rotationQuaternion ?? BABYLON.Quaternion.Identity();
-      const curFwd = BABYLON.Vector3.TransformCoordinates(fwd, BABYLON.Matrix.FromQuaternion(rot));
-      const yawNow = Math.atan2(curFwd.x, curFwd.z);
-      const yawTarget = Math.atan2(desiredWorld.x, desiredWorld.z);
-      let d = yawTarget - yawNow;
-      while (d > Math.PI) d -= 2*Math.PI;
-      while (d < -Math.PI) d += 2*Math.PI;
-      const maxStep = BABYLON.Tools.ToRadians(turnRateDeg) * dt;
-      const step = BABYLON.Scalar.Clamp(d, -maxStep, maxStep);
-      const qStep = BABYLON.Quaternion.FromEulerAngles(0, step, 0);
-      root.rotationQuaternion = (root.rotationQuaternion || BABYLON.Quaternion.Identity()).multiply(qStep);
-    }
-    function proceduralSwing(dt, speed){
-      if (!bones) return;
-      tProc += dt * BABYLON.Scalar.Clamp(speed / speedRun, 0, 1) * 4.0;
-      const s = Math.sin(tProc);
-      const armAmp = 0.35, hipAmp = 0.10;
-      bones.armL?.setRotation(new BABYLON.Vector3( armAmp*s, 0, 0), BABYLON.Space.LOCAL);
-      bones.armR?.setRotation(new BABYLON.Vector3(-armAmp*s, 0, 0), BABYLON.Space.LOCAL);
-      bones.spine?.setRotation(new BABYLON.Vector3(0, hipAmp*0.5*s, 0), BABYLON.Space.LOCAL);
-      bones.hips?.setRotation (new BABYLON.Vector3(0, hipAmp*-0.5*s,0), BABYLON.Space.LOCAL);
-    }
-    scene.onBeforeRenderObservable.add(()=>{
-      const dt = scene.getEngine().getDeltaTime()/1000;
-      const desiredLocal = getDesiredVelocity ? getDesiredVelocity() : new BABYLON.Vector3();
-      const rot = playerRoot.rotationQuaternion || BABYLON.Quaternion.Identity();
-      const desiredWorld = BABYLON.Vector3.TransformCoordinates(desiredLocal, BABYLON.Matrix.FromQuaternion(rot));
-
-      const want = desiredWorld.clone();
-      const wantSpeed = want.length();
-      const maxWalk = speedWalk; const maxRun = speedRun;
-      if (wantSpeed > 0){
-        const maxV = wantSpeed > maxWalk ? maxRun : maxWalk;
-        want.normalize().scaleInPlace(maxV);
-      }
-      const dv = want.subtract(v);
-      const rate = (want.length() > v.length()) ? accel : decel;
-      const step = BABYLON.Scalar.Clamp(rate * dt, 0, 1);
-      v.addInPlace(dv.scale(step));
-
-      faceMoveDir(playerRoot, v, dt);
-
-      const speed = v.length();
-      if (groups.all.length) blendClips(speed);
-      else proceduralSwing(dt, speed);
-    });
-    return { skeleton: skel, groups };
-  }
-  window.initHumanoidController = initHumanoidController;
-})();
-</script>
-
-<script>
-/* === Unified Avatar + Humanoid (inline, no camera parenting) =================
-   - Keeps your existing camera-driven locomotion intact.
-   - Loads ./assets/models/player/main_player.glb
-   - Shows body at all times; hides only the head in first-person.
-   - OTS shoulder swap (V), smooth zoom (wheel), FP/TP toggle (\).
-   - Adds HumanoidController to play Idle/Walk/Run if clips exist,
-     otherwise a tasteful procedural swing fallback.
-============================================================================= */
+/* === Third-Person Avatar Patch (inlined) ===============================
+   - Expects: ./assets/models/player/main_player.glb
+   - Toggle: Backslash "\"
+   - No edits to InputSystem required.
+========================================================================= */
 (function(){
   const PLAYER_MODEL_DIR = "./assets/models/player/";
   const PLAYER_MODEL_FILE = "main_player.glb";
   const EYE_HEIGHT = 1.7;
 
-  const state = {
+  const avatar = {
     root: null,
     mesh: null,
     loaded: false,
-    ots: {enabled:false, shoulder:1, dist:2.8, height:1.55, yaw:0},
-    headHidden: false,
-    humanoid: null,
+    third: false,
+    dist: 2.8,
+    height: 1.55
   };
 
-  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  async function ensurePlayerModel(){
+    if(avatar.loaded || !window.scene) return;
+    try{
+      const r = await BABYLON.SceneLoader.ImportMeshAsync("", PLAYER_MODEL_DIR, PLAYER_MODEL_FILE, scene);
+      const mesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+      avatar.root = new BABYLON.TransformNode("playerRoot", scene);
+      avatar.mesh = mesh;
+      mesh.parent = avatar.root;
+      mesh.isPickable = false;
+      // scale to ~1.8 m tall
+      const bb = mesh.getHierarchyBoundingVectors(true);
+      const h = Math.max(0.001, bb.max.y - bb.min.y);
+      const s = 1.8 / h;
+      mesh.scaling.set(s,s,s);
+      mesh.setEnabled(false); // hidden in first-person
+      avatar.loaded = true;
+    }catch(e){ console.warn("[3P] Failed to load main_player.glb", e); }
+  }
 
-  function hideHead(hidden){
-    if(!state.mesh) return;
-    if(state.headHidden === hidden) return;
-    state.headHidden = hidden;
-    const matchers = [/^head$/i, /Head/i, /Head_\d+/i, /Skull/i];
-    const parts = state.root.getChildMeshes(false);
-    for(const m of parts){
-      const n = m.name || "";
-      if(matchers.some(rx=>rx.test(n))) m.setEnabled(!hidden);
+  function toggleThirdPerson(){
+    avatar.third = !avatar.third;
+    if(avatar.mesh){ avatar.mesh.setEnabled(avatar.third); }
+    if(typeof toast === "function") toast(avatar.third ? "Third-person ON (\\)" : "Third-person OFF (\\)");
+  }
+  window.toggleThirdPerson = toggleThirdPerson; // optional global
+
+  function updateAvatarAndCamera(dt){
+    if(!window.scene || !window.camera || !window.engine) return;
+    ensurePlayerModel();
+    if(avatar.root){
+      // Ground at player's location (camera x/z)
+      const start = new BABYLON.Vector3(camera.position.x, camera.position.y + 0.5, camera.position.z);
+      const ray = new BABYLON.Ray(start, new BABYLON.Vector3(0,-1,0), 6.0);
+      const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+      const groundY = hit?.pickedPoint ? hit.pickedPoint.y : (camera.position.y - EYE_HEIGHT);
+
+      // Position avatar at ground, face camera yaw
+      avatar.root.position.set(camera.position.x, groundY, camera.position.z);
+      avatar.root.rotation.set(0, camera.rotation.y, 0);
+
+      if(avatar.third){
+        // Desired camera position behind avatar (ignore pitch for forward vector)
+        const yaw = camera.rotation.y;
+        const fwd = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const pivot = new BABYLON.Vector3(avatar.root.position.x, groundY + avatar.height, avatar.root.position.z);
+        const ideal = pivot.subtract(fwd.scale(avatar.dist)); ideal.y = groundY + avatar.height;
+
+        // Wall avoidance: ray from pivot toward ideal
+        const dir = ideal.subtract(pivot); const len = Math.max(0.001, dir.length());
+        const rayBack = new BABYLON.Ray(pivot, dir.scale(1/len), len);
+        const hitBack = scene.pickWithRay(rayBack, m=>m && m.isPickable!==false);
+        const finalPos = hitBack?.pickedPoint ? hitBack.pickedPoint.add(dir.scale(1/len).scale(0.2)) : ideal;
+
+        camera.position.copyFrom(finalPos);
+        camera.minZ = 0.1;
+      }
     }
   }
 
-  async function ensurePlayer(){
-    if(state.loaded || !window.scene) return;
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", PLAYER_MODEL_DIR, PLAYER_MODEL_FILE, scene);
-    state.mesh = r.meshes.find(m=>m.name && !/_primitive|_skinnedMesh/i.test(m.name)) || r.meshes[0];
-    state.root = state.mesh.parent || state.mesh;
-    state.root.name = "playerRoot";
-    state.root.alwaysSelectAsActiveMesh = true;
-    state.root.isPickable = false;
-    // scale/offset optional: state.root.scaling.set(1,1,1);
-
-    // Start humanoid controller
-    if(window.initHumanoidController){
-      state.humanoid = initHumanoidController(scene, state.root, {
-        speedWalk: 1.8, speedRun: 3.2, accel: 10, decel: 14, turnRate: 360,
-        getDesiredVelocity: ()=>{
-          // Use your InputSystem snapshot to derive local desired velocity
-          const snap = window.InputSystem?.snapshot ? InputSystem.snapshot() : {moveVec:{x:0,z:0}, running:false, analog:1};
-          const scale = (snap.running?1.0:0.65) * (snap.analog||1);
-          return new BABYLON.Vector3(snap.moveVec.x, 0, snap.moveVec.z).scale(scale);
-        }
-      });
-    }
-    state.loaded = true;
-  }
-
-  function toggleTP(){ state.ots.enabled=!state.ots.enabled; toast && toast(state.ots.enabled?'Third-person ON':'First-person'); }
-  function swapShoulder(){ state.ots.shoulder*=-1; }
-
-  document.addEventListener('keydown', (e)=>{
-    if(e.code==='Backslash'){ e.preventDefault(); toggleTP(); }
-    if(e.code==='KeyV'){ swapShoulder(); }
+  // Backslash toggles
+  document.addEventListener("keydown", (e)=>{
+    if(e.code === "Backslash"){ e.preventDefault(); toggleThirdPerson(); }
   }, {passive:false});
 
-  // Smooth follow + FP head hide + OTS offset & wheel zoom
-  (function attach(){
-    function onWheel(ev){
-      if(!state.ots.enabled) return;
-      const delta = Math.sign(ev.deltaY || ev.wheelDelta || -ev.detail);
-      state.ots.dist = clamp(state.ots.dist + delta*0.35, 0.6, 4.5);
+  // Attach update loop once scene exists
+  (function waitScene(){
+    if (window.scene && window.engine && window.camera){
+      ensurePlayerModel();
+      scene.onBeforeRenderObservable.add(()=>{
+        const dt = engine.getDeltaTime()/1000;
+        updateAvatarAndCamera(dt);
+      });
+    } else {
+      setTimeout(waitScene, 300);
     }
-    window.addEventListener('wheel', onWheel, {passive:true});
-
-    const up = new BABYLON.Vector3(0,1,0);
-    scene.onBeforeRenderObservable.add(()=>{
-      if(!window.camera || !window.scene) return;
-      ensurePlayer();
-      if(!state.root) return;
-
-      // Ground snap directly beneath the camera
-      const start = camera.position.add(new BABYLON.Vector3(0,0.5,0));
-      const ray = new BABYLON.Ray(start, new BABYLON.Vector3(0,-1,0), 6);
-      const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
-      const y = (hit && hit.pickedPoint) ? hit.pickedPoint.y : (camera.position.y - EYE_HEIGHT);
-      state.root.position.set(camera.position.x, y, camera.position.z);
-
-      // Determine facing: prefer move direction if any, else camera yaw
-      const snap = window.InputSystem?.snapshot ? InputSystem.snapshot() : {moveVec:{x:0,z:0}};
-      if (Math.abs(snap.moveVec.x)>0.01 || Math.abs(snap.moveVec.z)>0.01){
-        const fwd = new BABYLON.Vector3(snap.moveVec.x,0,snap.moveVec.z);
-        const angle = Math.atan2(fwd.x, fwd.z);
-        state.root.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(0, angle, 0);
-      } else {
-        const dir = camera.getForwardRay().direction.clone(); dir.y=0; dir.normalize();
-        const ang = Math.atan2(dir.x, dir.z);
-        state.root.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(0, ang, 0);
-      }
-
-      // FP head hide
-      const fp = !state.ots.enabled || state.ots.dist<0.75;
-      hideHead(fp);
-
-      // Optional OTS shoulder visual target (no camera parenting)
-      // (We keep your existing movement & collision untouched.)
-    });
   })();
 })();
 </script>
-
 
 
 <script>
@@ -1799,6 +1663,183 @@ document.addEventListener('keydown', (e)=>{
     if(window.scene && window.engine && window.camera){
       scene.onBeforeRenderObservable.add(()=> tick(engine.getDeltaTime()/1000));
     } else setTimeout(wait, 200);
+  })();
+})();
+</script>
+
+<!-- === Merge: Unified Camera Rig + Humanoid Controller (non-invasive) ====== -->
+<script>
+/* ==========================================================================
+   Unified Camera Rig — 1st/3rd person on a spring arm (toggle \, shoulder V)
+   - Non-invasive: waits for window.scene + a player root (or makes one).
+   - Always-visible body in FP by hiding only head submeshes.
+   - Wheel zoom in TP; smart wall stop via ray.
+========================================================================== */
+(function(){
+  if (window.initCameraRig) return; // avoid duplicates
+  const KEY={TOGGLE:220, SHOULDER:86};
+
+  function initCameraRig(scene, playerRoot, opts={}){
+    const canvas = (scene.getEngine && scene.getEngine().getRenderingCanvas && scene.getEngine().getRenderingCanvas()) || document.querySelector('canvas');
+    const cam = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,4), scene);
+    cam.minZ=0.05; cam.fov=1.0; cam.inertia=0; cam.speed=0; // movement handled elsewhere
+    cam.rotationQuaternion=new BABYLON.Quaternion();
+    cam.attachControl(canvas,true);
+
+    const rig=new BABYLON.TransformNode("camRig",scene); rig.parent=playerRoot;
+    const pivot=new BABYLON.TransformNode("camPivot",scene); pivot.parent=rig;
+    const boom=new BABYLON.TransformNode("camBoom",scene); boom.parent=pivot; cam.parent=boom;
+
+    const state={mode:"fp", shoulder:1, arm:0, targetArm:0, yaw:0, pitch:0, eye:1.7, tpH:1.55, tpArm:2.8, headHidden:false};
+    function setMode(m){ state.mode=m; state.targetArm=(m==="tp")?state.tpArm:0; }
+    setMode("fp");
+
+    // hide only head meshes in FP
+    const HEAD_RX=[/Head/i,/^head$/i,/Head_\d+/i,/Skull/i];
+    function setHeadHidden(hidden){
+      if(state.headHidden===hidden) return;
+      state.headHidden=hidden;
+      try{
+        (playerRoot.getChildMeshes?.(false)||[]).forEach(m=>{
+          const n=m.name||"";
+          if(HEAD_RX.some(rx=>rx.test(n))) m.setEnabled(!hidden);
+        });
+      }catch{}
+      cam.minZ = hidden?0.03:0.05;
+    }
+
+    // input
+    scene.onKeyboardObservable.add(k=>{
+      if(k.type!==BABYLON.KeyboardEventTypes.KEYUP) return;
+      const c=k.event.keyCode||k.event.which;
+      if(c===KEY.TOGGLE) setMode(state.mode==="fp"?"tp":"fp");
+      if(c===KEY.SHOULDER) state.shoulder*=-1;
+    });
+    scene.onPointerObservable.add(ev=>{
+      if(ev.type!==BABYLON.PointerEventTypes.POINTERMOVE) return;
+      const p=ev.event; const dx=p.movementX||0, dy=p.movementY||0;
+      const sens=(state.mode==="fp")?0.12:0.08;
+      state.yaw-=dx*sens*0.01; state.pitch-=dy*sens*0.01; state.pitch=Math.max(-1.5, Math.min(1.5, state.pitch));
+    }, BABYLON.PointerEventTypes.POINTERMOVE);
+
+    window.addEventListener('wheel',(e)=>{
+      if(state.mode!=="tp") return;
+      const d=Math.sign(e.deltaY||e.wheelDelta||-e.detail);
+      state.tpArm=Math.max(0.6, Math.min(5.0, state.tpArm + d*0.35));
+      state.targetArm=state.tpArm;
+    }, {passive:true});
+
+    scene.onBeforeRenderObservable.add(()=>{
+      // smooth arm & apply pose
+      state.arm += (state.targetArm-state.arm)*0.2;
+      const qYaw=BABYLON.Quaternion.FromEulerAngles(0,state.yaw,0);
+      const qPitch=BABYLON.Quaternion.FromEulerAngles(state.pitch,0,0);
+      rig.rotationQuaternion=qYaw; cam.rotationQuaternion=qPitch;
+      pivot.position.set(state.shoulder*(state.mode==="tp"?0.45:0), (state.mode==="tp"?state.tpH:state.eye), 0);
+
+      // wall-stop for boom
+      const desired=new BABYLON.Vector3(0,0,-state.arm);
+      const pivotWorld=pivot.getAbsolutePosition();
+      const idealWorld=BABYLON.Vector3.TransformCoordinates(desired, boom.getWorldMatrix());
+      let finalZ=-state.arm;
+      if(state.mode==="tp" && state.arm>0.01){
+        const ray=new BABYLON.Ray(pivotWorld, idealWorld.subtract(pivotWorld).normalize(), state.arm+0.6);
+        const hit=scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+        if(hit?.hit){ finalZ = -Math.max(0.1, BABYLON.Vector3.Distance(pivotWorld, hit.pickedPoint)-0.05); }
+      }
+      boom.position.set(0,0,finalZ);
+      // FP body visible (hide head only)
+      setHeadHidden(state.mode==="fp");
+    });
+
+    return {camera:cam, rig, pivot, boom, state, setMode};
+  }
+  window.initCameraRig = initCameraRig;
+})();
+</script>
+
+<script>
+/* ==========================================================================
+   Humanoid Controller — blends Idle/Walk/Run if present; procedural fallback.
+   - Non-invasive: reads camera speed estimate for animation weight.
+========================================================================== */
+(function(){
+  if (window.initHumanoidController) return;
+  function initHumanoidController(scene, playerRoot){
+    const groups=(scene.animationGroups||[]).filter(g=>g.targetedAnimations.some(ta=>playerRoot.getChildMeshes?.(false).some(m=>m===ta.target)));
+    const idle=groups.find(g=>/idle|stand/i.test(g.name));
+    const walk=groups.find(g=>/walk/i.test(g.name));
+    const run =groups.find(g=>/run|jog/i.test(g.name));
+    function setW(g,w){ try{g && g.setWeightForAllAnimatables(w);}catch{} }
+    [idle,walk,run].forEach(g=>{ try{ g && g.start(true,1.0,g.from,g.to,true); }catch{} });
+    scene.onBeforeRenderObservable.add(()=>{
+      const v = (window.__camSpeed||0);
+      const wWalk = Math.min(1, v/1.5);
+      const wRun  = Math.max(0, Math.min(1, (v-1.5)/(3.2-1.5)));
+      const wIdle = Math.max(0, 1-Math.max(wWalk,wRun));
+      setW(idle,wIdle); setW(walk,Math.max(0,wWalk-wRun*0.25)); setW(run,wRun);
+    });
+  }
+  window.initHumanoidController = initHumanoidController;
+})();
+</script>
+
+<script>
+/* ==========================================================================
+   Attach rig non-invasively — waits for scene/engine and a player root.
+   - If no global player root exists, create a TransformNode so the rig can parent.
+========================================================================== */
+(function(){
+  if (window.__rigAttached) return;
+  function findPlayerRoot(){
+    return window.playerRoot || window.PLAYER_ROOT || (window.scene && scene.getNodeByName && scene.getNodeByName("playerRoot"));
+  }
+  (function wait(){
+    const ready = (window.scene && window.engine);
+    if(!ready){ return setTimeout(wait,200); }
+    let root = findPlayerRoot();
+    if(!root){
+      root = new BABYLON.TransformNode("playerRoot", scene);
+      window.playerRoot = root;
+    }
+    const rig = window.initCameraRig && window.initCameraRig(scene, root, {});
+    if(rig){ scene.activeCamera = rig.camera; window.__rigAttached = true; }
+    if (window.initHumanoidController) window.initHumanoidController(scene, root);
+  })();
+})();
+</script>
+<!-- === /Merge ============================================================= -->
+
+<script>
+/* === Promotion Adapter: route camera translation into playerRoot, re-seat camera on rig === */
+(function(){
+  function find(nodes){ try{ return scene.getNodeByName(nodes) }catch{} return null; }
+  (function wait(){
+    if(!(window.scene && window.engine && scene.activeCamera)){ return setTimeout(wait,200); }
+    const cam = scene.activeCamera;
+    const rig = window.__camRigRef || null;
+    let lastCam = cam.getAbsolutePosition().clone();
+    scene.onBeforeRenderObservable.add(()=>{
+      const now = cam.getAbsolutePosition();
+      const dx = now.subtract(lastCam);
+      // If some other system moved the camera in world space, push that into playerRoot instead.
+      if (dx.lengthSquared() > 1e-6) {
+        try{
+          const root = window.playerRoot || (scene.getNodeByName && scene.getNodeByName("playerRoot"));
+          if (root) root.position.addInPlace(dx);
+        }catch(e){}
+      }
+      lastCam = cam.getAbsolutePosition().clone();
+      // Re-seat camera to boom if rig exists (so it follows playerRoot cleanly)
+      try{
+        const boom = scene.getNodeByName && scene.getNodeByName("camBoom");
+        if (boom){
+          const world = boom.getAbsolutePosition();
+          cam.position.copyFrom(boom.position || BABYLON.Vector3.Zero());
+          // force world align by re-parenting is handled by rig; we just ensure local pos is boom's local
+        }
+      }catch(e){}
+    });
   })();
 })();
 </script>
