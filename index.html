@@ -288,7 +288,7 @@ const WeatherAudio = (()=>{
                   (k==='rain' &&want.rain )?0.55:
                   (k==='snow' &&want.snow )?0.28:
                   (k==='drone'&&want.drone)?0.18:0.0;
-      if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){}} }
+      if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){} } }
       const start = snd.getVolume();
       let i=0, steps=18, stepMs=40;
       const id=setInterval(()=>{
@@ -472,9 +472,9 @@ function disturbSaltAt(pos){
         ps.colorDead = new BABYLON.Color4(1,1,1,0);
         ps.start();
         setTimeout(()=>{ try{ps.stop(); ps.dispose(); } catch(e){}}, 800);
-      } catch(e) { /* particle system failed; ignore */ }
-      // footprints appear for ~1 minute
-      try{ s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){}
+      } catch(e){} // FIX: add catch for the try above
+
+      try{ s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){} // footprints appear for ~1 minute
       try{ spawnUVFootprints(pos, 2, 0.4); } catch(e){}
     }
   }
@@ -886,10 +886,11 @@ window.loadSelectedMap = async function(){
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
     // Layer the house meshes as INTERIOR for light scoping
     try{res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
-    } catch(e){}// Force-origin mode
+    } catch(e){}
+    // Force-origin mode
     const FORCE_ORIGIN = true;
 
-        // Apply map transform if provided by MAP_DEF
+    // Apply map transform if provided by MAP_DEF
     try {
       const s = (window.MAP_DEF && (MAP_DEF.scale||MAP_DEF.scaling)) ? (MAP_DEF.scale||MAP_DEF.scaling) : null;
       if (s && houseRoot && houseRoot.scaling) { houseRoot.scaling.set(s, s, s); }
@@ -900,7 +901,9 @@ window.loadSelectedMap = async function(){
     } catch(e) { console.warn('Map transform apply failed', e); }
 
     // Force each GLB root to origin (0,0,0)
-    try{if (FORCE_ORIGIN && houseRoot && houseRoot.position) { houseRoot.position.set(0,0,0); } } catch(e){}// WORLD_BOUNDS
+    try{if (FORCE_ORIGIN && houseRoot && houseRoot.position) { houseRoot.position.set(0,0,0); } } catch(e){}
+
+    // WORLD_BOUNDS
     const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
     WORLD_BOUNDS = bb ? { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z } : null;
     updateEmitterToBounds();
@@ -1193,7 +1196,7 @@ function updateEventAudioGains(){
   }else{
     ghost.audio.heartbeat.setVolume(0);
     ghost.audio.singing.setVolume(0);
-    if(ghost.audio.singing.isPlaying)   ghost.audio.singing.stop();
+    if(ghost.audio.singing.isPlaying) ghost.audio.singing.stop();
   }
 }
 </script>
@@ -1259,15 +1262,16 @@ async function boot(){
 
   await loadSelectedMap();
 
-  // Start position: use map-defined spawn if available, else origin
-  try {
-    const sp = (window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.vanSpawn)) ? (MAP_DEF.spawn || MAP_DEF.vanSpawn) : null;
-    if (sp) {
+  // === Spawn position (robust) =========================================
+  try { // FIX: wrap the whole spawn selection in a single try/catch
+    if (window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.vanSpawn)) {
+      const sp = MAP_DEF.spawn || MAP_DEF.vanSpawn;
       camera.position = new BABYLON.Vector3(sp.x ?? 0, (sp.y ?? 1.8), sp.z ?? 0);
     } else {
       camera.position = new BABYLON.Vector3(0, 1.8, 0);
     }
-  } catch(e){ /* ignore */ }
+  } catch(e){ console.warn('Spawn apply failed', e); }
+  // =====================================================================
 
   await loadMoon();
   WeatherAudio.init(scene);
@@ -1353,7 +1357,6 @@ async function boot(){
 }
 </script>
 
-
 <script>
 /*** ==========================================================
     LIGHTNING FLASH FX
@@ -1376,12 +1379,9 @@ let __started=false;
 async function safeStart(){
   if(__started) return;
   __started = true;
-  try{CURRENT_MAP = getSelectedMap(); } catch(e){}
-  document.getElementById('title-screen').style.display='none';
+  try{CURRENT_MAP = getSelectedMap(); } catch(e){}document.getElementById('title-screen').style.display='none';
   await boot();
-  try{canvas.focus(); } catch(e){}
-  try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(e){}
-}
+  try{canvas.focus(); } catch(e){}try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(e){}}
 function startNow(e){
   e?.preventDefault?.();
   safeStart();
@@ -1553,7 +1553,6 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
   })();
 })();
 </script>
-
 
 <script>
 // Visibility helper: camera sees both layers; add interior hemi if missing; frame by bounds
