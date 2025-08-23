@@ -884,6 +884,16 @@ window.loadSelectedMap = async function(){
       res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
     } catch(e) {}
 
+    // Apply map transform if provided by MAP_DEF
+    try {
+      const s = (window.MAP_DEF && (MAP_DEF.scale||MAP_DEF.scaling)) ? (MAP_DEF.scale||MAP_DEF.scaling) : null;
+      if (s && houseRoot && houseRoot.scaling) { houseRoot.scaling.set(s, s, s); }
+      const off = (window.MAP_DEF && MAP_DEF.offset) ? MAP_DEF.offset : null;
+      if (off && houseRoot && houseRoot.position) { houseRoot.position.addInPlace(new BABYLON.Vector3(off.x||0, off.y||0, off.z||0)); }
+      const ry = (window.MAP_DEF && (MAP_DEF.rotationY!==undefined)) ? (MAP_DEF.rotationY * Math.PI/180) : null;
+      if (ry!==null && houseRoot && houseRoot.rotation) { houseRoot.rotation.y += ry; }
+    } catch(e) { console.warn('Map transform apply failed', e); }
+
     // WORLD_BOUNDS
     const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
     WORLD_BOUNDS = bb ? { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z } : null;
@@ -1240,6 +1250,13 @@ async function boot(){
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
   await loadSelectedMap();
+  // Move player camera to map-defined spawn if provided
+  try {
+    if (window.MAP_DEF && MAP_DEF.spawn) {
+      const sp = MAP_DEF.spawn;
+      camera.position = new BABYLON.Vector3(sp.x||0, sp.y||1.8, sp.z||0);
+    }
+  } catch(e){ console.warn('Spawn apply failed', e); }
   await loadMoon();
   WeatherAudio.init(scene);
 
