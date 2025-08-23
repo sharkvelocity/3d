@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Full Build (Loader + Map-Def Spawn)</title>
+  <title>PhasmaPhoney — Full Build (Loader after Start, Inspector Topmost)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -19,15 +19,29 @@
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
     #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
 
-    /* Loading overlay */
+    /* Loading overlay (hidden until Start pressed) */
     #loading-box{
-      position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
-      gap:14px; background:rgba(0,0,0,0.92); z-index:100000; color:#9ef; font-family:monospace;
+      position:fixed; inset:0;
+      display:none; /* HIDDEN by default; shown in safeStart() */
+      flex-direction:column; align-items:center; justify-content:center;
+      gap:14px; background:rgba(0,0,0,0.92);
+      z-index:2147483000; /* below inspector, above everything else */
+      color:#9ef; font-family:monospace;
     }
     #loading-logo{ width:240px; max-width:60vw; opacity:0.95; filter:drop-shadow(0 0 10px #0ff4); }
     #loading-text{ font-size:16px; letter-spacing:.3px; text-align:center; max-width:70vw; }
     #loading-bar{ width:64vw; max-width:720px; height:14px; border:1px solid #066; border-radius:10px; background:#071017; overflow:hidden; }
     #loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,#19f,#0ff); transition:width .15s ease; }
+
+    /* Force Babylon Inspector to be top-most over ALL layers */
+    #inspector-topmost-host,
+    iframe[id*="inspector"],
+    iframe[src*="inspector"],
+    div[id*="inspector"],
+    div[class*="inspector"] {
+      z-index: 2147483647 !important;  /* max 32-bit int */
+      position: fixed !important;
+    }
 
     /* Title */
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
@@ -41,14 +55,11 @@
 
     /* HUD (top center) */
     #hud-bar{ position:fixed; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; }
-    .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px;
-            background:rgba(0,0,0,0.5); }
+    .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; background:rgba(0,0,0,0.5); }
     .sanity-wrap{ display:flex; align-items:center; gap:6px; padding:0 6px; }
     #sanity-gauge{ width:170px; height:10px; border:1px solid #066; background:#061013; border-radius:8px; overflow:hidden; }
     #sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
-
-    #hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066;
-      padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
+    #hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
 
     /* Belt */
     #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%);
@@ -82,7 +93,7 @@
   </style>
 </head>
 <body>
-  <!-- LOADING OVERLAY -->
+  <!-- LOADING OVERLAY (hidden until Start) -->
   <div id="loading-box" aria-live="polite">
     <img src="logo.png" alt="Logo" id="loading-logo">
     <div id="loading-text">Initializing…</div>
@@ -273,7 +284,7 @@ const Loader = (() => {
   }
 
   async function run(){
-    show(); draw();
+    // Loader is shown by safeStart(), not here.
     for(const step of queue){
       label(step.label);
       draw();
@@ -303,6 +314,37 @@ const Loader = (() => {
   }
 
   return { addStep, run, wrap, show, hide, label, draw };
+})();
+</script>
+
+<script>
+/*** ==========================================================
+    INSPECTOR TOP-MOST ENSURER
+    ========================================================== ***/
+/** Ensure Babylon Inspector stays above everything on the page */
+(function setupInspectorTopmost(){
+  let host = document.getElementById('inspector-topmost-host');
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'inspector-topmost-host';
+    document.body.appendChild(host);
+  }
+
+  function elevateInspectorHost(){
+    const nodes = Array.from(document.querySelectorAll(
+      'iframe[id*="inspector"],iframe[src*="inspector"],div[id*="inspector"],div[class*="inspector"]'
+    ));
+    nodes.forEach(el => {
+      try {
+        el.style.zIndex = '2147483647';
+        el.style.position = 'fixed';
+      } catch(_) {}
+    });
+  }
+
+  const mo = new MutationObserver(() => elevateInspectorHost());
+  mo.observe(document.documentElement, { childList:true, subtree:true });
+  window.__elevateInspectorHost = elevateInspectorHost;
 })();
 </script>
 
@@ -936,7 +978,7 @@ async function loadMoon(){
 
 <script>
 /*** ==========================================================
-    MAP SELECTOR + MAP DEF LOADER (with smart fallbacks)
+    MAP SELECTOR + MAP DEF LOADER (smart fallbacks)
     ========================================================== ***/
 let MAP_FILES = [];
 let CURRENT_MAP = null;
@@ -981,7 +1023,7 @@ function loadScriptOnce(src){
   });
 }
 
-/* Try explicit def, then inferred names, then exact fallbacks you asked for */
+/* Try explicit def, then inferred names, then the exact fallbacks requested */
 async function loadMatchingMapDef(mapFile, explicitDef){
   const baseNoExt = (mapFile||'').replace(/\.[^.]+$/,'');
   const candidates = [];
@@ -997,10 +1039,9 @@ async function loadMatchingMapDef(mapFile, explicitDef){
   if (low.includes('abandoned')) candidates.push("Abandoned_House.js");
   if (low.includes('furnished')){
     candidates.push("furnished_house.config.js");
-    candidates.push("fully_furnished.config.js"); // allow this alias if present
+    candidates.push("fully_furnished.config.js");
   }
 
-  // Dedup while preserving order
   const tried = new Set(), ordered = candidates.filter(c=>{ if(tried.has(c)) return false; tried.add(c); return true; });
 
   let loadedAny = false;
@@ -1142,12 +1183,22 @@ function postInitUI(){
     document.getElementById('hud-z').textContent = camera.position.z.toFixed(2);
   });
 
+  // Inspector button (ensure topmost lift right after showing)
+  document.getElementById('btn-inspector').onclick = ()=>{
+    try{
+      scene.debugLayer.show({ embedMode:false });
+      setTimeout(()=>window.__elevateInspectorHost?.(), 0);
+      setTimeout(()=>window.__elevateInspectorHost?.(), 250);
+    }catch(e){
+      toast('Inspector not available');
+    }
+  };
+
   document.getElementById('btn-use').onclick = useActiveItem;
   document.getElementById('btn-place').onclick = placeActiveItem;
   document.getElementById('btn-toss').onclick = tossActiveItem;
   document.getElementById('btn-lighter').onclick = toggleLighter;
   document.getElementById('btn-notebook').onclick = ()=>document.getElementById('notebook-modal').style.display='block';
-  document.getElementById('btn-inspector').onclick = ()=>{ try{ scene.debugLayer.show({ embedMode:false }); }catch(e){ toast('Inspector not available'); } };
 }
 
 function startRenderLoop(){
@@ -1172,13 +1223,21 @@ function lightningFlash(){
 
 <script>
 /*** ==========================================================
-    START FLOW (Loader-driven)
+    START FLOW (Loader after Start)
     ========================================================== ***/
 let __started=false;
 
 async function safeStart(e){
   e?.preventDefault?.();
   if(__started) return; __started = true;
+
+  // Hide the title screen immediately
+  document.getElementById('title-screen').style.display = 'none';
+
+  // Show loader now (only after Start is pressed)
+  Loader.show();
+  Loader.label('Initializing…');
+  Loader.draw();
 
   // Build the queue of steps we want to show
   Loader.addStep('Loading maps manifest…',       ()=>loadManifest(),               3);
@@ -1219,11 +1278,9 @@ function resetEvidence(){ toast('Evidence reset'); }
 function getSpawnForMap(file){
   const f = (file||"").toLowerCase();
   if (f.includes("furnished")) {
-    // Furnished House default spawn (used only if config absent)
     return new BABYLON.Vector3(0, 1.8, 0);
   }
   if (f.includes("abandoned")) {
-    // Abandoned House default spawn (used only if config absent)
     return new BABYLON.Vector3(0, 1.8, 0);
   }
   return new BABYLON.Vector3(0, 1.8, 0);
