@@ -910,9 +910,9 @@ function setWeather(state){
 }
 </script>
 <script>
-/*** STATIC MOON (no orbit) ***/
+/*** STATIC MOON (no orbit) — double‑sided to avoid "inside‑out" ***/
 async function loadMoon(){
-  const SKY_POS   = new BABYLON.Vector3(180, 110, 140); // fixed position in world space
+  const SKY_POS   = new BABYLON.Vector3(180, 110, 140); // fixed position
   const MOON_SIZE = 16;                                 // visual size
 
   function makeVisibleMat(){
@@ -921,7 +921,7 @@ async function loadMoon(){
     mat.emissiveColor   = new BABYLON.Color3(1,1,1);
     mat.diffuseColor    = new BABYLON.Color3(1,1,1);
     mat.specularColor   = new BABYLON.Color3(0,0,0);
-    mat.backFaceCulling = true;
+    mat.backFaceCulling = false;            // <-- render both sides
     mat.alpha           = 1;
     mat.useAlphaFromDiffuseTexture = false;
     mat.disableDepthWrite = true;
@@ -933,10 +933,27 @@ async function loadMoon(){
     moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
   }catch(e){
     console.warn("Moon GLB missing; creating disc fallback.");
-    moonMesh = BABYLON.MeshBuilder.CreateDisc("MoonMesh",{radius:MOON_SIZE*0.5, tessellation:48}, scene);
+    moonMesh = BABYLON.MeshBuilder.CreateDisc("MoonMesh",{
+      radius:MOON_SIZE*0.5, tessellation:48, sideOrientation: BABYLON.Mesh.DOUBLESIDE
+    }, scene);
   }
 
-  moonMesh.material = makeVisibleMat();
+  // Ensure all submeshes render double-sided (covers GLB materials)
+  const applyDoubleSided = (n)=>{
+    if (!n) return;
+    let list = n.getChildMeshes ? n.getChildMeshes(false) : [];
+    if (!list.length && n.material) list = [n]; // single mesh case
+    list.forEach(m=>{
+      const mat = m.material;
+      if (mat && 'backFaceCulling' in mat) mat.backFaceCulling = false;
+      if (mat && 'disableLighting' in mat) mat.disableLighting = true;
+    });
+  };
+
+  const mat = makeVisibleMat();
+  moonMesh.material = mat;
+  applyDoubleSided(moonMesh);
+
   moonMesh.isPickable = false;
   moonMesh.applyFog   = false;
   moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // always face camera
@@ -949,7 +966,7 @@ async function loadMoon(){
 
   // Aim the directional moon light once as well
   if (moonLight){
-    const dir = SKY_POS.scale(-1).normalize(); // light coming from moon toward origin
+    const dir = SKY_POS.scale(-1).normalize();
     moonLight.direction = new BABYLON.Vector3(dir.x, dir.y, dir.z);
     moonLight.intensity = 0.55;
   }
