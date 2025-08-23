@@ -910,14 +910,10 @@ function setWeather(state){
 }
 </script>
 <script>
-/*** BIG but NOT-TOO-CLOSE MOON (world-space orbit) ***/
+/*** STATIC MOON (no orbit) ***/
 async function loadMoon(){
-  // Tunables
-  const ORBIT_RADIUS = 220;   // how far around the world center it orbits
-  const ORBIT_HEIGHT = 80;    // altitude of the moon
-  const ORBIT_SPEED  = 0.015; // slower = gentler movement
-  const MOON_SIZE    = 16;    // visual diameter
-  const MIN_DIST     = 70;    // never let moon get closer than this to camera
+  const SKY_POS   = new BABYLON.Vector3(180, 110, 140); // fixed position in world space
+  const MOON_SIZE = 16;                                 // visual size
 
   function makeVisibleMat(){
     const mat = new BABYLON.StandardMaterial("moonMatVisible", scene);
@@ -927,13 +923,11 @@ async function loadMoon(){
     mat.specularColor   = new BABYLON.Color3(0,0,0);
     mat.backFaceCulling = true;
     mat.alpha           = 1;
-    // draw late & avoid fog/depth issues
     mat.useAlphaFromDiffuseTexture = false;
     mat.disableDepthWrite = true;
     return mat;
   }
 
-  // Try to import the GLB; fallback to a disc
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
     moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
@@ -942,46 +936,23 @@ async function loadMoon(){
     moonMesh = BABYLON.MeshBuilder.CreateDisc("MoonMesh",{radius:MOON_SIZE*0.5, tessellation:48}, scene);
   }
 
-  // Setup
   moonMesh.material = makeVisibleMat();
   moonMesh.isPickable = false;
   moonMesh.applyFog   = false;
   moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // always face camera
   moonMesh.renderingGroupId = 2;
   moonMesh.scaling.setAll(MOON_SIZE);
-  moonMesh.layerMask = 0x10000000; // EXTERIOR (matches your LAYERS.EXTERIOR)
+  moonMesh.layerMask = 0x10000000; // EXTERIOR
 
-  // World-space orbit (not tied to the camera)
-  const t0 = performance.now()*ORBIT_SPEED*0.001;
-  const SKY_CENTER = new BABYLON.Vector3(0,0,0);
+  // Set once; no orbit
+  moonMesh.position.copyFrom(SKY_POS);
 
-  scene.onBeforeRenderObservable.add(()=>{
-    if(!camera) return;
-    const t = t0 + performance.now()*ORBIT_SPEED*0.001;
-    // Base orbit position
-    const ox = Math.cos(t) * ORBIT_RADIUS;
-    const oz = Math.sin(t) * ORBIT_RADIUS;
-    const basePos = new BABYLON.Vector3(ox, ORBIT_HEIGHT, oz).addInPlace(SKY_CENTER);
-
-    // Keep it from getting uncomfortably close
-    const toMoon = basePos.subtract(camera.position);
-    const dist   = toMoon.length();
-    let finalPos = basePos;
-    if (dist < MIN_DIST) {
-      const n = toMoon.normalize();
-      finalPos = camera.position.add(n.scale(MIN_DIST));
-      finalPos.y = Math.max(finalPos.y, camera.position.y + 12); // keep it above horizon if clamped
-    }
-
-    moonMesh.position.copyFrom(finalPos);
-
-    // Drive the moonlight to match the visible moon direction
-    if (moonLight){
-      const dir = moonMesh.position.subtract(camera.position).normalize().scale(-1);
-      moonLight.direction = new BABYLON.Vector3(dir.x, dir.y, dir.z);
-      moonLight.intensity = 0.55;
-    }
-  });
+  // Aim the directional moon light once as well
+  if (moonLight){
+    const dir = SKY_POS.scale(-1).normalize(); // light coming from moon toward origin
+    moonLight.direction = new BABYLON.Vector3(dir.x, dir.y, dir.z);
+    moonLight.intensity = 0.55;
+  }
 }
 </script>
 
