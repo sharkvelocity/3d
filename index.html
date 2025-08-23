@@ -521,8 +521,8 @@ const InputSystem = (()=>{
     'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
-    'KeyE':'pickup', 'KeyG':'drop',
-    'Backslash':'tps', 'KeyV':'swap'
+    'KeyE':'pickup', 'KeyG':'drop'
+    // (tps/swap removed)
   };
 
   function recomputeMove(){
@@ -542,8 +542,8 @@ const InputSystem = (()=>{
     }
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
-    if(tag==='tps' && down)    toggleThirdPerson();
-    if(tag==='swap' && down)   swapShoulder();
+    // removed: if(tag==='tps' && down)    toggleThirdPerson();
+    // removed: if(tag==='swap' && down)   swapShoulder();
     recomputeMove();
   }
 
@@ -1078,8 +1078,6 @@ function isInsideHouse(p){
   if(!window.MAP_DEF) return true;
   const poly = MAP_DEF.exterior || [];
   const inside = pointInPolyXZ({x:p.x, z:p.z}, poly);
-  // If the map says 'interior', inside the polygon means *inside the house*.
-  // Otherwise (default 'exterior'), inside polygon means *outside* (yard), so invert.
   const mode = (MAP_DEF.exteriorMode||'exterior');
   return mode==='interior' ? inside : !inside;
 }
@@ -1294,7 +1292,7 @@ async function boot(){
 
     handleMovement(input, dt);
     applyLook(input.lookDelta);
-    springArmTick(dt);
+    // removed: springArmTick(dt);
 
     // Attach held lights to camera (force off outdoors)
     const camForward = camera.getForwardRay().direction;
@@ -1439,10 +1437,8 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
       mesh.scaling.set(s,s,s);
       // ALWAYS visible
       mesh.setEnabled(true);
-      // Layer to interior by default if you want: comment out if not needed
-      // mesh.layerMask = LAYERS ? (LAYERS.INTERIOR|0) : mesh.layerMask;
 
-      // Try to find head bones/meshes by common names (Mixamo, GLTF2 human rigs)
+      // Try to find head bones/meshes by common names
       avatar.headLinks = findHeadNodes(mesh, skel);
 
       avatar.loaded = true;
@@ -1453,13 +1449,11 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
     const targets = [];
     const nameHas = (n,keys)=> keys.some(k=> n.toLowerCase().includes(k));
     const headKeys = ["head", "neck", "helmet"];
-    // Bones first
     if(skel){
       for(const b of skel.bones){
         if(nameHas(b.name, headKeys)) targets.push(b);
       }
     }
-    // Mesh nodes named like head
     const stack = mesh.getChildMeshes(false);
     for(const m of stack){
       if(nameHas(m.name||"", headKeys)) targets.push(m);
@@ -1470,14 +1464,12 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
   function setHeadHidden(hidden){
     if(!avatar.mesh) return;
     const epsilon = hidden ? 0.0001 : 1.0;
-    // If we have bones, scale head bones to a tiny value in 1P (more robust than alpha)
     for(const t of avatar.headLinks){
       if(t instanceof BABYLON.Bone){
-        const cur = t.getScale();
         t.setScale(new BABYLON.Vector3(epsilon, epsilon, epsilon));
-      } else if(t && t.scaling){ // mesh node
+      } else if(t && t.scaling){
         t.scaling.set(epsilon, epsilon, epsilon);
-      } else if(t && t.material && "alpha" in t.material){ // fallback
+      } else if(t && t.material && "alpha" in t.material){
         t.material.alpha = hidden ? 0.0 : 1.0;
       }
     }
@@ -1505,7 +1497,7 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
 
     if(rig.mode === "first"){
       rig.pos = camera.position.clone();
-      camera.minZ = 0.06; // allow near-body without clipping too soon
+      camera.minZ = 0.06;
       return;
     }
 
@@ -1531,19 +1523,17 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
     camera.minZ = 0.1;
   }
 
-  // Hotkeys
+  // Hotkeys managed here:
   document.addEventListener("keydown", (e)=>{
     if(e.code==="Backslash"){ e.preventDefault(); rig.mode = (rig.mode==="first"?"third":"first"); toast?.(rig.mode.toUpperCase()+" person"); }
     if(e.code==="KeyV"){ rig.shoulder *= -1; toast?.("Swap shoulder"); }
   }, {passive:false});
 
-  // Zoom with wheel in 3rd-person
   document.addEventListener("wheel", (e)=>{
     const step = (e.deltaY>0 ? 0.4 : -0.4);
     rig.dist = Math.min(rig.maxDist, Math.max(rig.minDist, rig.dist + step));
   }, {passive:true});
 
-  // Hook into your render loop
   (function wait(){
     if(window.scene && window.engine && window.camera){
       scene.onBeforeRenderObservable.add(()=> tick(engine.getDeltaTime()/1000));
@@ -1575,14 +1565,8 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
       }
     }catch(e){ console.warn('[vis] patch skipped', e); }
   };
-  // run when meshes appear (non-invasive)
   var t=0, iv=setInterval(()=>{ try{ if (window.scene && scene.meshes && scene.meshes.length){ __pp_applyMapPatch(scene); clearInterval(iv);} }catch(_){ } if(++t>40) clearInterval(iv); }, 500);
 })();
-
-
-
   </script>
 </body>
 </html>
-
-
