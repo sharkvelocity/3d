@@ -214,6 +214,35 @@
   <div id="toast"></div>
 
 <script>
+
+/*** ==========================================================
+    AUDIO MANAGER (unlock + master volume + fallbacks)
+    ========================================================== ***/
+const AudioManager = (()=>{
+  let unlocked=false, master=1.0;
+  function unlockNow(){
+    try{ BABYLON.Engine.audioEngine?.unlock?.(); }catch{}
+    // Babylon also exposes a legacy global
+    try{ BABYLON.Engine.audioEngine?.audioContext?.resume?.(); }catch{}
+    unlocked = true;
+    // Nudge active systems after unlock
+    try{ if(typeof WeatherAudio!=='undefined' && weather?.state){ WeatherAudio.set(weather.state); } }catch{}
+    try{ BABYLON.Sound?.Track?.resume?.(); }catch{}
+  }
+  function bindOnce(){
+    const fire = ()=>{ document.removeEventListener('pointerdown', fire, true); document.removeEventListener('touchstart', fire, true); unlockNow(); };
+    document.addEventListener('pointerdown', fire, true);
+    document.addEventListener('touchstart', fire, true);
+  }
+  function setMaster(v){
+    master = Math.max(0, Math.min(1, v));
+    try{ BABYLON.Engine.audioEngine?.setGlobalVolume?.(master); }catch{}
+  }
+  // auto-bind
+  bindOnce();
+  return { unlock: unlockNow, setMaster, get unlocked(){ return unlocked; } };
+})();
+
 /*** ==========================================================
     GLOBALS
     ========================================================== ***/
@@ -396,13 +425,21 @@ function populateMapSelector(){
   sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title}</option>`).join('');
   sel.value = "0";
 }
-populateMapSelector();
+// populateMapSelector();  // moved to DOMContentLoaded
 
 function getSelectedMap(){
   const sel = document.getElementById('map-select');
   const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value||"0",10) || 0));
   return MAP_FILES[idx];
 }
+// Populate the map dropdown once the DOM is ready
+(function(){
+  const run = ()=>{ try{ populateMapSelector(); }catch(e){ console.warn('populateMapSelector failed', e);} };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run, { once:true });
+  } else { run(); }
+})();
+
 
 function loadScriptOnce(src){
   return new Promise((resolve)=>{
@@ -674,14 +711,14 @@ const WeatherAudio = (()=>{
   function ensure(scene){
     if(sceneRef) return;
     sceneRef = scene;
-    tracks.clear = new BABYLON.Sound("clear","./assets/audio/clearWeather.mp3",sceneRef,null,{ loop:true, autoplay:false, volume:0.40 });
-    tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null, { loop:true, autoplay:false, volume:0.55 });
-    tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.28 });
-    tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,   { loop:true, autoplay:false, volume:0.18 });
+    tracks.clear = new BABYLON.Sound("clear","./assets/audio/clearWeather.mp3",sceneRef,null,{ loop:true, autoplay:false, volume:0.40, streaming:true });
+    tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null, { loop:true, autoplay:false, volume:0.55, streaming:true });
+    tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.28, streaming:true });
+    tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,   { loop:true, autoplay:false, volume:0.18, streaming:true });
 
     document.addEventListener("visibilitychange", ()=>{
       if (document.hidden) return;
-      try { BABYLON.Engine.audioEngine?.unlock?.(); } catch{}
+      if(!AudioManager.unlocked) return;
       switch(current){
         case 'Clear':      if(!tracks.clear.isPlaying) tracks.clear.play(); break;
         case 'Rain':       if(!tracks.rain.isPlaying)  tracks.rain.play();  break;
@@ -717,7 +754,7 @@ const WeatherAudio = (()=>{
       }
     }, stepMs);
   }
-  return { init:(s)=>ensure(s), set:(state)=>{ try{BABYLON.Engine.audioEngine?.unlock?.();}catch{} fadeTo(state);} };
+  return { init:(s)=>ensure(s), set:(state)=>{ fadeTo(state);} };
 })();
 
 function ensureGhostAudio(){
@@ -1664,7 +1701,7 @@ function sanityTick(dt){
 
 // Audio gain vs distance/state
 function updateEventAudioGains(){
-  if(!ghost.audio.heartbeat || !ghost.audio.singing) return;
+  if(!ghost.audio || !ghost.audio.heartbeat || !ghost.audio.singing) return;
   const d = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 99;
   const near = clamp(1-(d/12), 0, 1);
   if(ghost.mode==='hunt'){
@@ -1862,9 +1899,9 @@ async function safeStart(){
   document.getElementById('title-screen').style.display='none';
   await boot();
   try{ canvas.focus(); }catch{}
-  try{ BABYLON.Engine.audioEngine?.unlock?.(); }catch{}
+  try{ AudioManager.unlock(); }catch{}
 }
-document.getElementById('start-button').addEventListener('click', ()=>safeStart());
+document.getElementById('start-button').addEventListener('click', ()=>{ AudioManager.unlock(); safeStart(); });
 document.addEventListener('keydown', (e)=>{ if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(); } });
 </script>
 </body>
