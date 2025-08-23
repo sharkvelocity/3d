@@ -207,19 +207,30 @@ async function loadMoon(){
 <script>
 
 let currentMapIdx = 0;
-function determineWeather(){
-  // priority: URL param -> map config -> default 'Clear'
+
+const WEATHER_POOL = ['Clear','Mist','Fog','Rain','Snow'];
+if (!window.__weatherLocked) {
   const params = new URLSearchParams(location.search);
-  const w = (params.get('weather')||'').trim();
-  if(w) return w;
-  const m = MAP_FILES[currentMapIdx] || {};
-  return m.weather || 'Clear';
+  const wparam = (params.get('weather')||'').trim();
+  const pick = wparam || WEATHER_POOL[Math.floor(Math.random()*WEATHER_POOL.length)];
+  // Normalize capitalization
+  const canon = (pick+'').toLowerCase();
+  window.__weatherLocked = canon==='foggy' ? 'Fog' :
+                           canon==='misty' ? 'Mist' :
+                           canon==='rainy' ? 'Rain' :
+                           canon==='snowy' ? 'Snow' :
+                           canon==='clear' ? 'Clear' :
+                           pick;
+}
+
+function determineWeather(){
+  // Always return the locked value for this session
+  return window.__weatherLocked || 'Clear';
 }
 function applyWeather(state){
   weather.state = state;
   const hud = document.getElementById('hud-weather');
   if(hud) hud.textContent = state;
-  // simple visual link: fog density/colors
   const s = (state||'').toLowerCase();
   if(s==='clear'){
     scene.fogDensity = 0.0045;
@@ -237,12 +248,10 @@ function applyWeather(state){
     scene.fogDensity = 0.013;
     scene.fogColor = new BABYLON.Color3(0.08,0.10,0.13);
   } else {
-    // fallback
     scene.fogDensity = 0.0065;
     scene.fogColor = new BABYLON.Color3(0.03,0.05,0.07);
   }
 }
-
 </script>
 
 <script>
