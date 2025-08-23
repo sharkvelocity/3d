@@ -878,47 +878,14 @@ window.loadSelectedMap = async function(){
 
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
-    
-
-    // --- Interior fill light (so maps are visible even before flashlight) ---
-    try {
-      const fill = new BABYLON.HemisphericLight("interiorFill", new BABYLON.Vector3(0,1,0), scene);
-      fill.intensity = 0.25;
-      try { fill.includeOnlyWithLayerMask = LAYERS?.INTERIOR ?? fill.includeOnlyWithLayerMask; } catch(e){}
-    } catch(e) { console.warn("[maps] interior fill light failed", e); }
-
-    // --- Auto-center camera/player on map bounds (debug) ---
-    try {
-      const meshes = res.meshes.filter(m => m.getBoundingInfo);
-      if (meshes.length) {
-        let min = meshes[0].getBoundingInfo().boundingBox.minimumWorld.clone();
-        let max = meshes[0].getBoundingInfo().boundingBox.maximumWorld.clone();
-        for (const m of meshes) {
-          const bb = m.getBoundingInfo().boundingBox;
-          min = BABYLON.Vector3.Minimize(min, bb.minimumWorld);
-          max = BABYLON.Vector3.Maximize(max, bb.maximumWorld);
-        }
-        const center = min.add(max).scale(0.5);
-        const extents = max.subtract(min);
-        const maxDim = Math.max(extents.x, extents.y, extents.z);
-        if (!FORCE_ORIGIN) {
-          // Move camera and playerRoot to the map center-ish
-          const camPos = center.add(new BABYLON.Vector3(0, Math.max(1.6, Math.min(3.0, extents.y*0.2)), Math.max(1.8, maxDim*0.35)));
-          if (window.playerRoot) { window.playerRoot.position.copyFrom(center); }
-          if (scene.activeCamera) { scene.activeCamera.position.copyFrom(camPos); }
-          console.info("[maps] centered camera at", camPos.toString());
-        }
-      }
-    } catch (e) { console.warn("[maps] auto-center failed", e); }
-
-houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
+    houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
     // Layer the house meshes as INTERIOR for light scoping
     try {
       res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
     } catch(e) {}
 
 // Force-origin mode
-    const FORCE_ORIGIN = false;
+    const FORCE_ORIGIN = true;
 
         // Apply map transform if provided by MAP_DEF
     try {
@@ -1294,7 +1261,7 @@ async function boot(){
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
-  await window.loadSelectedMap();
+  await loadSelectedMap();
 // Force player start at world origin for consistent authoring
   if (true /* FORCE_ORIGIN */) {
     try { camera.position = new BABYLON.Vector3(0, 1.8, 0); } catch(e){}
@@ -1409,6 +1376,7 @@ function lightningFlash(){
 <script>
 /*** ==========================================================
     START FLOW (touch-friendly)
+(function(){
     ========================================================== ***/
 let __started=false;
 async function safeStart(){
@@ -1437,6 +1405,7 @@ document.addEventListener('keydown', (e)=>{
 
 // Load manifest asap
 (function(){ loadManifest(); })();
+})();
 </script>
 
 <script>
