@@ -851,7 +851,12 @@ function markExteriorMesh(mesh){
   try { mesh.layerMask = (mesh.layerMask|0) | LAYERS.EXTERIOR; } catch{}
 }
 function attachInteriorLight(light){
-  try { light.includeOnlyWithLayerMask = LAYERS.INTERIOR; // Interior-only lighting (inside meshes) } catch{}
+  try {
+  light.includeOnlyWithLayerMask = LAYERS.INTERIOR; // Interior-only lighting
+} catch(e) {
+  console.warn("attachInteriorLight failed:", e);
+}
+} catch{}
 }
 
 function updateEmitterToBounds(){
@@ -1253,7 +1258,7 @@ async function boot(){
   // Exterior hemispheric light
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0.2,1,0.2), scene);
   hemiLight.intensity = 0.6;
-  hemiLight.includeOnlyWithLayerMask = LAYERS.EXTERIOR; // Exterior-only lighting (outside meshes)
+  hemiLight.includeOnlyWithLayerMask = LAYERS.EXTERIOR;
 
   // Atmosphere
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
@@ -1404,7 +1409,7 @@ document.addEventListener('keydown', (e)=>{
 }, {passive:false});
 
 // Load manifest asap
-(function(){ loadManifest(); })();
+window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === "function") loadManifest(); });
 </script>
 
 <script>
@@ -1666,91 +1671,6 @@ document.addEventListener('keydown', (e)=>{
     } else setTimeout(wait, 200);
   })();
 })();
-</script>
-
-
-<script>
-// ======= MAP VISIBILITY + LAYER/LIGHT PATCH (non-destructive) ===================
-(function(){
-  if (window.__pp_vis_patch_added__) return; 
-  window.__pp_vis_patch_added__ = true;
-
-  window.__pp_applyMapPatch = function(scene){
-    try{
-      // Camera: ensure we can see both interior + exterior layers
-      if (typeof LAYERS !== "undefined" && scene.activeCamera) {
-        const BOTH = (LAYERS.EXTERIOR | LAYERS.INTERIOR) >>> 0;
-        if ((scene.activeCamera.layerMask|0) !== (BOTH|0)) {
-          scene.activeCamera.layerMask = BOTH;
-        }
-      }
-
-      // Interior-only ambient light if not present
-      var hasInterior = false;
-      for (var i=0;i<scene.lights.length;i++){ if (scene.lights[i].name === "hemi_interior") { hasInterior=true; break; } }
-      if (!hasInterior && typeof BABYLON !== "undefined") {
-        var hemiInterior = new BABYLON.HemisphericLight("hemi_interior", new BABYLON.Vector3(0,1,0), scene);
-        hemiInterior.intensity = 0.9;
-        if (typeof LAYERS !== "undefined" && LAYERS.INTERIOR) {
-          hemiInterior.includeOnlyWithLayerMask = LAYERS.INTERIOR; // Interior-only lighting (inside meshes) // Interior-only lighting
-        }
-      }
-
-      // Frame camera using WORLD_BOUNDS if available; otherwise use world extents
-      var cx=0, cz=0, span=12;
-      if (typeof WORLD_BOUNDS !== "undefined" && WORLD_BOUNDS){
-        cx = (WORLD_BOUNDS.minx + WORLD_BOUNDS.maxx) * 0.5;
-        cz = (WORLD_BOUNDS.minz + WORLD_BOUNDS.maxz) * 0.5;
-        var sx = Math.abs(WORLD_BOUNDS.maxx - WORLD_BOUNDS.minx);
-        var sz = Math.abs(WORLD_BOUNDS.maxz - WORLD_BOUNDS.minz);
-        span = Math.max(8, sx, sz);
-      } else if (scene.getWorldExtends){
-        var ext = scene.getWorldExtends();
-        var size = ext.max.subtract(ext.min);
-        var c = ext.min.add(size.scale(0.5));
-        cx = c.x; cz = c.z; span = Math.max(8, size.x, size.z);
-      }
-
-      var cam = scene.activeCamera;
-      if (cam) {
-        if ("radius" in cam){
-          cam.setTarget(new BABYLON.Vector3(cx, 1.6, cz));
-          cam.radius = span * 1.4 + 6;
-          cam.alpha  = Math.PI * 0.85;
-          cam.beta   = Math.PI * 0.45;
-          cam.minZ   = 0.05;
-        } else if ("position" in cam) {
-          cam.setTarget(new BABYLON.Vector3(cx, 1.6, cz));
-          cam.position.set(cx - span*0.9, Math.max(3, span*0.5), cz - span*0.9);
-          cam.minZ = 0.05;
-        }
-      }
-
-      // Tiny emissive bump to help dark PBRs (safe to remove later)
-      for (var j=0;j<scene.materials.length;j++){
-        var m = scene.materials[j];
-        if (m && m.emissiveColor && m.emissiveColor.addInPlace) {
-          m.emissiveColor.addInPlace(new BABYLON.Color3(0.06,0.06,0.06));
-        }
-      }
-
-      console.log("[PP Patch] cameraLayerMask:", scene.activeCamera && scene.activeCamera.layerMask,
-                  "meshes:", scene.meshes.length, "lights:", scene.lights.length);
-    }catch(e){ console.warn("[PP Patch] skipped:", e); }
-  };
-
-  // Fallback poller in case we cannot hook your .then(...) path
-  var tries = 0;
-  var poll = setInterval(function(){
-    tries++;
-    if (window.scene && scene.meshes && scene.meshes.length > 0){
-      clearInterval(poll);
-      window.__pp_applyMapPatch(scene);
-    }
-    if (tries > 40) clearInterval(poll); // give up after ~20s
-  }, 500);
-})();
-// ======= /PATCH ================================================================
 </script>
 
 </body>
