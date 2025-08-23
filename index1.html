@@ -144,7 +144,7 @@ const player = {
   speedRun: 2.2,
   sanity: 100,
   room: 'Van',
-  inside: false,
+  inside: false,       // true ONLY when inside a mapped room (house interior)
   stepUpMax: 0.45,
   lightLevel: 0,      // 0..1
   nextSanityTick: 0
@@ -657,16 +657,23 @@ async function loadMoon(){
 /*** ==========================================================
     MAP LOAD + COLLISIONS + ROOMS + MARKER TOOL (fixed)
     ========================================================== ***/
+// Inside helpers
+function isInsideHouse(p){
+  if(!window.MAP_DEF) return false;
+  for(const r of MAP_DEF.rooms){ if(pointInPolyXZ({x:p.x,z:p.z}, r.poly)) return true; }
+  return false;
+}
+function isInsideExterior(p){
+  if(!window.MAP_DEF) return true;
+  return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
+}
 function currentRoomName(){
   if(!window.MAP_DEF) return player.inside?'House':'Exterior';
   const pos = {x:camera.position.x, z:camera.position.z};
   for(const r of MAP_DEF.rooms){ if(pointInPolyXZ(pos, r.poly)) return r.name; }
   return player.inside ? 'House' : 'Exterior';
 }
-function isInsideExterior(p){
-  if(!window.MAP_DEF) return true;
-  return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
-}
+
 async function loadMap(){
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
@@ -862,9 +869,12 @@ function makeFlickerController(mesh){
     }
   };
 }
-function randomInsideExterior(){
-  const poly = MAP_DEF?.exterior || [{x:-10,z:-10},{x:10,z:-10},{x:10,z:10},{x:-10,z:10}];
-  return randomPointInRoomPoly(poly);
+function randomRoomCenter(){
+  const rooms = (MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
+  if(!rooms.length) return new BABYLON.Vector3(0,1.7,0);
+  const room = rooms[(Math.random()*rooms.length)|0];
+  const p = randomPointInRoomPoly(room.poly);
+  return p;
 }
 async function spawnGhost(){
   const profile = GHOSTS[(Math.random()*GHOSTS.length)|0];
@@ -891,7 +901,7 @@ async function spawnGhost(){
     m.material=mat; m.isPickable=false; ghost.mesh=m;
   }
 
-  ghost.roomCenter = randomInsideExterior();
+  ghost.roomCenter = randomRoomCenter();
   ghost.mesh.position.copyFrom(ghost.roomCenter);
   ghost.visible=false;
   ghost.flicker = makeFlickerController(ghost.mesh);
@@ -911,9 +921,11 @@ function wanderGhost(dt){
   }
   const step = ghost._dir.scale(dt);
   const cand = ghost.mesh.position.add(step);
-  if(isInsideExterior(cand)) ghost.mesh.position = cand; else ghost._dir=null;
+  // keep ghost inside house interior (wander within rooms area)
+  if(isInsideHouse(cand)) ghost.mesh.position = cand; else ghost._dir=null;
 }
 function startEvent(){
+  if(!player.inside) return; // events only while player is inside
   ghost.mode='event';
   ghost._eventLeft = 3 + Math.random()*2;
   toast('You hear something...');
@@ -931,6 +943,7 @@ function ghostEventTick(dt){
   }
 }
 function startHunt(){
+  if(!player.inside) return; // hunts only start if player is inside
   ghost.mode='hunt'; ghost._huntLeft = 8 + Math.random()*5;
   document.getElementById('hud-hunt').textContent='Hunting';
   toast('Hunt started!');
@@ -947,6 +960,7 @@ function huntTick(dt){
   if(!ghost._huntTimer){ ghost._huntTimer=0; ghost._nextHunt=50+Math.random()*40; }
   if(ghost.mode==='hunt'){
     if(performance.now() < (ghost.smudgedUntil||0)) return;
+    if(!player.inside){ stopHunt('Player left house'); return; } // enforce rule
     const dir = camera.position.subtract(ghost.mesh.position); dir.y=0;
     const dist = dir.length();
     ghost.nearPlayer = dist<3.0;
@@ -979,7 +993,9 @@ function ghostAbortHunt(reason){ stopHunt(reason); }
     SANITY (ties into lights, events, hunts)
     ========================================================== ***/
 function sanityTick(dt){
-  player.inside = isInsideExterior(camera.position);
+  // INSIDE means inside a *room polygon* (house interior), not the exterior yard
+  player.inside = isInsideHouse(camera.position);
+
   const roomNow = currentRoomName();
   if(roomNow!==player.room){ player.room = roomNow; document.getElementById('hud-room').textContent=roomNow; }
 
@@ -1004,8 +1020,8 @@ function sanityTick(dt){
     if(weather.state==='Blood Moon') drain += 0.004;
   }
 
-  // Ghost proximity
-  if(ghost.mesh){
+  // Ghost proximity (only if inside)
+  if(ghost.mesh && player.inside){
     const d = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
     if(d<6) drain += 0.016 * ((6-d)/6);
   }
