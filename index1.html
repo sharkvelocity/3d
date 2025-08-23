@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Full Build (Annotated)</title>
+  <title>PhasmaPhoney — Updated Build</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -53,7 +53,7 @@
     #touch-left { left:0; }
     #touch-right{ right:0; }
 
-    /* Notebook (paper style) */
+    /* Notebook (paper style with corner brackets) */
     #notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#cfefff; display:none; z-index:12000; padding:4vh 0; overflow:auto; }
     .nb-wrap{ width: min(920px, 92vw); margin: 0 auto; position:relative; }
     .nb-page{
@@ -64,7 +64,6 @@
       box-shadow: 0 10px 32px rgba(0, 255, 255, 0.12), inset 0 0 0 1px rgba(0,255,255,0.15);
       min-height: 68vh;
     }
-    /* Corner brackets */
     .nb-wrap::before, .nb-wrap::after, .nb-page::before, .nb-page::after{
       content: ""; position:absolute; width:28px; height:28px; border:2px solid #0a9;
     }
@@ -72,18 +71,18 @@
     .nb-wrap::after{ right:-6px; top:-6px; border-left:none; border-bottom:none; }
     .nb-page::before{ left:-6px; bottom:-6px; border-right:none; border-top:none; }
     .nb-page::after{ right:-6px; bottom:-6px; border-left:none; border-top:none; }
-    /* Tabs */
+
     #nb-tabs{ display:flex; gap:8px; margin: 0 0 10px 0; flex-wrap: wrap; }
     .nb-tab{ background:#07161a; color:#aef; border:1px solid #0a8; border-bottom:none; border-radius:8px 8px 0 0; padding:8px 12px; cursor:pointer; }
     .nb-tab.active{ background:#0a2a2f; color:#fff; box-shadow:0 2px 0 #0a2a2f; }
     #nb-title{ margin: 0 0 8px 0; }
     #nb-content{ background:#0a2a2f; border:1px solid #0a8; border-radius:8px; padding:12px; }
-    /* Evidence list */
+
     .ev-row{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
     .ev-row input{ transform:scale(1.2); }
     #possible-ghosts{ margin-top:12px; font-weight:bold; color:#aef; }
     #notebook-controls{ margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
-    /* Ghost cards */
+
     .ghost-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:10px; }
     .ghost-card{ border:1px solid #0a8; border-radius:10px; padding:10px; background:#06161a; }
     .ghost-card h3{ margin:0 0 6px 0; font-size:16px; color:#e8ffff; }
@@ -184,7 +183,7 @@ const player = {
   speedRun: 2.2,
   sanity: 100,
   room: 'Van',
-  inside: false,       // true ONLY when inside a mapped room (house interior)
+  inside: false,
   stepUpMax: 0.45,
   lightLevel: 0,      // 0..1
   nextSanityTick: 0
@@ -459,7 +458,7 @@ const InputSystem = (()=>{
     'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
-    'KeyE':'pickup', 'KeyG':'drop'
+    'KeyE':'pickup', 'KeyG':'drop', 'Backslash':'tp'
   };
 
   function recomputeMove(){
@@ -478,6 +477,7 @@ const InputSystem = (()=>{
     }
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
+    if(tag==='tp' && down)     toggleThirdPerson();
     recomputeMove();
   }
 
@@ -495,7 +495,7 @@ const InputSystem = (()=>{
     let leftId=null, leftCenter=null, rightId=null, lastRight=null;
     const DEAD=14, MAX=110;
     const norm=(v)=> Math.abs(v)<DEAD?0:v;
-    const clamp=(v,m)=> Math.max(-m, Math.min(m, v));
+    const clampv=(v,m)=> Math.max(-m, Math.min(m, v));
 
     left.addEventListener('touchstart', e=>{ for(const t of e.changedTouches){ if(leftId===null){ leftId=t.identifier; leftCenter={x:t.clientX,y:t.clientY}; break; } } e.preventDefault(); },{passive:false});
     right.addEventListener('touchstart', e=>{ for(const t of e.changedTouches){ if(rightId===null){ rightId=t.identifier; lastRight={x:t.clientX,y:t.clientY}; break; } } e.preventDefault(); },{passive:false});
@@ -503,7 +503,7 @@ const InputSystem = (()=>{
     window.addEventListener('touchmove', e=>{
       for(const t of e.changedTouches){
         if(t.identifier===leftId && leftCenter){
-          const dx=clamp(t.clientX-leftCenter.x,MAX), dy=clamp(t.clientY-leftCenter.y,MAX);
+          const dx=clampv(t.clientX-leftCenter.x,MAX), dy=clampv(t.clientY-leftCenter.y,MAX);
           const nx=norm(dx)/MAX, ny=norm(dy)/MAX;
           move.x = Math.sign(nx);
           move.z = ny<0 ? 1 : (ny>0 ? -1 : 0);
@@ -525,7 +525,7 @@ const InputSystem = (()=>{
 
   function tryPickup(){
     const ray = camera.getForwardRay(2.2);
-    const hit = scene.pickWithRay(ray, m=>m && m.metadata?.itemId);
+    const hit = scene.pickWithRay(ray, m=>m && m.metadata?.itemKind==='tool' && m.metadata?.itemId);
     if(hit?.pickedMesh?.metadata?.itemId){
       const id = hit.pickedMesh.metadata.itemId;
       if(!belt.includes(id)){
@@ -540,12 +540,11 @@ const InputSystem = (()=>{
   }
   function tryDrop(){
     const it = activeItem(); if(!it) return;
-    const box = BABYLON.MeshBuilder.CreateBox("drop_"+it.id,{size:0.25},scene);
-    box.position = camera.position.add(new BABYLON.Vector3(0,-0.9,0)).add(camera.getForwardRay().direction.scale(0.6));
-    box.isPickable=true; box.checkCollisions=false;
-    box.metadata={ itemId: it.id };
-    const mat = new BABYLON.StandardMaterial("im_"+it.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2,0.4,0.5); box.material=mat;
-    WORLD_ITEMS.push(box);
+    const drop = cloneToolMesh(it.id) || BABYLON.MeshBuilder.CreateBox("drop_"+it.id,{size:0.25},scene);
+    drop.position = camera.position.add(new BABYLON.Vector3(0,-0.9,0)).add(camera.getForwardRay().direction.scale(0.6));
+    drop.isPickable=true; drop.checkCollisions=false;
+    drop.metadata={ itemKind:'tool', itemId: it.id };
+    WORLD_ITEMS.push(drop);
     toast('Dropped '+it.name);
   }
 
@@ -597,26 +596,25 @@ function applyLook(lookDelta){
   const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
   camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
 }
+</script>
 
+<script>
 /*** ==========================================================
     CONTINUOUS GROUND SNAP
     ========================================================== ***/
 const EYE_H = 1.7;
 function groundSnapTick(dt){
   if(!camera || !scene) return;
-  // Ray start slightly above the player to ensure we hit floors even on slopes
   const start = camera.position.add(new BABYLON.Vector3(0, 1.0, 0));
   const ray   = new BABYLON.Ray(start, new BABYLON.Vector3(0,-1,0), 4.0);
   const hit   = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
   if(hit && hit.pickedPoint){
     const targetY = hit.pickedPoint.y + EYE_H;
-    // Smoothly approach to avoid jitter but clamp strong penetrations
     const dy = targetY - camera.position.y;
-    const snap = Math.abs(dy) > 0.2 ? dy : dy * 0.25; // big correction if we sank
+    const snap = Math.abs(dy) > 0.2 ? dy : dy * 0.25;
     camera.position.y += snap;
   }
 }
-
 </script>
 
 <script>
@@ -666,7 +664,7 @@ function ensureSnow(){
   ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(4,4,3,0,Math.PI*2); ctx.fill(); snowTex.update(false);
   ps.particleTexture=snowTex;
 
-  // Compute exterior bounds to anchor snowfall over the whole area
+  // Anchor snowfall over the entire exterior polygon
   const ext = (window.MAP_DEF?.exterior)||[{x:-20,z:-20},{x:20,z:-20},{x:20,z:20},{x:-20,z:20}];
   let minx=Infinity, maxx=-Infinity, minz=Infinity, maxz=-Infinity;
   for(const p of ext){ if(p.x<minx) minx=p.x; if(p.x>maxx) maxx=p.x; if(p.z<minz) minz=p.z; if(p.z>maxz) maxz=p.z; }
@@ -726,25 +724,18 @@ async function loadMoon(){
 
 <script>
 /*** ==========================================================
-    MAP LOAD + COLLISIONS + ROOMS + MARKER TOOL (fixed)
+    MAP LOAD + COLLISIONS + ROOMS + MARKER TOOL (lazy init)
     ========================================================== ***/
-// Inside helpers
-function isInsideHouse(p){
-  if(!window.MAP_DEF) return false;
-  for(const r of MAP_DEF.rooms){ if(pointInPolyXZ({x:p.x,z:p.z}, r.poly)) return true; }
-  return false;
-}
-function isInsideExterior(p){
-  if(!window.MAP_DEF) return true;
-  return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
-}
 function currentRoomName(){
   if(!window.MAP_DEF) return player.inside?'House':'Exterior';
   const pos = {x:camera.position.x, z:camera.position.z};
   for(const r of MAP_DEF.rooms){ if(pointInPolyXZ(pos, r.poly)) return r.name; }
   return player.inside ? 'House' : 'Exterior';
 }
-
+function isInsideExterior(p){
+  if(!window.MAP_DEF) return true;
+  return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
+}
 async function loadMap(){
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
@@ -756,21 +747,21 @@ async function loadMap(){
   }
 }
 
-/* --- Marker Tool (uses discs, not SpriteManager) --- */
+/* --- Marker Tool (lazy attached) --- */
 const MarkerTool = (()=>{
   let enabled=false, interior=true, points=[];
   let polyMesh=null, polyMat=null, discs=[];
   let attached=false;
 
   function attach(){
-    if(attached || !scene) return; // wait until scene exists
+    if(attached || !scene) return;
     scene.onPointerObservable.add((pi)=>{
       if(!enabled) return;
       if(pi.type===BABYLON.PointerEventTypes.POINTERDOWN){
         const ev = pi.event;
         const P = pointerToGround(); if(!P) return;
 
-        if(ev.button===2){ // RMB remove last
+        if(ev.button===2){
           ev.preventDefault();
           if(points.length){
             points.pop();
@@ -845,8 +836,47 @@ document.getElementById('btn-marker-clear').onclick=()=>MarkerTool.clear();
 
 <script>
 /*** ==========================================================
-    ITEMS: RANDOM SPAWN + GHOST TOSS
+    ITEMS: RANDOM PROPS + GHOST TOSS + VAN TOOL SUPPLY (GLB)
     ========================================================== ***/
+// TOOL GLBs registry
+const TOOL_DEFS = [
+  {id:'flash',  name:'Flashlight',          file:'flash.glb'},
+  {id:'uv',     name:'UV Light',            file:'uv.glb'},
+  {id:'camera', name:'Photo Camera',        file:'camera.glb'},
+  {id:'emf',    name:'EMF Reader',          file:'emf.glb'},
+  {id:'thermo', name:'Thermometer',         file:'thermo.glb'},
+  {id:'salt',   name:'Salt',                file:'salt.glb'},
+  {id:'book',   name:'Ghost Writing Book',  file:'book.glb'},
+  {id:'dots',   name:'DOTS Projector',      file:'dots.glb'},
+  {id:'cruci',  name:'Crucifix',            file:'crucifix.glb'},
+  {id:'smudge', name:'Smudge Sticks',       file:'smudge.glb'},
+];
+const TOOL_CACHE = {};
+
+async function ensureToolModel(id){
+  if(TOOL_CACHE[id]) return TOOL_CACHE[id];
+  const def = TOOL_DEFS.find(t=>t.id===id);
+  if(!def) return null;
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/items/", def.file, scene);
+    const root = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+    if(root){
+      root.setEnabled(false);
+      root.isPickable=false;
+      TOOL_CACHE[id]=root;
+      return root;
+    }
+  }catch(e){ console.warn('Failed to load tool GLB', id, e); }
+  return null;
+}
+function cloneToolMesh(id){
+  const src = TOOL_CACHE[id];
+  if(!src) return null;
+  const clone = src.clone(id+"_inst_"+Math.random().toString(36).slice(2), null);
+  clone.setEnabled(true);
+  clone.isPickable=true;
+  return clone;
+}
 function randomPointInRoomPoly(poly){
   const xs=poly.map(p=>p.x), zs=poly.map(p=>p.z);
   const minx=Math.min(...xs), maxx=Math.max(...xs), minz=Math.min(...zs), maxz=Math.max(...zs);
@@ -862,17 +892,53 @@ function randomPointInRoomPoly(poly){
   }
   return new BABYLON.Vector3(poly[0].x, 1.7, poly[0].z);
 }
+function gridAround(origin, n, cols=5, spacing=0.75){
+  const pts=[]; const rows=Math.ceil(n/cols);
+  let k=0;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      if(k++>=n) break;
+      const x = origin.x + (c-(cols-1)/2)*spacing;
+      const z = origin.z + (r-(rows-1)/2)*spacing;
+      pts.push(new BABYLON.Vector3(x, origin.y, z));
+    }
+  }
+  return pts;
+}
+async function spawnToolsInVan(){
+  const vanPoly = (MAP_DEF?.rooms||[]).find(r=>r.name==='Van')?.poly;
+  if(!vanPoly?.length) return;
+  const xs=vanPoly.map(p=>p.x), zs=vanPoly.map(p=>p.z);
+  const cx=(Math.min(...xs)+Math.max(...xs))/2;
+  const cz=(Math.min(...zs)+Math.max(...zs))/2;
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(cx, 20, cz), new BABYLON.Vector3(0,-1,0), 40);
+  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  const y = hit?.pickedPoint ? hit.pickedPoint.y+0.02 : 1.7;
+  const center = new BABYLON.Vector3(cx, y, cz);
+
+  await Promise.all(TOOL_DEFS.map(t=>ensureToolModel(t.id)));
+  const points = gridAround(center, TOOL_DEFS.length, 5, 0.75);
+  TOOL_DEFS.forEach((t,i)=>{
+    const m = cloneToolMesh(t.id);
+    if(!m) return;
+    const rr = new BABYLON.Ray(new BABYLON.Vector3(points[i].x, points[i].y+2, points[i].z), new BABYLON.Vector3(0,-1,0), 6);
+    const hh = scene.pickWithRay(rr, mm=>mm && mm.isPickable!==false);
+    const yy = hh?.pickedPoint ? hh.pickedPoint.y+0.02 : points[i].y;
+    m.position = new BABYLON.Vector3(points[i].x, yy, points[i].z);
+    m.metadata = { itemKind:'tool', itemId: t.id };
+  });
+}
 function spawnWorldItems(){
+  // Spawn a few lightweight, non-pickable props inside rooms for ghost tossing.
   const rooms = (MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
   if(rooms.length===0) return;
-  const count = Math.min(ITEM_TYPES.length, 6);
+  const count = 12;
   for(let i=0;i<count;i++){
-    const type = ITEM_TYPES[i];
     const room = rooms[(Math.random()*rooms.length)|0];
     const pos = randomPointInRoomPoly(room.poly);
-    const mesh = BABYLON.MeshBuilder.CreateBox("item_"+type.id,{size:0.25},scene);
-    const mat = new BABYLON.StandardMaterial("im_"+type.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2+Math.random()*0.2,0.6,0.7);
-    mesh.material=mat; mesh.position=pos; mesh.isPickable=true; mesh.metadata={ itemId:type.id };
+    const mesh = BABYLON.MeshBuilder.CreateBox("prop_"+i,{size:0.22},scene);
+    const mat = new BABYLON.StandardMaterial("propMat_"+i,scene); mat.emissiveColor=new BABYLON.Color3(0.15+Math.random()*0.2,0.35,0.4);
+    mesh.material=mat; mesh.position=pos; mesh.isPickable=false; // prop, not player pickable
     WORLD_ITEMS.push(mesh);
   }
 }
@@ -892,11 +958,7 @@ function ghostTossNearby(dt){
 
 <script>
 /*** ==========================================================
-    NOTEBOOK / EVIDENCE
-    ========================================================== ***/
-
-/*** ==========================================================
-    NOTEBOOK TABS + GHOST INFO + GUESS
+    NOTEBOOK / EVIDENCE with TABS
     ========================================================== ***/
 let NB_ACTIVE = 'evidence';
 
@@ -904,14 +966,12 @@ function switchTab(tab){
   NB_ACTIVE = tab;
   document.getElementById('nb-title').textContent =
       tab==='evidence' ? 'Evidence' : tab==='ghosts' ? 'Ghosts' : 'Guess the Ghost';
-  // tab buttons
   ['evidence','ghosts','guess'].forEach(id=>{
     const btn=document.getElementById('tab-'+id);
     if(btn) btn.classList.toggle('active', id===tab);
   });
   renderNotebookTab();
 }
-
 function renderNotebookTab(){
   const content = document.getElementById('nb-content'); if(!content) return;
   if(NB_ACTIVE==='evidence'){
@@ -922,7 +982,6 @@ function renderNotebookTab(){
         <button class="hud-btn" onclick="closeNotebook()">Close</button>
         <button class="hud-btn" onclick="resetEvidence()">Reset Evidence</button>
       </div>`;
-    // rebuild evidence check list
     const list=document.getElementById('evidence-list');
     EVIDENCE.forEach(ev=>{
       const row=document.createElement('div'); row.className='ev-row';
@@ -950,7 +1009,7 @@ function renderNotebookTab(){
             ].filter(Boolean).join(' • ')}</div>`:''}`;
       grid.appendChild(card);
     });
-  } else { // guess
+  } else {
     const names = GHOSTS.map(g=>g.name);
     content.innerHTML = `
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
@@ -979,8 +1038,9 @@ function renderNotebookTab(){
     };
   }
 }
-
-const __bindTabsOnce = ()=>{
+function openNotebook(){
+  const box=document.getElementById('notebook-modal');
+  box.style.display='block';
   const e=document.getElementById('tab-evidence');
   const g=document.getElementById('tab-ghosts');
   const s=document.getElementById('tab-guess');
@@ -989,13 +1049,7 @@ const __bindTabsOnce = ()=>{
     g.onclick=()=>switchTab('ghosts');
     s.onclick=()=>switchTab('guess');
   }
-}
-
-function openNotebook(){
-  const box=document.getElementById('notebook-modal');
-  box.style.display='block';
-  __bindTabsOnce();
-  switchTab(NB_ACTIVE); // render current tab
+  switchTab(NB_ACTIVE);
 }
 function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
 function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); }
@@ -1036,12 +1090,9 @@ function makeFlickerController(mesh){
     }
   };
 }
-function randomRoomCenter(){
-  const rooms = (MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
-  if(!rooms.length) return new BABYLON.Vector3(0,1.7,0);
-  const room = rooms[(Math.random()*rooms.length)|0];
-  const p = randomPointInRoomPoly(room.poly);
-  return p;
+function randomInsideExterior(){
+  const poly = MAP_DEF?.exterior || [{x:-10,z:-10},{x:10,z:-10},{x:10,z:10},{x:-10,z:10}];
+  return randomPointInRoomPoly(poly);
 }
 async function spawnGhost(){
   const profile = GHOSTS[(Math.random()*GHOSTS.length)|0];
@@ -1068,7 +1119,7 @@ async function spawnGhost(){
     m.material=mat; m.isPickable=false; ghost.mesh=m;
   }
 
-  ghost.roomCenter = randomRoomCenter();
+  ghost.roomCenter = randomInsideExterior();
   ghost.mesh.position.copyFrom(ghost.roomCenter);
   ghost.visible=false;
   ghost.flicker = makeFlickerController(ghost.mesh);
@@ -1088,11 +1139,9 @@ function wanderGhost(dt){
   }
   const step = ghost._dir.scale(dt);
   const cand = ghost.mesh.position.add(step);
-  // keep ghost inside house interior (wander within rooms area)
-  if(isInsideHouse(cand)) ghost.mesh.position = cand; else ghost._dir=null;
+  if(isInsideExterior(cand)) ghost.mesh.position = cand; else ghost._dir=null;
 }
 function startEvent(){
-  if(!player.inside) return; // events only while player is inside
   ghost.mode='event';
   ghost._eventLeft = 3 + Math.random()*2;
   toast('You hear something...');
@@ -1110,7 +1159,6 @@ function ghostEventTick(dt){
   }
 }
 function startHunt(){
-  if(!player.inside) return; // hunts only start if player is inside
   ghost.mode='hunt'; ghost._huntLeft = 8 + Math.random()*5;
   document.getElementById('hud-hunt').textContent='Hunting';
   toast('Hunt started!');
@@ -1127,7 +1175,6 @@ function huntTick(dt){
   if(!ghost._huntTimer){ ghost._huntTimer=0; ghost._nextHunt=50+Math.random()*40; }
   if(ghost.mode==='hunt'){
     if(performance.now() < (ghost.smudgedUntil||0)) return;
-    if(!player.inside){ stopHunt('Player left house'); return; } // enforce rule
     const dir = camera.position.subtract(ghost.mesh.position); dir.y=0;
     const dist = dir.length();
     ghost.nearPlayer = dist<3.0;
@@ -1160,9 +1207,7 @@ function ghostAbortHunt(reason){ stopHunt(reason); }
     SANITY (ties into lights, events, hunts)
     ========================================================== ***/
 function sanityTick(dt){
-  // INSIDE means inside a *room polygon* (house interior), not the exterior yard
-  player.inside = isInsideHouse(camera.position);
-
+  player.inside = isInsideExterior(camera.position);
   const roomNow = currentRoomName();
   if(roomNow!==player.room){ player.room = roomNow; document.getElementById('hud-room').textContent=roomNow; }
 
@@ -1187,8 +1232,8 @@ function sanityTick(dt){
     if(weather.state==='Blood Moon') drain += 0.004;
   }
 
-  // Ghost proximity (only if inside)
-  if(ghost.mesh && player.inside){
+  // Ghost proximity
+  if(ghost.mesh){
     const d = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
     if(d<6) drain += 0.016 * ((6-d)/6);
   }
@@ -1290,9 +1335,11 @@ async function boot(){
   InputSystem.init();
   canvas.focus();
 
-  // Spawn ghost/items
+  // Spawn ghost/items/tools
   await spawnGhost();
   spawnWorldItems();
+  await spawnToolsInVan();
+  ensurePlayerModel();
 
   // Buttons
   document.getElementById('btn-use').onclick=useActiveItem;
@@ -1310,6 +1357,7 @@ async function boot(){
     handleMovement(input, dt);
     applyLook(input.lookDelta);
     groundSnapTick(dt);
+    updatePlayerAvatar(dt);
 
     // Attach held lights to camera (force off outdoors)
     const camForward = camera.getForwardRay().direction;
