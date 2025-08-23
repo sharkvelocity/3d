@@ -601,6 +601,138 @@ const InputSystem = (()=>{
     isTouch: ()=>isTouchMode
   };
 })();
+<script>
+/*** ==========================================================
+    PLAYER MODEL (Visible Body in First Person)
+    - Expects: ./assets/models/player/main_player.glb
+    - Shows full body when you look down; hides only the head.
+    - No movement rewrite: we follow your existing camera.
+    ========================================================== ***/
+const PlayerRig = (()=>{
+  let root = null;          // Transform node for the player
+  let meshRoot = null;      // First real mesh under the import
+  let loaded = false;
+  let headHidden = false;
+  let scaleApplied = false;
+
+  const CONFIG = {
+    modelDir: "./assets/models/player/",
+    modelFile: "main_player.glb",
+    bodyYOffset: 1.70,     // distance from camera down to approximate foot level
+    bodyForward: 0.06,     // tiny push forward so you see chest when looking down
+    minScale: 0.6,         // sane scale bounds for odd assets
+    maxScale: 1.6
+  };
+
+  function _hideHeadIfFound(node) {
+    if (!node) return;
+    const name = (node.name||"").toLowerCase();
+    // common head name patterns (Mixamo, GLB exports)
+    const looksLikeHead = name.includes("head") || name.includes("mixamorig:head") || name.includes("bone_head");
+    if (looksLikeHead && node.getClassName && node.getClassName()!=="TransformNode") {
+      try { node.isVisible = false; headHidden = true; } catch(_){}
+    }
+    if (node.getChildren) node.getChildren().forEach(_hideHeadIfFound);
+  }
+
+  function _tuneMaterials(node) {
+    if (!node || !node.material) return;
+    try {
+      node.material.backFaceCulling = true; // avoid weird inside-face artifacts
+      if (node.material.albedoTexture) node.material.albedoTexture.hasAlpha = false;
+      if (node.material.opacityTexture) node.material.opacityTexture.getAlphaFromRGB = false;
+    } catch(_){}
+  }
+
+  function _fitScaleToHuman(meshes) {
+    // Simple heuristic to prevent “giant” or “tiny” avatars
+    try {
+      const bbox = BABYLON.Mesh.CreateBox("tmp_bb", 0.1, scene); // temp holder
+      bbox.isVisible = false; bbox.isPickable = false;
+      meshes.forEach(m => { try{ if (m.getBoundingInfo) bbox.refreshBoundingInfo(true, true); }catch(_){} });
+      // Use first skinned mesh to get bounds instead
+      const m0 = meshes.find(m=> m.getClassName && m.getClassName()!=="TransformNode");
+      if (!m0) return;
+      const bi = m0.getBoundingInfo();
+      const height = (bi.boundingBox.maximumWorld.y - bi.boundingBox.minimumWorld.y) || 1.7;
+      const want = 1.7 / height;
+      const clamped = Math.max(CONFIG.minScale, Math.min(CONFIG.maxScale, want));
+      root.scaling = new BABYLON.Vector3(clamped, clamped, clamped);
+      scaleApplied = true;
+    } catch(_){}
+  }
+
+  async function load() {
+    if (loaded) return;
+    root = new BABYLON.TransformNode("playerRoot", scene);
+    try {
+      const r = await BABYLON.SceneLoader.ImportMeshAsync("", CONFIG.modelDir, CONFIG.modelFile, scene);
+      // find the first non-__root__ mesh
+      meshRoot = r.meshes.find(m => (m.name||"") !== "__root__") || r.meshes[0];
+      r.meshes.forEach(m=>{
+        try {
+          m.isPickable = false;
+          m.checkCollisions = false;
+          m.parent = root;
+          _tuneMaterials(m);
+        } catch(_){}
+      });
+      // Prevent shadow-casting from body (optional)
+      try { r.meshes.forEach(m => m.receiveShadows = false); } catch(_){}
+
+      // Scale to reasonable human size
+      _fitScaleToHuman(r.meshes);
+
+      // Hide head only (so body & arms are visible looking down)
+      _hideHeadIfFound(root);
+
+      // If we couldn’t find a head mesh, fallback: hide the top-most small piece (~failsafe)
+      if (!headHidden) {
+        try {
+          const tallest = r.meshes
+            .filter(m=>m.getBoundingInfo)
+            .sort((a,b)=>b.getBoundingInfo().boundingBox.maximumWorld.y - a.getBoundingInfo().boundingBox.maximumWorld.y)[0];
+          if (tallest && (tallest.name||"").toLowerCase().includes("head")) { tallest.isVisible = false; headHidden = true; }
+        } catch(_){}
+      }
+
+      loaded = true;
+    } catch (e) {
+      console.warn("Player model load failed, creating capsule proxy.", e);
+      // fallback capsule so you still see a body when looking down
+      const capsule = BABYLON.MeshBuilder.CreateCapsule("fp_capsule", {height:1.7, radius:0.25, tessellation:10}, scene);
+      const m = new BABYLON.StandardMaterial("fp_capsule_mat", scene);
+      m.diffuseColor = new BABYLON.Color3(0.75,0.75,0.8);
+      m.emissiveColor = new BABYLON.Color3(0.05,0.08,0.1);
+      capsule.material = m;
+      capsule.isPickable = false; capsule.checkCollisions = false;
+      root = capsule; meshRoot = capsule; loaded = true; headHidden = true;
+    }
+  }
+
+  // Keep body under the camera & aligned to yaw
+  function update() {
+    if (!loaded || !camera || !root) return;
+
+    const fwd = camera.getForwardRay().direction.clone(); fwd.y = 0; fwd.normalize();
+    const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+    const yaw = Math.atan2(fwd.z, fwd.x);
+
+    // Position: place body slightly forward and down from camera, so it’s visible when you look down
+    const bodyPos = camera.position
+      .add(fwd.scale(CONFIG.bodyForward))           // tiny forward nudge
+      .add(new BABYLON.Vector3(0, -CONFIG.bodyYOffset, 0)); // drop to feet
+
+    root.position.copyFrom(bodyPos);
+    root.rotation.y = yaw;
+
+    // Ensure sane scale even if importer didn’t give us one
+    if (!scaleApplied) try { root.scaling = root.scaling || new BABYLON.Vector3(1,1,1); } catch(_){}
+  }
+
+  return { load, update };
+})();
+</script>
 
 /*** ==========================================================
     MOVEMENT (with temporary gravity disable) + LOOK
@@ -998,6 +1130,7 @@ async function boot(){
   // Sun + Moon
   setupSun(); setupMoon();
   await loadSelectedMap();
+  await PlayerRig.load();
 
   // Spawn at map-defined spawn OR fallback to requested position
   const sp = (window.MAP_DEF && MAP_DEF.spawn) ? MAP_DEF.spawn : { x:14.15, y:1.80, z:11.09 };
@@ -1022,7 +1155,7 @@ async function boot(){
     const input = InputSystem.snapshot();
     handleMovement(input, dt);
     applyLook(input.lookDelta);
-
+    PlayerRig.update();
     // Salt disturbance check near camera (demo)
     try{ disturbSaltAt(camera.position.clone()); }catch(e){}
 
