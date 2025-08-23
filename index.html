@@ -480,8 +480,14 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 /*** ==========================================================
     INPUT (KBD/Touch) + PICKUP
     ========================================================== ***/
+<script>
+/*** ==========================================================
+    INPUT (KBD/Touch) + PICKUP  — with PageUp/PageDown fly
+    ========================================================== ***/
 const InputSystem = (()=>{
-  let move={x:0,z:0}, running=false, lookDelta={x:0,y:0};
+
+  // NOTE: add y in move so we can fly up/down
+  let move={x:0,y:0,z:0}, running=false, lookDelta={x:0,y:0};
   const keys = new Set();
   let isTouchMode=false;
   let _tapSprint=false;
@@ -492,13 +498,16 @@ const InputSystem = (()=>{
     'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
-    'KeyE':'pickup', 'KeyG':'drop'
+    'KeyE':'pickup', 'KeyG':'drop',
+    'PageUp':'up', 'PageDown':'down'   // ← vertical fly keys
   };
 
   function recomputeMove(){
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
-    move.z=f; move.x=r; running=keys.has('run') || _tapSprint;
+    const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0); // ← vertical
+    move.z=f; move.x=r; move.y=v;
+    running=keys.has('run') || _tapSprint;
   }
 
   function onKey(e,down){
@@ -580,7 +589,6 @@ const InputSystem = (()=>{
     const mat = new BABYLON.StandardMaterial("im_"+it.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2,0.6,0.7);
     box.material=mat;
     WORLD_ITEMS.push(box);
-    try{ box.receiveShadows = true; if(sunShadows) sunShadows.addShadowCaster(box, true); if(moonShadows) moonShadows.addShadowCaster(box, true);}catch(e){}
     toast('Dropped '+it.name);
   }
 
@@ -600,31 +608,42 @@ const InputSystem = (()=>{
 </script>
 
 <script>
-/*** ==========================================================
-    MOVEMENT & LOOK
-    ========================================================== ***/
 function handleMovement(input, dt){
   if(!camera) return;
+
   const baseWalk = player.speedWalk * (input.analog||1);
   const speed = input.running ? player.speedRun : baseWalk;
+
   const fwd = camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
   const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+
   const desired = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
-  if (desired.lengthSquared()>0){
-    const v = desired.normalize().scale(speed*dt);
-    camera.cameraDirection = (camera.cameraDirection||BABYLON.Vector3.Zero()).add(v);
+  const vert = input.moveVec.y || 0;
+  const wantsFly = vert !== 0;
+
+  // Build the candidate next position
+  let next = camera.position.clone();
+  if (desired.lengthSquared() > 0) next = next.add(desired.normalize().scale(speed * dt));
+  if (wantsFly) next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
+
+  // If flying this frame, don't ground-snap; otherwise do normal snap
+  if (!wantsFly && desired.lengthSquared() > 0) {
+    const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
+    const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
+    const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
+    if(hit && hit.pickedPoint){
+      const deltaY = hit.pickedPoint.y + 1.7 - camera.position.y;
+      if(deltaY<=player.stepUpMax) camera.position = new BABYLON.Vector3(next.x, hit.pickedPoint.y+1.7, next.z);
+      else camera.position = next;
+    } else {
+      camera.position = next;
+    }
+  } else {
+    camera.position = next;
   }
 }
-function applyLook(lookDelta){
-  if(!camera) return;
-  const sens = 0.0028;
-  camera.rotation.y += lookDelta.x * sens;
-  const invertY = 1;
-  const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
-  const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
-  camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
-}
 </script>
+
 
 <script>
 /*** ==========================================================
@@ -663,41 +682,92 @@ function markShadowable(meshes){
   }catch(e){}
 }
 
+<script>
 let __rainTex = null;
 function makeRainTexture(){
+  // 1px x 64px vertical streak with soft ends
   if(__rainTex) return __rainTex;
-  const w=2, h=32;
+  const w = 1, h = 64;
   const dt = new BABYLON.DynamicTexture("rainTex",{width:w,height:h},scene,false);
-  const ctx=dt.getContext(); ctx.clearRect(0,0,w,h);
-  const g=ctx.createLinearGradient(0,0,0,h);
-  g.addColorStop(0.0,"rgba(255,255,255,0.00)");
-  g.addColorStop(0.3,"rgba(255,255,255,0.40)");
-  g.addColorStop(0.6,"rgba(255,255,255,0.80)");
-  g.addColorStop(0.9,"rgba(255,255,255,0.40)");
-  g.addColorStop(1.0,"rgba(255,255,255,0.00)");
-  ctx.fillStyle=g; ctx.fillRect(0,0,w,h); dt.update(false);
-  __rainTex=dt; return dt;
+  const ctx = dt.getContext();
+  ctx.clearRect(0,0,w,h);
+  const g = ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0.00,"rgba(255,255,255,0.00)");
+  g.addColorStop(0.15,"rgba(255,255,255,0.20)");
+  g.addColorStop(0.50,"rgba(255,255,255,0.85)");
+  g.addColorStop(0.85,"rgba(255,255,255,0.20)");
+  g.addColorStop(1.00,"rgba(255,255,255,0.00)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,w,h);
+  dt.update(false);
+  __rainTex = dt;
+  return dt;
 }
+
 function ensureRain(){
   if(weather.rainPS) return weather.rainPS;
-  const ps=new BABYLON.ParticleSystem("rain", 2400, scene);
-  ps.particleTexture=makeRainTexture();
-  ps.emitter = new BABYLON.Vector3(0,14,0);
-  ps.minEmitBox=new BABYLON.Vector3(-12, 0, -12);
-  ps.maxEmitBox=new BABYLON.Vector3( 12, 0,  12);
-  ps.minSize=0.9; ps.maxSize=1.2;
-  ps.minLifeTime=0.7; ps.maxLifeTime=1.0;
-  ps.direction1=new BABYLON.Vector3(-0.15,-1.7, 0.1);
-  ps.direction2=new BABYLON.Vector3( 0.15,-1.5,-0.1);
-  ps.gravity=new BABYLON.Vector3(0,-9.8,0);
-  ps.emitRate=1200;
-  ps.updateSpeed=0.02;
-  ps.color1=new BABYLON.Color4(0.95,0.98,1.00,0.85);
-  ps.color2=new BABYLON.Color4(0.95,0.98,1.00,0.55);
-  ps.colorDead=new BABYLON.Color4(1,1,1,0.0);
-  ps.disposeOnStop=false;
-  weather.rainPS=ps; return ps;
+
+  // Use GPU particles if available for density at low cost
+  const cap = 16000;
+  const ps = (BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported)
+    ? new BABYLON.GPUParticleSystem("rain", { capacity: cap }, scene)
+    : new BABYLON.ParticleSystem("rain", cap, scene);
+
+  ps.particleTexture = makeRainTexture();
+
+  // Big “cloud” over the playable area — emitter box is re-centered by updateEmitterToBounds()
+  ps.emitter = new BABYLON.Vector3(0, 16, 0);
+  ps.minEmitBox = new BABYLON.Vector3(-12, 0, -12);
+  ps.maxEmitBox = new BABYLON.Vector3( 12, 0,  12);
+
+  // MUCH smaller drops (streaks) — world scale friendly
+  ps.minSize = 0.03;
+  ps.maxSize = 0.06;
+
+  // Alpha (standard) blending looks like translucent water, not glowing lines
+  ps.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+
+  // Fast downward motion with a touch of wind slant
+  ps.direction1 = new BABYLON.Vector3(-0.05, -2.6,  0.05);
+  ps.direction2 = new BABYLON.Vector3( 0.05, -3.0, -0.05);
+
+  // Strong gravity keeps motion natural
+  ps.gravity = new BABYLON.Vector3(0, -9.8, 0);
+
+  // Short lifetime so streaks don’t hover
+  ps.minLifeTime = 0.55;
+  ps.maxLifeTime = 0.85;
+
+  // High density = “sheet of rain”
+  ps.emitRate = 12000;
+
+  // Faster sim tick for smoother streaks
+  ps.updateSpeed = 0.01;
+
+  // billboard + stretch along velocity (if supported)
+  try {
+    ps.isBillboardBased = true;
+    if (BABYLON.ParticleSystem.BILLBOARDMODE_STRETCHED !== undefined) {
+      ps.billboardMode = BABYLON.ParticleSystem.BILLBOARDMODE_STRETCHED;
+      // Some engines expose these; if not, they’re harmless no-ops
+      ps.useVelocityStretching = true;
+      ps.velocityStretchScale = 10.0;
+    }
+  } catch(e){}
+
+  // Subtle blue-white tint
+  ps.color1 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.85);
+  ps.color2 = new BABYLON.Color4(0.92, 0.96, 1.00, 0.65);
+  ps.colorDead = new BABYLON.Color4(1, 1, 1, 0.0);
+
+  // Keep for pooling instead of destroying
+  ps.disposeOnStop = false;
+
+  weather.rainPS = ps;
+  return ps;
 }
+</script>
+<script>
 function ensureSnow(){
   if(weather.snowPS) return weather.snowPS;
   const ps=new BABYLON.ParticleSystem("snow", 1800, scene);
