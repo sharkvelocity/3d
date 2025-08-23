@@ -145,8 +145,8 @@ const rng = Math.random;
 
 // --- Player state ---
 const player = {
-  speedWalk: 1.35,
-  speedRun: 3.0,
+  speedWalk: 2.2,   // faster defaults
+  speedRun: 5.0,
   sanity: 100,
   room: 'Van',
   inside: false,
@@ -207,6 +207,9 @@ const ghost = {
   nextEvent: 10+Math.random()*10,
   audio: { singing:null, heartbeat:null }
 };
+
+// Movement mode: start in NOCLIP so WASD is unrestricted. Toggle with N.
+let NOCLIP = true;
 </script>
 
 <script>
@@ -367,7 +370,6 @@ function placeSalt(){
   mesh.material = mat;
   SALT_LINES.push({mesh, a, b, disturbed:false, mat});
   saltCharges--;
-  // make it receive shadows
   try{ mesh.receiveShadows = true; if(sunShadows) sunShadows.addShadowCaster(mesh, true); if(moonShadows) moonShadows.addShadowCaster(mesh, true); }catch(e){}
   toast('Salt line placed ('+saltCharges+' left)');
 }
@@ -421,14 +423,12 @@ function spawnUVFootprints(origin, count=2, step=0.35){
     DISTURB SALT (fixed try/catch)
     ========================================================== ***/
 function disturbSaltAt(pos){
-  // Wraith does NOT disturb salt
   if((ghost?.type||'').toLowerCase()==='wraith') return;
   for(const s of SALT_LINES){
     if(s.disturbed) continue;
     const d = _pointToSegmentDistance(pos, s.a, s.b);
     if(d < 0.18){
       s.disturbed = true;
-      // particle puff
       try{
         const ps = new BABYLON.ParticleSystem("saltPuff", 400, scene);
         ps.particleTexture = new BABYLON.Texture("./assets/images/particles/smoke.png", scene);
@@ -442,7 +442,6 @@ function disturbSaltAt(pos){
         ps.start();
         setTimeout(()=>{ try{ps.stop(); ps.dispose(); } catch(e){} }, 800);
       } catch(e) { /* ignore */ }
-      // tweak salt & add footprints
       try{ s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){}
       try{ spawnUVFootprints(pos, 2, 0.4); } catch(e){}
     }
@@ -482,7 +481,6 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
     ========================================================== ***/
 const InputSystem = (()=>{
 
-  // NOTE: add y in move so we can fly up/down
   let move={x:0,y:0,z:0}, running=false, lookDelta={x:0,y:0};
   const keys = new Set();
   let isTouchMode=false;
@@ -495,13 +493,14 @@ const InputSystem = (()=>{
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
     'KeyE':'pickup', 'KeyG':'drop',
-    'PageUp':'up', 'PageDown':'down'   // ← vertical fly keys
+    'PageUp':'up', 'PageDown':'down',
+    'KeyN':'noclip' // toggle free-move
   };
 
   function recomputeMove(){
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
-    const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0); // ← vertical
+    const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0);
     move.z=f; move.x=r; move.y=v;
     running=keys.has('run') || _tapSprint;
   }
@@ -511,6 +510,16 @@ const InputSystem = (()=>{
     if(!tag) return;
     e.preventDefault();
     if(down) keys.add(tag); else keys.delete(tag);
+
+    if(tag==='noclip' && down){
+      NOCLIP = !NOCLIP;
+      if (window.camera){
+        camera.checkCollisions = !NOCLIP;
+        camera.applyGravity    = !NOCLIP;
+      }
+      toast('Noclip ' + (NOCLIP?'ON':'OFF'));
+    }
+
     if(tag.startsWith('slot') && down){
       const idx = parseInt(tag.replace('slot',''),10);
       if(idx>=0 && idx<3){ activeSlot=idx; rebuildBelt(); }
@@ -554,7 +563,6 @@ const InputSystem = (()=>{
       e.preventDefault();
     },{passive:false});
 
-    // mobile sprint toggle
     const sprintWrap = document.getElementById('mobile-sprint');
     const sprintBtn  = document.getElementById('btn-sprint');
     sprintWrap.style.display='block';
@@ -711,7 +719,7 @@ const PlayerRig = (()=>{
 
 <script>
 /*** ==========================================================
-    MOVEMENT (with temporary gravity disable) + LOOK (global)
+    MOVEMENT (noclip toggle) + LOOK
     ========================================================== ***/
 window.handleMovement = function(input, dt){
   if(!window.camera) return;
@@ -721,34 +729,21 @@ window.handleMovement = function(input, dt){
 
   const fwd = camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
   const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
-  const desired = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
-
+  const dirXZ = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
+  const wantMove = dirXZ.lengthSquared() > 0;
   const vert = input.moveVec.y || 0;
-  const wantsFly = vert !== 0;
 
-  const prevGravity = camera.applyGravity;
-  if (wantsFly) camera.applyGravity = false;
-
-  let next = camera.position.clone();
-  if (desired.lengthSquared() > 0) next = next.add(desired.normalize().scale(speed * dt));
-  if (wantsFly) next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
-
-  if (!wantsFly && desired.lengthSquared() > 0) {
-    const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
-    const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
-    const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
-    if(hit && hit.pickedPoint){
-      const y = hit.pickedPoint.y + 1.7;
-      const dy = y - camera.position.y;
-      camera.position = (dy<=player.stepUpMax) ? new BABYLON.Vector3(next.x, y, next.z) : next;
-    } else {
-      camera.position = next;
-    }
+  if (NOCLIP){
+    let next = camera.position.clone();
+    if (wantMove) next = next.add(dirXZ.normalize().scale(speed * dt));
+    if (vert)     next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
+    camera.position.copyFrom(next);
   } else {
-    camera.position = next;
+    let disp = new BABYLON.Vector3(0,0,0);
+    if (wantMove) disp = disp.add(dirXZ.normalize().scale(speed * dt));
+    if (vert)     disp = disp.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
+    camera.moveWithCollisions(disp);
   }
-
-  camera.applyGravity = prevGravity;
 };
 
 window.applyLook = function(lookDelta){
@@ -1102,12 +1097,12 @@ async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
   scene  = new BABYLON.Scene(engine);
   scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0,-0.9,0); // gravity enabled
+  scene.gravity = new BABYLON.Vector3(0,-0.9,0);
 
   camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, 24), scene);
   camera.attachControl(canvas, true);
-  camera.checkCollisions = true;
-  camera.applyGravity = true; // << gravity ON
+  camera.checkCollisions = !NOCLIP;  // respect noclip at start
+  camera.applyGravity    = !NOCLIP;
   camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
   camera.minZ = 0.1; camera.inertia=0;
