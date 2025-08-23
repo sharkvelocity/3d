@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Updated Build</title>
+  <title>PhasmaPhoney — index1 (patched)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -270,6 +270,10 @@ const GHOSTS = [
   { name:'Deogen',   ev:['Spirit Box','Ghost Writing','Dots'], rules:{wander:8,roomChange:true} },
   { name:'Thaye',    ev:['Ghost Writing','Freezing Temps','Orbs'], rules:{wander:8,roomChange:true} }
 ];
+
+// safe fallbacks if third-person script is not present
+window.ensurePlayerModel = window.ensurePlayerModel || function(){};
+window.toggleThirdPerson = window.toggleThirdPerson || function(){};
 </script>
 
 <script>
@@ -477,7 +481,7 @@ const InputSystem = (()=>{
     }
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
-    if(tag==='tp' && down)     toggleThirdPerson();
+    if(tag==='tp' && down && typeof toggleThirdPerson==='function') toggleThirdPerson();
     recomputeMove();
   }
 
@@ -533,8 +537,8 @@ const InputSystem = (()=>{
         if(empty>=0) belt[empty]=id; else belt[activeSlot]=id;
         rebuildBelt();
       }
-      hit.pickedMesh.dispose();
-      const i = WORLD_ITEMS.findIndex(x=>x===hit.pickedMesh); if(i>=0) WORLD_ITEMS.splice(i,1);
+      hit.pickedMesh.parent?.dispose?.() || hit.pickedMesh.dispose();
+      const i = WORLD_ITEMS.findIndex(x=>x===hit.pickedMesh || x===hit.pickedMesh.parent); if(i>=0) WORLD_ITEMS.splice(i,1);
       toast('Picked up '+itemById(id).name);
     }
   }
@@ -543,7 +547,7 @@ const InputSystem = (()=>{
     const drop = cloneToolMesh(it.id) || BABYLON.MeshBuilder.CreateBox("drop_"+it.id,{size:0.25},scene);
     drop.position = camera.position.add(new BABYLON.Vector3(0,-0.9,0)).add(camera.getForwardRay().direction.scale(0.6));
     drop.isPickable=true; drop.checkCollisions=false;
-    drop.metadata={ itemKind:'tool', itemId: it.id };
+    if(!drop.metadata) drop.metadata={ itemKind:'tool', itemId: it.id };
     WORLD_ITEMS.push(drop);
     toast('Dropped '+it.name);
   }
@@ -836,47 +840,63 @@ document.getElementById('btn-marker-clear').onclick=()=>MarkerTool.clear();
 
 <script>
 /*** ==========================================================
-    ITEMS: RANDOM PROPS + GHOST TOSS + VAN TOOL SUPPLY (GLB)
+    ITEMS: PROPS + VAN TOOL SUPPLY (from ./assets/models/items/exploration_objects.glb)
     ========================================================== ***/
-// TOOL GLBs registry
-const TOOL_DEFS = [
-  {id:'flash',  name:'Flashlight',          file:'flash.glb'},
-  {id:'uv',     name:'UV Light',            file:'uv.glb'},
-  {id:'camera', name:'Photo Camera',        file:'camera.glb'},
-  {id:'emf',    name:'EMF Reader',          file:'emf.glb'},
-  {id:'thermo', name:'Thermometer',         file:'thermo.glb'},
-  {id:'salt',   name:'Salt',                file:'salt.glb'},
-  {id:'book',   name:'Ghost Writing Book',  file:'book.glb'},
-  {id:'dots',   name:'DOTS Projector',      file:'dots.glb'},
-  {id:'cruci',  name:'Crucifix',            file:'crucifix.glb'},
-  {id:'smudge', name:'Smudge Sticks',       file:'smudge.glb'},
+const TOOL_MATCH = [
+  {id:'flash',  names:['flash','torch','light'], scale:1.0},
+  {id:'uv',     names:['uv','ultra','violet'],   scale:1.0},
+  {id:'camera', names:['camera','photo'],        scale:1.0},
+  {id:'emf',    names:['emf','meter'],           scale:1.0},
+  {id:'thermo', names:['thermo','temp'],         scale:1.0},
+  {id:'salt',   names:['salt'],                  scale:1.0},
+  {id:'book',   names:['book','journal'],        scale:1.0},
+  {id:'dots',   names:['dots','projector'],      scale:1.0},
+  {id:'cruci',  names:['crucifix','cross'],      scale:1.0},
+  {id:'smudge', names:['smudge','incense'],      scale:1.0},
 ];
-const TOOL_CACHE = {};
+let TOOL_PACK_MESHES=null;
+const TOOL_TEMPLATES={};
 
-async function ensureToolModel(id){
-  if(TOOL_CACHE[id]) return TOOL_CACHE[id];
-  const def = TOOL_DEFS.find(t=>t.id===id);
-  if(!def) return null;
+async function ensureToolPack(){
+  if(TOOL_PACK_MESHES) return TOOL_PACK_MESHES;
   try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/items/", def.file, scene);
-    const root = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
-    if(root){
-      root.setEnabled(false);
-      root.isPickable=false;
-      TOOL_CACHE[id]=root;
-      return root;
-    }
-  }catch(e){ console.warn('Failed to load tool GLB', id, e); }
-  return null;
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/items/", "exploration_objects.glb", scene);
+    TOOL_PACK_MESHES = r.meshes;
+    TOOL_PACK_MESHES.forEach(m=>m.setEnabled(false));
+  }catch(e){ console.warn("items pack load failed", e); TOOL_PACK_MESHES=[]; }
+  return TOOL_PACK_MESHES;
+}
+function findPackMeshFor(id){
+  if(!TOOL_PACK_MESHES) return null;
+  const match = TOOL_MATCH.find(x=>x.id===id);
+  if(!match) return null;
+  const lc = (s)=> (s||'').toLowerCase();
+  return TOOL_PACK_MESHES.find(m=> match.names.some(n=> lc(m.name).includes(n) ));
+}
+async function buildToolTemplates(){
+  await ensureToolPack();
+  TOOL_MATCH.forEach(tm=>{
+    if(TOOL_TEMPLATES[tm.id]) return;
+    const src = findPackMeshFor(tm.id);
+    if(!src) return;
+    const tpl = src.clone("tpl_"+tm.id, null);
+    tpl.setEnabled(false);
+    tpl.isPickable=true;
+    tpl.metadata={ itemKind:'tool', itemId: tm.id };
+    if(tm.scale && tpl.scaling) tpl.scaling.scaleInPlace(tm.scale);
+    TOOL_TEMPLATES[tm.id]=tpl;
+  });
 }
 function cloneToolMesh(id){
-  const src = TOOL_CACHE[id];
+  const src = TOOL_TEMPLATES[id];
   if(!src) return null;
-  const clone = src.clone(id+"_inst_"+Math.random().toString(36).slice(2), null);
-  clone.setEnabled(true);
-  clone.isPickable=true;
-  return clone;
+  const inst = src.clone(id+"_inst_"+Math.random().toString(36).slice(2), null);
+  inst.setEnabled(true);
+  inst.isPickable=true;
+  inst.metadata = { itemKind:'tool', itemId: id };
+  return inst;
 }
+
 function randomPointInRoomPoly(poly){
   const xs=poly.map(p=>p.x), zs=poly.map(p=>p.z);
   const minx=Math.min(...xs), maxx=Math.max(...xs), minz=Math.min(...zs), maxz=Math.max(...zs);
@@ -916,16 +936,17 @@ async function spawnToolsInVan(){
   const y = hit?.pickedPoint ? hit.pickedPoint.y+0.02 : 1.7;
   const center = new BABYLON.Vector3(cx, y, cz);
 
-  await Promise.all(TOOL_DEFS.map(t=>ensureToolModel(t.id)));
-  const points = gridAround(center, TOOL_DEFS.length, 5, 0.75);
-  TOOL_DEFS.forEach((t,i)=>{
-    const m = cloneToolMesh(t.id);
-    if(!m) return;
+  await buildToolTemplates();
+  const ids = TOOL_MATCH.map(t=>t.id);
+  const points = gridAround(center, ids.length, 5, 0.75);
+  ids.forEach((id,i)=>{
+    const m = cloneToolMesh(id) || BABYLON.MeshBuilder.CreateBox("tool_"+id,{size:0.25},scene);
     const rr = new BABYLON.Ray(new BABYLON.Vector3(points[i].x, points[i].y+2, points[i].z), new BABYLON.Vector3(0,-1,0), 6);
     const hh = scene.pickWithRay(rr, mm=>mm && mm.isPickable!==false);
     const yy = hh?.pickedPoint ? hh.pickedPoint.y+0.02 : points[i].y;
     m.position = new BABYLON.Vector3(points[i].x, yy, points[i].z);
-    m.metadata = { itemKind:'tool', itemId: t.id };
+    if(!m.metadata) m.metadata = { itemKind:'tool', itemId: id };
+    WORLD_ITEMS.push(m);
   });
 }
 function spawnWorldItems(){
@@ -940,18 +961,6 @@ function spawnWorldItems(){
     const mat = new BABYLON.StandardMaterial("propMat_"+i,scene); mat.emissiveColor=new BABYLON.Color3(0.15+Math.random()*0.2,0.35,0.4);
     mesh.material=mat; mesh.position=pos; mesh.isPickable=false; // prop, not player pickable
     WORLD_ITEMS.push(mesh);
-  }
-}
-function ghostTossNearby(dt){
-  if(!ghost.mesh || ghost.mode==='idle') return;
-  let best=null, bd=99;
-  for(const m of WORLD_ITEMS){
-    const d = BABYLON.Vector3.Distance(m.position, ghost.mesh.position);
-    if(d<3 && d<bd){ best=m; bd=d; }
-  }
-  if(best && Math.random()<0.02){
-    const dir = camera.position.subtract(ghost.mesh.position); dir.y=0; dir.normalize();
-    best.position.addInPlace(dir.scale(0.8)).addInPlace(new BABYLON.Vector3(0,0.6,0));
   }
 }
 </script>
@@ -1339,7 +1348,7 @@ async function boot(){
   await spawnGhost();
   spawnWorldItems();
   await spawnToolsInVan();
-  ensurePlayerModel();
+  if (typeof ensurePlayerModel==='function') ensurePlayerModel();
 
   // Buttons
   document.getElementById('btn-use').onclick=useActiveItem;
@@ -1357,7 +1366,9 @@ async function boot(){
     handleMovement(input, dt);
     applyLook(input.lookDelta);
     groundSnapTick(dt);
-    updatePlayerAvatar(dt);
+
+    // Optional third-person avatar updater (provided by third_person_patch.js)
+    if (typeof updatePlayerAvatar === 'function') updatePlayerAvatar(dt);
 
     // Attach held lights to camera (force off outdoors)
     const camForward = camera.getForwardRay().direction;
@@ -1387,7 +1398,6 @@ async function boot(){
     huntTick(dt);
     wanderGhost(dt);
     ghostVisibilityTick(dt);
-    ghostTossNearby(dt);
     updateEventAudioGains();
 
     // Sanity
@@ -1418,6 +1428,9 @@ function lightningFlash(){
   setTimeout(()=>{ d.remove(); }, 260);
 }
 </script>
+
+<!-- Optional third-person avatar system -->
+<script src="./third_person_patch.js"></script>
 
 <script>
 /*** ==========================================================
