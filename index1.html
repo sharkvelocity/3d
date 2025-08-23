@@ -1505,5 +1505,167 @@ document.addEventListener('keydown', (e)=>{
 })();
 </script>
 
+
+<script>
+/* === Unified Camera + Always-Visible Avatar ==============================
+   - Uses the same camera for 1st/3rd person.
+   - Avatar is ALWAYS enabled. In 1st-person we just hide the head so you see body/arms.
+   - Toggle view: Backslash (\) ; Swap shoulder: V ; Zoom: Mouse Wheel
+============================================================================ */
+(function(){
+  const PLAYER_MODEL_DIR = "./assets/models/player/";
+  const PLAYER_MODEL_FILE = "main_player.glb";
+
+  const rig = {
+    mode: "first",      // "first" | "third"
+    dist: 3.0,          // 3rd-person distance
+    minDist: 1.6,
+    maxDist: 6.0,
+    height: 1.55,       // camera height (pivot) above ground in 3rd person
+    shoulder: 0.55,     // right-shoulder offset (flip with V)
+    collidePad: 0.20,   // keep camera away from walls
+    stiffness: 10,      // smoothing
+    pos: null
+  };
+
+  const avatar = {
+    root: null,
+    mesh: null,
+    skeleton: null,
+    loaded: false,
+    headLinks: [],   // bones or meshes that represent the head to hide in 1P
+  };
+
+  async function ensureAvatar(){
+    if(avatar.loaded || !window.scene) return;
+    try{
+      const r = await BABYLON.SceneLoader.ImportMeshAsync("", PLAYER_MODEL_DIR, PLAYER_MODEL_FILE, scene);
+      const mesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
+      const skel = r.skeletons?.[0] || null;
+      avatar.root = new BABYLON.TransformNode("playerRoot", scene);
+      avatar.mesh = mesh;
+      avatar.skeleton = skel;
+      mesh.parent = avatar.root;
+      mesh.isPickable = false;
+      // scale to ~1.8 m height
+      const bb = mesh.getHierarchyBoundingVectors(true);
+      const h = Math.max(0.001, bb.max.y - bb.min.y);
+      const s = 1.8 / h;
+      mesh.scaling.set(s,s,s);
+      // ALWAYS visible
+      mesh.setEnabled(true);
+      // Layer to interior by default if you want: comment out if not needed
+      // mesh.layerMask = LAYERS ? (LAYERS.INTERIOR|0) : mesh.layerMask;
+
+      // Try to find head bones/meshes by common names (Mixamo, GLTF2 human rigs)
+      avatar.headLinks = findHeadNodes(mesh, skel);
+
+      avatar.loaded = true;
+    }catch(e){ console.warn("[Avatar] load failed:", e); }
+  }
+
+  function findHeadNodes(mesh, skel){
+    const targets = [];
+    const nameHas = (n,keys)=> keys.some(k=> n.toLowerCase().includes(k));
+    const headKeys = ["head", "neck", "helmet"];
+    // Bones first
+    if(skel){
+      for(const b of skel.bones){
+        if(nameHas(b.name, headKeys)) targets.push(b);
+      }
+    }
+    // Mesh nodes named like head
+    const stack = mesh.getChildMeshes(false);
+    for(const m of stack){
+      if(nameHas(m.name||"", headKeys)) targets.push(m);
+    }
+    return targets;
+  }
+
+  function setHeadHidden(hidden){
+    if(!avatar.mesh) return;
+    const epsilon = hidden ? 0.0001 : 1.0;
+    // If we have bones, scale head bones to a tiny value in 1P (more robust than alpha)
+    for(const t of avatar.headLinks){
+      if(t instanceof BABYLON.Bone){
+        const cur = t.getScale();
+        t.setScale(new BABYLON.Vector3(epsilon, epsilon, epsilon));
+      } else if(t && t.scaling){ // mesh node
+        t.scaling.set(epsilon, epsilon, epsilon);
+      } else if(t && t.material && "alpha" in t.material){ // fallback
+        t.material.alpha = hidden ? 0.0 : 1.0;
+      }
+    }
+  }
+
+  function groundYAt(x,y,z){
+    const start = new BABYLON.Vector3(x, y+0.5, z);
+    const ray   = new BABYLON.Ray(start, new BABYLON.Vector3(0,-1,0), 6.0);
+    const hit   = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+    return hit?.pickedPoint ? hit.pickedPoint.y : (y - 1.7);
+  }
+
+  function tick(dt){
+    if(!window.scene || !window.camera || !window.engine) return;
+    ensureAvatar();
+    if(!avatar.root) return;
+
+    // Keep avatar at camera XZ, grounded
+    const gy = groundYAt(camera.position.x, camera.position.y, camera.position.z);
+    avatar.root.position.set(camera.position.x, gy, camera.position.z);
+    avatar.root.rotation.set(0, camera.rotation.y, 0);
+
+    // Toggle head visibility depending on mode
+    setHeadHidden(rig.mode === "first");
+
+    if(rig.mode === "first"){
+      rig.pos = camera.position.clone();
+      camera.minZ = 0.06; // allow near-body without clipping too soon
+      return;
+    }
+
+    // === Third-person desired spot ===
+    const yaw = camera.rotation.y;
+    const fwd = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const right = new BABYLON.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const pivot = new BABYLON.Vector3(avatar.root.position.x, gy + rig.height, avatar.root.position.z);
+    let ideal = pivot.subtract(fwd.scale(rig.dist)).add(right.scale(rig.shoulder));
+    // collision push-in
+    const dir = ideal.subtract(pivot); const len = Math.max(0.001, dir.length());
+    const ray = new BABYLON.Ray(pivot, dir.scale(1/len), len);
+    const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+    if(hit?.pickedPoint){
+      ideal = hit.pickedPoint.subtract(dir.scale(rig.collidePad/len));
+    }
+    // smooth
+    if(!rig.pos) rig.pos = ideal.clone();
+    const alpha = 1 - Math.exp(-rig.stiffness * dt);
+    rig.pos = BABYLON.Vector3.Lerp(rig.pos, ideal, alpha);
+
+    camera.position.copyFrom(rig.pos);
+    camera.minZ = 0.1;
+  }
+
+  // Hotkeys
+  document.addEventListener("keydown", (e)=>{
+    if(e.code==="Backslash"){ e.preventDefault(); rig.mode = (rig.mode==="first"?"third":"first"); toast?.(rig.mode.toUpperCase()+" person"); }
+    if(e.code==="KeyV"){ rig.shoulder *= -1; toast?.("Swap shoulder"); }
+  }, {passive:false});
+
+  // Zoom with wheel in 3rd-person
+  document.addEventListener("wheel", (e)=>{
+    const step = (e.deltaY>0 ? 0.4 : -0.4);
+    rig.dist = Math.min(rig.maxDist, Math.max(rig.minDist, rig.dist + step));
+  }, {passive:true});
+
+  // Hook into your render loop
+  (function wait(){
+    if(window.scene && window.engine && window.camera){
+      scene.onBeforeRenderObservable.add(()=> tick(engine.getDeltaTime()/1000));
+    } else setTimeout(wait, 200);
+  })();
+})();
+</script>
+
 </body>
 </html>
