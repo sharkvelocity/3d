@@ -6,28 +6,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
-  <script src="./cdn/babylon.js"></script> <!-- NOTE: Babylon core -->
-  <script src="./cdn/earcut.min.js"></script> <!-- NOTE: polygon triangulation used by GLTF & utilities -->
-  <script src="./cdn/meshopt_decoder.js"></script> <!-- NOTE: GLTF meshopt decoder -->
-  <script src="./cdn/draco_decoder_gltf.js"></script> <!-- NOTE: GLTF Draco decoder -->
-  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script> <!-- NOTE: GLTF loader -->
-  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script> <!-- NOTE: convenience loaders bundle -->
-  <script src="./cdn/gui/babylon.gui.min.js"></script> <!-- NOTE: optional GUI -->
-  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script> <!-- NOTE: Inspector toggle -->
+  <script src="./cdn/babylon.js"></script>                 <!-- NOTE: Babylon core -->
+  <script src="./cdn/earcut.min.js"></script>              <!-- NOTE: polygon triangulation -->
+  <script src="./cdn/meshopt_decoder.js"></script>         <!-- NOTE: GLTF meshopt decoder -->
+  <script src="./cdn/draco_decoder_gltf.js"></script>      <!-- NOTE: GLTF Draco decoder -->
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+
+  <!-- Map definition (exterior + rooms) MUST come before our game logic -->
+  <script src="./assets/models/map/Abandoned_House.js"></script>
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
-    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; } /* main Babylon canvas */
+
+    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
 
     /* Title screen */
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
-      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:9999;}
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:9999; }
     #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
     #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; }
-    #title-tools{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:center; }
-    #file-input{ display:none; } /* hidden file input for GLB import */
 
-    /* HUD chips */
+    /* HUD */
     #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066;
       padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
     #hud-top-left { position:fixed; top:10px; left:10px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; z-index:6000; display:flex; gap:12px; align-items:center; }
@@ -47,7 +49,7 @@
     .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
     #action-bar { position:fixed; right:12px; bottom:18px; display:flex; gap:10px; z-index:6500; }
 
-    /* Touch halves — invisible capture zones */
+    /* Touch halves — 20vh from top to 12vh above bottom */
     .touch-half { position:fixed; top:20vh; bottom:12vh; width:50vw; z-index:7000; touch-action:none; }
     #touch-left { left:0; }
     #touch-right{ right:0; }
@@ -60,7 +62,7 @@
     #possible-ghosts{ margin-top:12px; font-weight:bold; color:#9ff; }
     #notebook-controls{ margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
 
-    /* Marker tool bar */
+    /* Marker tool */
     #marker-toolbar{ position:fixed; top:72px; right:12px; z-index:6500; display:flex; gap:8px; }
     .toggle{ background:#102; color:#9ef; border:1px solid #066; border-radius:6px; padding:6px 10px; cursor:pointer; }
 
@@ -74,11 +76,6 @@
   <!-- Title -->
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-    <div id="title-tools">
-      <label class="hud-btn" for="file-input">Import GLB</label>
-      <input id="file-input" type="file" accept=".glb,.gltf,.zip,.bin,.json,.png,.jpg"/>
-      <button id="btn-load-map" class="hud-btn">Reload Map</button>
-    </div>
     <button id="start-button">Start Investigation</button>
   </div>
 
@@ -90,13 +87,14 @@
     <div class="chip">Weather: <span id="hud-weather">—</span></div>
     <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div>
     <div class="chip">Room: <span id="hud-room">Van</span></div>
+    <div class="chip">Sanity: <span id="hud-sanity">100%</span></div>
   </div>
   <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
 
   <!-- Belt (3 slots) -->
   <div id="belt"></div>
 
-  <!-- Action bar (right) -->
+  <!-- Action bar -->
   <div id="action-bar">
     <button id="btn-use" class="hud-btn">Use</button>
     <button id="btn-place" class="hud-btn">Place</button>
@@ -133,260 +131,82 @@
   <div id="toast"></div>
 
 <script>
-/*** =========================================
+/*** ==========================================================
     GLOBALS
-    ========================================= ***/
-const canvas = document.getElementById('renderCanvas'); // Babylon canvas
-let engine, scene, camera, hemiLight; // core Babylon refs
-let houseRoot = null;  // root of map once loaded
-let moonMesh  = null;  // moon GLB
-let rng = Math.random; // swap with a seeded RNG if needed
+    ========================================================== ***/
+const canvas = document.getElementById('renderCanvas'); // NOTE: Babylon canvas
+let engine, scene, camera, hemiLight, houseRoot, moonMesh;
 
-const player = { // player config/state
-  speedWalk: 1.1, // walk speed m/s
-  speedRun:  2.2, // run speed m/s
-  sanity:   100,
+const rng = Math.random; // NOTE: for quick randomness; swap with seeded rng if needed
+
+// --- Player state ---
+const player = {
+  speedWalk: 1.1,
+  speedRun: 2.2,
+  sanity: 100,                 // NOTE: 0..100
   room: 'Van',
-  stepUpMax: 0.45 // max ledge height for auto-step
+  inside: false,               // NOTE: inside exterior polygon?
+  stepUpMax: 0.45,
+  lightLevel: 0,               // NOTE: computed per-frame (0..1) from held lights
+  nextSanityTick: 0
 };
 
-const weather = { // weather state + particles
+// --- Weather state ---
+const weather = {
   state: 'Clear',
   rainPS: null,
   snowPS: null,
-  lightningTimer: 0,
+  lightningTimer:0,
   nextStrike: 6
 };
-function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 4 + Math.random()*10; } // random lightning cadence
+function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 4 + Math.random()*10; } // NOTE: random cadence
 
-/*** =========================================
-    TOAST (HUD message)
-    ========================================= ***/
-function toast(msg, ms=1500){
-  const t=document.getElementById('toast');
-  t.textContent=msg; t.style.display='block';
-  setTimeout(()=>t.style.display='none', ms);
-} // simple HUD pop-up
-</script>
-
-<script>
-/*** =========================================
-    WEATHER AUDIO (crossfaded ambience)
-    ========================================= ***/
-const WeatherAudio = (()=>{
-  let sceneRef=null, current=null, fading=false;
-  const tracks={ clear:null, rain:null, snow:null, drone:null };
-
-  function ensure(scene){
-    if(sceneRef) return;
-    sceneRef = scene;
-    tracks.clear = new BABYLON.Sound("clear","./assets/audio/clearWeather.mp3",sceneRef,null,{ loop:true, autoplay:false, volume:0.45 });
-    tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null, { loop:true, autoplay:false, volume:0.55 });
-    tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.30 });
-    tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,   { loop:true, autoplay:false, volume:0.22 });
-
-    document.addEventListener("visibilitychange", ()=>{
-      if (document.hidden) return;
-      try { BABYLON.Engine.audioEngine?.unlock?.(); } catch{}
-      switch(current){
-        case 'Clear':      if(!tracks.clear.isPlaying) tracks.clear.play(); break;
-        case 'Rain':       if(!tracks.rain.isPlaying)  tracks.rain.play();  break;
-        case 'Snow':       if(!tracks.snow.isPlaying)  tracks.snow.play();  break;
-        case 'Blood Moon': if(!tracks.rain.isPlaying)  tracks.rain.play();
-                           if(!tracks.drone.isPlaying) tracks.drone.play(); break;
-      }
-    });
-  } // prepare audio buffers; obey mobile autoplay rules
-
-  function fadeTo(target){
-    if(!sceneRef || current===target || fading) return;
-    fading=true;
-
-    const want={
-      clear: target==='Clear',
-      rain:  (target==='Rain'||target==='Blood Moon'),
-      snow:  target==='Snow',
-      drone: target==='Blood Moon'
-    };
-
-    // start needed tracks at 0 volume
-    if (want.clear && !tracks.clear.isPlaying){ tracks.clear.setVolume(0); tracks.clear.play(); }
-    if (want.rain  && !tracks.rain.isPlaying ){ tracks.rain.setVolume(0);  tracks.rain.play();  }
-    if (want.snow  && !tracks.snow.isPlaying ){ tracks.snow.setVolume(0);  tracks.snow.play();  }
-    if (want.drone && !tracks.drone.isPlaying){ tracks.drone.setVolume(0); tracks.drone.play(); }
-
-    const tgt   = { clear: want.clear?0.45:0, rain:want.rain?0.55:0, snow:want.snow?0.30:0, drone:want.drone?0.22:0 };
-    const start = { clear: tracks.clear.getVolume(), rain: tracks.rain.getVolume(), snow: tracks.snow.getVolume(), drone: tracks.drone.getVolume() };
-
-    let i=0, steps=16, stepMs=50; // 800ms crossfade
-    const tick=setInterval(()=>{
-      i++;
-      const a=i/steps; const ease=(x)=>x<.5?2*x*x:-1+(4-2*x)*x;
-      ['clear','rain','snow','drone'].forEach(k=>{
-        const v=start[k]+(tgt[k]-start[k])*ease(a);
-        tracks[k].setVolume(v);
-      });
-      if(i>=steps){
-        clearInterval(tick);
-        ['clear','rain','snow','drone'].forEach(k=>{
-          if(tgt[k]===0 && tracks[k].isPlaying) try{ tracks[k].stop(); }catch{}
-        });
-        current=target; fading=false;
-      }
-    }, stepMs);
-  } // crossfade
-
-  return { init:(s)=>ensure(s), set:(state)=>{ try{BABYLON.Engine.audioEngine?.unlock?.();}catch{} fadeTo(state);} };
-})(); // ambience module
-</script>
-
-<script>
-/*** =========================================
-    ITEM SYSTEM (3-slot belt, separate lighter)
-    ========================================= ***/
-const ALL_ITEMS=[
-  {id:'flash',  name:'Flashlight'},
-  {id:'uv',     name:'UV Light'},
+// --- Item registry (types + spawn counts) ---
+const ITEM_TYPES = [
   {id:'emf',    name:'EMF Reader'},
-  {id:'spirit', name:'Spirit Box'},
-  {id:'camera', name:'Photo Camera'},
-  {id:'salt',   name:'Salt'},
   {id:'thermo', name:'Thermometer'},
-  {id:'dots',   name:'DOTS Projector'},
+  {id:'salt',   name:'Salt'},
   {id:'book',   name:'Ghost Writing Book'},
+  {id:'dots',   name:'DOTS Projector'},
   {id:'cruci',  name:'Crucifix'},
   {id:'smudge', name:'Smudge Sticks'}
-]; // available items
+];
+const WORLD_ITEMS = []; // NOTE: in-world pickable meshes we spawn
 
-let belt = ['flash','emf','camera']; // exactly 3 unique items
-let activeSlot = 0; // 0..2
-let lighterOn = false; // separate lighter toggle
+// --- Belt (3 slots) + separate lighter ---
+const ALL_ITEMS=[
+  {id:'flash', name:'Flashlight'},
+  {id:'uv',    name:'UV Light'},
+  {id:'camera',name:'Photo Camera'},
+  ...ITEM_TYPES
+];
+let belt = ['flash','emf','camera']; // NOTE: exactly 3
+let activeSlot = 0;
+let lighterOn = false;
 
-// runtime item nodes
-const held = { flash:null, uv:null, dots:null, light:null, uvLight:null };
+// --- Held lighting (spot cones) ---
+const held = { light:null, uvLight:null, lighter:null };
 
-function itemById(id){ return ALL_ITEMS.find(x=>x.id===id); } // lookup
+// --- Ghost state ---
+const ghost = {
+  mesh: null,
+  type: null,
+  roomCenter: null,
+  wanderRadius: 8,
+  canChangeRoom: true,
+  mode: 'idle', // idle | event | hunt
+  visible: false,
+  flicker: null,
+  smudgedUntil: 0,
+  nearPlayer: false,
+  eventTimer:0,
+  nextEvent: 10+Math.random()*10,
+  audio: { singing:null, heartbeat:null }
+};
 
-function rebuildBelt(){
-  const el=document.getElementById('belt'); el.innerHTML='';
-  belt.forEach((id,i)=>{
-    const d=document.createElement('div'); d.className='slot'+(i===activeSlot?' active':'');
-    const item=itemById(id);
-    d.innerHTML = `<div class="label">${item?.name||id}</div>`;
-    d.onclick=()=>{ activeSlot=i; rebuildBelt(); };                 // select slot
-    d.oncontextmenu=(e)=>{ e.preventDefault(); cycleSlot(i); };     // right-click cycle
-    el.appendChild(d);
-  });
-} // render 3-slot belt UI
-
-function cycleSlot(i){
-  const idx = ALL_ITEMS.findIndex(x=>x.id===belt[i]);
-  let j=(idx+1)%ALL_ITEMS.length;
-  for(let k=0;k<ALL_ITEMS.length;k++){
-    const cand = ALL_ITEMS[j].id;
-    if(!belt.includes(cand)){ belt[i]=cand; break; }
-    j=(j+1)%ALL_ITEMS.length;
-  }
-  rebuildBelt();
-} // rotate to next unique item
-
-// helpers
-function activeItem(){ return itemById(belt[activeSlot]); } // current item
-
-function useActiveItem(){
-  const it = activeItem(); if(!it){ toast('Empty slot'); return; }
-  switch(it.id){
-    case 'flash':  toggleFlash(true); break;
-    case 'uv':     toggleUV(true);    break;
-    case 'emf':    pingEMF();         break;
-    case 'spirit': spiritBoxTalk();   break;
-    case 'camera': takePhoto();       break;
-    case 'salt':   placeSalt();       break;
-    case 'thermo': readTemp();        break;
-    case 'dots':   toggleDOTS();      break;
-    case 'book':   dropWritingBook(); break;
-    case 'cruci':  useCrucifix();     break;
-    case 'smudge': burnSmudge();      break;
-    default: toast('Use '+it.name);   break;
-  }
-} // primary use router
-
-function placeActiveItem(){
-  const it = activeItem(); if(!it){ toast('Empty slot'); return; }
-  switch(it.id){
-    case 'camera': placeTripodCamera(); break;
-    case 'dots':   placeDOTS();         break;
-    case 'book':   placeWritingBook();  break;
-    case 'salt':   placeSalt();         break;
-    default: toast('Place '+it.name);   break;
-  }
-} // placement router
-
-function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); } // demo toss
-function toggleLighter(){ lighterOn=!lighterOn; toast(lighterOn?'Lighter ON':'Lighter OFF'); } // lighter toggle
-
-// concrete item implementations (minimal but real)
-function ensureHeldLight(){
-  if(!held.light){
-    held.light = new BABYLON.SpotLight("handFlash", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/6, 12, scene);
-    held.light.intensity = 0;  // off by default
-    held.light.range = 18;
-  }
-  return held.light;
-} // create flashlight node
-
-function toggleFlash(){
-  const lamp = ensureHeldLight();
-  lamp.intensity = lamp.intensity>0 ? 0 : 1.2;
-  toast(lamp.intensity>0?'Flashlight ON':'Flashlight OFF');
-} // toggle flashlight
-
-function ensureHeldUV(){
-  if(!held.uvLight){
-    held.uvLight = new BABYLON.SpotLight("handUV", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/6, 12, scene);
-    held.uvLight.diffuse = new BABYLON.Color3(0.6,0.4,1.0);
-    held.uvLight.specular = new BABYLON.Color3(0.2,0.1,0.5);
-    held.uvLight.intensity = 0;
-  }
-  return held.uvLight;
-} // create UV cone
-
-function toggleUV(){
-  const uv = ensureHeldUV();
-  uv.intensity = uv.intensity>0 ? 0 : 1.0;
-  toast(uv.intensity>0?'UV ON':'UV OFF');
-} // toggle UV
-
-function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); } // tied to ghost proximity
-function spiritBoxTalk(){ if(ghost?.mode==='hunt') toast('Spirit Box: *static*'); else toast('Spirit Box: ...'); } // demo stub
-
-function takePhoto(){
-  // quick flash effect + success message if ghost visible
-  const flash = document.createElement('div');
-  flash.style.cssText='position:fixed;inset:0;background:#fff;opacity:.8;pointer-events:none;z-index:12001;';
-  document.body.appendChild(flash);
-  setTimeout(()=>flash.style.opacity='0',40);
-  setTimeout(()=>flash.remove(),180);
-  if(ghost && ghost.visible) toast('Ghost captured!');
-} // photo effect
-
-function placeSalt(){ toast('Salt placed'); } // demo placement
-function readTemp(){ toast('Temp: '+(ghost?.room===player.room?'3°C':'11°C')); } // colder in ghost room
-function toggleDOTS(){ toast('DOTS toggled'); }
-function placeDOTS(){ toast('DOTS placed'); }
-function dropWritingBook(){ toast('Book dropped'); }
-function placeWritingBook(){ toast('Book placed'); }
-function useCrucifix(){ if(ghost?.mode==='hunt'){ ghostAbortHunt('Crucifix'); } else toast('Crucifix readied'); }
-function burnSmudge(){ if(ghost){ ghost.smudgedUntil = performance.now()+6000; toast('Smudge in effect (6s)'); } }
-</script>
-
-<script>
-/*** =========================================
-    EVIDENCE & GHOST PROFILES
-    ========================================= ***/
-const EVIDENCE = ['EMF5','Spirit Box','Ghost Writing','Freezing Temps','Orbs','Dots','Fingerprints']; // evidence set
-const found = Object.fromEntries(EVIDENCE.map(e=>[e,false])); // checkbox state
-
+// --- EVIDENCE ---
+const EVIDENCE = ['EMF5','Spirit Box','Ghost Writing','Freezing Temps','Orbs','Dots','Fingerprints'];
+const found = Object.fromEntries(EVIDENCE.map(e=>[e,false]));
 const GHOSTS = [
   { name:'Spirit',  ev:['EMF5','Spirit Box','Ghost Writing'], rules:{wander:8, roomChange:true} },
   { name:'Wraith',  ev:['EMF5','Spirit Box','Dots'],          rules:{wander:10,roomChange:true} },
@@ -411,41 +231,200 @@ const GHOSTS = [
   { name:'Moroi',    ev:['Freezing Temps','Spirit Box','Ghost Writing'], rules:{wander:8,roomChange:true} },
   { name:'Deogen',   ev:['Spirit Box','Ghost Writing','Dots'], rules:{wander:8,roomChange:true} },
   { name:'Thaye',    ev:['Ghost Writing','Freezing Temps','Orbs'], rules:{wander:8,roomChange:true} }
-]; // ghost table
-
-function openNotebook(){
-  const box=document.getElementById('notebook-modal');
-  const list=document.getElementById('evidence-list');
-  list.innerHTML='';
-  EVIDENCE.forEach(ev=>{
-    const row=document.createElement('div'); row.className='ev-row';
-    const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=found[ev];
-    cb.onchange=()=>{ found[ev]=cb.checked; updatePossible(); };
-    const lbl=document.createElement('span'); lbl.textContent=ev;
-    row.appendChild(cb); row.appendChild(lbl);
-    list.appendChild(row);
-  });
-  updatePossible();
-  box.style.display='block';
-} // build evidence checklist
-
-function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; } // hide notebook
-function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); } // clear checks
-
-function updatePossible(){
-  const result = GHOSTS.filter(g=>{
-    const ghostEv = new Set(g.ev);
-    if (g.rules?.mimicOrbs) ghostEv.add('Orbs'); // Mimic always can show orbs
-    return Object.entries(found).every(([e,has])=>!has || ghostEv.has(e));
-  }).map(g=>g.name);
-  document.getElementById('possible-ghosts').textContent = 'Possible: ' + (result.length? result.join(', ') : 'None');
-} // filter ghosts by checked evidence
+];
 </script>
 
 <script>
-/*** =========================================
-    INPUT SYSTEM (WASD + Pointer Lock + Multi-touch)
-    ========================================= ***/
+/*** ==========================================================
+    UTIL: toast + geometry helpers + point-in-polygon
+    ========================================================== ***/
+function toast(msg, ms=1500){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.style.display='block';
+  setTimeout(()=>t.style.display='none', ms);
+} // NOTE: simple HUD message
+
+function pointInPolyXZ(p, poly){
+  // NOTE: ray-cast in XZ
+  let inside = false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+    const intersect = ((zi>p.z)!==(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi+1e-9)+xi);
+    if(intersect) inside = !inside;
+  }
+  return inside;
+} // NOTE: robust enough for our convex/concave room loops
+
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); } // NOTE: general clamp
+</script>
+
+<script>
+/*** ==========================================================
+    WEATHER AUDIO (crossfaded ambience) + event/hunt audio
+    ========================================================== ***/
+const WeatherAudio = (()=>{
+  let sceneRef=null, current=null, fading=false;
+  const tracks={ clear:null, rain:null, snow:null, drone:null };
+
+  function ensure(scene){
+    if(sceneRef) return;
+    sceneRef = scene;
+    tracks.clear = new BABYLON.Sound("clear","./assets/audio/clearWeather.mp3",sceneRef,null,{ loop:true, autoplay:false, volume:0.40 });
+    tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null, { loop:true, autoplay:false, volume:0.55 });
+    tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.28 });
+    tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,   { loop:true, autoplay:false, volume:0.18 });
+
+    document.addEventListener("visibilitychange", ()=>{
+      if (document.hidden) return;
+      try { BABYLON.Engine.audioEngine?.unlock?.(); } catch{}
+      switch(current){
+        case 'Clear':      if(!tracks.clear.isPlaying) tracks.clear.play(); break;
+        case 'Rain':       if(!tracks.rain.isPlaying)  tracks.rain.play();  break;
+        case 'Snow':       if(!tracks.snow.isPlaying)  tracks.snow.play();  break;
+        case 'Blood Moon': if(!tracks.rain.isPlaying)  tracks.rain.play();
+                           if(!tracks.drone.isPlaying) tracks.drone.play(); break;
+      }
+    });
+  } // NOTE: prepare loops (no autoplay)
+
+  function fadeTo(target){
+    if(!sceneRef) return;
+    if(current===target || fading) return;
+    fading=true;
+
+    const want={ clear:target==='Clear', rain:(target==='Rain'||target==='Blood Moon'), snow:target==='Snow', drone:target==='Blood Moon' };
+    // spin up newcomers at 0
+    if (want.clear && !tracks.clear.isPlaying){ tracks.clear.setVolume(0); tracks.clear.play(); }
+    if (want.rain  && !tracks.rain.isPlaying ){ tracks.rain.setVolume(0);  tracks.rain.play();  }
+    if (want.snow  && !tracks.snow.isPlaying ){ tracks.snow.setVolume(0);  tracks.snow.play();  }
+    if (want.drone && !tracks.drone.isPlaying){ tracks.drone.setVolume(0); tracks.drone.play(); }
+
+    const tgt = { clear: want.clear?0.40:0, rain:want.rain?0.55:0, snow:want.snow?0.28:0, drone:want.drone?0.18:0 };
+    const start={ clear:tracks.clear.getVolume(), rain:tracks.rain.getVolume(), snow:tracks.snow.getVolume(), drone:tracks.drone.getVolume() };
+
+    let i=0, steps=16, stepMs=50;
+    const tick=setInterval(()=>{
+      i++; const a=i/steps; const ease=(x)=>x<.5?2*x*x:-1+(4-2*x)*x;
+      ['clear','rain','snow','drone'].forEach(k=>tracks[k].setVolume(start[k]+(tgt[k]-start[k])*ease(a)));
+      if(i>=steps){
+        clearInterval(tick);
+        ['clear','rain','snow','drone'].forEach(k=>{ if(tgt[k]===0 && tracks[k].isPlaying) try{ tracks[k].stop(); }catch{} });
+        current=target; fading=false;
+      }
+    }, stepMs);
+  } // NOTE: crossfade
+
+  return { init:(s)=>ensure(s), set:(state)=>{ try{BABYLON.Engine.audioEngine?.unlock?.();}catch{} fadeTo(state);} };
+})();
+
+// --- Event/Hunt sfx: attached later in spawnGhost() ---
+function ensureGhostAudio(){
+  if(ghost.audio.heartbeat) return;
+  ghost.audio.heartbeat = new BABYLON.Sound("heartbeat","./assets/audio/heartbeat.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:false });
+  ghost.audio.singing   = new BABYLON.Sound("singing","./assets/audio/singing_loop.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:true, distanceModel:"linear", maxDistance:20 });
+} // NOTE: creates sfx; volumes are driven every frame based on distance/state
+</script>
+
+<script>
+/*** ==========================================================
+    BELT UI + HELD LIGHTS (flash/uv/lighter) that only light inside
+    ========================================================== ***/
+function itemById(id){ return ALL_ITEMS.find(x=>x.id===id); } // NOTE: helper
+
+function rebuildBelt(){
+  const el=document.getElementById('belt'); el.innerHTML='';
+  belt.forEach((id,i)=>{
+    const d=document.createElement('div'); d.className='slot'+(i===activeSlot?' active':'');
+    const item=itemById(id);
+    d.innerHTML = `<div class="label">${item?.name||id}</div>`;
+    d.onclick=()=>{ activeSlot=i; rebuildBelt(); };
+    d.oncontextmenu=(e)=>{ e.preventDefault(); cycleSlot(i); };
+    el.appendChild(d);
+  });
+} // NOTE: rebuilds 3-slot belt UI
+
+function cycleSlot(i){
+  const idx = ALL_ITEMS.findIndex(x=>x.id===belt[i]);
+  let j=(idx+1)%ALL_ITEMS.length;
+  for(let k=0;k<ALL_ITEMS.length;k++){
+    const cand = ALL_ITEMS[j].id;
+    if(!belt.includes(cand)){ belt[i]=cand; break; }
+    j=(j+1)%ALL_ITEMS.length;
+  }
+  rebuildBelt();
+} // NOTE: rotate to a unique item
+
+function activeItem(){ return itemById(belt[activeSlot]); } // NOTE: current item
+
+// --- Held light creators ---
+function ensureHeldFlash(){
+  if(!held.light){
+    held.light = new BABYLON.SpotLight("handFlash", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/7, 14, scene);
+    held.light.intensity = 0;
+    held.light.range = 18;
+  }
+  return held.light;
+} // NOTE: white cone
+
+function ensureHeldUV(){
+  if(!held.uvLight){
+    held.uvLight = new BABYLON.SpotLight("handUV", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/7, 12, scene);
+    held.uvLight.diffuse = new BABYLON.Color3(0.6,0.4,1.0);
+    held.uvLight.specular = new BABYLON.Color3(0.2,0.1,0.5);
+    held.uvLight.intensity = 0;
+    held.uvLight.range = 14;
+  }
+  return held.uvLight;
+} // NOTE: purple cone
+
+function ensureHeldLighter(){
+  if(!held.lighter){
+    held.lighter = new BABYLON.PointLight("handLighter", new BABYLON.Vector3(0,1.6,0), scene);
+    held.lighter.intensity = 0;
+    held.lighter.range = 6;
+  }
+  return held.lighter;
+} // NOTE: warm point light
+
+function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (player.inside ? (l.intensity>0?0:1.25) : 0); toast(l.intensity>0?'Flashlight ON':'Flashlight OFF'); } // NOTE: off outside
+function toggleUV(){ const u=ensureHeldUV(); u.intensity = (player.inside ? (u.intensity>0?0:1.00) : 0); toast(u.intensity>0?'UV ON':'UV OFF'); } // NOTE: off outside
+function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (player.inside && lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); } // NOTE: off outside
+
+// --- Item actions (primary/secondary) ---
+function useActiveItem(){
+  const it = activeItem(); if(!it){ toast('Empty slot'); return; }
+  switch(it.id){
+    case 'flash': toggleFlash(); break;
+    case 'uv':    toggleUV(); break;
+    case 'camera': takePhoto(); break;
+    case 'emf':   pingEMF(); break;
+    case 'thermo':readTemp(); break;
+    case 'salt':  placeSalt(); break;
+    case 'book':  dropWritingBook(); break;
+    case 'dots':  toggleDOTS(); break;
+    case 'cruci': useCrucifix(); break;
+    case 'smudge': burnSmudge(); break;
+    default: toast('Use '+it.name);
+  }
+} // NOTE: routes Use
+
+function placeActiveItem(){
+  const it = activeItem(); if(!it){ toast('Empty slot'); return; }
+  switch(it.id){
+    case 'dots': placeDOTS(); break;
+    case 'book': placeWritingBook(); break;
+    case 'salt': placeSalt(); break;
+    default: toast('Place '+it.name);
+  }
+} // NOTE: routes Place
+
+function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); } // NOTE: hook for physics later
+</script>
+
+<script>
+/*** ==========================================================
+    INPUT (WASD + Pointer Lock + Touch) + PICKUP
+    ========================================================== ***/
 const InputSystem = (()=>{
   let move={x:0,z:0}, running=false, lookDelta={x:0,y:0};
   let pointerLocked=false;
@@ -455,14 +434,15 @@ const InputSystem = (()=>{
     'KeyW':'fw','KeyS':'bk','KeyA':'lt','KeyD':'rt',
     'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
     'ShiftLeft':'run','ShiftRight':'run',
-    'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2'
+    'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
+    'KeyE':'pickup', 'KeyG':'drop'
   };
 
   function recomputeMove(){
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
     move.z=f; move.x=r; running=keys.has('run');
-  } // keyboard → move vector
+  } // NOTE: translate keys to vec
 
   function onKey(e,down){
     const tag=keyMap[e.code];
@@ -473,8 +453,10 @@ const InputSystem = (()=>{
       const idx = parseInt(tag.replace('slot',''),10);
       if(idx>=0 && idx<3){ activeSlot=idx; rebuildBelt(); }
     }
+    if(tag==='pickup' && down) tryPickup();
+    if(tag==='drop' && down)   tryDrop();
     recomputeMove();
-  } // key handler
+  } // NOTE: keyboard
 
   function bindPointerLock(){
     document.addEventListener('click', ()=>{ if(document.pointerLockElement!==canvas) canvas.requestPointerLock?.(); }, {capture:true});
@@ -484,7 +466,7 @@ const InputSystem = (()=>{
       lookDelta.x += e.movementX||0;
       lookDelta.y += e.movementY||0;
     });
-  } // relative mouse look
+  } // NOTE: mouse look
 
   function bindTouchHalves(){
     const left=document.getElementById('touch-left'), right=document.getElementById('touch-right');
@@ -511,12 +493,8 @@ const InputSystem = (()=>{
           move.z = ny<0 ? 1 : (ny>0 ? -1 : 0);
           e.preventDefault();
         } else if(t.identifier===rightId){
-          if(lastRight){
-            lookDelta.x += (t.clientX-lastRight.x);
-            lookDelta.y += (t.clientY-lastRight.y);
-          }
-          lastRight={x:t.clientX,y:t.clientY};
-          e.preventDefault();
+          if(lastRight){ lookDelta.x += (t.clientX-lastRight.x); lookDelta.y += (t.clientY-lastRight.y); }
+          lastRight={x:t.clientX,y:t.clientY}; e.preventDefault();
         }
       }
     },{passive:false});
@@ -528,7 +506,37 @@ const InputSystem = (()=>{
       }
       e.preventDefault();
     },{passive:false});
-  } // twin touch zones
+  } // NOTE: two-thumb
+
+  function tryPickup(){
+    // ray from camera forward ~2m
+    const ray = camera.getForwardRay(2.2);
+    const hit = scene.pickWithRay(ray, m=>m && m.metadata?.itemId);
+    if(hit?.pickedMesh?.metadata?.itemId){
+      const id = hit.pickedMesh.metadata.itemId;
+      // put into belt if not present; otherwise replace active
+      if(!belt.includes(id)){
+        const empty = belt.findIndex(s=>!s);
+        if(empty>=0) belt[empty]=id; else belt[activeSlot]=id;
+        rebuildBelt();
+      }
+      hit.pickedMesh.dispose();
+      const i = WORLD_ITEMS.findIndex(x=>x===hit.pickedMesh); if(i>=0) WORLD_ITEMS.splice(i,1);
+      toast('Picked up '+itemById(id).name);
+    }
+  } // NOTE: pickup
+
+  function tryDrop(){
+    const it = activeItem(); if(!it) return;
+    // drop a small box at feet as placeholder mesh
+    const box = BABYLON.MeshBuilder.CreateBox("drop_"+it.id,{size:0.25},scene);
+    box.position = camera.position.add(new BABYLON.Vector3(0,-0.9,0)).add(camera.getForwardRay().direction.scale(0.6));
+    box.isPickable=true; box.checkCollisions=false;
+    box.metadata={ itemId: it.id };
+    const mat = new BABYLON.StandardMaterial("im_"+it.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2,0.4,0.5); box.material=mat;
+    WORLD_ITEMS.push(box);
+    toast('Dropped '+it.name);
+  } // NOTE: drop
 
   return {
     init(){
@@ -539,17 +547,16 @@ const InputSystem = (()=>{
     },
     snapshot(){
       const out={ moveVec:{...move}, running, lookDelta:{...lookDelta} };
-      lookDelta.x=0; lookDelta.y=0;
-      return out;
+      lookDelta.x=0; lookDelta.y=0; return out;
     }
   };
-})(); // input module
+})(); // NOTE: input module
 </script>
 
 <script>
-/*** =========================================
-    MOVEMENT, LOOK & STEP-UP
-    ========================================= ***/
+/*** ==========================================================
+    MOVEMENT & LOOK (with step-up)
+    ========================================================== ***/
 function handleMovement(input, dt){
   if(!camera) return;
   const speed = input.running ? player.speedRun : player.speedWalk;
@@ -560,7 +567,6 @@ function handleMovement(input, dt){
   if (desired.lengthSquared()>0){
     const v = desired.normalize().scale(speed*dt);
     const next = camera.position.add(v);
-    // step-up probe
     const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
     const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
     const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
@@ -570,23 +576,23 @@ function handleMovement(input, dt){
       else camera.position = next;
     } else camera.position = next;
   }
-} // free-walk + ledge step-up
+} // NOTE: ledge step-up
 
 function applyLook(lookDelta){
   if(!camera) return;
   const sens = 0.0026;
   camera.rotation.y += lookDelta.x * sens;
-  const invertY = 1; // up = up
+  const invertY = 1; // NOTE: up=up
   const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
   const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
   camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
-} // look control
+} // NOTE: mouse/touch look
 </script>
 
 <script>
-/*** =========================================
-    WEATHER RENDERING + MOON
-    ========================================= ***/
+/*** ==========================================================
+    WEATHER RENDERING + MOON (centered near house)
+    ========================================================== ***/
 let __rainTex = null;
 function makeRainTexture(){
   if(__rainTex) return __rainTex;
@@ -594,45 +600,47 @@ function makeRainTexture(){
   const dt = new BABYLON.DynamicTexture("rainTex",{width:w,height:h},scene,false);
   const ctx=dt.getContext(); ctx.clearRect(0,0,w,h);
   const g=ctx.createLinearGradient(0,0,0,h);
-  g.addColorStop(0.00,"rgba(255,255,255,0.00)");
-  g.addColorStop(0.25,"rgba(255,255,255,0.35)");
-  g.addColorStop(0.55,"rgba(255,255,255,0.80)");
-  g.addColorStop(0.85,"rgba(255,255,255,0.35)");
-  g.addColorStop(1.00,"rgba(255,255,255,0.00)");
+  g.addColorStop(0.0,"rgba(255,255,255,0.00)");
+  g.addColorStop(0.3,"rgba(255,255,255,0.40)");
+  g.addColorStop(0.6,"rgba(255,255,255,0.80)");
+  g.addColorStop(0.9,"rgba(255,255,255,0.40)");
+  g.addColorStop(1.0,"rgba(255,255,255,0.00)");
   ctx.fillStyle=g; ctx.fillRect(0,0,w,h); dt.update(false);
   __rainTex=dt; return dt;
-} // procedural streak texture
+} // NOTE: streak texture
 
 function ensureRain(){
   if(weather.rainPS) return weather.rainPS;
-  const ps=new BABYLON.ParticleSystem("rain", 3200, scene);
+  const ps=new BABYLON.ParticleSystem("rain", 2400, scene);
   ps.particleTexture=makeRainTexture();
-  ps.minEmitBox=new BABYLON.Vector3(-70, 36, -70);
-  ps.maxEmitBox=new BABYLON.Vector3( 70, 36,  70);
-  ps.minSize=0.9; ps.maxSize=1.3;
+  ps.emitter = camera;                      // NOTE: follow player
+  ps.minEmitBox=new BABYLON.Vector3(-12, 10, -12);
+  ps.maxEmitBox=new BABYLON.Vector3( 12, 10,  12); // NOTE: lower & tighter to map
+  ps.minSize=0.9; ps.maxSize=1.2;
   ps.minLifeTime=0.7; ps.maxLifeTime=1.0;
-  ps.direction1=new BABYLON.Vector3(-0.15,-1.5, 0.1);
-  ps.direction2=new BABYLON.Vector3( 0.15,-1.4,-0.1);
+  ps.direction1=new BABYLON.Vector3(-0.15,-1.7, 0.1);
+  ps.direction2=new BABYLON.Vector3( 0.15,-1.5,-0.1);
   ps.gravity=new BABYLON.Vector3(0,-9.8,0);
-  ps.emitRate=1400;
-  ps.updateSpeed=0.018;
+  ps.emitRate=1200;
+  ps.updateSpeed=0.02;
   ps.color1=new BABYLON.Color4(0.95,0.98,1.00,0.85);
   ps.color2=new BABYLON.Color4(0.95,0.98,1.00,0.55);
   ps.colorDead=new BABYLON.Color4(1,1,1,0.0);
   ps.disposeOnStop=false;
   weather.rainPS=ps; return ps;
-} // rain emitter
+} // NOTE: camera-centric rain
 
 function ensureSnow(){
   if(weather.snowPS) return weather.snowPS;
-  const ps=new BABYLON.ParticleSystem("snow", 2200, scene);
+  const ps=new BABYLON.ParticleSystem("snow", 1800, scene);
   const snowTex=new BABYLON.DynamicTexture("snowTex",{width:8,height:8},scene,false);
   const ctx=snowTex.getContext(); ctx.clearRect(0,0,8,8);
   ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(4,4,3,0,Math.PI*2); ctx.fill(); snowTex.update(false);
   ps.particleTexture=snowTex;
-  ps.minEmitBox=new BABYLON.Vector3(-60, 28, -60);
-  ps.maxEmitBox=new BABYLON.Vector3( 60, 28,  60);
-  ps.minSize=0.06; ps.maxSize=0.13;
+  ps.emitter = camera;
+  ps.minEmitBox=new BABYLON.Vector3(-10, 8, -10);
+  ps.maxEmitBox=new BABYLON.Vector3( 10, 8,  10);
+  ps.minSize=0.06; ps.maxSize=0.12;
   ps.minLifeTime=2.0; ps.maxLifeTime=3.2;
   ps.emitRate=900;
   ps.direction1=new BABYLON.Vector3(-0.12,-0.7, 0.08);
@@ -643,17 +651,21 @@ function ensureSnow(){
   ps.color2=new BABYLON.Color4(1,1,1,0.70);
   ps.disposeOnStop=false;
   weather.snowPS=ps; return ps;
-} // snow emitter
+} // NOTE: camera-centric snow
 
 function setWeather(state){
   weather.state=state;
   document.getElementById('hud-weather').textContent=state;
   WeatherAudio.set(state);
+
   if(weather.rainPS) weather.rainPS.stop();
   if(weather.snowPS) weather.snowPS.stop();
+
+  if(state==='Clear'){ /* none */ }
   if(state==='Snow'){ ensureSnow().start(); }
-  if(state==='Rain' || state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
-} // switch weather + audio
+  if(state==='Rain'){ ensureRain().start(); scheduleNextLightning(); }
+  if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
+} // NOTE: swap particle beds + audio
 
 async function loadMoon(){
   try{
@@ -665,22 +677,36 @@ async function loadMoon(){
       const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
       mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(1,1,1);
       moonMesh.material=mat;
-      moonMesh.position.copyFromFloats(0, 280, 320);
+      moonMesh.position.copyFromFloats(0, 120, 180); // NOTE: lower & closer so it’s visible over the house
       scene.onBeforeRenderObservable.add(()=>{
         const t=performance.now()*0.00002;
-        moonMesh.position.x=Math.cos(t)*320;
-        moonMesh.position.z=Math.sin(t)*320;
-        moonMesh.position.y=270+Math.sin(t*1.7)*8;
+        moonMesh.position.x=Math.cos(t)*180;
+        moonMesh.position.z=Math.sin(t)*180;
+        moonMesh.position.y=115+Math.sin(t*1.7)*6;
       });
     }
   }catch(e){ console.warn('Moon load failed', e); }
-} // load & animate moon
+} // NOTE: moon visible over map
 </script>
 
 <script>
-/*** =========================================
-    MAP LOADING + GLB VIEWER + MARKER TOOL
-    ========================================= ***/
+/*** ==========================================================
+    MAP LOAD + COLLISIONS + ROOM/EXTERIOR TESTS + MARKER TOOL
+    ========================================================== ***/
+function currentRoomName(){
+  if(!window.MAP_DEF) return player.inside?'House':'Exterior';
+  const pos = {x:camera.position.x, z:camera.position.z};
+  for(const r of MAP_DEF.rooms){
+    if(pointInPolyXZ(pos, r.poly)) return r.name;
+  }
+  return player.inside ? 'House' : 'Exterior';
+} // NOTE: label used in HUD and sanity
+
+function isInsideExterior(p){
+  if(!window.MAP_DEF) return true;
+  return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
+} // NOTE: confine ghost spawn & lights
+
 async function loadMap(){
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
@@ -690,174 +716,174 @@ async function loadMap(){
     console.warn('Map load failed; building ground fallback', e);
     const g=BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true;
   }
-} // load map GLB
+} // NOTE: GLB + collisions
 
-// File picker import
-document.getElementById('file-input').addEventListener('change', async (e)=>{
-  const f=e.target.files?.[0]; if(!f) return;
-  try{
-    const blobUrl = URL.createObjectURL(f);
-    await BABYLON.SceneLoader.AppendAsync("", blobUrl, scene);
-    toast('Imported '+f.name, 1600);
-  }catch(err){ console.error(err); toast('Import failed'); }
-}); // append GLB into scene
-
-// Drag-drop import
-window.addEventListener('dragover', e=>{ e.preventDefault(); });
-window.addEventListener('drop', async (e)=>{
-  e.preventDefault();
-  if(!e.dataTransfer?.files?.length) return;
-  const f=e.dataTransfer.files[0];
-  try{
-    const url=URL.createObjectURL(f);
-    await BABYLON.SceneLoader.AppendAsync("", url, scene);
-    toast('Imported '+f.name, 1600);
-  }catch(err){ console.error(err); toast('Import failed'); }
-}); // drop to import
-
-// --- Marker Tool (left-add, right-remove, close loop) ---
+// --- Marker Tool: LMB add, RMB remove, auto-link, close loop on first point ---
 const MarkerTool = (()=>{
-  let enabled=false, interior=true, points=[];   // state
-  let mesh=null, mat=null;                       // renderables
-  let _scene=null, _camera=null;                 // bound scene/camera
-  const CLOSE_DIST=0.8;                          // world units to close polygon
-
-  function bind(scene, camera){
-    _scene=scene; _camera=camera;
-    // Pointer observable is valid *after* scene exists
-    _scene.onPointerObservable.add((pi)=>{
-      if(!enabled) return;
-      if(pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-      const evt = pi.event;
-      const isLeft  = (evt.button===0);
-      const isRight = (evt.button===2);
-
-      if(isLeft){
-        const p = pickGroundPoint();
-        if(!p) return;
-        // If close to first point and >= 2 points, close the loop by adding the first again
-        if(points.length>=2 && dist3(p, points[0])<=CLOSE_DIST){
-          addPoint(points[0]); // closes shape
-          redraw(true);
-        }else{
-          addPoint(p);
-        }
-      } else if(isRight){
-        removeNearestAtPointer();
-      }
-    });
-  } // attach listeners to a real scene (prevents undefined errors)
+  let enabled=false, interior=true, points=[]; // NOTE: room marking helper
+  let mesh=null, mat=null, firstSprite=null, sprites=[];
 
   function toggle(){ enabled=!enabled; toast('Markers '+(enabled?'enabled':'disabled')); }
-  function toggleFill(){ interior=!interior; document.getElementById('btn-marker-fill').textContent = 'Fill: ' + (interior?'Interior':'Exterior'); redraw(false); }
-  function clear(){ points.length=0; redraw(false); }
+  function toggleFill(){ interior=!interior; document.getElementById('btn-marker-fill').textContent = 'Fill: ' + (interior?'Interior':'Exterior'); redraw(); }
+  function clear(){ points.length=0; sprites.forEach(s=>s.dispose()); sprites=[]; if(mesh){ mesh.dispose(); mesh=null; } if(firstSprite){firstSprite.dispose(); firstSprite=null;} }
 
-  function addPoint(p){ points.push({x:p.x,y:p.y,z:p.z}); redraw(false); } // add vertex
-
-  function removeNearestAtPointer(){
-    const p = pickGroundPoint(); if(!p || points.length===0) return;
-    let best=-1, bd=1e9;
-    for(let i=0;i<points.length;i++){ const d=dist3(p, points[i]); if(d<bd){ bd=d; best=i; } }
-    if(best>=0){ points.splice(best,1); redraw(false); }
-  } // remove closest vertex to cursor
-
-  function pickGroundPoint(){
-    const ray = _scene.createPickingRay(_scene.pointerX, _scene.pointerY, BABYLON.Matrix.Identity(), _camera);
-    const hit = _scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  function pointerToGround(){
+    const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
+    const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
     return hit?.pickedPoint ? hit.pickedPoint.clone() : null;
-  } // screen → world point
+  }
 
-  function dist3(a,b){ const dx=a.x-b.x, dy=(a.y||0)-(b.y||0), dz=a.z-b.z; return Math.sqrt(dx*dx+dy*dy+dz*dz); } // euclidean
-
-  function redraw(closed){
+  function redraw(){
     if(mesh){ mesh.dispose(); mesh=null; }
-    if(points.length<2) return;
-
-    // Build a thin polygonal line (and filled area if 3+)
+    if(points.length<3) return;
     const path2D = points.map(p=> new BABYLON.Vector2(p.x, p.z));
-    const y = (points[0].y||0) + 0.05;
+    const tri = BABYLON.PolygonMeshBuilder.BuildFromPoints("poly", path2D, scene);
+    mesh = tri || BABYLON.MeshBuilder.CreatePolygon("poly",{shape: path2D, depth:0.02}, scene);
+    if(!mat){ mat=new BABYLON.StandardMaterial("polyMat",scene); mat.alpha=0.35; }
+    mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
+    mesh.material=mat; mesh.position.y = (camera.position.y-1.6)+0.05;
+  }
 
-    // outline as ribbon
-    const path3D = points.map(p=> new BABYLON.Vector3(p.x, y, p.z));
-    const ribbon = BABYLON.MeshBuilder.CreateLines("polyline",{points:path3D, updatable:false}, _scene);
-    ribbon.color = new BABYLON.Color3(0,1,1);
+  function ensureFirstSprite(p){
+    const ms = new BABYLON.SpriteManager("spr","",1,64,scene);
+    const s = new BABYLON.Sprite("first", ms); s.size=0.8; s.position= new BABYLON.Vector3(p.x, (camera.position.y-1.6)+0.02, p.z);
+    firstSprite = s;
+  }
 
-    // filled polygon if enough points
-    if(points.length>=3){
-      const builder = new BABYLON.PolygonMeshBuilder("polyFill", path2D, _scene, earcut);
-      const poly = builder.build(null, 0.02); // thin depth
-      if(!mat){
-        mat = new BABYLON.StandardMaterial("polyMat", _scene);
-        mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
-        mat.alpha = 0.35;
-      }else{
-        mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
+  scene.onPointerObservable.add((pi)=>{
+    if(!enabled) return;
+    if(pi.type===BABYLON.PointerEventTypes.POINTERDOWN){
+      const ev = pi.event;
+      const P = pointerToGround(); if(!P) return;
+
+      if(ev.button===2){ // RMB remove last
+        ev.preventDefault(); if(points.length){ points.pop(); const s=sprites.pop(); if(s) s.dispose(); redraw(); }
+        return;
       }
-      poly.material = mat;
-      poly.position.y = y;
-      mesh = poly;
-    } else {
-      mesh = ribbon; // only lines for 2 points
+
+      // LMB
+      if(points.length>0){
+        const first=points[0];
+        const d = Math.hypot(P.x-first.x, P.z-first.z);
+        if(d<0.8){ // close polygon
+          points.push({...first});
+          redraw(); toast('Polygon closed'); return;
+        }
+      }
+
+      points.push({x:P.x,y:P.y,z:P.z});
+      const ms = new BABYLON.SpriteManager("sprs","",1,64,scene);
+      const s = new BABYLON.Sprite("p", ms); s.size=0.5; s.position = new BABYLON.Vector3(P.x, P.y+0.02, P.z);
+      sprites.push(s);
+      if(points.length===1) ensureFirstSprite(P);
+      redraw();
     }
-  } // re-render polygon/lines
+  });
 
   function save(){
-    const data = { interior, closed: (points.length>=3 && dist3(points[0], points[points.length-1])<1e-3), points: points.map(p=>({x:p.x,y:p.y,z:p.z})) };
+    const data = { interior, points: points.map(p=>({x:p.x,y:p.y,z:p.z})) };
     const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'markers.json';
-    a.click();
-  } // download JSON
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='markers.json'; a.click();
+  }
 
-  return { bind, toggle, toggleFill, save, clear, get enabled(){ return enabled; } };
-})(); // marker tool
-
-// Toolbar wiring
+  return { toggle, toggleFill, save, clear };
+})();
 document.getElementById('btn-marker').onclick=()=>MarkerTool.toggle();
 document.getElementById('btn-marker-fill').onclick=()=>MarkerTool.toggleFill();
 document.getElementById('btn-marker-save').onclick=()=>MarkerTool.save();
 document.getElementById('btn-marker-clear').onclick=()=>MarkerTool.clear();
-
-// Prevent context menu while tool is active (so right-click works)
-window.addEventListener('contextmenu', (e)=>{ if(MarkerTool.enabled){ e.preventDefault(); } }, {capture:true});
-
-// Reload map shortcut
-document.getElementById('btn-load-map').onclick=async ()=>{ await loadMap(); toast('Map reloaded'); };
 </script>
 
 <script>
-/*** =========================================
-    GHOST SYSTEM (spawn, flicker, wander, hunt)
-    ========================================= ***/
-const ghost = {
-  mesh: null,
-  type: null,
-  roomCenter: null,
-  wanderRadius: 8,
-  canChangeRoom: true,
-  mode: 'idle', // idle | event | hunt
-  visible: false,
-  flicker: null,
-  smudgedUntil: 0,
-  nearPlayer: false
-}; // central ghost state
-
-function randomPointInHouse(){
-  if(!houseRoot){
-    return new BABYLON.Vector3(46.16, 1.7, -105.52);
+/*** ==========================================================
+    ITEMS: random spawns + ghost toss
+    ========================================================== ***/
+function randomPointInRoomPoly(poly){
+  // simple rejection sampling inside room polygon
+  const xs=poly.map(p=>p.x), zs=poly.map(p=>p.z);
+  const minx=Math.min(...xs), maxx=Math.max(...xs), minz=Math.min(...zs), maxz=Math.max(...zs);
+  for(let tries=0; tries<80; tries++){
+    const x=minx+(maxx-minx)*Math.random();
+    const z=minz+(maxz-minz)*Math.random();
+    if(pointInPolyXZ({x,z}, poly)){
+      // project to ground
+      const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 12, z), new BABYLON.Vector3(0,-1,0), 40);
+      const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+      const y = hit?.pickedPoint ? hit.pickedPoint.y+0.05 : 1.7;
+      return new BABYLON.Vector3(x,y,z);
+    }
   }
-  const bb = houseRoot.getHierarchyBoundingVectors(true);
-  const x = BABYLON.Scalar.Lerp(bb.min.x+3, bb.max.x-3, Math.random());
-  const z = BABYLON.Scalar.Lerp(bb.min.z+3, bb.max.z-3, Math.random());
-  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, (bb.max.y||10)+4, z), new BABYLON.Vector3(0,-1,0), 40);
-  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
-  const y = hit?.pickedPoint ? hit.pickedPoint.y + 0.05 : 1.7;
-  return new BABYLON.Vector3(x,y,z);
-} // plausible floor point
+  return new BABYLON.Vector3(poly[0].x, 1.7, poly[0].z);
+} // NOTE: uniform-ish in polygon bbox
 
+function spawnWorldItems(){
+  // pick a subset and drop around selected rooms (skip Van)
+  const rooms = (MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
+  if(rooms.length===0) return;
+  const count = Math.min(ITEM_TYPES.length, 6);
+  for(let i=0;i<count;i++){
+    const type = ITEM_TYPES[i];
+    const room = rooms[(Math.random()*rooms.length)|0];
+    const pos = randomPointInRoomPoly(room.poly);
+    const mesh = BABYLON.MeshBuilder.CreateBox("item_"+type.id,{size:0.25},scene);
+    const mat = new BABYLON.StandardMaterial("im_"+type.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2+Math.random()*0.2,0.6,0.7);
+    mesh.material=mat; mesh.position=pos; mesh.isPickable=true; mesh.metadata={ itemId:type.id };
+    WORLD_ITEMS.push(mesh);
+  }
+} // NOTE: scatter items to pick up
+
+function ghostTossNearby(dt){
+  if(!ghost.mesh || ghost.mode==='idle') return;
+  // find nearest item within 3m and nudge it
+  let best=null, bd=99;
+  for(const m of WORLD_ITEMS){
+    const d = BABYLON.Vector3.Distance(m.position, ghost.mesh.position);
+    if(d<3 && d<bd){ best=m; bd=d; }
+  }
+  if(best && Math.random()<0.02){
+    // simple toss: arc forward from ghost
+    const dir = camera.position.subtract(ghost.mesh.position); dir.y=0; dir.normalize();
+    best.position.addInPlace(dir.scale(0.8)).addInPlace(new BABYLON.Vector3(0,0.6,0));
+  }
+} // NOTE: ghost poltergeist-ish shove
+</script>
+
+<script>
+/*** ==========================================================
+    EVIDENCE UI
+    ========================================================== ***/
+function openNotebook(){
+  const box=document.getElementById('notebook-modal');
+  const list=document.getElementById('evidence-list');
+  list.innerHTML='';
+  EVIDENCE.forEach(ev=>{
+    const row=document.createElement('div'); row.className='ev-row';
+    const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=found[ev];
+    cb.onchange=()=>{ found[ev]=cb.checked; updatePossible(); };
+    const lbl=document.createElement('span'); lbl.textContent=ev;
+    row.appendChild(cb); row.appendChild(lbl); list.appendChild(row);
+  });
+  updatePossible(); box.style.display='block';
+} // NOTE: build evidence panel
+
+function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; } // NOTE: hide notebook
+function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); } // NOTE: clear all
+
+function updatePossible(){
+  const result = GHOSTS.filter(g=>{
+    const ghostEv = new Set(g.ev); if (g.rules?.mimicOrbs) ghostEv.add('Orbs');
+    return Object.entries(found).every(([e,has])=>!has || ghostEv.has(e));
+  }).map(g=>g.name);
+  document.getElementById('possible-ghosts').textContent = 'Possible: ' + (result.length? result.join(', ') : 'None');
+} // NOTE: filter list
+</script>
+
+<script>
+/*** ==========================================================
+    GHOST (spawn inside, events, hunts, visibility)
+    ========================================================== ***/
 function makeFlickerController(mesh){
-  let t=0, on=false, next=0, solid=0.85;
+  let t=0,on=false,next=0,solid=0.85;
   return {
     setSolid(v){ solid=v; },
     reset(){ t=0; on=false; next=0; },
@@ -875,13 +901,15 @@ function makeFlickerController(mesh){
         setTimeout(()=>{ on=false; apply(0); }, onDur*1000);
         next += offDur;
       } else apply(on?solid:0);
-      function apply(a){
-        if(!mesh) return;
-        if(mesh.material && 'alpha' in mesh.material) mesh.material.alpha=a; else mesh.visibility=a;
-      }
+      function apply(a){ if(!mesh) return; if(mesh.material && 'alpha' in mesh.material) mesh.material.alpha=a; else mesh.visibility=a; }
     }
   };
-} // flicker profile
+} // NOTE: flicker designer
+
+function randomInsideExterior(){
+  const poly = MAP_DEF?.exterior || [{x:-10,z:-10},{x:10,z:-10},{x:10,z:10},{x:-10,z:10}];
+  return randomPointInRoomPoly(poly);
+} // NOTE: spawn inside house
 
 async function spawnGhost(){
   const profile = GHOSTS[(Math.random()*GHOSTS.length)|0];
@@ -900,7 +928,7 @@ async function spawnGhost(){
       const height=bb.max.y-bb.min.y; const s=1.9/Math.max(0.8,height||1);
       ghost.mesh.scaling.set(s,s,s);
     }
-  }catch(e){ /* fallback below */ }
+  }catch(e){ /* fallback */ }
 
   if(!ghost.mesh){
     const m=BABYLON.MeshBuilder.CreateBox("ghostFallback",{size:1.2},scene);
@@ -908,102 +936,211 @@ async function spawnGhost(){
     m.material=mat; m.isPickable=false; ghost.mesh=m;
   }
 
-  ghost.roomCenter = randomPointInHouse();
+  ghost.roomCenter = randomInsideExterior();
   ghost.mesh.position.copyFrom(ghost.roomCenter);
   ghost.visible=false;
-
   ghost.flicker = makeFlickerController(ghost.mesh);
   if(ghost.type==='Phantom') ghost.flicker.setSolid(0.45);
   if(ghost.type==='Oni')     ghost.flicker.setSolid(0.95);
-} // spawn ghost
+
+  ensureGhostAudio();
+  ghost.audio.singing.attachToMesh(ghost.mesh);
+} // NOTE: single ghost instance
 
 function wanderGhost(dt){
   if(!ghost.mesh) return;
   if(ghost.mode!=='idle' && ghost.mode!=='event') return;
   if(!ghost._dir || Math.random()<0.02){
     const ang=Math.random()*Math.PI*2;
-    const spd=0.28; ghost._dir = new BABYLON.Vector3(Math.cos(ang)*spd,0,Math.sin(ang)*spd);
+    const spd=0.28;
+    ghost._dir = new BABYLON.Vector3(Math.cos(ang)*spd,0,Math.sin(ang)*spd);
   }
   const step = ghost._dir.scale(dt);
-  const candidate = ghost.mesh.position.add(step);
-  const center = ghost.roomCenter;
-  if(candidate.subtract(center).length() <= ghost.wanderRadius) ghost.mesh.position = candidate;
-  else ghost._dir = null;
-} // constrained wander
+  const cand = ghost.mesh.position.add(step);
+  if(isInsideExterior(cand)) ghost.mesh.position = cand; else ghost._dir=null;
+} // NOTE: keep inside house
+
+function startEvent(){
+  ghost.mode='event';
+  ghost._eventLeft = 3 + Math.random()*2;
+  toast('You hear something...');
+} // NOTE: short scare window
 
 function ghostEventTick(dt){
-  if(!ghost._eventTimer){ ghost._eventTimer=0; ghost._nextEvent= 8+Math.random()*12; }
-  ghost._eventTimer += dt;
-  if(ghost.mode!=='hunt' && ghost._eventTimer>ghost._nextEvent){
-    ghost.mode='event';
-    ghost._eventLeft = 3.0 + Math.random()*1.5;
-    ghost._eventTimer=0; ghost._nextEvent=10+Math.random()*14;
+  ghost.eventTimer += dt;
+  if(ghost.mode!=='hunt' && ghost.eventTimer>ghost.nextEvent){
+    ghost.eventTimer=0; ghost.nextEvent=10+Math.random()*14;
+    // sanity-weighted chance
+    const chance = clamp((80-player.sanity)/120,0.05,0.7);
+    if(Math.random()<chance) startEvent();
   }
   if(ghost.mode==='event'){
     ghost._eventLeft -= dt;
     if(ghost._eventLeft<=0) ghost.mode='idle';
   }
-} // ambient events
+} // NOTE: events scheduled by sanity
+
+function startHunt(){
+  ghost.mode='hunt'; ghost._huntLeft = 8 + Math.random()*5;
+  document.getElementById('hud-hunt').textContent='Hunting';
+  toast('Hunt started!');
+  if(!ghost.audio.heartbeat.isPlaying) ghost.audio.heartbeat.play();
+  if(!ghost.audio.singing.isPlaying)   ghost.audio.singing.play();
+} // NOTE: begins hunt
+
+function stopHunt(reason){
+  ghost.mode='idle'; document.getElementById('hud-hunt').textContent='Calm';
+  toast('Hunt ended'+(reason?` (${reason})`:''));
+  if(ghost.audio.heartbeat.isPlaying) ghost.audio.heartbeat.stop();
+  if(ghost.audio.singing.isPlaying)   ghost.audio.singing.stop();
+} // NOTE: end hunt
 
 function huntTick(dt){
   if(!ghost._huntTimer){ ghost._huntTimer=0; ghost._nextHunt=50+Math.random()*40; }
   if(ghost.mode==='hunt'){
+    // smudge suppression
     if(performance.now() < (ghost.smudgedUntil||0)) return;
     const dir = camera.position.subtract(ghost.mesh.position); dir.y=0;
     const dist = dir.length();
     ghost.nearPlayer = dist<3.0;
     if(dist>0.02){
       dir.normalize();
-      const spd = (ghost.type==='Revenant' && player.sanity<50) ? 2.8 : 1.4;
+      const spd = (ghost.type==='Revenant' && player.sanity<50) ? 2.6 : 1.35;
       ghost.mesh.position.addInPlace(dir.scale(spd*dt));
     }
     ghost._huntLeft -= dt;
-    if(ghost._huntLeft<=0){ ghost.mode='idle'; document.getElementById('hud-hunt').textContent='Calm'; }
+    if(ghost._huntLeft<=0) stopHunt();
   } else {
     ghost._huntTimer += dt;
     if(ghost._huntTimer>ghost._nextHunt){
       ghost._huntTimer=0; ghost._nextHunt=55+Math.random()*45;
+      // sanity gate (lower sanity -> more hunts)
       if(player.sanity<65){ startHunt(); }
     }
   }
-} // hunt loop
-
-function startHunt(){
-  ghost.mode='hunt'; ghost._huntLeft = 8 + Math.random()*5;
-  document.getElementById('hud-hunt').textContent='Hunting';
-  toast('Hunt started!');
-} // begin hunt
-
-function ghostAbortHunt(reason){
-  ghost.mode='idle'; document.getElementById('hud-hunt').textContent='Calm';
-  toast('Hunt stopped by '+reason);
-} // stop hunt
+} // NOTE: hunt scheduler + chase
 
 function ghostVisibilityTick(dt){
   const profile = (ghost.type==='Phantom')?'phantom':(ghost.type==='Oni')?'oni':'default';
-  ghost.flicker?.tick(dt, ghost.mode, profile);
+  const mode = (ghost.mode==='event' || ghost.mode==='hunt') ? ghost.mode : 'idle';
+  ghost.flicker?.tick(dt, mode, profile);
   ghost.visible = (ghost.mesh.material?.alpha ?? ghost.mesh.visibility) > 0.05;
-} // flicker driver
+} // NOTE: only seen in events/hunts
+
+function ghostAbortHunt(reason){ stopHunt(reason); } // NOTE: alias for item hooks
 </script>
 
 <script>
-/*** =========================================
-    BOOT, WEATHER PICK & MAIN LOOP
-    ========================================= ***/
+/*** ==========================================================
+    SANITY: drains in dark/near ghost; recovers in light/van
+    ========================================================== ***/
+function sanityTick(dt){
+  // recompute inside + room
+  player.inside = isInsideExterior(camera.position);
+  const roomNow = currentRoomName();
+  if(roomNow!==player.room){ player.room = roomNow; document.getElementById('hud-room').textContent=roomNow; }
+
+  // compute lightLevel from held lights (only if inside)
+  const li = player.inside ? (
+    (held.light?.intensity||0)*0.7 +
+    (held.uvLight?.intensity||0)*0.5 +
+    (held.lighter?.intensity||0)*0.8
+  ) : 0;
+  player.lightLevel = clamp(li/2.5, 0, 1); // normalize ~0..1
+
+  // base rates
+  let drain = 0.004;                 // passive drain
+  let recover = 0;
+
+  // light helps
+  if(player.lightLevel>0.4) recover += 0.008 * (player.lightLevel-0.4);
+
+  // darkness hurts, more if weather ominous
+  if(player.lightLevel<0.25){
+    drain += (0.010 * (0.25-player.lightLevel));
+    if(weather.state==='Blood Moon') drain += 0.004;
+  }
+
+  // ghost proximity
+  if(ghost.mesh){
+    const d = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
+    if(d<6) drain += 0.016 * ((6-d)/6);
+  }
+
+  // events/hunt
+  if(ghost.mode==='event') drain += 0.010;
+  if(ghost.mode==='hunt')  drain += 0.020;
+
+  // van recovers
+  if(player.room==='Van') recover += 0.040;
+
+  // apply
+  player.sanity = clamp(player.sanity + (recover - drain)*dt*60, 0, 100);
+  document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
+} // NOTE: sanity model
+
+// --- audio gains vs distance ---
+function updateEventAudioGains(){
+  if(!ghost.audio.heartbeat || !ghost.audio.singing) return;
+  const d = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 99;
+  const near = clamp(1-(d/12), 0, 1); // 0..1
+  if(ghost.mode==='hunt'){
+    ghost.audio.heartbeat.setVolume(0.18 + 0.40*near);
+    ghost.audio.singing.setVolume(0.12 + 0.50*near);
+  }else if(ghost.mode==='event'){
+    ghost.audio.heartbeat.setVolume(0.10*near);
+    ghost.audio.singing.setVolume(0.20 + 0.30*near);
+    if(!ghost.audio.singing.isPlaying) ghost.audio.singing.play();
+  }else{
+    ghost.audio.heartbeat.setVolume(0);
+    ghost.audio.singing.setVolume(0);
+    if(ghost.audio.singing.isPlaying) ghost.audio.singing.stop();
+  }
+} // NOTE: distance-based loudness
+</script>
+
+<script>
+/*** ==========================================================
+    SIMPLE ITEM ACTIONS (tied to sanity/evidence)
+    ========================================================== ***/
+function takePhoto(){
+  const flash = document.createElement('div');
+  flash.style.cssText='position:fixed;inset:0;background:#fff;opacity:.8;pointer-events:none;z-index:12001;';
+  document.body.appendChild(flash);
+  setTimeout(()=>flash.style.opacity='0',40);
+  setTimeout(()=>flash.remove(),180);
+  if(ghost && ghost.visible) toast('Ghost captured!');
+} // NOTE: camera flash
+
+function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); } // NOTE: demo EMF
+function readTemp(){ toast('Temp: '+(player.room!=='Van' ? (ghost.visible?'-1°C':'5°C') : '18°C')); } // NOTE: colder in action
+function placeSalt(){ toast('Salt placed'); }
+function toggleDOTS(){ toast('DOTS toggled'); }
+function placeDOTS(){ toast('DOTS placed'); }
+function dropWritingBook(){ toast('Book dropped'); }
+function placeWritingBook(){ toast('Book placed'); }
+function useCrucifix(){ if(ghost?.mode==='hunt'){ ghostAbortHunt('Crucifix'); } else toast('Crucifix readied'); }
+function burnSmudge(){ if(ghost){ ghost.smudgedUntil = performance.now()+6000; toast('Smudge in effect (6s)'); } }
+</script>
+
+<script>
+/*** ==========================================================
+    BOOT + MAIN LOOP + START
+    ========================================================== ***/
 async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
   scene  = new BABYLON.Scene(engine);
   scene.collisionsEnabled = true;
   scene.gravity = new BABYLON.Vector3(0,-0.5,0);
 
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(46.16, 2.0, -105.52), scene);
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(MAP_DEF?.vanSpawn?.x||0, MAP_DEF?.vanSpawn?.y||2, MAP_DEF?.vanSpawn?.z||24), scene);
   camera.attachControl(canvas, true);
   camera.checkCollisions = true;
   camera.applyGravity = true;
   camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
   camera.minZ = 0.1; camera.inertia=0;
-  camera.inputs.removeByType("FreeCameraKeyboardMoveInput"); // we handle input
+  camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
   // Atmosphere
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
@@ -1013,14 +1150,11 @@ async function boot(){
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
 
-  await loadMap();   // load house GLB
-  await loadMoon();  // load moon GLB
-
-  // 🔹 Bind marker tool AFTER scene+camera exist (fixes onPointerObservable undefined)
-  MarkerTool.bind(scene, camera);
+  await loadMap();      // NOTE: GLB + collisions
+  await loadMoon();     // NOTE: sky prop
+  WeatherAudio.init(scene);
 
   // Weather pick AFTER scene exists
-  WeatherAudio.init(scene);
   const r=Math.random();
   const w = r<0.40?'Clear' : r<0.70?'Rain' : r<0.88?'Snow' : 'Blood Moon';
   setWeather(w);
@@ -1030,8 +1164,9 @@ async function boot(){
   InputSystem.init();
   canvas.focus();
 
-  // Ghost spawn
+  // Spawn ghost/items inside
   await spawnGhost();
+  spawnWorldItems();
 
   // Buttons
   document.getElementById('btn-use').onclick=useActiveItem;
@@ -1049,25 +1184,41 @@ async function boot(){
     handleMovement(input, dt);
     applyLook(input.lookDelta);
 
-    // attach held lights to camera
-    if(held.light){ held.light.position = camera.position.add(new BABYLON.Vector3(0,0.3,0)); held.light.setDirectionToTarget(camera.position.add(camera.getForwardRay().direction)); }
-    if(held.uvLight){ held.uvLight.position = camera.position.add(new BABYLON.Vector3(0,0.3,0)); held.uvLight.setDirectionToTarget(camera.position.add(camera.getForwardRay().direction)); }
+    // Attach held lights to camera + disable when outside
+    const camForward = camera.getForwardRay().direction;
+    if(held.light){
+      held.light.position = camera.position.add(new BABYLON.Vector3(0,0.3,0));
+      held.light.setDirectionToTarget(camera.position.add(camForward));
+      if(!player.inside) held.light.intensity=0;
+    }
+    if(held.uvLight){
+      held.uvLight.position = camera.position.add(new BABYLON.Vector3(0,0.3,0));
+      held.uvLight.setDirectionToTarget(camera.position.add(camForward));
+      if(!player.inside) held.uvLight.intensity=0;
+    }
+    if(held.lighter){
+      held.lighter.position = camera.position.add(new BABYLON.Vector3(0,0.2,0));
+      if(!player.inside) held.lighter.intensity=0;
+    }
 
-    // weather tick
+    // Weather: lightning pacing
     if(weather.state==='Rain' || weather.state==='Blood Moon'){
       weather.lightningTimer += dt;
       if(weather.lightningTimer > weather.nextStrike){ lightningFlash(); scheduleNextLightning(); }
-      if(weather.rainPS){ weather.rainPS.emitRate = 1400; }
     }
-    if(weather.snowPS){ weather.snowPS.emitRate = 900; }
 
-    // ghost AI
+    // Ghost
     ghostEventTick(dt);
     huntTick(dt);
     wanderGhost(dt);
     ghostVisibilityTick(dt);
+    ghostTossNearby(dt);
+    updateEventAudioGains();
 
-    // HUD XYZ (fixed)
+    // Sanity
+    sanityTick(dt);
+
+    // HUD XYZ
     const xyz=document.getElementById('hud-xyz'); xyz.style.display='block';
     document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
     document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
@@ -1076,11 +1227,13 @@ async function boot(){
 
   engine.runRenderLoop(()=>scene.render());
   window.addEventListener('resize', ()=>engine.resize());
-} // boot scene, bind systems, start loop
+} // NOTE: boot
+</script>
 
-/*** =========================================
-    LIGHTNING FLASH (quick white pop)
-    ========================================= ***/
+<script>
+/*** ==========================================================
+    LIGHTNING FLASH (screen pop)
+    ========================================================== ***/
 function lightningFlash(){
   const d=document.createElement('div');
   d.style.cssText='position:fixed;inset:0;background:#fff;opacity:.0;pointer-events:none;z-index:12000;transition:opacity 90ms ease-out;';
@@ -1088,22 +1241,22 @@ function lightningFlash(){
   requestAnimationFrame(()=>{ d.style.opacity='0.55'; });
   setTimeout(()=>{ d.style.opacity='0'; }, 110);
   setTimeout(()=>{ d.remove(); }, 260);
-} // transient overlay for lightning
+} // NOTE: used in rain/blood moon
+</script>
 
-/*** =========================================
+<script>
+/*** ==========================================================
     START FLOW (title → game)
-    ========================================= ***/
+    ========================================================== ***/
 let __started=false;
 async function safeStart(){
   if(__started) return;
   __started = true;
   document.getElementById('title-screen').style.display='none';
-  await boot(); // build scene & start
-
+  await boot();
   try{ canvas.focus(); }catch{}
   try{ BABYLON.Engine.audioEngine?.unlock?.(); }catch{}
-} // gesture entry
-
+}
 document.getElementById('start-button').addEventListener('click', ()=>safeStart());
 document.addEventListener('keydown', (e)=>{ if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(); } });
 </script>
