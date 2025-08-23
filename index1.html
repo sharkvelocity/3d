@@ -53,13 +53,42 @@
     #touch-left { left:0; }
     #touch-right{ right:0; }
 
-    /* Notebook */
-    #notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#0ff; display:none; z-index:12000; padding:18px; overflow:auto; }
-    #notebook-modal h2{ margin:0 0 8px 0; }
+    /* Notebook (paper style) */
+    #notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#cfefff; display:none; z-index:12000; padding:4vh 0; overflow:auto; }
+    .nb-wrap{ width: min(920px, 92vw); margin: 0 auto; position:relative; }
+    .nb-page{
+      background: repeating-linear-gradient(#101820, #101820 28px, #0b2a2a 29px);
+      border-radius: 12px;
+      padding: 18px 20px 22px 24px;
+      border: 2px solid #0a9;
+      box-shadow: 0 10px 32px rgba(0, 255, 255, 0.12), inset 0 0 0 1px rgba(0,255,255,0.15);
+      min-height: 68vh;
+    }
+    /* Corner brackets */
+    .nb-wrap::before, .nb-wrap::after, .nb-page::before, .nb-page::after{
+      content: ""; position:absolute; width:28px; height:28px; border:2px solid #0a9;
+    }
+    .nb-wrap::before{ left:-6px; top:-6px; border-right:none; border-bottom:none; }
+    .nb-wrap::after{ right:-6px; top:-6px; border-left:none; border-bottom:none; }
+    .nb-page::before{ left:-6px; bottom:-6px; border-right:none; border-top:none; }
+    .nb-page::after{ right:-6px; bottom:-6px; border-left:none; border-top:none; }
+    /* Tabs */
+    #nb-tabs{ display:flex; gap:8px; margin: 0 0 10px 0; flex-wrap: wrap; }
+    .nb-tab{ background:#07161a; color:#aef; border:1px solid #0a8; border-bottom:none; border-radius:8px 8px 0 0; padding:8px 12px; cursor:pointer; }
+    .nb-tab.active{ background:#0a2a2f; color:#fff; box-shadow:0 2px 0 #0a2a2f; }
+    #nb-title{ margin: 0 0 8px 0; }
+    #nb-content{ background:#0a2a2f; border:1px solid #0a8; border-radius:8px; padding:12px; }
+    /* Evidence list */
     .ev-row{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
     .ev-row input{ transform:scale(1.2); }
-    #possible-ghosts{ margin-top:12px; font-weight:bold; color:#9ff; }
+    #possible-ghosts{ margin-top:12px; font-weight:bold; color:#aef; }
     #notebook-controls{ margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
+    /* Ghost cards */
+    .ghost-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:10px; }
+    .ghost-card{ border:1px solid #0a8; border-radius:10px; padding:10px; background:#06161a; }
+    .ghost-card h3{ margin:0 0 6px 0; font-size:16px; color:#e8ffff; }
+    .ev-tags{ display:flex; flex-wrap:wrap; gap:6px; }
+    .ev-tag{ font-size:11px; padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; background:#042126; }
 
     /* Marker tool */
     #marker-toolbar{ position:fixed; top:72px; right:12px; z-index:6500; display:flex; gap:8px; }
@@ -117,12 +146,23 @@
 
   <!-- Notebook -->
   <div id="notebook-modal">
-    <h2>Evidence</h2>
-    <div id="evidence-list"></div>
-    <div id="possible-ghosts">Possible: —</div>
-    <div id="notebook-controls">
-      <button class="hud-btn" onclick="closeNotebook()">Close</button>
-      <button class="hud-btn" onclick="resetEvidence()">Reset Evidence</button>
+    <div class="nb-wrap">
+      <div id="nb-tabs">
+        <button class="nb-tab" id="tab-evidence">Evidence</button>
+        <button class="nb-tab" id="tab-ghosts">Ghosts</button>
+        <button class="nb-tab" id="tab-guess">Guess</button>
+      </div>
+      <div class="nb-page">
+        <h2 id="nb-title">Evidence</h2>
+        <div id="nb-content">
+          <div id="evidence-list"></div>
+          <div id="possible-ghosts">Possible: —</div>
+          <div id="notebook-controls">
+            <button class="hud-btn" onclick="closeNotebook()">Close</button>
+            <button class="hud-btn" onclick="resetEvidence()">Reset Evidence</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -854,18 +894,108 @@ function ghostTossNearby(dt){
 /*** ==========================================================
     NOTEBOOK / EVIDENCE
     ========================================================== ***/
+
+/*** ==========================================================
+    NOTEBOOK TABS + GHOST INFO + GUESS
+    ========================================================== ***/
+let NB_ACTIVE = 'evidence';
+
+function switchTab(tab){
+  NB_ACTIVE = tab;
+  document.getElementById('nb-title').textContent =
+      tab==='evidence' ? 'Evidence' : tab==='ghosts' ? 'Ghosts' : 'Guess the Ghost';
+  // tab buttons
+  ['evidence','ghosts','guess'].forEach(id=>{
+    const btn=document.getElementById('tab-'+id);
+    if(btn) btn.classList.toggle('active', id===tab);
+  });
+  renderNotebookTab();
+}
+
+function renderNotebookTab(){
+  const content = document.getElementById('nb-content'); if(!content) return;
+  if(NB_ACTIVE==='evidence'){
+    content.innerHTML = `
+      <div id="evidence-list"></div>
+      <div id="possible-ghosts">Possible: —</div>
+      <div id="notebook-controls">
+        <button class="hud-btn" onclick="closeNotebook()">Close</button>
+        <button class="hud-btn" onclick="resetEvidence()">Reset Evidence</button>
+      </div>`;
+    // rebuild evidence check list
+    const list=document.getElementById('evidence-list');
+    EVIDENCE.forEach(ev=>{
+      const row=document.createElement('div'); row.className='ev-row';
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=found[ev];
+      cb.onchange=()=>{ found[ev]=cb.checked; updatePossible(); };
+      const lbl=document.createElement('span'); lbl.textContent=ev;
+      row.appendChild(cb); row.appendChild(lbl); list.appendChild(row);
+    });
+    updatePossible();
+  } else if(NB_ACTIVE==='ghosts'){
+    content.innerHTML = `<div class="ghost-grid" id="ghost-grid"></div>
+    <div id="notebook-controls">
+      <button class="hud-btn" onclick="closeNotebook()">Close</button>
+    </div>`;
+    const grid=document.getElementById('ghost-grid');
+    GHOSTS.forEach(g=>{
+      const card=document.createElement('div'); card.className='ghost-card';
+      card.innerHTML = `<h3>${g.name}</h3>
+        <div class="ev-tags">${g.ev.map(e=>`<span class="ev-tag">${e}</span>`).join('')}</div>
+        ${g.rules?.mimicOrbs?'<div style="margin-top:6px;font-size:12px;color:#ffec9a;">Note: Mimic can show false Orbs.</div>':''}
+        ${g.rules?.wander||g.rules?.roomChange!==undefined ?
+           `<div style="margin-top:6px;font-size:12px;color:#aef;">Rules: ${[
+              g.rules?.wander?`Wander ${g.rules.wander}m`:null,
+              g.rules?.roomChange===false?'No room change':(g.rules?.roomChange===true?'Can change rooms':null)
+            ].filter(Boolean).join(' • ')}</div>`:''}`;
+      grid.appendChild(card);
+    });
+  } else { // guess
+    const names = GHOSTS.map(g=>g.name);
+    content.innerHTML = `
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <label for="guessSel">Pick a ghost:</label>
+        <select id="guessSel" class="hud-btn" style="padding:6px 8px;">${names.map(n=>`<option>${n}</option>`).join('')}</select>
+        <button class="hud-btn" id="btnSetGuess">Set Guess</button>
+      </div>
+      <div id="guessDetails" style="margin-top:10px;"></div>
+      <div id="notebook-controls" style="margin-top:14px;">
+        <button class="hud-btn" onclick="closeNotebook()">Close</button>
+      </div>`;
+    const sel=document.getElementById('guessSel');
+    const det=document.getElementById('guessDetails');
+    function updateDetails(){
+      const g = GHOSTS.find(x=>x.name===sel.value);
+      if(!g){ det.innerHTML=''; return; }
+      det.innerHTML = `<div class="ghost-card">
+        <h3>${g.name}</h3>
+        <div class="ev-tags">${g.ev.map(e=>`<span class="ev-tag">${e}</span>`).join('')}</div>
+        ${g.rules?.mimicOrbs?'<div style="margin-top:6px;font-size:12px;color:#ffec9a;">Note: Mimic can show false Orbs.</div>':''}
+      </div>`;
+    }
+    sel.onchange=updateDetails; updateDetails();
+    document.getElementById('btnSetGuess').onclick=()=>{
+      toast('You guessed: '+sel.value);
+    };
+  }
+}
+
+const __bindTabsOnce = ()=>{
+  const e=document.getElementById('tab-evidence');
+  const g=document.getElementById('tab-ghosts');
+  const s=document.getElementById('tab-guess');
+  if(e&&g&&s){
+    e.onclick=()=>switchTab('evidence');
+    g.onclick=()=>switchTab('ghosts');
+    s.onclick=()=>switchTab('guess');
+  }
+}
+
 function openNotebook(){
   const box=document.getElementById('notebook-modal');
-  const list=document.getElementById('evidence-list');
-  list.innerHTML='';
-  EVIDENCE.forEach(ev=>{
-    const row=document.createElement('div'); row.className='ev-row';
-    const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=found[ev];
-    cb.onchange=()=>{ found[ev]=cb.checked; updatePossible(); };
-    const lbl=document.createElement('span'); lbl.textContent=ev;
-    row.appendChild(cb); row.appendChild(lbl); list.appendChild(row);
-  });
-  updatePossible(); box.style.display='block';
+  box.style.display='block';
+  __bindTabsOnce();
+  switchTab(NB_ACTIVE); // render current tab
 }
 function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
 function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); }
@@ -874,7 +1004,8 @@ function updatePossible(){
     const ghostEv = new Set(g.ev); if (g.rules?.mimicOrbs) ghostEv.add('Orbs');
     return Object.entries(found).every(([e,has])=>!has || ghostEv.has(e));
   }).map(g=>g.name);
-  document.getElementById('possible-ghosts').textContent = 'Possible: ' + (result.length? result.join(', ') : 'None');
+  const el=document.getElementById('possible-ghosts');
+  if(el) el.textContent = 'Possible: ' + (result.length? result.join(', ') : 'None');
 }
 </script>
 
