@@ -91,8 +91,18 @@
       background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff;
       z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
+
+<script>
+(function(){
+  const dbg = document.getElementById('debug-status');
+  function show(msg){ if(!dbg) return; dbg.style.display='block'; dbg.textContent = msg; }
+  window.__dbg = { show };
+})();
+</script>
+
 </head>
 <body>
+  <div id="debug-status" style="position:fixed;left:8px;top:8px;background:rgba(0,0,0,.55);color:#0f0;font:12px monospace;padding:6px 8px;border:1px solid #063;z-index:65000;display:none;"></div>
   <!-- LOADING OVERLAY (hidden until Start) -->
   <div id="loading-box" aria-live="polite">
     <img src="logo.png" alt="Logo" id="loading-logo">
@@ -160,6 +170,7 @@
 
   <!-- Toast -->
   <div id="toast"></div>
+<div id="fp-tip" style="position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:rgba(0,0,0,.6);border:1px solid #066;color:#0ff;padding:6px 10px;border-radius:10px;font:12px monospace;z-index:65001;display:none">Click the canvas, then use WASD + Shift. Press B to toggle body.</div>
 
 <script>
 /*** ==========================================================
@@ -173,7 +184,7 @@ const rng = Math.random;
 
 // --- Player state ---
 const player = {
-  speedWalk: 1.35,
+  speedWalk: 1.8,
   speedRun: 3.0,
   sanity: 100,
   room: 'Van',
@@ -286,7 +297,7 @@ const Loader = (() => {
   async function run(){
     // Loader is shown by safeStart(), not here.
     for(const step of queue){
-      label(step.label);
+      label(step.label); try{__dbg.show(step.label);}catch(_){}
       draw();
       try{
         if (typeof step.run === 'function') {
@@ -891,18 +902,22 @@ const PlayerRig = (()=>{
   }
 
   function update() {
+    try{ if(root) PlayerRig.__root = root; }catch(_){}
+
     if (!loaded || !camera || !root) return;
     const fwd = camera.getForwardRay().direction.clone(); fwd.y = 0; fwd.normalize();
     const yaw = Math.atan2(fwd.z, fwd.x);
     const bodyPos = camera.position
       .add(fwd.scale(CONFIG.bodyForward))
       .add(new BABYLON.Vector3(0, -CONFIG.bodyYOffset, 0));
+    // keep the body always enabled/disabled based on toggle
+    try{ root.setEnabled(__showBody); }catch(_){ }
     root.position.copyFrom(bodyPos);
     root.rotation.y = yaw;
     if (!scaleApplied) try { root.scaling = root.scaling || new BABYLON.Vector3(1,1,1); } catch(_){}
   }
 
-  return { load, update };
+  return { load, update, __root: null };
 })();
 </script>
 
@@ -1209,7 +1224,8 @@ async function prepareEngineScene(){
   scene.collisionsEnabled = true;
   scene.gravity = new BABYLON.Vector3(0,-0.9,0);
 
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, 24), scene);
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 1.7, 4), scene);
+  camera.fov = 1.1;
   camera.attachControl(canvas, true);
   camera.checkCollisions = true;
   camera.applyGravity = true;
@@ -1251,6 +1267,10 @@ async function pickAndSetWeather(){
 }
 
 function postInitUI(){
+  try{ document.getElementById('hud-bar').style.display='flex'; }catch(_){}
+  try{ document.getElementById('hud-xyz').style.display='block'; }catch(_){}
+  __dbg.show('UI wired; press WASD + Shift, click canvas to lock pointer.');
+
   Footsteps.init(scene);
   GhostAudio.ensure(scene);
 
@@ -1365,6 +1385,7 @@ async function safeStart(e){
   await Loader.run();
 
   try{canvas.focus(); } catch(_){}
+  try{ document.getElementById('fp-tip').style.display='block'; setTimeout(()=>document.getElementById('fp-tip').style.display='none', 4500); }catch(_){}
   try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(_){}
 
   // Auto-request pointer lock once everything is ready (desktop convenience)
@@ -1379,6 +1400,14 @@ document.addEventListener('keydown', (e)=>{
 }, {passive:false});
 
 window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === "function") loadManifest(); });
+
+
+// Quick toggle for visible body in first person
+let __showBody = true;
+document.addEventListener('keydown', (e)=>{
+  const k=(e.key||'').toLowerCase();
+  if(k==='b'){ __showBody = !__showBody; toast('Body: ' + (__showBody?'ON':'OFF')); try{ if(PlayerRig.__root) PlayerRig.__root.setEnabled(__showBody); }catch(_){ } }
+}, {passive:false});
 
 // Simple buttons wiring for notebook close/reset
 function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
@@ -1399,6 +1428,33 @@ function getSpawnForMap(file){
   }
   return new BABYLON.Vector3(0, 1.8, 0);
 }
+</script>
+
+
+<script>
+/*** ==========================================================
+    FAILSAFE ENGINE KICKER
+    ========================================================== ***/
+window.addEventListener('load', ()=>{
+  setTimeout(()=>{
+    if(!window.engine || !window.scene || !window.camera){
+      try{
+        const canvas = document.getElementById('renderCanvas');
+        engine = new BABYLON.Engine(canvas, true);
+        scene  = new BABYLON.Scene(engine);
+        camera = new BABYLON.UniversalCamera("cam", new BABYLON.Vector3(0,2,6), scene);
+        camera.attachControl(canvas, true);
+        camera.checkCollisions = true; camera.applyGravity = true;
+        const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+        engine.runRenderLoop(()=>scene.render());
+        __dbg.show('Failsafe scene active (basic).');
+      }catch(e){
+        console.warn('Failsafe init failed', e);
+        __dbg.show('Failsafe failed: '+(e && e.message || e));
+      }
+    }
+  }, 1200);
+});
 </script>
 
 </body>
