@@ -3,13 +3,14 @@
   window.MAP_DEF = {
     title: "Furnished House",
     file:  "furnished_house.glb",
-    scale: 0.10,
+    // Reduced overall model scale so the house is not gigantic
+    scale: 0.020,
     rotationY: 0,
+    // If your GLB's origin is not the front door, you can nudge it here:
     offset: { x: 0, y: 0, z: 0 },
-    // Updated spawn point
-    spawn:    { x: -334.56, y: 3.76, z: -377.44 },
-    vanSpawn: { x: 0, y: 1.8, z: 0 },
-    // Treat this polygon as exterior by default (adjust later if needed)
+    // Spawn adjusted for the new scale (was -541.99, 2.00, -609.52 at scale 0.1)
+    spawn:    { x: -108.40, y: 0.40, z: -121.90 },
+    vanSpawn: { x: -108.40, y: 0.40, z: -121.90 },
     exteriorMode: "exterior",
     exterior: [
       {x:-15,z:-20}, {x:15,z:-20}, {x:15,z:20}, {x:-15,z:20}
