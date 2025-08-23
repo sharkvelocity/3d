@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — index1 (Shadows + Moonlight)</title>
+  <title>PhasmaPhoney — Full Build (Loader + Map-Def Spawn)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -18,6 +18,16 @@
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
     #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
+
+    /* Loading overlay */
+    #loading-box{
+      position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:14px; background:rgba(0,0,0,0.92); z-index:100000; color:#9ef; font-family:monospace;
+    }
+    #loading-logo{ width:240px; max-width:60vw; opacity:0.95; filter:drop-shadow(0 0 10px #0ff4); }
+    #loading-text{ font-size:16px; letter-spacing:.3px; text-align:center; max-width:70vw; }
+    #loading-bar{ width:64vw; max-width:720px; height:14px; border:1px solid #066; border-radius:10px; background:#071017; overflow:hidden; }
+    #loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,#19f,#0ff); transition:width .15s ease; }
 
     /* Title */
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
@@ -72,6 +82,13 @@
   </style>
 </head>
 <body>
+  <!-- LOADING OVERLAY -->
+  <div id="loading-box" aria-live="polite">
+    <img src="logo.png" alt="Logo" id="loading-logo">
+    <div id="loading-text">Initializing…</div>
+    <div id="loading-bar"><div id="loading-fill" style="width:0%"></div></div>
+  </div>
+
   <!-- Title -->
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
@@ -151,7 +168,7 @@ const player = {
   room: 'Van',
   inside: false,
   stepUpMax: 0.45,
-  lightLevel: 0,      // 0..1
+  lightLevel: 0,
   nextSanityTick: 0
 };
 
@@ -191,7 +208,7 @@ let lighterOn = false;
 // --- Held lighting ---
 const held = { light:null, uvLight:null, lighter:null };
 
-// --- Ghost (minimal for file size) ---
+// --- Ghost (minimal) ---
 const ghost = {
   mesh: null,
   type: "Spirit",
@@ -229,6 +246,64 @@ function pointInPolyXZ(p, poly){
   return inside;
 }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+</script>
+
+<script>
+/*** ==========================================================
+    LOADER (progress + labels)
+    ========================================================== ***/
+const Loader = (() => {
+  const box  = () => document.getElementById('loading-box');
+  const text = () => document.getElementById('loading-text');
+  const fill = () => document.getElementById('loading-fill');
+
+  let totalWeight = 0;
+  let progressed  = 0;
+  let queue = [];
+
+  function show(){ if(box()) box().style.display='flex'; }
+  function hide(){ if(box()) box().style.display='none'; }
+  function label(s){ if(text()) text().textContent = s; }
+  function pct(){ return totalWeight ? Math.max(0, Math.min(100, (progressed/totalWeight)*100)) : 0; }
+  function draw(){ if(fill()) fill().style.width = pct().toFixed(1) + '%'; }
+
+  function addStep(label, fnOrPromise, weight=1){
+    queue.push({label, run: fnOrPromise, weight});
+    totalWeight += weight;
+  }
+
+  async function run(){
+    show(); draw();
+    for(const step of queue){
+      label(step.label);
+      draw();
+      try{
+        if (typeof step.run === 'function') {
+          const maybe = step.run();
+          if (maybe && typeof maybe.then === 'function') await maybe;
+        } else if (step.run && typeof step.run.then === 'function') {
+          await step.run;
+        }
+      } catch(e){
+        console.warn('Loader step failed:', step.label, e);
+        label(step.label + ' — failed, continuing…');
+        await new Promise(r=>setTimeout(r, 250));
+      }
+      progressed += step.weight;
+      draw();
+    }
+    label('Finalizing…');
+    progressed = totalWeight; draw();
+    await new Promise(r=>setTimeout(r, 150));
+    hide();
+  }
+
+  async function wrap(labelText, weight, fn){
+    addStep(labelText, async ()=>{ await fn(); }, weight);
+  }
+
+  return { addStep, run, wrap, show, hide, label, draw };
+})();
 </script>
 
 <script>
@@ -332,23 +407,18 @@ function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (l.intensity>0?
 function toggleUV(){ const u=ensureHeldUV(); u.intensity = (u.intensity>0?0:1.3); toast(u.intensity>0?'UV ON':'UV OFF'); }
 function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); }
 
-// ===== SALT System: place salt lines and disturb logic =====
-const SALT_LINES = []; // array of {mesh, a:Vector3, b:Vector3, disturbed:false}
-let saltCharges = 6; // basic total lines available
-
+// ===== SALT System =====
+const SALT_LINES = [];
+let saltCharges = 6;
 function _aimPointOnGround(maxDist=3.5){
   const origin = camera.position.clone();
   const dir = camera.getForwardRay().direction.clone();
   const ray = new BABYLON.Ray(origin, dir, maxDist);
   const pick = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
-  if(pick && pick.hit){
-    return pick.pickedPoint;
-  }
+  if(pick && pick.hit) return pick.pickedPoint;
   const ahead = origin.add(dir.scale(Math.min(maxDist, 3.5)));
-  ahead.y = 0.02;
-  return ahead;
+  ahead.y = 0.02; return ahead;
 }
-
 function placeSalt(){
   if(saltCharges<=0){ toast('Out of salt'); return; }
   const center = _aimPointOnGround(3.8);
@@ -369,7 +439,6 @@ function placeSalt(){
   try{ mesh.receiveShadows = true; if(sunShadows) sunShadows.addShadowCaster(mesh, true); if(moonShadows) moonShadows.addShadowCaster(mesh, true); }catch(e){}
   toast('Salt line placed ('+saltCharges+' left)');
 }
-
 function _pointToSegmentDistance(p, a, b){
   const ap = p.subtract(a);
   const ab = b.subtract(a);
@@ -383,7 +452,7 @@ function _pointToSegmentDistance(p, a, b){
 
 <script>
 /*** ==========================================================
-    UV FOOTPRINTS (1 minute lifetime)
+    UV FOOTPRINTS
     ========================================================== ***/
 function spawnUVFootprints(origin, count=2, step=0.35){
   for(let i=0;i<count;i++){
@@ -395,7 +464,7 @@ function spawnUVFootprints(origin, count=2, step=0.35){
     m.diffuseColor = new BABYLON.Color3(0.6,0.3,1.0);
     m.emissiveColor = new BABYLON.Color3(0.2,0.1,0.6);
     m.specularColor = new BABYLON.Color3(0,0,0);
-    m.alpha = 0.0; // fade in
+    m.alpha = 0.0;
     quad.material = m;
     let t=0; const fadeIn = scene.onBeforeRenderObservable.add(()=>{
       t += engine.getDeltaTime()/1000; m.alpha = Math.min(0.9, t*3);
@@ -480,27 +549,13 @@ const InputSystem = (()=>{
   let _tapSprint=false;
   let _analogScale=1.0;
 
-  // Keep comments OFF the same line as entries to avoid JSON-ish mistakes
   const keyMap = {
-    'KeyW':'fw',
-    'KeyS':'bk',
-    'KeyA':'lt',
-    'KeyD':'rt',
-    'ArrowUp':'fw',
-    'ArrowDown':'bk',
-    'ArrowLeft':'lt',
-    'ArrowRight':'rt',
-    'ShiftLeft':'run',
-    'ShiftRight':'run',
-    'Digit1':'slot0',
-    'Digit2':'slot1',
-    'Digit3':'slot2',
-    'KeyE':'pickup',
-    'KeyG':'drop',
-    'PageUp':'up',
-    'PageDown':'down',
-    'Space':'up',
-    'ControlLeft':'down',
+    'KeyW':'fw','KeyS':'bk','KeyA':'lt','KeyD':'rt',
+    'ArrowUp':'fw','ArrowDown':'bk','ArrowLeft':'lt','ArrowRight':'rt',
+    'ShiftLeft':'run','ShiftRight':'run',
+    'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
+    'KeyE':'pickup','KeyG':'drop',
+    'PageUp':'up','PageDown':'down','Space':'up','ControlLeft':'down',
     'KeyN':'noclip'
   };
 
@@ -508,13 +563,11 @@ const InputSystem = (()=>{
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
     const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0);
-    move.z=f; move.x=r; move.y=v;
-    running=keys.has('run') || _tapSprint;
+    move.z=f; move.x=r; move.y=v; running=keys.has('run') || _tapSprint;
   }
 
   function onKey(e,down){
-    const tag=keyMap[e.code];
-    if(!tag) return;
+    const tag=keyMap[e.code]; if(!tag) return;
     e.preventDefault();
     if(down) keys.add(tag); else keys.delete(tag);
 
@@ -524,7 +577,6 @@ const InputSystem = (()=>{
       camera.applyGravity = noclipNow ? false : true;
       toast(noclipNow ? 'Noclip: ON' : 'Noclip: OFF');
     }
-
     if(tag.startsWith('slot') && down){
       const idx = parseInt(tag.replace('slot',''),10);
       if(idx>=0 && idx<3){ activeSlot=idx; rebuildBelt(); }
@@ -724,7 +776,7 @@ const PlayerRig = (()=>{
 
 <script>
 /*** ==========================================================
-    MOVEMENT + LOOK (GLOBAL)
+    MOVEMENT + LOOK
     ========================================================== ***/
 window.handleMovement = function(input, dt){
   if(!window.camera) return;
@@ -760,7 +812,6 @@ window.handleMovement = function(input, dt){
   } else {
     camera.position = next;
   }
-
   camera.applyGravity = prevGravity;
 };
 
@@ -768,7 +819,6 @@ window.applyLook = function(lookDelta){
   if(!window.camera) return;
   const sens = 0.0028;
   camera.rotation.y += lookDelta.x * sens;
-
   const minPitch = -Math.PI/2 + 0.15;
   const maxPitch =  Math.PI/2 - 0.15;
   const next = (camera.rotation.x || 0) + (lookDelta.y * sens * 0.85);
@@ -812,8 +862,6 @@ function markShadowable(meshes){
     });
   }catch(e){}
 }
-
-/*** Weather driver (make sure this exists BEFORE boot) ***/
 function setWeather(state){
   weather.state=state;
   const hw=document.getElementById('hud-weather'); if(hw) hw.textContent=state;
@@ -850,7 +898,7 @@ function setWeather(state){
 /*** Static, visible moon (no orbit) ***/
 async function loadMoon(){
   const MOON_DIAM = 18;
-  const MOON_POS   = new BABYLON.Vector3(0, 120, 160); // high in the sky
+  const MOON_POS   = new BABYLON.Vector3(0, 120, 160);
 
   function makeMat(){
     const mat = new BABYLON.StandardMaterial("moonMatVisible", scene);
@@ -858,7 +906,7 @@ async function loadMoon(){
     mat.emissiveColor   = new BABYLON.Color3(1,1,1);
     mat.diffuseColor    = new BABYLON.Color3(1,1,1);
     mat.specularColor   = new BABYLON.Color3(0,0,0);
-    mat.backFaceCulling = false; // double-sided so it never disappears
+    mat.backFaceCulling = false;
     return mat;
   }
 
@@ -874,7 +922,7 @@ async function loadMoon(){
   moonMesh.isPickable = false;
   moonMesh.applyFog   = false;
   moonMesh.renderingGroupId = 2;
-  moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // always face camera
+  moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
   moonMesh.scaling.setAll(MOON_DIAM);
   moonMesh.position.copyFrom(MOON_POS);
 
@@ -888,7 +936,7 @@ async function loadMoon(){
 
 <script>
 /*** ==========================================================
-    MAP SELECTOR + DYNAMIC DEF LOADER
+    MAP SELECTOR + MAP DEF LOADER (with smart fallbacks)
     ========================================================== ***/
 let MAP_FILES = [];
 let CURRENT_MAP = null;
@@ -903,7 +951,7 @@ async function loadManifest() {
     console.warn("maps.json missing or invalid; using fallback.", e);
     MAP_FILES = [
       { file:"Abandoned_House.glb", title:"Abandoned House", def:"Abandoned_House.js" },
-      { file:"furnished_house.glb", title:"Furnished House" }
+      { file:"furnished_house.glb", title:"Furnished House", def:"furnished_house.config.js" }
     ];
   }
   populateMapSelector();
@@ -932,29 +980,58 @@ function loadScriptOnce(src){
     document.head.appendChild(s);
   });
 }
+
+/* Try explicit def, then inferred names, then exact fallbacks you asked for */
 async function loadMatchingMapDef(mapFile, explicitDef){
-  const base = (explicitDef || mapFile.replace(/\.[^.]+$/,'') + ".js");
-  const path = `./assets/models/map/${base}`;
-  const ok = await loadScriptOnce(path);
-  if(!ok){ window.MAP_DEF = undefined; }
+  const baseNoExt = (mapFile||'').replace(/\.[^.]+$/,'');
+  const candidates = [];
+
+  if (explicitDef) candidates.push(explicitDef);
+
+  // Inferred
+  candidates.push(baseNoExt + ".js");
+  candidates.push(baseNoExt + ".config.js");
+
+  // Special-case exact names requested
+  const low = (mapFile||'').toLowerCase();
+  if (low.includes('abandoned')) candidates.push("Abandoned_House.js");
+  if (low.includes('furnished')){
+    candidates.push("furnished_house.config.js");
+    candidates.push("fully_furnished.config.js"); // allow this alias if present
+  }
+
+  // Dedup while preserving order
+  const tried = new Set(), ordered = candidates.filter(c=>{ if(tried.has(c)) return false; tried.add(c); return true; });
+
+  let loadedAny = false;
+  for (const name of ordered){
+    const ok = await loadScriptOnce(`./assets/models/map/${name}`);
+    if (ok && window.MAP_DEF) { loadedAny = true; break; }
+  }
+  if (!loadedAny) {
+    console.warn("No map def loaded for", mapFile, "— spawn will use fallback.");
+    window.MAP_DEF = undefined;
+  }
 }
 
 window.loadSelectedMap = async function(){
   const map = (window.CURRENT_MAP = getSelectedMap());
   const mapFile = map?.file || "Abandoned_House.glb";
 
+  Loader.label('Loading map definition…');
   await loadMatchingMapDef(mapFile, map?.def);
 
+  Loader.label('Importing map meshes…');
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
-    try{
-      res.meshes.forEach(m=>{
+    res.meshes.forEach(m=>{
+      try{
         m.receiveShadows = true;
         if(sunShadows) sunShadows.addShadowCaster(m, true);
         if(moonShadows) moonShadows.addShadowCaster(m, true);
-      });
-    }catch(e){}
+      }catch(_){}
+    });
   } catch(e){
     console.warn('Map load failed; building ground fallback', e);
     const g=BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true; g.receiveShadows=true;
@@ -985,7 +1062,7 @@ function burnSmudge(){ toast('Smudge in effect (6s)'); }
 
 <script>
 /*** ==========================================================
-    BOOT + MAIN LOOP  (PATCHED)
+    BOOT VIA LOADER STEPS (reads spawn from MAP_DEF if available)
     ========================================================== ***/
 function currentRoomName(){
   if(!window.MAP_DEF) return player.inside?'House':'Exterior';
@@ -994,11 +1071,12 @@ function currentRoomName(){
   return player.inside ? 'House' : 'Exterior';
 }
 
-async function boot(){
+async function prepareEngineScene(){
+  if (window.engine && window.scene) return;
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
   scene  = new BABYLON.Scene(engine);
   scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0,-0.9,0); // gravity enabled
+  scene.gravity = new BABYLON.Vector3(0,-0.9,0);
 
   camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, 24), scene);
   camera.attachControl(canvas, true);
@@ -1011,44 +1089,39 @@ async function boot(){
 
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.35;
-
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
+}
 
-  setupSun();
-  setupMoon();
+function setupLightsPreMoon(){ setupSun(); setupMoon(); }
 
-  await loadMoon();
-  WeatherAudio.init(scene);
-
-  // Load player body so you can see arms/body in first person
-  await PlayerRig.load();
-
-  // Load selected map (and its .js def if present)
-  await loadSelectedMap();
-
-  // Spawn logic: prefer MAP_DEF.spawn if provided, else map-based default
-  try {
-    if (window.MAP_DEF && window.MAP_DEF.spawn) {
+async function applySpawn(){
+  try{
+    if (window.MAP_DEF?.spawn){
       const s = window.MAP_DEF.spawn;
-      camera.position = new BABYLON.Vector3(s.x||0, s.y||1.8, s.z||0);
-    } else {
-      const sel = getSelectedMap();
-      camera.position = getSpawnForMap(sel?.file || "");
+      camera.position = new BABYLON.Vector3(
+        Number.isFinite(s.x)?s.x:0,
+        Number.isFinite(s.y)?s.y:1.8,
+        Number.isFinite(s.z)?s.z:0
+      );
+      return;
     }
-  } catch(e){ console.warn("Spawn fallback", e); }
+  }catch(e){ console.warn('MAP_DEF spawn read failed', e); }
+  const sel = getSelectedMap();
+  camera.position = getSpawnForMap(sel?.file || "");
+}
 
-  // Random weather after world is ready
+async function pickAndSetWeather(){
   const r=Math.random();
   const w = r<0.30?'Sunset' : r<0.55?'Clear' : r<0.80?'Rain' : r<0.92?'Snow' : 'Blood Moon';
   setWeather(w);
+}
 
+function postInitUI(){
   rebuildBelt();
   InputSystem.init();
-  canvas.focus();
-  window.addEventListener('click', ()=>canvas.focus());
 
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
@@ -1059,11 +1132,9 @@ async function boot(){
 
     try{ disturbSaltAt(camera.position.clone()); }catch(e){}
 
-    // Placeholder: mark as inside so HUD shows; plug real room/exterior later
-    player.inside = true;
-
+    player.inside = true; // placeholder until room volumes wired
     document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
-    const fill = document.getElementById('sanity-fill'); fill.style.width = Math.round(player.sanity)+'%'; 
+    document.getElementById('sanity-fill').style.width = Math.round(player.sanity)+'%';
 
     const xyz=document.getElementById('hud-xyz'); xyz.style.display='block';
     document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
@@ -1071,6 +1142,15 @@ async function boot(){
     document.getElementById('hud-z').textContent = camera.position.z.toFixed(2);
   });
 
+  document.getElementById('btn-use').onclick = useActiveItem;
+  document.getElementById('btn-place').onclick = placeActiveItem;
+  document.getElementById('btn-toss').onclick = tossActiveItem;
+  document.getElementById('btn-lighter').onclick = toggleLighter;
+  document.getElementById('btn-notebook').onclick = ()=>document.getElementById('notebook-modal').style.display='block';
+  document.getElementById('btn-inspector').onclick = ()=>{ try{ scene.debugLayer.show({ embedMode:false }); }catch(e){ toast('Inspector not available'); } };
+}
+
+function startRenderLoop(){
   engine.runRenderLoop(()=>scene.render());
   window.addEventListener('resize', ()=>engine.resize());
 }
@@ -1092,51 +1172,61 @@ function lightningFlash(){
 
 <script>
 /*** ==========================================================
-    START FLOW (touch-friendly)
+    START FLOW (Loader-driven)
     ========================================================== ***/
 let __started=false;
-async function safeStart(){
-  if(__started) return;
-  __started = true;
-  try{CURRENT_MAP = getSelectedMap(); } catch(e){}
-  document.getElementById('title-screen').style.display='none';
-  await boot();
-  try{canvas.focus(); } catch(e){} try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(e){}
+
+async function safeStart(e){
+  e?.preventDefault?.();
+  if(__started) return; __started = true;
+
+  // Build the queue of steps we want to show
+  Loader.addStep('Loading maps manifest…',       ()=>loadManifest(),               3);
+  Loader.addStep('Preparing Babylon engine…',    ()=>prepareEngineScene(),         2);
+  Loader.addStep('Setting up sky lights…',       ()=>setupLightsPreMoon(),         1);
+  Loader.addStep('Loading sky / moon…',          ()=>loadMoon(),                   2);
+  Loader.addStep('Initializing audio engine…',   ()=>WeatherAudio.init(scene),     1);
+  Loader.addStep('Loading player model…',        ()=>PlayerRig.load(),             3);
+  Loader.addStep('Loading selected map…',        ()=>loadSelectedMap(),            5);
+  Loader.addStep('Positioning player spawn…',    ()=>applySpawn(),                 2);
+  Loader.addStep('Selecting starting weather…',  ()=>pickAndSetWeather(),          1);
+  Loader.addStep('Building shadows & flags…',    ()=>markShadowable(scene.meshes), 1);
+  Loader.addStep('Wiring input + UI…',           ()=>postInitUI(),                 1);
+  Loader.addStep('Starting render loop…',        ()=>startRenderLoop(),            1);
+
+  await Loader.run();
+
+  try{canvas.focus(); } catch(_){}
+  try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(_){}
 }
-function startNow(e){ e?.preventDefault?.(); safeStart(); }
-const startBtn = document.getElementById('start-button');
-if(startBtn){
-  startBtn.addEventListener('click',     startNow, {passive:false});
-  startBtn.addEventListener('pointerup', startNow, {passive:false});
-  startBtn.addEventListener('touchend',  startNow, {passive:false});
-  startBtn.addEventListener('touchstart', startNow, {passive:false});
-}
+
+document.getElementById('start-button')?.addEventListener('click', safeStart, {passive:false});
 document.addEventListener('keydown', (e)=>{
-  if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); startNow(e); }
+  if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(e); }
 }, {passive:false});
 
 window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === "function") loadManifest(); });
 
-// Simple buttons wiring
-document.getElementById('btn-use').onclick = useActiveItem;
-document.getElementById('btn-place').onclick = placeActiveItem;
-document.getElementById('btn-toss').onclick = tossActiveItem;
-document.getElementById('btn-lighter').onclick = toggleLighter;
-document.getElementById('btn-notebook').onclick = ()=>document.getElementById('notebook-modal').style.display='block';
-document.getElementById('btn-inspector').onclick = ()=>{ try{ scene.debugLayer.show({ embedMode:false }); }catch(e){ toast('Inspector not available'); } };
+// Simple buttons wiring for notebook close/reset
 function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
 function resetEvidence(){ toast('Evidence reset'); }
 </script>
 
 <script>
+/*** ==========================================================
+    SPAWN FALLBACKS (used only if no MAP_DEF.spawn)
+    ========================================================== ***/
 function getSpawnForMap(file){
   const f = (file||"").toLowerCase();
   if (f.includes("furnished")) {
-    // Fully Furnished House spawn
-    return new BABYLON.Vector3(-334.56, 3.76, -377.44);
+    // Furnished House default spawn (used only if config absent)
+    return new BABYLON.Vector3(0, 1.8, 0);
   }
-  // Default fallback spawn (safe exterior)
-  return new BABYLON.Vector3(44.91, 1.17, -104.00);
+  if (f.includes("abandoned")) {
+    // Abandoned House default spawn (used only if config absent)
+    return new BABYLON.Vector3(0, 1.8, 0);
+  }
+  return new BABYLON.Vector3(0, 1.8, 0);
 }
 </script>
 
