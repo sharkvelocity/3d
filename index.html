@@ -146,7 +146,8 @@ async function loadManifest(){
   }catch(e){}
   const sel = $('#map-select');
   if(sel){ sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join(''); sel.value='0'; }
-  try{ applyWeather(determineWeather()); }catch(e){}
+  try{ applyWeather(determineWeather());
+  try{ ensurePrecipitation(weather.state); }catch(e){} }catch(e){}
 }
 async function loadSelectedMap(){
   currentMapIdx = parseInt(document.getElementById('map-select')?.value||'0',10)||0;
@@ -235,7 +236,9 @@ function applyWeather(state){
   if(s==='clear'){
     scene.fogDensity = 0.0045;
     scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
-  } else if(s==='mist'){
+    try{ ensurePrecipitation(state); }catch(e){}
+}
+ else if(s==='mist'){
     scene.fogDensity = 0.010;
     scene.fogColor = new BABYLON.Color3(0.05,0.08,0.10);
   } else if(s==='fog' || s==='foggy'){
@@ -250,6 +253,67 @@ function applyWeather(state){
   } else {
     scene.fogDensity = 0.0065;
     scene.fogColor = new BABYLON.Color3(0.03,0.05,0.07);
+  }
+}
+
+// ===== Precipitation (Snow/Rain) =====
+let precipPS=null, precipEmitter=null, precipType='none', precipBaseRate=0;
+
+function disposePrecip(){
+  try{ precipPS?.stop(); }catch(e){}
+  try{ precipPS?.dispose?.(); }catch(e){}
+  precipPS=null; precipEmitter?.dispose?.(); precipEmitter=null; precipType='none'; precipBaseRate=0;
+}
+
+function createSnow(){
+  precipEmitter = new BABYLON.TransformNode("precipEmitter", scene);
+  const tex = new BABYLON.DynamicTexture("snowFlake", {width:32, height:32}, scene, false);
+  const ctx = tex.getContext();
+  ctx.clearRect(0,0,32,32);
+  const g = ctx.createRadialGradient(16,16,2,16,16,14);
+  g.addColorStop(0,"rgba(255,255,255,0.95)");
+  g.addColorStop(0.6,"rgba(255,255,255,0.5)");
+  g.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(16,16,14,0,Math.PI*2); ctx.fill(); tex.update();
+
+  if (BABYLON.GPUParticleSystem && BABYLON.GPUParticleSystem.IsSupported){
+    precipPS = new BABYLON.GPUParticleSystem("snow", {capacity: 5000}, scene);
+  } else {
+    precipPS = new BABYLON.ParticleSystem("snow", 5000, scene);
+  }
+  precipPS.particleTexture = tex;
+  precipPS.emitter = precipEmitter;
+  precipPS.minEmitBox = new BABYLON.Vector3(-10, 6, -10);
+  precipPS.maxEmitBox = new BABYLON.Vector3( 10, 9,  10);
+  precipPS.direction1 = new BABYLON.Vector3(-0.1, -1.0, 0.1);
+  precipPS.direction2 = new BABYLON.Vector3( 0.1, -1.0,-0.1);
+  precipPS.gravity = new BABYLON.Vector3(0, -0.15, 0);
+  precipPS.minLifeTime = 4.0; precipPS.maxLifeTime = 7.0;
+  precipPS.minSize = 0.08; precipPS.maxSize = 0.18;
+  precipPS.emitRate = precipBaseRate = 1200;
+  precipPS.updateSpeed = 0.02;
+  precipPS.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  precipPS.start();
+  precipType = 'snow';
+}
+
+function ensurePrecipitation(state){
+  const s = (state||'').toLowerCase();
+  const want = (s==='snow') ? 'snow' : 'none';
+  if (want === precipType) return;
+  disposePrecip();
+  if (want === 'snow'){ createSnow(); }
+}
+
+function updatePrecipFollow(){
+  if(!precipEmitter) return;
+  // Keep the volume above and slightly ahead of the camera
+  const forward = camera.getForwardRay().direction;
+  const pos = camera.position.add(forward.scale(2)).add(new BABYLON.Vector3(0,7,0));
+  precipEmitter.position.copyFrom(pos);
+  if(precipPS){
+    const rate = player.inside ? 0 : precipBaseRate;
+    if (precipPS.emitRate !== rate) precipPS.emitRate = rate;
   }
 }
 </script>
@@ -634,6 +698,7 @@ async function boot(){
   await loadSelectedMap();
   await loadMoon();
   applyWeather(determineWeather());
+  try{ ensurePrecipitation(weather.state); }catch(e){}
   await spawnGhost();
   initMistParticles();
 
@@ -653,6 +718,7 @@ async function boot(){
     const uvOn = (uvLight && uvLight.intensity>0);
     for(const f of game.footprints){ if(!f.mesh || f.expireAt <= game.time){ if(f.mesh){ f.mesh.dispose(); f.mesh=null; } continue; } if(f.mesh.material) f.mesh.material.alpha = uvOn ? 0.85 : 0.0; }
     updateGhost(dt);
+    updatePrecipFollow();
     if(settings.thirdPerson){ ensureAvatar(); avatarRoot.setEnabled(true); const fwd=camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize(); const followDist=1.8; const ahead = camera.position.add(fwd.scale(followDist)); avatarRoot.position = new BABYLON.Vector3(ahead.x, camera.position.y-0.9, ahead.z); avatarRoot.rotation = new BABYLON.Vector3(0, camera.rotation.y, 0); }
     else { if(avatarRoot) avatarRoot.setEnabled(false); }
     if(!game.hunt.active){ if(game.time - game.lastEvent > game.nextEvent && player.inside && ghostWantsEvent()){ game.lastEvent = game.time; game.nextEvent = 6 + rng()*10; triggerEvent(); } if(chanceHunt()) startHunt(); }
