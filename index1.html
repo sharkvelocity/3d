@@ -337,32 +337,112 @@ function activeItem(){ return itemById(belt[activeSlot]); }
 // Held lights
 function ensureHeldFlash(){
   if(!held.light){
-    held.light = new BABYLON.SpotLight("handFlash", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/7, 14, scene);
-    held.light.intensity = 0; held.light.range = 18;
+    held.light = new BABYLON.SpotLight("handFlash", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/6, 12, scene);
+    held.light.intensity = 0; held.light.range = 28;
   }
   return held.light;
 }
 function ensureHeldUV(){
   if(!held.uvLight){
-    held.uvLight = new BABYLON.SpotLight("handUV", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/7, 12, scene);
-    held.uvLight.diffuse = new BABYLON.Color3(0.6,0.4,1.0);
-    held.uvLight.specular = new BABYLON.Color3(0.2,0.1,0.5);
-    held.uvLight.intensity = 0; held.uvLight.range = 14;
+    held.uvLight = new BABYLON.SpotLight("handUV", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/7.5, 10, scene);
+    held.uvLight.diffuse = new BABYLON.Color3(0.7,0.35,1.0);
+    held.uvLight.specular = new BABYLON.Color3(0.25,0.15,0.5);
+    held.uvLight.intensity = 0; held.uvLight.range = 18;
   }
   return held.uvLight;
 }
 function ensureHeldLighter(){
   if(!held.lighter){
-    held.lighter = new BABYLON.PointLight("handLighter", new BABYLON.Vector3(0,1.6,0), scene);
+    held.lighter = new BABYLON.PointLight("handLighter", new BABYLON.Vector3(0,1.6,0); attachInteriorLight(lighter), scene);
     held.lighter.intensity = 0; held.lighter.range = 6;
   }
   return held.lighter;
 }
-function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (player.inside ? (l.intensity>0?0:1.25) : 0); toast(l.intensity>0?'Flashlight ON':'Flashlight OFF'); }
-function toggleUV(){ const u=ensureHeldUV(); u.intensity = (player.inside ? (u.intensity>0?0:1.00) : 0); toast(u.intensity>0?'UV ON':'UV OFF'); }
-function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (player.inside && lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); }
+function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (l.intensity>0?0:2.2); toast(l.intensity>0?'Flashlight ON':'Flashlight OFF'); }
+function toggleUV(){ const u=ensureHeldUV(); u.intensity = (u.intensity>0?0:1.3); UV_ACTIVE = (u.intensity>0); _refreshUVFootprintMaterials(); toast(u.intensity>0?'UV ON':'UV OFF'); }
+function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); }
 
 // Item actions
+
+// ===== SALT System: place salt lines and disturb logic =====
+const SALT_LINES = []; // array of {mesh, a:Vector3, b:Vector3, disturbed:false}
+let saltCharges = 6; // basic total lines available (tune as desired)
+
+function _aimPointOnGround(maxDist=3.5){
+  // Ray from camera forward to ground (y=0 approx); fallback to ahead of player
+  const origin = camera.position.clone();
+  const dir = camera.getForwardRay().direction.clone();
+  const ray = new BABYLON.Ray(origin, dir, maxDist);
+  const pick = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  if(pick && pick.hit){
+    return pick.pickedPoint;
+  }
+  const ahead = origin.add(dir.scale(Math.min(maxDist, 3.5)));
+  ahead.y = 0.02;
+  return ahead;
+}
+
+function placeSalt(){
+  if(saltCharges<=0){ toast('Out of salt'); return; }
+  const center = _aimPointOnGround(3.8);
+  const yaw = Math.atan2(camera.getForwardRay().direction.z, camera.getForwardRay().direction.x);
+  const half = 0.6;
+  const a = new BABYLON.Vector3(center.x - Math.cos(yaw)*half, 0.01, center.z - Math.sin(yaw)*half);
+  const b = new BABYLON.Vector3(center.x + Math.cos(yaw)*half, 0.01, center.z + Math.sin(yaw)*half);
+  // Thin quad strip
+  const path = [a, b];
+  const mesh = BABYLON.MeshBuilder.CreateTube("salt_line", {path, radius:0.05, tessellation:4}, scene);
+  const mat = new BABYLON.StandardMaterial("salt_mat", scene);
+  mat.diffuseColor = new BABYLON.Color3(0.95,0.95,0.95);
+  mat.specularColor = new BABYLON.Color3(0.2,0.2,0.2);
+  mat.emissiveColor = new BABYLON.Color3(0.05,0.05,0.05);
+  mat.alpha = 0.9;
+  mesh.material = mat;
+  mesh.layerMask = LAYERS.INTERIOR | LAYERS.EXTERIOR; // visible anywhere on ground
+  SALT_LINES.push({mesh, a, b, disturbed:false, mat});
+  saltCharges--;
+  toast('Salt line placed ('+saltCharges+' left)');
+}
+
+function _pointToSegmentDistance(p, a, b){
+  const ap = p.subtract(a);
+  const ab = b.subtract(a);
+  const ab2 = ab.x*ab.x + ab.z*ab.z + 1e-9;
+  const t = Math.max(0, Math.min(1, (ap.x*ab.x + ap.z*ab.z) / ab2));
+  const proj = new BABYLON.Vector3(a.x + ab.x*t, p.y, a.z + ab.z*t);
+  const dx = p.x - proj.x, dz = p.z - proj.z;
+  return Math.sqrt(dx*dx + dz*dz);
+}
+
+function disturbSaltAt(pos){
+  // Wraith does NOT disturb salt
+  if((ghost?.type||'').toLowerCase()==='wraith') return;
+  for(const s of SALT_LINES){
+    if(s.disturbed) continue;
+    const d = _pointToSegmentDistance(pos, s.a, s.b);
+    if(d < 0.18){
+      s.disturbed = true;
+      // Particle puff
+      try{
+        const ps = new BABYLON.ParticleSystem("saltPuff", 400, scene);
+        ps.particleTexture = new BABYLON.Texture("./assets/textures/particles/smoke.png", scene);
+        ps.emitter = s.mesh;
+        ps.minSize = 0.02; ps.maxSize = 0.08;
+        ps.minEmitPower = 0.4; ps.maxEmitPower = 1.0;
+        ps.emitRate = 600; ps.targetStopDuration = 0.35;
+        ps.color1 = new BABYLON.Color4(1,1,1,0.8);
+        ps.color2 = new BABYLON.Color4(1,1,1,0.4);
+        ps.colorDead = new BABYLON.Color4(1,1,1,0);
+        ps.start();
+        setTimeout(()=>{ try{ ps.stop(); ps.dispose(); }catch{} }, 800);
+      }catch{}
+      // Visual change: dull + scatter tint
+      try{ s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; }catch{}
+      // Optional: spawn UV footprints right after disturbance
+      try{ spawnUVFootprints(pos, 2, 0.4); }catch{}
+    }
+  }
+}
 function useActiveItem(){
   const it = activeItem(); if(!it){ toast('Empty slot'); return; }
   switch(it.id){
@@ -550,7 +630,7 @@ function handleMovement(input, dt){
 }
 function applyLook(lookDelta){
   if(!camera) return;
-  const sens = 0.0028;
+  const sens = (OTS?.enabled ? 0.0022 : 0.0028);
   camera.rotation.y += lookDelta.x * sens;
   const invertY = 1;
   const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
@@ -647,7 +727,7 @@ function setWeather(state){
   if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
   updateEmitterToBounds();
 }
-async function loadMoon(){
+async async function loadMoon(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
     moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
@@ -657,6 +737,7 @@ async function loadMoon(){
       const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
       mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(1,1,1);
       moonMesh.material=mat;
+      moonMesh.layerMask = LAYERS.EXTERIOR;
       moonMesh.position.copyFromFloats(0, 120, 180);
       scene.onBeforeRenderObservable.add(()=>{
         const t=performance.now()*0.00002;
@@ -673,6 +754,13 @@ async function loadMoon(){
 /*** ==========================================================
     MAP SELECTOR + DYNAMIC DEF LOADER (via maps.json)
     ========================================================== ***/
+
+// === Render Layers for lighting separation ===
+const LAYERS = {
+  EXTERIOR: 0x10000000,  // yard, skybox, exterior props
+  INTERIOR: 0x20000000,  // house meshes (walls, floors, furniture)
+  ALL:      0x0fffffff
+};
 let MAP_FILES = [];
 let CURRENT_MAP = null;
 let WORLD_BOUNDS = null;
@@ -696,6 +784,12 @@ async function loadManifest() {
 function populateMapSelector(){
   const sel = document.getElementById('map-select'); if(!sel) return;
   if (!MAP_FILES.length) { sel.innerHTML = `<option value="-1">(no maps found)</option>`; return; }
+(function(){
+  const sel = document.getElementById('map-select');
+  if(sel){
+    sel.addEventListener('change', ()=>{ try{ window.CURRENT_MAP = getSelectedMap(); }catch{} });
+  }
+})();
   sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join('');
   sel.value = "0";
 }
@@ -742,12 +836,27 @@ window.loadSelectedMap = async function(){
   const map = (window.CURRENT_MAP = getSelectedMap());
   const mapFile = map?.file || "Abandoned_House.glb";
 
-  try { await loadMatchingMapDef(mapFile, map?.def); } catch{}
+  try { await loadMatchingMapDef(mapFile, map?.def); }
+
+// Light/Layer helpers
+function markExteriorMesh(mesh){
+  try { mesh.layerMask = (mesh.layerMask|0) | LAYERS.EXTERIOR; } catch{}
+}
+function attachInteriorLight(light){
+  try { light.includeOnlyWithLayerMask = LAYERS.INTERIOR; } catch{}
+  // NOTE: ShadowGen can be added per-light later if needed for wall occlusion.
+}
+ catch{}
 
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
-    res.meshes.forEach(m=>{ m.checkCollisions=true; m.isPickable=true; m.receiveShadows=true; });
+    \1
+    // Layer the house meshes as INTERIOR for light scoping
+    try {
+      res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
+    } catch(e) {}
+
     // WORLD_BOUNDS
     const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
     WORLD_BOUNDS = bb ? { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z } : null;
@@ -890,7 +999,7 @@ async function spawnGhost(){
     m.material=mat; m.isPickable=false; ghost.mesh=m;
   }
 
-  ghost.roomCenter = randomInsideExterior();
+  ghost.roomCenter = randomInsideRoom();
   ghost.mesh.position.copyFrom(ghost.roomCenter);
   ghost.visible=false;
   ghost.flicker = makeFlickerController(ghost.mesh);
@@ -914,6 +1023,8 @@ function wanderGhost(dt){
   const step = ghost._dir.scale(dt);
   const cand = ghost.mesh.position.add(step);
   if(isInsideExterior(cand)) ghost.mesh.position = cand; else ghost._dir=null;
+}
+  try{ disturbSaltAt(ghost.mesh.position); }catch{}
 }
 function isInsideExterior(p){
   if(!window.MAP_DEF) return true;
@@ -967,7 +1078,7 @@ function huntTick(dt){
     ghost._huntTimer += dt;
     if(ghost._huntTimer>ghost._nextHunt){
       ghost._huntTimer=0; ghost._nextHunt=55+Math.random()*45;
-      if(player.sanity<65){ startHunt(); }
+      if (player.sanity < 65 && player.inside) { startHunt(); }
     }
   }
 }
@@ -985,7 +1096,7 @@ function ghostAbortHunt(reason){ stopHunt(reason); }
     SANITY & AUDIO GAINS
     ========================================================== ***/
 function sanityTick(dt){
-  player.inside = isInsideExterior(camera.position);
+  player.inside = isInsideHouse(camera.position);
   const roomNow = (player.inside ? (currentRoomName()||'House') : 'Exterior');
   if(roomNow!==player.room){ player.room = roomNow; document.getElementById('hud-room').textContent=roomNow; }
 
@@ -1089,10 +1200,8 @@ async function boot(){
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
-  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-  hemiLight.intensity = 0.06;
-
-  await loadSelectedMap();
+  \1hemiLight.includeOnlyWithLayerMask = LAYERS.EXTERIOR;
+await loadSelectedMap();
   await loadMoon();
   WeatherAudio.init(scene);
 
@@ -1154,7 +1263,7 @@ async function boot(){
     ghostEventTick(dt);
     huntTick(dt);
     wanderGhost(dt);
-    ghostVisibilityTick(dt);
+    ghostVisibilityTick(dt); try{ disturbSaltAt(ghost.mesh?.position||camera.position); }catch{};
     ghostTossNearby(dt);
     updateEventAudioGains();
 
@@ -1210,6 +1319,7 @@ if(startBtn){
   startBtn.addEventListener('click',     startNow, {passive:false});
   startBtn.addEventListener('pointerup', startNow, {passive:false});
   startBtn.addEventListener('touchend',  startNow, {passive:false});
+  startBtn.addEventListener('touchstart', startNow, {passive:false});
 }
 document.addEventListener('keydown', (e)=>{
   if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); startNow(e); }
