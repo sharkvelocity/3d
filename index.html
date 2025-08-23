@@ -94,7 +94,7 @@
       <select id="map-select"></select>
     </div>
     <button id="start-button">Start Investigation</button>
-    <div class="chip">` Fly • N Noclip • F9 Dev</div>
+    <div class="chip">` Fly • N Noclip • V 3rd-person • I InvertY • F9 Dev</div>
   </div>
 
   <!-- Notebook / Evidence -->
@@ -142,6 +142,9 @@
 const canvas = document.getElementById('renderCanvas');
 let engine, scene, camera, hemiLight, houseRoot, moonMesh;
 let sunLight=null, moonLight=null;
+
+let avatarRoot=null;
+const settings = { invertY:false, thirdPerson:false };
 
 const rng = Math.random;
 let flyMode = false; // persistent fly toggle
@@ -225,10 +228,50 @@ function setupMoon(){
   moonLight = new BABYLON.DirectionalLight("moon", new BABYLON.Vector3(0.2,-1,-0.1).normalize(), scene);
   moonLight.intensity = 0.35;
 }
+
 async function loadMoon(){
-  const MOON_DIAM = 28, MOON_POS = new BABYLON.Vector3(0,220,200);
-  function mat(){ const m=new BABYLON.StandardMaterial('moonMat',scene); m.disableLighting=true; m.emissiveColor=new BABYLON.Color3(1,1,1); m.backFaceCulling=false; return m; }
-  try{
+  const MOON_DIAM = 40;
+  const MOON_DIR = new BABYLON.Vector3(0.25, 0.85, -0.2).normalize(); // fixed sky azimuth/elevation
+  // Build a soft disc texture (simple moon look)
+  const texSize = 256;
+  const dt = new BABYLON.DynamicTexture("moonDynTex", {width:texSize, height:texSize}, scene, false);
+  const ctx = dt.getContext();
+  ctx.clearRect(0,0,texSize,texSize);
+  // base disc
+  const g = ctx.createRadialGradient(texSize/2, texSize/2, 4, texSize/2, texSize/2, texSize/2 - 2);
+  g.addColorStop(0.00, "#ffffff");
+  g.addColorStop(0.60, "#f2f2ff");
+  g.addColorStop(1.00, "#dcdcf0");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(texSize/2, texSize/2, texSize/2-2, 0, Math.PI*2); ctx.fill();
+  // a few faint "craters"
+  function crater(x,y,r,alpha){ ctx.fillStyle = "rgba(150,160,200,"+alpha+")"; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
+  crater(160, 90, 22, 0.20); crater(90,140, 28, 0.18); crater(120,110, 16, 0.16); crater(70,80,14,0.12);
+  dt.update();
+
+  // Mesh
+  moonMesh = BABYLON.MeshBuilder.CreateDisc("moon", {radius: MOON_DIAM*0.5, tessellation: 64}, scene);
+  moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+  const m = new BABYLON.StandardMaterial("moonMat", scene);
+  m.disableLighting = true;
+  m.emissiveTexture = dt;
+  m.emissiveColor = new BABYLON.Color3(1,1,1);
+  m.backFaceCulling = false;
+  moonMesh.material = m;
+  moonMesh.isPickable = false;
+  moonMesh.applyFog = false;
+  moonMesh.alwaysSelectAsActiveMesh = true;
+  moonMesh.renderingGroupId = 0;
+
+  // Keep it at an 'infinite' sky position relative to camera so it's always visible
+  const SKY_DIST = 800;
+  scene.onBeforeRenderObservable.add(()=>{
+    if (!camera || !moonMesh) return;
+    const base = camera.position.add(MOON_DIR.scale(SKY_DIST));
+    moonMesh.position.copyFrom(base);
+  });
+}
+try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync('', './assets/models/sky/', 'moon.glb', scene);
     moonMesh = r.meshes.find(m=>m.name && !m.parent) || r.meshes[0];
   }catch(e){ moonMesh = BABYLON.MeshBuilder.CreateDisc('moon',{radius:MOON_DIAM*0.5, tessellation:48}, scene); moonMesh.rotation.x = Math.PI/2; }
@@ -414,6 +457,27 @@ function renderBelt(){
     el.textContent = BELT[i]?.name || '—';
     el.classList.toggle('active', i===activeSlot);
   }
+}
+
+
+// --- Third-person avatar (simple body) ---
+function ensureAvatar(){
+  if(avatarRoot) return;
+  avatarRoot = new BABYLON.TransformNode("avatarRoot", scene);
+  // Body
+  const body = BABYLON.MeshBuilder.CreateCylinder("avatarBody",{height:1.6, diameter:0.48, tessellation:18}, scene);
+  body.position = new BABYLON.Vector3(0,0.8,0);
+  // Head
+  const head = BABYLON.MeshBuilder.CreateSphere("avatarHead",{diameter:0.36, segments:16}, scene);
+  head.position = new BABYLON.Vector3(0,1.68,0);
+  // Material
+  const mat = new BABYLON.StandardMaterial("avatarMat", scene);
+  mat.diffuseColor = new BABYLON.Color3(0.85,0.9,1);
+  mat.emissiveColor = new BABYLON.Color3(0.15,0.2,0.35);
+  body.material = mat; head.material = mat;
+  body.isPickable = false; head.isPickable=false;
+  body.parent = avatarRoot; head.parent = avatarRoot;
+  avatarRoot.setEnabled(false);
 }
 
 // Notebook/Lighter hotkeys
@@ -683,7 +747,7 @@ const InputSystem = (function(){
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
     'Backquote':'flyToggle','KeyN':'noclip',
-    'KeyE':'use','KeyQ':'place','KeyG':'toss','KeyL':'lighter',
+    'KeyE':'use','KeyQ':'place','KeyG':'toss','KeyL':'lighter','KeyV':'toggleThird','KeyI':'invertY',
     'Space':'up','ControlLeft':'down','PageUp':'up','PageDown':'down'
   };
 
@@ -699,7 +763,11 @@ const InputSystem = (function(){
     e.preventDefault();
     if(tag==='flyToggle' && down){ flyMode=!flyMode; if(camera){ camera.checkCollisions=!flyMode; camera.applyGravity=!flyMode; } toast('Fly: '+(flyMode?'ON':'OFF')); return; }
     if(tag==='noclip' && down){ const nc = !camera.checkCollisions; camera.checkCollisions=!nc; camera.applyGravity=!nc; toast('Noclip: '+(!nc?'OFF':'ON')); return; }
+    
     if(tag==='lighter' && down){ toggleLighter(); return; }
+    if(tag==='toggleThird' && down){ settings.thirdPerson = !settings.thirdPerson; if(avatarRoot){ avatarRoot.setEnabled(settings.thirdPerson); } toast('3rd person: '+(settings.thirdPerson?'ON':'OFF')); return; }
+    if(tag==='invertY' && down){ settings.invertY = !settings.invertY; toast('Invert Y: '+(settings.invertY?'ON':'OFF')); return; }
+
     if(down) keys.add(tag); else keys.delete(tag);
     recomputeMove();
 
@@ -728,8 +796,9 @@ const InputSystem = (function(){
 
 function applyLook(lookDelta){
   const sens=0.0028;
+  const invert = settings.invertY ? -1 : 1;
   camera.rotation.y += lookDelta.x * sens;
-  camera.rotation.x -= lookDelta.y * sens;
+  camera.rotation.x += lookDelta.y * sens * invert; // default: mouse up -> look up
   camera.rotation.x = Math.max(-Math.PI/2+0.02, Math.min(Math.PI/2-0.02, camera.rotation.x));
 }
 
@@ -900,6 +969,20 @@ async function boot(){
 
     // Ghost AI / visibility
     updateGhost(dt);
+
+    // 3rd person avatar follow
+    if(settings.thirdPerson){
+      ensureAvatar();
+      avatarRoot.setEnabled(true);
+      const fwd=camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
+      const followDist=1.8;
+      const ahead = camera.position.add(fwd.scale(followDist));
+      avatarRoot.position = new BABYLON.Vector3(ahead.x, camera.position.y-0.9, ahead.z);
+      avatarRoot.rotation = new BABYLON.Vector3(0, camera.rotation.y, 0);
+    } else {
+      if(avatarRoot) avatarRoot.setEnabled(false);
+    }
+
 
     // Random events (when not hunting)
     if(!game.hunt.active){
