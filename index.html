@@ -477,12 +477,9 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 </script>
 
 <script>
-/*** ==========================================================
-    INPUT (KBD/Touch) + PICKUP
-    ========================================================== ***/
 <script>
 /*** ==========================================================
-    INPUT (KBD/Touch) + PICKUP  — with PageUp/PageDown fly
+    INPUT (KBD/Touch) + PICKUP — with PageUp/PageDown fly
     ========================================================== ***/
 const InputSystem = (()=>{
 
@@ -605,46 +602,67 @@ const InputSystem = (()=>{
     isTouch: ()=>isTouchMode
   };
 })();
-</script>
 
-<script>
+/*** ==========================================================
+    MOVEMENT (with temporary gravity disable) + LOOK
+    ========================================================== ***/
 function handleMovement(input, dt){
   if(!camera) return;
 
   const baseWalk = player.speedWalk * (input.analog||1);
   const speed = input.running ? player.speedRun : baseWalk;
 
+  // move on XZ from camera yaw
   const fwd = camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
   const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
-
   const desired = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
+
+  // vertical intent from PageUp/PageDown
   const vert = input.moveVec.y || 0;
   const wantsFly = vert !== 0;
 
-  // Build the candidate next position
+  // if flying, pause gravity just for this frame
+  const prevGravity = camera.applyGravity;
+  if (wantsFly) camera.applyGravity = false;
+
   let next = camera.position.clone();
   if (desired.lengthSquared() > 0) next = next.add(desired.normalize().scale(speed * dt));
   if (wantsFly) next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
 
-  // If flying this frame, don't ground-snap; otherwise do normal snap
+  // ground snap only when not flying
   if (!wantsFly && desired.lengthSquared() > 0) {
     const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
     const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
     const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
     if(hit && hit.pickedPoint){
-      const deltaY = hit.pickedPoint.y + 1.7 - camera.position.y;
-      if(deltaY<=player.stepUpMax) camera.position = new BABYLON.Vector3(next.x, hit.pickedPoint.y+1.7, next.z);
-      else camera.position = next;
+      const y = hit.pickedPoint.y + 1.7;
+      const dy = y - camera.position.y;
+      camera.position = (dy<=player.stepUpMax) ? new BABYLON.Vector3(next.x, y, next.z) : next;
     } else {
       camera.position = next;
     }
   } else {
     camera.position = next;
   }
+
+  // restore gravity
+  camera.applyGravity = prevGravity;
+
+  // OPTIONAL noclip while flying:
+  // camera.checkCollisions = !wantsFly;
+}
+
+function applyLook(lookDelta){
+  if(!camera) return;
+  const sens = 0.0028;
+  camera.rotation.y += lookDelta.x * sens;
+
+  const minPitch = -Math.PI/2 + 0.15;
+  const maxPitch =  Math.PI/2 - 0.15;
+  const next = (camera.rotation.x || 0) + (lookDelta.y * sens * 0.85);
+  camera.rotation.x = Math.max(minPitch, Math.min(maxPitch, next));
 }
 </script>
-
-
 <script>
 /*** ==========================================================
     WEATHER, SUN, MOON + SHADOWS
