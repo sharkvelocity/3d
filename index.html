@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — index1 (FIXED)</title>
+  <title>PhasmaPhoney — index1 (FIXED + Sunset)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -280,7 +280,14 @@ const WeatherAudio = (()=>{
     if(!sceneRef) return;
     if(current===target) return;
 
-    const want={ clear:target==='Clear', rain:(target==='Rain'||target==='Blood Moon'), snow:target==='Snow', drone:target==='Blood Moon' };
+    // Treat "Sunset" like "Clear" for audio
+    const want={
+      clear:(target==='Clear'||target==='Sunset'),
+      rain:(target==='Rain'||target==='Blood Moon'),
+      snow:(target==='Snow'),
+      drone:(target==='Blood Moon')
+    };
+
     for(const k of Object.keys(tracks)){
       const snd = tracks[k];
       if(!snd) continue;
@@ -288,7 +295,7 @@ const WeatherAudio = (()=>{
                   (k==='rain' &&want.rain )?0.55:
                   (k==='snow' &&want.snow )?0.28:
                   (k==='drone'&&want.drone)?0.18:0.0;
-      if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){} } }
+      if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){}} }
       const start = snd.getVolume();
       let i=0, steps=18, stepMs=40;
       const id=setInterval(()=>{
@@ -472,11 +479,9 @@ function disturbSaltAt(pos){
         ps.colorDead = new BABYLON.Color4(1,1,1,0);
         ps.start();
         setTimeout(()=>{ try{ps.stop(); ps.dispose(); } catch(e){}}, 800);
-      } catch(e){} // FIX: add catch for the try above
-
-      try{ s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){} // footprints appear for ~1 minute
-      try{ spawnUVFootprints(pos, 2, 0.4); } catch(e){}
-    }
+      }
+try{s.mat.emissiveColor = new BABYLON.Color3(0.01,0.01,0.01); s.mat.alpha = 0.8; } catch(e){}// footprints appear for ~1 minute
+      try{spawnUVFootprints(pos, 2, 0.4); } catch(e){}}
   }
 }
 function useActiveItem(){
@@ -694,6 +699,8 @@ function springArmTick(dt){
     WEATHER & MOON
     ========================================================== ***/
 let __rainTex = null;
+let __sunsetDir = null; // NEW: warm low sun for Sunset
+
 function makeRainTexture(){
   if(__rainTex) return __rainTex;
   const w=2, h=32;
@@ -750,18 +757,62 @@ function ensureSnow(){
   ps.disposeOnStop=false;
   weather.snowPS=ps; return ps;
 }
+
+// NEW: warm dusk ambience helpers
+function ensureSunsetLight(){
+  if (__sunsetDir) return __sunsetDir;
+  __sunsetDir = new BABYLON.DirectionalLight("sunsetSun",
+    new BABYLON.Vector3(-0.35, -1.0, 0.25), scene);
+  __sunsetDir.position = new BABYLON.Vector3(40, 60, -80);
+  __sunsetDir.diffuse  = new BABYLON.Color3(1.00, 0.64, 0.35);
+  __sunsetDir.specular = new BABYLON.Color3(1.00, 0.60, 0.30);
+  __sunsetDir.intensity = 0.7;
+  __sunsetDir.includeOnlyWithLayerMask = LAYERS.EXTERIOR;
+  return __sunsetDir;
+}
+function removeSunsetLight(){
+  if (__sunsetDir){ try{ __sunsetDir.dispose(); }catch(e){} __sunsetDir=null; }
+}
+function applyDefaultAmbience(){
+  scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+  scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
+  scene.fogDensity = 0.0045;
+  if (hemiLight){
+    hemiLight.intensity = 0.6;
+    hemiLight.diffuse = new BABYLON.Color3(1,1,1);
+    hemiLight.groundColor = new BABYLON.Color3(0.2,0.2,0.25);
+  }
+  removeSunsetLight();
+}
+function applySunsetAmbience(){
+  scene.clearColor = new BABYLON.Color4(0.15,0.08,0.04,1);
+  scene.fogColor   = new BABYLON.Color3(0.20,0.12,0.08);
+  scene.fogDensity = 0.0035;
+  if (hemiLight){
+    hemiLight.intensity = 0.75;
+    hemiLight.diffuse = new BABYLON.Color3(1.00, 0.75, 0.50);
+    hemiLight.groundColor = new BABYLON.Color3(0.05,0.05,0.08);
+  }
+  ensureSunsetLight();
+}
+
 function setWeather(state){
   weather.state=state;
   document.getElementById('hud-weather').textContent=state;
   WeatherAudio.set(state);
+
   if(weather.rainPS) weather.rainPS.stop();
   if(weather.snowPS) weather.snowPS.stop();
-  if(state==='Clear'){ /* none */ }
-  if(state==='Snow'){ ensureSnow().start(); }
-  if(state==='Rain'){ ensureRain().start(); scheduleNextLightning(); }
-  if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
+
+  if(state==='Clear'){ applyDefaultAmbience(); }
+  if(state==='Sunset'){ applySunsetAmbience(); } // NEW
+  if(state==='Snow'){ applyDefaultAmbience(); ensureSnow().start(); }
+  if(state==='Rain'){ applyDefaultAmbience(); ensureRain().start(); scheduleNextLightning(); }
+  if(state==='Blood Moon'){ applyDefaultAmbience(); ensureRain().start(); scheduleNextLightning(); }
+
   updateEmitterToBounds();
 }
+
 async function loadMoon(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
@@ -886,11 +937,10 @@ window.loadSelectedMap = async function(){
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
     // Layer the house meshes as INTERIOR for light scoping
     try{res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
-    } catch(e){}
-    // Force-origin mode
+    } catch(e){}// Force-origin mode
     const FORCE_ORIGIN = true;
 
-    // Apply map transform if provided by MAP_DEF
+        // Apply map transform if provided by MAP_DEF
     try {
       const s = (window.MAP_DEF && (MAP_DEF.scale||MAP_DEF.scaling)) ? (MAP_DEF.scale||MAP_DEF.scaling) : null;
       if (s && houseRoot && houseRoot.scaling) { houseRoot.scaling.set(s, s, s); }
@@ -901,9 +951,7 @@ window.loadSelectedMap = async function(){
     } catch(e) { console.warn('Map transform apply failed', e); }
 
     // Force each GLB root to origin (0,0,0)
-    try{if (FORCE_ORIGIN && houseRoot && houseRoot.position) { houseRoot.position.set(0,0,0); } } catch(e){}
-
-    // WORLD_BOUNDS
+    try{if (FORCE_ORIGIN && houseRoot && houseRoot.position) { houseRoot.position.set(0,0,0); } } catch(e){}// WORLD_BOUNDS
     const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
     WORLD_BOUNDS = bb ? { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z } : null;
     updateEmitterToBounds();
@@ -1262,24 +1310,20 @@ async function boot(){
 
   await loadSelectedMap();
 
-  // === Spawn position (robust) =========================================
-  try { // FIX: wrap the whole spawn selection in a single try/catch
-    if (window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.vanSpawn)) {
-      const sp = MAP_DEF.spawn || MAP_DEF.vanSpawn;
-      camera.position = new BABYLON.Vector3(sp.x ?? 0, (sp.y ?? 1.8), sp.z ?? 0);
-    } else {
-    const sp = (window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.vanSpawn)) || {x:0,y:1.8,z:0};
-camera.position.set(sp.x, sp.y, sp.z);
-    }
-  } catch(e){ console.warn('Spawn apply failed', e); }
-  // =====================================================================
+  // Force player start at world origin for consistent authoring
+  try { camera.position = new BABYLON.Vector3(0, 1.8, 0); } catch(e){}
 
   await loadMoon();
   WeatherAudio.init(scene);
 
-  // Weather
+  // Weather: now includes "Sunset"
   const r=Math.random();
-  const w = r<0.40?'Clear' : r<0.70?'Rain' : r<0.88?'Snow' : 'Blood Moon';
+  const w =
+    r < 0.30 ? 'Clear'   :
+    r < 0.55 ? 'Sunset'  :
+    r < 0.80 ? 'Rain'    :
+    r < 0.94 ? 'Snow'    :
+               'Blood Moon';
   setWeather(w);
 
   // Items & inputs
@@ -1357,6 +1401,7 @@ camera.position.set(sp.x, sp.y, sp.z);
   window.addEventListener('resize', ()=>engine.resize());
 }
 </script>
+
 
 <script>
 /*** ==========================================================
@@ -1554,6 +1599,7 @@ window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === 
   })();
 })();
 </script>
+
 
 <script>
 // Visibility helper: camera sees both layers; add interior hemi if missing; frame by bounds
