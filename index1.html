@@ -16,8 +16,7 @@
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
   <!-- Map definition (exterior + rooms) MUST come before our game logic -->
-  <script src="./assets/models/map/Abandoned_House.js"></script>
-
+  
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
     #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
@@ -31,7 +30,7 @@
     /* HUD */
     #hud-xyz { position:fixed; top:10px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066;
       padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
-    #hud-top-left { position:fixed; top:10px; left:10px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; z-index:6000; display:flex; gap:12px; align-items:center; }
+    #hud-top { position:fixed; top:10px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 10px; z-index:6000; display:flex; gap:12px; align-items:center; border-radius:10px; }
     .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; }
 
     /* Belt */
@@ -97,6 +96,20 @@
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%);
       background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff;
       z-index:10001; display:none; max-width:70vw; text-align:center; }
+  
+    /* Sanity bar */
+    #sanity-wrap{ width:160px; height:8px; border:1px solid #066; border-radius:8px; margin-left:8px; overflow:hidden; background:rgba(0,20,20,0.55); }
+    #sanity-bar{ width:100%; height:100%; background:#00ffd5; box-shadow:0 0 8px rgba(0,255,213,0.45) inset; transition: width 0.35s ease, background-color 0.35s ease, box-shadow 0.35s ease; }
+    @keyframes sanityPulse { 0%{ box-shadow:0 0 6px rgba(255,80,80,0.25) inset; } 50%{ box-shadow:0 0 14px rgba(255,80,80,0.55) inset; } 100%{ box-shadow:0 0 6px rgba(255,80,80,0.25) inset; } }
+    .sanity-low{ animation: sanityPulse 0.9s ease-in-out infinite; }
+
+  
+    /* GLB Viewer Modal */
+    #viewer-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.92); color:#cfefff; display:none; z-index:14000; }
+    #viewer-ui{ position:absolute; top:14px; left:50%; transform:translateX(-50%); display:flex; gap:8px; flex-wrap:wrap; align-items:center; z-index:14010; }
+    #viewer-ui input[type="text"]{ background:#0a2a2f; border:1px solid #0a8; color:#aef; padding:6px 8px; border-radius:8px; min-width:320px; }
+    #viewer-canvas{ position:absolute; inset:0; }
+
   </style>
 </head>
 <body>
@@ -104,17 +117,24 @@
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
     <button id="start-button">Start Investigation</button>
+    <div style="display:flex; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+      <label for="map-select">Map:</label>
+      <select id="map-select" class="hud-btn" style="padding:6px 8px;">
+        <!-- options populated at runtime -->
+      </select>
+    </div>
+
   </div>
 
   <!-- Canvas -->
   <canvas id="renderCanvas" tabindex="0"></canvas>
 
   <!-- HUD -->
-  <div id="hud-top-left">
+  <div id="hud-top">
     <div class="chip">Weather: <span id="hud-weather">—</span></div>
     <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div>
     <div class="chip">Room: <span id="hud-room">Van</span></div>
-    <div class="chip">Sanity: <span id="hud-sanity">100%</span></div>
+    <div class="chip sanity-chip">Sanity: <span id="hud-sanity">100%</span><div id="sanity-wrap"><div id="sanity-bar"></div></div></div>
   </div>
   <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
 
@@ -129,6 +149,7 @@
     <button id="btn-lighter" class="hud-btn">Lighter</button>
     <button id="btn-notebook" class="hud-btn">Notebook</button>
     <button id="btn-inspector" class="hud-btn">Inspector</button>
+      <button id="btn-viewer" class="hud-btn">GLB Viewer</button>
   </div>
 
   <!-- Marker tool -->
@@ -163,6 +184,20 @@
         </div>
       </div>
     </div>
+  </div>
+
+
+  <!-- GLB Viewer -->
+  <div id="viewer-modal">
+    <div id="viewer-ui">
+      <input id="viewer-path" type="text" placeholder="./assets/models/items/exploration_objects.glb" />
+      <button id="viewer-load-path" class="hud-btn">Load Path</button>
+      <label class="hud-btn" style="cursor:pointer;">
+        Load File<input id="viewer-file" type="file" accept=".glb,.gltf,.zip,.obj" style="display:none;">
+      </label>
+      <button id="viewer-close" class="hud-btn">Close Viewer</button>
+    </div>
+    <canvas id="viewer-canvas"></canvas>
   </div>
 
   <!-- Toast -->
@@ -296,6 +331,172 @@ function pointInPolyXZ(p, poly){
   return inside;
 }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+function updateSanityUI(pct){
+  const bar = document.getElementById('sanity-bar');
+  if(!bar) return;
+  const p = Math.max(0, Math.min(100, pct));
+  bar.style.width = p + '%';
+  // color zones
+  if(p > 66){
+    bar.style.background = '#00ffd5';
+    bar.classList.remove('sanity-low');
+  } else if(p > 33){
+    bar.style.background = '#ffd166';
+    bar.classList.remove('sanity-low');
+  } else {
+    bar.style.background = '#ff4d4d';
+    bar.classList.add('sanity-low');
+  }
+}
+
+
+/*** ==========================================================
+    MAP SELECTOR + DYNAMIC DEF + VIEWER
+    ========================================================== ***/
+const MAP_FILES = [
+  { file:"Abandoned_House.glb", title:"Abandoned House", def:"Abandoned_House.js" },
+  { file:"furnished_house.glb", title:"Furnished House", def:"furnished_house.js" }
+];
+let CURRENT_MAP = null;
+let WORLD_BOUNDS = null; // fallback exterior bounds derived from mesh bbox
+
+function populateMapSelector(){
+  const sel = document.getElementById('map-select');
+  if(!sel) return;
+  sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title}</option>`).join('');
+  sel.value = "0";
+}
+populateMapSelector();
+
+function getSelectedMap(){
+  const sel = document.getElementById('map-select');
+  const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value||"0",10) || 0));
+  return MAP_FILES[idx];
+}
+
+function loadScriptOnce(src){
+  return new Promise((resolve)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = ()=>resolve(true);
+    s.onerror = ()=>resolve(false);
+    document.head.appendChild(s);
+  });
+}
+async function loadMatchingMapDef(mapFile){
+  // Try to load a matching .js def if present
+  const base = mapFile.replace(/\.[^.]+$/,''); // strip extension
+  const guess = `./assets/models/map/${base}.js`;
+  const ok = await loadScriptOnce(guess);
+  if(!ok){
+    // if we had Abandoned_House.js preloaded in old builds, clear it by nulling MAP_DEF
+    window.MAP_DEF = undefined;
+  }
+}
+
+/* Override loadMap to use CURRENT_MAP and compute WORLD_BOUNDS */
+const __orig_loadMap = loadMap;
+loadMap = async function(){
+  let mapFile = CURRENT_MAP?.file || "Abandoned_House.glb";
+  try{
+    await loadMatchingMapDef(mapFile);
+  }catch{}
+  try{
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
+    houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
+    res.meshes.forEach(m=>{ m.checkCollisions=true; m.isPickable=true; m.receiveShadows=true; });
+    // compute WORLD_BOUNDS
+    const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
+    if(bb){
+      WORLD_BOUNDS = { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z };
+    } else {
+      WORLD_BOUNDS = null;
+    }
+  }catch(e){
+    console.warn('Map load failed; building ground fallback', e);
+    const g=BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true;
+  }
+}
+
+/* Fallback helpers for exterior bounds */
+function getExteriorBounds(){
+  if(window.MAP_DEF?.exterior?.length){
+    const ext = MAP_DEF.exterior;
+    let minx=Infinity, maxx=-Infinity, minz=Infinity, maxz=-Infinity;
+    for(const p of ext){ if(p.x<minx) minx=p.x; if(p.x>maxx) maxx=p.x; if(p.z<minz) minz=p.z; if(p.z>maxz) maxz=p.z; }
+    return {minx,maxx,minz,maxz};
+  }
+  if(WORLD_BOUNDS) return WORLD_BOUNDS;
+  return {minx:-20,maxx:20,minz:-20,maxz:20};
+}
+
+/*** ---- GLB Viewer ---- ***/
+let viewerEngine=null, viewerScene=null, viewerCam=null;
+
+function openViewer(){
+  const modal = document.getElementById('viewer-modal');
+  modal.style.display='block';
+  if(!viewerEngine){
+    const canvas = document.getElementById('viewer-canvas');
+    viewerEngine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+    viewerScene = new BABYLON.Scene(viewerEngine);
+    viewerScene.clearColor = new BABYLON.Color4(0.02,0.03,0.05,1);
+    viewerCam = new BABYLON.ArcRotateCamera("vCam", Math.PI/4, Math.PI/3, 6, new BABYLON.Vector3(0,1,0), viewerScene);
+    viewerCam.attachControl(canvas, true);
+    new BABYLON.HemisphericLight("vHemi", new BABYLON.Vector3(0,1,0), viewerScene);
+    const gl = new BABYLON.GlowLayer("glow", viewerScene, { blurKernelSize: 16 });
+    viewerEngine.runRenderLoop(()=>viewerScene.render());
+    window.addEventListener('resize', ()=>viewerEngine?.resize?.());
+  }
+}
+function closeViewer(){
+  const modal = document.getElementById('viewer-modal');
+  modal.style.display='none';
+}
+async function viewerLoadPath(){
+  const path = document.getElementById('viewer-path').value.trim();
+  if(!path) return;
+  // Clear previous meshes
+  viewerScene.meshes.slice().forEach(m=>{ if(m.name!=="__root__") m.dispose(); });
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync("", path.substring(0, path.lastIndexOf('/')+1), path.split('/').pop(), viewerScene);
+    fitViewerCamera();
+  }catch(e){ console.warn('Viewer path load failed', e); toast('Failed to load: '+path); }
+}
+function fitViewerCamera(){
+  try{
+    const bb = viewerScene.getWorldExtends();
+    const size = bb.max.subtract(bb.min);
+    const radius = Math.max(size.x, size.y, size.z) * 0.8 + 1.0;
+    viewerCam.radius = Math.min(Math.max(radius, 2.5), 50);
+    viewerCam.target = bb.min.add(size.scale(0.5));
+  }catch{}
+}
+function viewerLoadFile(file){
+  if(!file) return;
+  // Clear previous meshes
+  viewerScene.meshes.slice().forEach(m=>{ if(m.name!=="__root__") m.dispose(); });
+  BABYLON.SceneLoader.ImportMesh("", "file:", file, viewerScene, ()=>fitViewerCamera(), null, (scene, msg, exc)=>{
+    console.warn('Viewer file error', msg, exc);
+    toast('Failed to load file');
+  });
+}
+document.getElementById('btn-viewer').onclick = openViewer;
+document.getElementById('viewer-close').onclick = closeViewer;
+document.getElementById('viewer-load-path').onclick = viewerLoadPath;
+document.getElementById('viewer-file').addEventListener('change', (e)=>viewerLoadFile(e.target.files[0]));
+
+// Also enable drag & drop
+(function(){
+  const modal = document.getElementById('viewer-modal');
+  modal.addEventListener('dragover', (e)=>{ e.preventDefault(); });
+  modal.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0]; if(f) viewerLoadFile(f);
+  });
+})();
+
 </script>
 
 <script>
@@ -454,6 +655,7 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
     ========================================================== ***/
 const InputSystem = (()=>{
   let move={x:0,z:0}, running=false, lookDelta={x:0,y:0};
+  let speedScalar=0; // 0..1 analog speed from touch/keys
   let pointerLocked=false;
 
   const keys = new Set();
@@ -469,6 +671,8 @@ const InputSystem = (()=>{
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
     move.z=f; move.x=r; running=keys.has('run');
+    const moving = Math.abs(f)+Math.abs(r) > 0;
+    speedScalar = moving ? (running ? 1 : 0.62) : 0; // keyboard: walk ~62%, shift=full
   }
   function onKey(e,down){
     const tag=keyMap[e.code];
@@ -486,19 +690,23 @@ const InputSystem = (()=>{
   }
 
   function bindPointerLock(){
-    document.addEventListener('click', ()=>{ if(document.pointerLockElement!==canvas) canvas.requestPointerLock?.(); }, {capture:true});
-    document.addEventListener('pointerlockchange', ()=>{ pointerLocked=(document.pointerLockElement===canvas); });
-    document.addEventListener('mousemove', e=>{
-      if(!pointerLocked) return;
-      lookDelta.x += e.movementX||0;
-      lookDelta.y += e.movementY||0;
+    // Debug-friendly: NO automatic pointer lock. Hold right mouse to look.
+    let dragLook=false; let last={x:0,y:0};
+    canvas.addEventListener('contextmenu', e=>e.preventDefault());
+    canvas.addEventListener('mousedown', e=>{ if(e.button===2||e.button===0){ dragLook=true; last.x=e.clientX; last.y=e.clientY; } });
+    window.addEventListener('mouseup', ()=>{ dragLook=false; });
+    window.addEventListener('mouseleave', ()=>{ dragLook=false; });
+    window.addEventListener('mousemove', e=>{
+      if(!dragLook) return;
+      lookDelta.x += (e.clientX - last.x);
+      lookDelta.y += (e.clientY - last.y);
+      last.x = e.clientX; last.y = e.clientY;
     });
   }
   function bindTouchHalves(){
     const left=document.getElementById('touch-left'), right=document.getElementById('touch-right');
     let leftId=null, leftCenter=null, rightId=null, lastRight=null;
     const DEAD=14, MAX=110;
-    const norm=(v)=> Math.abs(v)<DEAD?0:v;
     const clampv=(v,m)=> Math.max(-m, Math.min(m, v));
 
     left.addEventListener('touchstart', e=>{ for(const t of e.changedTouches){ if(leftId===null){ leftId=t.identifier; leftCenter={x:t.clientX,y:t.clientY}; break; } } e.preventDefault(); },{passive:false});
@@ -507,10 +715,22 @@ const InputSystem = (()=>{
     window.addEventListener('touchmove', e=>{
       for(const t of e.changedTouches){
         if(t.identifier===leftId && leftCenter){
-          const dx=clampv(t.clientX-leftCenter.x,MAX), dy=clampv(t.clientY-leftCenter.y,MAX);
-          const nx=norm(dx)/MAX, ny=norm(dy)/MAX;
-          move.x = Math.sign(nx);
-          move.z = ny<0 ? 1 : (ny>0 ? -1 : 0);
+          const dx=clampv(t.clientX-leftCenter.x,MAX);
+          const dy=clampv(t.clientY-leftCenter.y,MAX);
+          const ax = Math.abs(dx), ay = Math.abs(dy);
+          // deadzone
+          const dead = DEAD;
+          const ndx = ax<dead?0:dx; const ndy = ay<dead?0:dy;
+          // normalized -1..1
+          const nx = ndx / MAX; const ny = ndy / MAX;
+          // movement vector in x (strafe) and z (forward = drag up)
+          move.x = nx;      // -1..1
+          move.z = -ny;     // up swipe => +z forward
+          // analog speed 0..1 based on displacement magnitude
+          const m = Math.min(1, Math.hypot(ndx, ndy) / MAX);
+          // ease slightly so small drags produce decent speed
+          speedScalar = Math.pow(m, 0.85);
+          running = speedScalar > 0.82; // for any systems that still read running
           e.preventDefault();
         } else if(t.identifier===rightId){
           if(lastRight){ lookDelta.x += (t.clientX-lastRight.x); lookDelta.y += (t.clientY-lastRight.y); }
@@ -520,7 +740,7 @@ const InputSystem = (()=>{
     },{passive:false});
     window.addEventListener('touchend', e=>{
       for(const t of e.changedTouches){
-        if(t.identifier===leftId){ leftId=null; leftCenter=null; move.x=0; move.z=0; }
+        if(t.identifier===leftId){ leftId=null; leftCenter=null; move.x=0; move.z=0; speedScalar=0; running=false; }
         if(t.identifier===rightId){ rightId=null; lastRight=null; }
       }
       e.preventDefault();
@@ -560,7 +780,7 @@ const InputSystem = (()=>{
       bindTouchHalves();
     },
     snapshot(){
-      const out={ moveVec:{...move}, running, lookDelta:{...lookDelta} };
+      const out={ moveVec:{...move}, running, speedScalar, lookDelta:{...lookDelta} };
       lookDelta.x=0; lookDelta.y=0; return out;
     }
   };
@@ -573,7 +793,8 @@ const InputSystem = (()=>{
     ========================================================== ***/
 function handleMovement(input, dt){
   if(!camera) return;
-  const speed = input.running ? player.speedRun : player.speedWalk;
+  const t = Math.max(0, Math.min(1, (input.speedScalar!==undefined ? input.speedScalar : (input.running?1:0))));
+  const speed = player.speedWalk + (player.speedRun - player.speedWalk) * t;
   const fwd = camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
   const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
   const desired = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
@@ -669,11 +890,9 @@ function ensureSnow(){
   ps.particleTexture=snowTex;
 
   // Anchor snowfall over the entire exterior polygon
-  const ext = (window.MAP_DEF?.exterior)||[{x:-20,z:-20},{x:20,z:-20},{x:20,z:20},{x:-20,z:20}];
-  let minx=Infinity, maxx=-Infinity, minz=Infinity, maxz=-Infinity;
-  for(const p of ext){ if(p.x<minx) minx=p.x; if(p.x>maxx) maxx=p.x; if(p.z<minz) minz=p.z; if(p.z>maxz) maxz=p.z; }
-  const cx=(minx+maxx)/2, cz=(minz+maxz)/2;
-  const hx=(maxx-minx)/2, hz=(maxz-minz)/2;
+  const b = getExteriorBounds();
+  const cx=(b.minx+b.maxx)/2, cz=(b.minz+b.maxz)/2;
+  const hx=(b.maxx-b.minx)/2, hz=(b.maxz-b.minz)/2;
 
   const emitter = new BABYLON.TransformNode("snowEmitter", scene);
   emitter.position = new BABYLON.Vector3(cx, 8, cz);
@@ -927,7 +1146,20 @@ function gridAround(origin, n, cols=5, spacing=0.75){
 }
 async function spawnToolsInVan(){
   const vanPoly = (MAP_DEF?.rooms||[]).find(r=>r.name==='Van')?.poly;
-  if(!vanPoly?.length) return;
+  if(!vanPoly?.length){
+    // fallback: drop tools near current camera start
+    const base = camera?.position || new BABYLON.Vector3(0,1.7,0);
+    await buildToolTemplates();
+    const ids = TOOL_MATCH.map(t=>t.id);
+    const points = gridAround(base, ids.length, 5, 0.75);
+    ids.forEach((id,i)=>{
+      const m = cloneToolMesh(id) || BABYLON.MeshBuilder.CreateBox("tool_"+id,{size:0.25},scene);
+      m.position = new BABYLON.Vector3(points[i].x, base.y, points[i].z);
+      if(!m.metadata) m.metadata = { itemKind:'tool', itemId: id };
+      WORLD_ITEMS.push(m);
+    });
+    return;
+  }
   const xs=vanPoly.map(p=>p.x), zs=vanPoly.map(p=>p.z);
   const cx=(Math.min(...xs)+Math.max(...xs))/2;
   const cz=(Math.min(...zs)+Math.max(...zs))/2;
@@ -1256,7 +1488,9 @@ function sanityTick(dt){
 
   // Apply
   player.sanity = clamp(player.sanity + (recover - drain)*dt*60, 0, 100);
-  document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
+  const sPct = Math.round(player.sanity);
+  document.getElementById('hud-sanity').textContent = sPct+'%';
+  updateSanityUI(sPct);
 }
 
 // Audio gain vs distance/state
@@ -1429,8 +1663,56 @@ function lightningFlash(){
 }
 </script>
 
-<!-- Optional third-person avatar system -->
-<script src="./third_person_patch.js"></script>
+
+<script>
+/*** ==========================================================
+    SIMPLE THIRD-PERSON AVATAR (inline)
+    ========================================================== ***/
+let __avatar = { root:null, mesh:null, enabled:false, height:1.7, dist:1.6 };
+
+async function ensurePlayerModel(){
+  if(__avatar.mesh) return __avatar.mesh;
+  try{
+    const r = await BABYLON.SceneLoader.ImportMeshAsync(\"\", \"./assets/models/player/\", \"main_player.glb\", scene);
+    const mesh = r.meshes.find(m=>m.name && m.name!==\"__root__\") || r.meshes[0];
+    __avatar.root = new BABYLON.TransformNode(\"playerAvatar\", scene);
+    mesh.parent = __avatar.root;
+    mesh.isPickable = false;
+    // scale to ~1.8m tall if needed
+    const bb = mesh.getHierarchyBoundingVectors(true);
+    const h = (bb.max.y - bb.min.y) || 1.8;
+    const s = 1.8 / h;
+    mesh.scaling.set(s,s,s);
+    mesh.setEnabled(false);
+    __avatar.mesh = mesh;
+    console.log(\"Avatar loaded\");
+  }catch(e){ console.warn(\"main_player.glb failed to load\", e); }
+  return __avatar.mesh;
+}
+
+function setThirdPerson(on){
+  __avatar.enabled = !!on;
+  if(__avatar.mesh) __avatar.mesh.setEnabled(__avatar.enabled);
+  toast(__avatar.enabled?\"Third-person ON\":\"Third-person OFF\");
+}
+function toggleThirdPerson(){ setThirdPerson(!__avatar.enabled); }
+
+// Keep avatar positioned in front of the camera so it’s visible
+function updatePlayerAvatar(dt){
+  if(!__avatar.mesh) return;
+  if(!__avatar.enabled){ __avatar.mesh.setEnabled(false); return; }
+  __avatar.mesh.setEnabled(true);
+  const f = camera.getForwardRay().direction.clone(); f.y = 0; f.normalize();
+  const pos = camera.position.add(f.scale(__avatar.dist));
+  // find ground for feet placement
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(pos.x, pos.y+2, pos.z), new BABYLON.Vector3(0,-1,0), 5);
+  const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  const y = hit?.pickedPoint ? hit.pickedPoint.y : (camera.position.y - __avatar.height);
+  __avatar.root.position.copyFrom(new BABYLON.Vector3(pos.x, y, pos.z));
+  // face same yaw as camera
+  __avatar.root.rotation.y = camera.rotation.y;
+}
+</script>
 
 <script>
 /*** ==========================================================
@@ -1440,6 +1722,7 @@ let __started=false;
 async function safeStart(){
   if(__started) return;
   __started = true;
+  CURRENT_MAP = getSelectedMap();
   document.getElementById('title-screen').style.display='none';
   await boot();
   try{ canvas.focus(); }catch{}
