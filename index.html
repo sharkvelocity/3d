@@ -145,8 +145,8 @@ const rng = Math.random;
 
 // --- Player state ---
 const player = {
-  speedWalk: 2.2,   // faster defaults
-  speedRun: 5.0,
+  speedWalk: 1.35,
+  speedRun: 3.0,
   sanity: 100,
   room: 'Van',
   inside: false,
@@ -207,9 +207,6 @@ const ghost = {
   nextEvent: 10+Math.random()*10,
   audio: { singing:null, heartbeat:null }
 };
-
-// Movement mode: start in NOCLIP so WASD is unrestricted. Toggle with N.
-let NOCLIP = true;
 </script>
 
 <script>
@@ -401,12 +398,10 @@ function spawnUVFootprints(origin, count=2, step=0.35){
     m.specularColor = new BABYLON.Color3(0,0,0);
     m.alpha = 0.0; // fade in
     quad.material = m;
-    // fade in
     let t=0; const fadeIn = scene.onBeforeRenderObservable.add(()=>{
       t += engine.getDeltaTime()/1000; m.alpha = Math.min(0.9, t*3);
       if(m.alpha>=0.9) scene.onBeforeRenderObservable.remove(fadeIn);
     });
-    // hold ~60s then fade out and dispose
     setTimeout(()=>{
       let f=1;
       const h = scene.onBeforeRenderObservable.add(()=>{
@@ -477,15 +472,17 @@ function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 
 <script>
 /*** ==========================================================
-    INPUT (KBD/Touch) + PICKUP — with PageUp/PageDown fly
+    INPUT (KBD/Touch) + PICKUP — with PageUp/PageDown/Space/Ctrl fly + noclip
     ========================================================== ***/
 const InputSystem = (()=>{
 
+  // NOTE: add y in move so we can fly up/down
   let move={x:0,y:0,z:0}, running=false, lookDelta={x:0,y:0};
   const keys = new Set();
   let isTouchMode=false;
   let _tapSprint=false;
   let _analogScale=1.0;
+  let _noclip=false;
 
   const keyMap = {
     'KeyW':'fw','KeyS':'bk','KeyA':'lt','KeyD':'rt',
@@ -493,14 +490,14 @@ const InputSystem = (()=>{
     'ShiftLeft':'run','ShiftRight':'run',
     'Digit1':'slot0','Digit2':'slot1','Digit3':'slot2',
     'KeyE':'pickup', 'KeyG':'drop',
-    'PageUp':'up', 'PageDown':'down',
-    'KeyN':'noclip' // toggle free-move,
-    'KeyN':'noclip', 'Space':'up', 'ControlLeft':'down'};
+    'PageUp':'up', 'PageDown':'down',   // ← vertical fly keys
+    'KeyN':'noclip', 'Space':'up', 'ControlLeft':'down'
+  };
 
   function recomputeMove(){
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
-    const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0);
+    const v=(keys.has('up')?1:0)+(keys.has('down')?-1:0); // ← vertical
     move.z=f; move.x=r; move.y=v;
     running=keys.has('run') || _tapSprint;
   }
@@ -510,20 +507,18 @@ const InputSystem = (()=>{
     if(!tag) return;
     e.preventDefault();
     if(down) keys.add(tag); else keys.delete(tag);
+
+    if(tag==='noclip' && down){
+      _noclip=!_noclip;
+      toast('Noclip '+(_noclip?'ON':'OFF'));
+    }
+
     if(tag.startsWith('slot') && down){
       const idx = parseInt(tag.replace('slot',''),10);
       if(idx>=0 && idx<3){ activeSlot=idx; rebuildBelt(); }
     }
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
-    if(tag==='noclip' && down){
-      window.NOCLIP = !window.NOCLIP;
-      try{
-        camera.checkCollisions = !window.NOCLIP;
-        camera.applyGravity   = !window.NOCLIP;
-      }catch(_){ }
-      toast('Noclip: ' + (window.NOCLIP?'ON':'OFF'));
-    }
     recomputeMove();
   }
 
@@ -561,6 +556,7 @@ const InputSystem = (()=>{
       e.preventDefault();
     },{passive:false});
 
+    // mobile sprint toggle
     const sprintWrap = document.getElementById('mobile-sprint');
     const sprintBtn  = document.getElementById('btn-sprint');
     sprintWrap.style.display='block';
@@ -604,10 +600,10 @@ const InputSystem = (()=>{
       const out={ moveVec:{...move}, running, lookDelta:{...lookDelta}, analog:_analogScale };
       lookDelta.x=0; lookDelta.y=0; return out;
     },
-    isTouch: ()=>isTouchMode
+    isTouch: ()=>isTouchMode,
+    isNoclip: ()=>_noclip
   };
 })();
-
 </script>
 
 <script>
@@ -718,7 +714,7 @@ const PlayerRig = (()=>{
 
 <script>
 /*** ==========================================================
-    MOVEMENT (noclip toggle) + LOOK
+    MOVEMENT (with temporary gravity disable) + LOOK (global)
     ========================================================== ***/
 window.handleMovement = function(input, dt){
   if(!window.camera) return;
@@ -728,20 +724,49 @@ window.handleMovement = function(input, dt){
 
   const fwd = camera.getForwardRay().direction.clone(); fwd.y=0; fwd.normalize();
   const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
-  const dirXZ = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
-  const wantMove = dirXZ.lengthSquared() > 0;
-  const vert = input.moveVec.y || 0;
+  const desired = fwd.scale(input.moveVec.z).add(right.scale(input.moveVec.x));
 
-  if (NOCLIP){
-    let next = camera.position.clone();
-    if (wantMove) next = next.add(dirXZ.normalize().scale(speed * dt));
-    if (vert)     next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
-    camera.position.copyFrom(next);
+  const vert = input.moveVec.y || 0;
+  const wantsFly = vert !== 0;
+  const noclipActive = (window.InputSystem && InputSystem.isNoclip && InputSystem.isNoclip()) || false;
+
+  // remember prior states
+  const prevGravity = camera.applyGravity;
+  const prevCollisions = camera.checkCollisions;
+
+  if (noclipActive){
+    camera.applyGravity = false;
+    camera.checkCollisions = false;
+  } else if (wantsFly){
+    camera.applyGravity = false; // temporary
   } else {
-    let disp = new BABYLON.Vector3(0,0,0);
-    if (wantMove) disp = disp.add(dirXZ.normalize().scale(speed * dt));
-    if (vert)     disp = disp.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
-    camera.moveWithCollisions(disp);
+    camera.applyGravity = true;
+    camera.checkCollisions = true;
+  }
+
+  let next = camera.position.clone();
+  if (desired.lengthSquared() > 0) next = next.add(desired.normalize().scale(speed * dt));
+  if (wantsFly || noclipActive) next = next.add(new BABYLON.Vector3(0, vert * speed * dt, 0));
+
+  if (!wantsFly && !noclipActive && desired.lengthSquared() > 0) {
+    const probe = next.add(new BABYLON.Vector3(0, player.stepUpMax, 0));
+    const downRay = new BABYLON.Ray(probe, new BABYLON.Vector3(0,-1,0), player.stepUpMax+0.6);
+    const hit = scene.pickWithRay(downRay, m=>m && m.isPickable!==false);
+    if(hit && hit.pickedPoint){
+      const y = hit.pickedPoint.y + 1.7;
+      const dy = y - camera.position.y;
+      camera.position = (dy<=player.stepUpMax) ? new BABYLON.Vector3(next.x, y, next.z) : next;
+    } else {
+      camera.position = next;
+    }
+  } else {
+    camera.position = next;
+  }
+
+  // restore if we only temporarily disabled gravity
+  if (!noclipActive && !wantsFly){
+    camera.applyGravity = prevGravity;
+    camera.checkCollisions = prevCollisions;
   }
 };
 
@@ -908,21 +933,21 @@ function setWeather(state){
   try{ markShadowable(scene.meshes||[]); } catch(e){}
 }
 </script>
-<script>
-/*** STATIC MOON (no orbit) — double‑sided to avoid "inside‑out" ***/
-async function loadMoon(){
-  const SKY_POS   = new BABYLON.Vector3(0, 160, 260); // fixed position
-  const MOON_SIZE = 16;                                 // visual size
 
-  function makeVisibleMat(){
+<script>
+/*** STATIC MOON (no orbit) ***/
+async function loadMoon(){
+  const MOON_SIZE = 16;
+  const MOON_POS  = new BABYLON.Vector3(0, 160, 260);
+
+  function makeMat(){
     const mat = new BABYLON.StandardMaterial("moonMatVisible", scene);
     mat.disableLighting = true;
     mat.emissiveColor   = new BABYLON.Color3(1,1,1);
     mat.diffuseColor    = new BABYLON.Color3(1,1,1);
     mat.specularColor   = new BABYLON.Color3(0,0,0);
-    mat.backFaceCulling = false;            // <-- render both sides
+    mat.backFaceCulling = false; // double-sided so it never disappears
     mat.alpha           = 1;
-    mat.useAlphaFromDiffuseTexture = false;
     mat.disableDepthWrite = true;
     return mat;
   }
@@ -931,42 +956,23 @@ async function loadMoon(){
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
     moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
   }catch(e){
-    console.warn("Moon GLB missing; creating disc fallback.");
-    moonMesh = BABYLON.MeshBuilder.CreateDisc("MoonMesh",{
-      radius:MOON_SIZE*0.5, tessellation:48, sideOrientation: BABYLON.Mesh.DOUBLESIDE
-    }, scene);
+    moonMesh = BABYLON.MeshBuilder.CreateDisc("MoonMesh",{radius:MOON_SIZE*0.5, tessellation:48, sideOrientation:BABYLON.Mesh.DOUBLESIDE}, scene);
   }
 
-  // Ensure all submeshes render double-sided (covers GLB materials)
-  const applyDoubleSided = (n)=>{
-    if (!n) return;
-    let list = n.getChildMeshes ? n.getChildMeshes(false) : [];
-    if (!list.length && n.material) list = [n]; // single mesh case
-    list.forEach(m=>{
-      const mat = m.material;
-      if (mat && 'backFaceCulling' in mat) mat.backFaceCulling = false;
-      if (mat && 'disableLighting' in mat) mat.disableLighting = true;
-    });
-  };
-
-  const mat = makeVisibleMat();
-  moonMesh.material = mat;
-  applyDoubleSided(moonMesh);
-
+  moonMesh.material = makeMat();
   moonMesh.isPickable = false;
   moonMesh.applyFog   = false;
   moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL; // always face camera
   moonMesh.renderingGroupId = 2;
-  moonMesh.scaling.setAll(MOON_SIZE);
   moonMesh.layerMask = 0x10000000; // EXTERIOR
 
-  // Set once; no orbit
-  moonMesh.position.copyFrom(SKY_POS);
+  moonMesh.scaling.setAll(MOON_SIZE);
+  moonMesh.position.copyFrom(MOON_POS);
 
-  // Aim the directional moon light once as well
+  // Aim moonlight toward the world using moon position
   if (moonLight){
-    const dir = SKY_POS.scale(-1).normalize();
-    moonLight.direction = new BABYLON.Vector3(dir.x, dir.y, dir.z);
+    const dir = moonMesh.position.subtract(new BABYLON.Vector3(0,0,0)).normalize().scale(-1);
+    moonLight.direction = dir;
     moonLight.intensity = 0.55;
   }
 }
@@ -1081,29 +1087,31 @@ function currentRoomName(){
 }
 
 async function boot(){
-  window.NOCLIP = false;
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
   scene  = new BABYLON.Scene(engine);
   scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0,-0.9,0);
+  scene.gravity = new BABYLON.Vector3(0,-0.9,0); // gravity enabled
 
   camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 2, 24), scene);
   camera.attachControl(canvas, true);
-  camera.checkCollisions = !NOCLIP;  // respect noclip at start
-  camera.applyGravity    = !NOCLIP;
+  camera.checkCollisions = true;
+  camera.applyGravity = true; // gravity ON by default
   camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
   camera.minZ = 0.1; camera.inertia=0;
   camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
+  // hemispheric fill (subtle, most light from sun/moon)
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.35;
 
+  // Atmosphere
   scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
+  // Sun + Moon
   setupSun(); setupMoon();
   await loadSelectedMap();
   await PlayerRig.load();
@@ -1118,10 +1126,12 @@ async function boot(){
   const w = r<0.30?'Sunset' : r<0.55?'Clear' : r<0.80?'Rain' : r<0.92?'Snow' : 'Blood Moon';
   setWeather(w);
 
+  // Items & inputs
   rebuildBelt();
   InputSystem.init();
   canvas.focus();
 
+  // Main loop
   scene.onBeforeRenderObservable.add(()=>{
     const dt = engine.getDeltaTime()/1000;
     const input = InputSystem.snapshot();
@@ -1131,10 +1141,12 @@ async function boot(){
 
     try{ disturbSaltAt(camera.position.clone()); }catch(e){}
 
+    // Sanity (simplified)
     player.inside = true;
     document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
     const fill = document.getElementById('sanity-fill'); fill.style.width = Math.round(player.sanity)+'%'; 
 
+    // HUD XYZ
     const xyz=document.getElementById('hud-xyz'); xyz.style.display='block';
     document.getElementById('hud-x').textContent = camera.position.x.toFixed(2);
     document.getElementById('hud-y').textContent = camera.position.y.toFixed(2);
