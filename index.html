@@ -871,24 +871,30 @@ function updateEmitterToBounds(){
 }
 
 window.loadSelectedMap = async function(){
+  console.info('[maps] Loading selected map...');
   const map = (window.CURRENT_MAP = getSelectedMap());
   const mapFile = map?.file || "Abandoned_House.glb";
+  console.info('[maps] mapFile =', mapFile);
 
   await loadMatchingMapDef(mapFile, map?.def);
 
   try{
+  console.info('[maps] Loading selected map...');
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
+    console.info('[maps] GLB loaded:', mapFile, res);
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
     // Layer the house meshes as INTERIOR for light scoping
     try {
+  console.info('[maps] Loading selected map...');
       res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
     } catch(e) {}
 
 // Force-origin mode
-    const FORCE_ORIGIN = true;
+    const FORCE_ORIGIN = false;
 
         // Apply map transform if provided by MAP_DEF
     try {
+  console.info('[maps] Loading selected map...');
       const s = (window.MAP_DEF && (MAP_DEF.scale||MAP_DEF.scaling)) ? (MAP_DEF.scale||MAP_DEF.scaling) : null;
       if (s && houseRoot && houseRoot.scaling) { houseRoot.scaling.set(s, s, s); }
       const off = (window.MAP_DEF && MAP_DEF.offset) ? MAP_DEF.offset : null;
@@ -905,7 +911,8 @@ window.loadSelectedMap = async function(){
     WORLD_BOUNDS = bb ? { minx: bb.min.x, maxx: bb.max.x, minz: bb.min.z, maxz: bb.max.z } : null;
     updateEmitterToBounds();
   }catch(e){
-    console.warn('Map load failed; building ground fallback', e);
+  console.info('[maps] Loading selected map...');
+    console.error('[maps] Map load failed', e);
     const g=BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true;
   }
 };
@@ -1238,6 +1245,10 @@ function currentRoomName(){
 async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
   scene  = new BABYLON.Scene(engine);
+
+try {
+  BABYLON.SceneLoader.OnPluginActivatedObservable?.add((pl)=>{ try{ console.info('[maps] Loader plugin active:', pl.name||pl.constructor?.name); }catch{} });
+} catch(e) {}
   scene.collisionsEnabled = true;
   scene.gravity = new BABYLON.Vector3(0,-0.5,0);
 
@@ -1261,9 +1272,9 @@ async function boot(){
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
-  await loadSelectedMap();
+  await window.loadSelectedMap();
 // Force player start at world origin for consistent authoring
-  if (true /* FORCE_ORIGIN */) {
+  if (FORCE_ORIGIN) {
     try { camera.position = new BABYLON.Vector3(0, 1.8, 0); } catch(e){}
   } else {
   // Move player camera to map-defined spawn if provided
@@ -1357,7 +1368,6 @@ async function boot(){
   engine.runRenderLoop(()=>scene.render());
   window.addEventListener('resize', ()=>engine.resize());
 }
-} // patched: close boot()
 </script>
 
 <script>
