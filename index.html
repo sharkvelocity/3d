@@ -146,9 +146,11 @@ async function loadManifest(){
   }catch(e){}
   const sel = $('#map-select');
   if(sel){ sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join(''); sel.value='0'; }
+  try{ applyWeather(determineWeather()); }catch(e){}
 }
 async function loadSelectedMap(){
-  const idx = parseInt($('#map-select')?.value||'0',10)||0;
+  currentMapIdx = parseInt(document.getElementById('map-select')?.value||'0',10)||0;
+  const idx = currentMapIdx;
   const file = MAP_FILES[idx]?.file || MAP_FILES[0].file;
   try{
     await BABYLON.SceneLoader.AppendAsync('./assets/models/map/', file, scene);
@@ -201,6 +203,46 @@ async function loadMoon(){
     moonMesh.position.copyFrom(base);
   });
 }
+</script>
+<script>
+
+let currentMapIdx = 0;
+function determineWeather(){
+  // priority: URL param -> map config -> default 'Clear'
+  const params = new URLSearchParams(location.search);
+  const w = (params.get('weather')||'').trim();
+  if(w) return w;
+  const m = MAP_FILES[currentMapIdx] || {};
+  return m.weather || 'Clear';
+}
+function applyWeather(state){
+  weather.state = state;
+  const hud = document.getElementById('hud-weather');
+  if(hud) hud.textContent = state;
+  // simple visual link: fog density/colors
+  const s = (state||'').toLowerCase();
+  if(s==='clear'){
+    scene.fogDensity = 0.0045;
+    scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
+  } else if(s==='mist'){
+    scene.fogDensity = 0.010;
+    scene.fogColor = new BABYLON.Color3(0.05,0.08,0.10);
+  } else if(s==='fog' || s==='foggy'){
+    scene.fogDensity = 0.016;
+    scene.fogColor = new BABYLON.Color3(0.06,0.09,0.11);
+  } else if(s==='rain'){
+    scene.fogDensity = 0.012;
+    scene.fogColor = new BABYLON.Color3(0.04,0.06,0.09);
+  } else if(s==='snow'){
+    scene.fogDensity = 0.013;
+    scene.fogColor = new BABYLON.Color3(0.08,0.10,0.13);
+  } else {
+    // fallback
+    scene.fogDensity = 0.0065;
+    scene.fogColor = new BABYLON.Color3(0.03,0.05,0.07);
+  }
+}
+
 </script>
 
 <script>
@@ -582,6 +624,7 @@ async function boot(){
   setupSun(); setupMoon();
   await loadSelectedMap();
   await loadMoon();
+  applyWeather(determineWeather());
   await spawnGhost();
   initMistParticles();
 
