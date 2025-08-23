@@ -6,11 +6,9 @@
     scale: 0.10,
     rotationY: 0,
     offset: { x: 0, y: 0, z: 0 },
-
-    // Spawn at origin for now
-    spawn:    { x: 0, y: 1.8, z: 0 },
+    // Updated spawn point
+    spawn:    { x: -334.56, y: 3.76, z: -377.44 },
     vanSpawn: { x: 0, y: 1.8, z: 0 },
-
     // Treat this polygon as exterior by default (adjust later if needed)
     exteriorMode: "exterior",
     exterior: [
