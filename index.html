@@ -348,9 +348,10 @@ const Loader = (() => {
 })();
 </script>
 
+
 <script>
 /*** ==========================================================
-    SIMPLE AUDIO HELPERS
+    AUDIO: WEATHER & AMBIENCE
     ========================================================== ***/
 const WeatherAudio = (()=>{
   let sceneRef=null, current=null;
@@ -359,10 +360,12 @@ const WeatherAudio = (()=>{
   function ensure(scene){
     if(sceneRef) return;
     sceneRef = scene;
-    tracks.clear = new BABYLON.Sound("clear","./assets/audio/clearWeather.mp3",sceneRef,null,{ loop:true, autoplay:false, volume:0.45 });
-    tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null, { loop:true, autoplay:false, volume:0.55 });
-    tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.28 });
-    tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,   { loop:true, autoplay:false, volume:0.18 });
+    // Use the repo-provided assets (paths from user)
+    tracks.clear = new BABYLON.Sound("clear","./assets/audio/clearWeather.mp3",sceneRef,null,{ loop:true, autoplay:false, volume:0.55 });
+    tracks.rain  = new BABYLON.Sound("rain","./assets/audio/rainstorm.mp3",sceneRef,null,   { loop:true, autoplay:false, volume:0.65 });
+    tracks.snow  = new BABYLON.Sound("snow","./assets/audio/ambient.mp3",sceneRef,null,     { loop:true, autoplay:false, volume:0.30 });
+    // low ominous bed (used during Blood Moon or ghost events)
+    tracks.drone = new BABYLON.Sound("drone","./assets/audio/ambient.mp3",sceneRef,null,    { loop:true, autoplay:false, volume:0.22 });
   }
 
   function fadeTo(target){
@@ -373,13 +376,13 @@ const WeatherAudio = (()=>{
     for(const k of Object.keys(tracks)){
       const snd = tracks[k];
       if(!snd) continue;
-      const tgt = (k==='clear'&&want.clear)?0.45:
-                  (k==='rain' &&want.rain )?0.55:
-                  (k==='snow' &&want.snow )?0.28:
-                  (k==='drone'&&want.drone)?0.18:0.0;
-      if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){}} }
+      const tgt = (k==='clear'&&want.clear)?0.55:
+                  (k==='rain' &&want.rain )?0.65:
+                  (k==='snow' &&want.snow )?0.30:
+                  (k==='drone'&&want.drone)?0.22:0.0;
+      if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){} } }
       const start = snd.getVolume();
-      let i=0, steps=18, stepMs=40;
+      let i=0, steps=22, stepMs=40;
       const id=setInterval(()=>{
         i++; const a=i/steps; const ease=(x)=>x<.5?2*x*x:-1+(4-2*x)*x;
         snd.setVolume(start + (tgt-start)*ease(a));
@@ -388,9 +391,10 @@ const WeatherAudio = (()=>{
     }
     current=target;
   }
-  return { init:(s)=>ensure(s), set:(state)=>{ try{BABYLON.Engine.audioEngine?.unlock?.();} catch(e){}fadeTo(state);} };
+  return { init:(s)=>ensure(s), set:(state)=>{ try{BABYLON.Engine.audioEngine?.unlock?.();} catch(e){} fadeTo(state);} };
 })();
 </script>
+
 
 <script>
 /*** ==========================================================
@@ -490,6 +494,85 @@ function _pointToSegmentDistance(p, a, b){
   const dx = p.x - proj.x, dz = p.z - proj.z;
   return Math.sqrt(dx*dx + dz*dz);
 }
+
+<script>
+/*** ==========================================================
+    AUDIO: FOOTSTEPS & GHOST SFX
+    ========================================================== ***/
+const Footsteps = (()=>{
+  let sceneRef=null, lastStepT=0, intervalWalk=0.46, intervalRun=0.30;
+  let s1=null, s2=null, s3=null;
+
+  function init(scene){
+    if(sceneRef) return;
+    sceneRef = scene;
+    s1 = new BABYLON.Sound("step1","./assets/audio/step1.wav", sceneRef, null, { volume:0.35 });
+    s2 = new BABYLON.Sound("step2","./assets/audio/step2.wav", sceneRef, null, { volume:0.35 });
+    s3 = new BABYLON.Sound("step3","./assets/audio/step3.wav", sceneRef, null, { volume:0.35 });
+  }
+
+  function tick(isMoving, running){
+    if(!sceneRef) return;
+    const now = performance.now()/1000;
+    const gap = running ? intervalRun : intervalWalk;
+    if(isMoving && (now - lastStepT) >= gap){
+      lastStepT = now;
+      const r = Math.random();
+      const snd = r<0.34 ? s1 : (r<0.67 ? s2 : s3);
+      try{ snd && snd.play(); } catch(_){}
+    }
+  }
+
+  return { init, tick };
+})();
+
+const GhostAudio = (()=>{
+  let sceneRef=null;
+  const sfx = {};
+
+  function ensure(scene){
+    if(sceneRef) return; sceneRef=scene;
+    const make=(name, path, opts={})=> sfx[name] = new BABYLON.Sound(name, path, sceneRef, null, Object.assign({ volume:0.6 }, opts));
+
+    // Doors & movement
+    make("doorCreak1","./assets/audio/doorCreak1.mp3",{ volume:0.5 });
+    make("doorCreak2","./assets/audio/doorCreak2.mp3",{ volume:0.5 });
+    make("doorSlam1","./assets/audio/doorSlam1.mp3",{ volume:0.7 });
+    make("doorSlam2","./assets/audio/doorSlam2.mp3",{ volume:0.7 });
+    make("toss","./assets/audio/Toss.wav",{ volume:0.7 });
+
+    // Supernatural
+    make("whisper","./assets/audio/whisper.mp3",{ volume:0.55 });
+    make("laugh","./assets/audio/ghostLaugh.mp3",{ volume:0.6 });
+    make("radio","./assets/audio/Radio.mp3",{ volume:0.45 });
+    make("spiritbox","./assets/audio/spiritbox.mp3",{ volume:0.5 });
+    make("spiritboxStatic","./assets/audio/spiritBoxStatic.mp3",{ volume:0.35 });
+    make("writing","./assets/audio/GhostWriting1.mp3",{ volume:0.6 });
+    make("kill","./assets/audio/gameKilled.mp3",{ volume:0.75 });
+    make("tarot","./assets/audio/tarot_card_flip.mp3",{ volume:0.6 });
+    make("musicBox","./assets/audio/music_box_play.mp3",{ volume:0.6 });
+    make("notebookOpen","./assets/audio/notebook_open.mp3",{ volume:0.6 });
+  }
+
+  // Simple public triggers
+  function doorCreak(){ try{ (Math.random()<0.5 ? sfx.doorCreak1 : sfx.doorCreak2)?.play(); }catch(_){}};
+  function doorSlam(){ try{ (Math.random()<0.5 ? sfx.doorSlam1 : sfx.doorSlam2)?.play(); }catch(_){}};
+  function toss(){ try{ sfx.toss?.play(); }catch(_){} };
+  function whisper(){ try{ sfx.whisper?.play(); }catch(_){} };
+  function laugh(){ try{ sfx.laugh?.play(); }catch(_){} };
+  function radio(){ try{ sfx.radio?.play(); }catch(_){} };
+  function spiritbox(){ try{ sfx.spiritbox?.play(); }catch(_){} };
+  function writing(){ try{ sfx.writing?.play(); }catch(_){} };
+  function kill(){ try{ sfx.kill?.play(); }catch(_){} };
+  function tarot(){ try{ sfx.tarot?.play(); }catch(_){} };
+  function musicBox(){ try{ sfx.musicBox?.play(); }catch(_){} };
+  function notebookOpen(){ try{ sfx.notebookOpen?.play(); }catch(_){} };
+
+  // For convenience
+  return { ensure, doorCreak, doorSlam, toss, whisper, laugh, radio, spiritbox, writing, kill, tarot, musicBox, notebookOpen };
+})();
+</script>
+
 </script>
 
 <script>
@@ -577,7 +660,7 @@ function placeActiveItem(){
     default: toast('Place '+it.name);
   }
 }
-function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
+function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); try{ GhostAudio.toss(); }catch(_){} }
 </script>
 
 <script>
@@ -1102,10 +1185,10 @@ function takePhoto(){
 }
 function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); }
 function readTemp(){ toast('Temp: '+(player.room!=='Van' ? (ghost.visible?'-1°C':'5°C') : '18°C')); }
-function toggleDOTS(){ toast('DOTS toggled'); }
-function dropWritingBook(){ toast('Book dropped'); }
+function toggleDOTS(){ toast('DOTS toggled'); GhostAudio.radio(); }
+function dropWritingBook(){ toast('Book dropped'); GhostAudio.writing(); }
 function useCrucifix(){ toast('Crucifix readied'); }
-function burnSmudge(){ toast('Smudge in effect (6s)'); }
+function burnSmudge(){ toast('Smudge in effect (6s)'); GhostAudio.whisper(); }
 </script>
 
 <script>
@@ -1168,6 +1251,9 @@ async function pickAndSetWeather(){
 }
 
 function postInitUI(){
+  Footsteps.init(scene);
+  GhostAudio.ensure(scene);
+
   rebuildBelt();
   InputSystem.init();
 
@@ -1175,8 +1261,24 @@ function postInitUI(){
     const dt = engine.getDeltaTime()/1000;
     const input = InputSystem.snapshot();
     if (typeof window.handleMovement === 'function') window.handleMovement(input, dt);
+    const isMoving = Math.abs(input.moveVec.x) + Math.abs(input.moveVec.z) > 0.01;
+    Footsteps.tick(isMoving, input.running);
     if (typeof window.applyLook === 'function') window.applyLook(input.lookDelta);
     PlayerRig.update();
+
+    // Lightweight ghost event sampler
+    ghost.eventTimer += dt;
+    if(ghost.eventTimer >= ghost.nextEvent){
+      ghost.eventTimer = 0;
+      ghost.nextEvent = 8 + Math.random()*12;
+      const r = Math.random();
+      if(r < 0.30) { GhostAudio.doorCreak(); }
+      else if(r < 0.55) { GhostAudio.whisper(); }
+      else if(r < 0.72) { GhostAudio.doorSlam(); }
+      else if(r < 0.86) { GhostAudio.laugh(); }
+      else { GhostAudio.spiritbox(); }
+    }
+
 
     try{ disturbSaltAt(camera.position.clone()); }catch(e){}
 
@@ -1205,7 +1307,7 @@ function postInitUI(){
   document.getElementById('btn-place').onclick = placeActiveItem;
   document.getElementById('btn-toss').onclick = tossActiveItem;
   document.getElementById('btn-lighter').onclick = toggleLighter;
-  document.getElementById('btn-notebook').onclick = ()=>document.getElementById('notebook-modal').style.display='block';
+  document.getElementById('btn-notebook').onclick = ()=>{ document.getElementById('notebook-modal').style.display='block'; GhostAudio.notebookOpen(); };
 }
 
 function startRenderLoop(){
