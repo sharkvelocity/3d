@@ -6,10 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
-  <script src="./cdn/babylon.js"></script>                 <!-- NOTE: Babylon core -->
-  <script src="./cdn/earcut.min.js"></script>              <!-- NOTE: polygon triangulation -->
-  <script src="./cdn/meshopt_decoder.js"></script>         <!-- NOTE: GLTF meshopt decoder -->
-  <script src="./cdn/draco_decoder_gltf.js"></script>      <!-- NOTE: GLTF Draco decoder -->
+  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/earcut.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js"></script>
+  <script src="./cdn/draco_decoder_gltf.js"></script>
   <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
@@ -20,10 +20,9 @@
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
-
     #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
 
-    /* Title screen */
+    /* Title */
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88);
       display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; z-index:9999; }
     #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
@@ -35,7 +34,7 @@
     #hud-top-left { position:fixed; top:10px; left:10px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; z-index:6000; display:flex; gap:12px; align-items:center; }
     .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; }
 
-    /* Belt – fixed 3 slots; right-click cycles item */
+    /* Belt */
     #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%);
       display:flex; gap:12px; z-index:6000; align-items:center;
       background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
@@ -45,16 +44,16 @@
     .slot .label{ font-size:12px; color:#adf; text-align:center; line-height:1.1; padding:6px; }
     .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
 
-    /* Buttons pinned to right */
+    /* Buttons (right) */
     .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
     #action-bar { position:fixed; right:12px; bottom:18px; display:flex; gap:10px; z-index:6500; }
 
-    /* Touch halves — 20vh from top to 12vh above bottom */
+    /* Touch halves */
     .touch-half { position:fixed; top:20vh; bottom:12vh; width:50vw; z-index:7000; touch-action:none; }
     #touch-left { left:0; }
     #touch-right{ right:0; }
 
-    /* Notebook modal */
+    /* Notebook */
     #notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#0ff; display:none; z-index:12000; padding:18px; overflow:auto; }
     #notebook-modal h2{ margin:0 0 8px 0; }
     .ev-row{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
@@ -91,10 +90,10 @@
   </div>
   <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
 
-  <!-- Belt (3 slots) -->
+  <!-- Belt -->
   <div id="belt"></div>
 
-  <!-- Action bar -->
+  <!-- Actions -->
   <div id="action-bar">
     <button id="btn-use" class="hud-btn">Use</button>
     <button id="btn-place" class="hud-btn">Place</button>
@@ -104,7 +103,7 @@
     <button id="btn-inspector" class="hud-btn">Inspector</button>
   </div>
 
-  <!-- Marker tool bar -->
+  <!-- Marker tool -->
   <div id="marker-toolbar">
     <button id="btn-marker" class="toggle">Markers</button>
     <button id="btn-marker-fill" class="toggle">Fill: Interior</button>
@@ -134,24 +133,24 @@
 /*** ==========================================================
     GLOBALS
     ========================================================== ***/
-const canvas = document.getElementById('renderCanvas'); // NOTE: Babylon canvas
+const canvas = document.getElementById('renderCanvas');
 let engine, scene, camera, hemiLight, houseRoot, moonMesh;
 
-const rng = Math.random; // NOTE: for quick randomness; swap with seeded rng if needed
+const rng = Math.random;
 
 // --- Player state ---
 const player = {
   speedWalk: 1.1,
   speedRun: 2.2,
-  sanity: 100,                 // NOTE: 0..100
+  sanity: 100,
   room: 'Van',
-  inside: false,               // NOTE: inside exterior polygon?
+  inside: false,
   stepUpMax: 0.45,
-  lightLevel: 0,               // NOTE: computed per-frame (0..1) from held lights
+  lightLevel: 0,      // 0..1
   nextSanityTick: 0
 };
 
-// --- Weather state ---
+// --- Weather ---
 const weather = {
   state: 'Clear',
   rainPS: null,
@@ -159,9 +158,9 @@ const weather = {
   lightningTimer:0,
   nextStrike: 6
 };
-function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 4 + Math.random()*10; } // NOTE: random cadence
+function scheduleNextLightning(){ weather.lightningTimer=0; weather.nextStrike = 4 + Math.random()*10; }
 
-// --- Item registry (types + spawn counts) ---
+// --- Item registry ---
 const ITEM_TYPES = [
   {id:'emf',    name:'EMF Reader'},
   {id:'thermo', name:'Thermometer'},
@@ -171,23 +170,23 @@ const ITEM_TYPES = [
   {id:'cruci',  name:'Crucifix'},
   {id:'smudge', name:'Smudge Sticks'}
 ];
-const WORLD_ITEMS = []; // NOTE: in-world pickable meshes we spawn
+const WORLD_ITEMS = [];
 
-// --- Belt (3 slots) + separate lighter ---
+// --- Belt (3 slots) + lighter ---
 const ALL_ITEMS=[
   {id:'flash', name:'Flashlight'},
   {id:'uv',    name:'UV Light'},
   {id:'camera',name:'Photo Camera'},
   ...ITEM_TYPES
 ];
-let belt = ['flash','emf','camera']; // NOTE: exactly 3
+let belt = ['flash','emf','camera'];
 let activeSlot = 0;
 let lighterOn = false;
 
-// --- Held lighting (spot cones) ---
+// --- Held lighting ---
 const held = { light:null, uvLight:null, lighter:null };
 
-// --- Ghost state ---
+// --- Ghost ---
 const ghost = {
   mesh: null,
   type: null,
@@ -204,7 +203,7 @@ const ghost = {
   audio: { singing:null, heartbeat:null }
 };
 
-// --- EVIDENCE ---
+// --- Evidence ---
 const EVIDENCE = ['EMF5','Spirit Box','Ghost Writing','Freezing Temps','Orbs','Dots','Fingerprints'];
 const found = Object.fromEntries(EVIDENCE.map(e=>[e,false]));
 const GHOSTS = [
@@ -236,31 +235,29 @@ const GHOSTS = [
 
 <script>
 /*** ==========================================================
-    UTIL: toast + geometry helpers + point-in-polygon
+    UTILITIES
     ========================================================== ***/
 function toast(msg, ms=1500){
   const t=document.getElementById('toast');
   t.textContent=msg; t.style.display='block';
   setTimeout(()=>t.style.display='none', ms);
-} // NOTE: simple HUD message
+}
 
 function pointInPolyXZ(p, poly){
-  // NOTE: ray-cast in XZ
   let inside = false;
   for(let i=0,j=poly.length-1;i<poly.length;j=i++){
     const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
-    const intersect = ((zi>p.z)!==(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi+1e-9)+xi);
+    const intersect = ((zi>p.z)!==(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/( (zj-zi)||1e-9 ) + xi);
     if(intersect) inside = !inside;
   }
   return inside;
-} // NOTE: robust enough for our convex/concave room loops
-
-function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); } // NOTE: general clamp
+}
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 </script>
 
 <script>
 /*** ==========================================================
-    WEATHER AUDIO (crossfaded ambience) + event/hunt audio
+    AMBIENT & EVENT AUDIO
     ========================================================== ***/
 const WeatherAudio = (()=>{
   let sceneRef=null, current=null, fading=false;
@@ -285,7 +282,7 @@ const WeatherAudio = (()=>{
                            if(!tracks.drone.isPlaying) tracks.drone.play(); break;
       }
     });
-  } // NOTE: prepare loops (no autoplay)
+  }
 
   function fadeTo(target){
     if(!sceneRef) return;
@@ -293,7 +290,6 @@ const WeatherAudio = (()=>{
     fading=true;
 
     const want={ clear:target==='Clear', rain:(target==='Rain'||target==='Blood Moon'), snow:target==='Snow', drone:target==='Blood Moon' };
-    // spin up newcomers at 0
     if (want.clear && !tracks.clear.isPlaying){ tracks.clear.setVolume(0); tracks.clear.play(); }
     if (want.rain  && !tracks.rain.isPlaying ){ tracks.rain.setVolume(0);  tracks.rain.play();  }
     if (want.snow  && !tracks.snow.isPlaying ){ tracks.snow.setVolume(0);  tracks.snow.play();  }
@@ -312,24 +308,22 @@ const WeatherAudio = (()=>{
         current=target; fading=false;
       }
     }, stepMs);
-  } // NOTE: crossfade
-
+  }
   return { init:(s)=>ensure(s), set:(state)=>{ try{BABYLON.Engine.audioEngine?.unlock?.();}catch{} fadeTo(state);} };
 })();
 
-// --- Event/Hunt sfx: attached later in spawnGhost() ---
 function ensureGhostAudio(){
   if(ghost.audio.heartbeat) return;
   ghost.audio.heartbeat = new BABYLON.Sound("heartbeat","./assets/audio/heartbeat.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:false });
   ghost.audio.singing   = new BABYLON.Sound("singing","./assets/audio/singing_loop.mp3",scene,null,{ loop:true, autoplay:false, volume:0.0, spatialSound:true, distanceModel:"linear", maxDistance:20 });
-} // NOTE: creates sfx; volumes are driven every frame based on distance/state
+}
 </script>
 
 <script>
 /*** ==========================================================
-    BELT UI + HELD LIGHTS (flash/uv/lighter) that only light inside
+    BELT UI + HELD LIGHTS
     ========================================================== ***/
-function itemById(id){ return ALL_ITEMS.find(x=>x.id===id); } // NOTE: helper
+function itemById(id){ return ALL_ITEMS.find(x=>x.id===id); }
 
 function rebuildBelt(){
   const el=document.getElementById('belt'); el.innerHTML='';
@@ -341,8 +335,7 @@ function rebuildBelt(){
     d.oncontextmenu=(e)=>{ e.preventDefault(); cycleSlot(i); };
     el.appendChild(d);
   });
-} // NOTE: rebuilds 3-slot belt UI
-
+}
 function cycleSlot(i){
   const idx = ALL_ITEMS.findIndex(x=>x.id===belt[i]);
   let j=(idx+1)%ALL_ITEMS.length;
@@ -352,45 +345,38 @@ function cycleSlot(i){
     j=(j+1)%ALL_ITEMS.length;
   }
   rebuildBelt();
-} // NOTE: rotate to a unique item
+}
+function activeItem(){ return itemById(belt[activeSlot]); }
 
-function activeItem(){ return itemById(belt[activeSlot]); } // NOTE: current item
-
-// --- Held light creators ---
+// Held lights
 function ensureHeldFlash(){
   if(!held.light){
     held.light = new BABYLON.SpotLight("handFlash", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/7, 14, scene);
-    held.light.intensity = 0;
-    held.light.range = 18;
+    held.light.intensity = 0; held.light.range = 18;
   }
   return held.light;
-} // NOTE: white cone
-
+}
 function ensureHeldUV(){
   if(!held.uvLight){
     held.uvLight = new BABYLON.SpotLight("handUV", new BABYLON.Vector3(0,1.6,0), new BABYLON.Vector3(0,0,1), Math.PI/7, 12, scene);
     held.uvLight.diffuse = new BABYLON.Color3(0.6,0.4,1.0);
     held.uvLight.specular = new BABYLON.Color3(0.2,0.1,0.5);
-    held.uvLight.intensity = 0;
-    held.uvLight.range = 14;
+    held.uvLight.intensity = 0; held.uvLight.range = 14;
   }
   return held.uvLight;
-} // NOTE: purple cone
-
+}
 function ensureHeldLighter(){
   if(!held.lighter){
     held.lighter = new BABYLON.PointLight("handLighter", new BABYLON.Vector3(0,1.6,0), scene);
-    held.lighter.intensity = 0;
-    held.lighter.range = 6;
+    held.lighter.intensity = 0; held.lighter.range = 6;
   }
   return held.lighter;
-} // NOTE: warm point light
+}
+function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (player.inside ? (l.intensity>0?0:1.25) : 0); toast(l.intensity>0?'Flashlight ON':'Flashlight OFF'); }
+function toggleUV(){ const u=ensureHeldUV(); u.intensity = (player.inside ? (u.intensity>0?0:1.00) : 0); toast(u.intensity>0?'UV ON':'UV OFF'); }
+function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (player.inside && lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); }
 
-function toggleFlash(){ const l=ensureHeldFlash(); l.intensity = (player.inside ? (l.intensity>0?0:1.25) : 0); toast(l.intensity>0?'Flashlight ON':'Flashlight OFF'); } // NOTE: off outside
-function toggleUV(){ const u=ensureHeldUV(); u.intensity = (player.inside ? (u.intensity>0?0:1.00) : 0); toast(u.intensity>0?'UV ON':'UV OFF'); } // NOTE: off outside
-function toggleLighter(){ lighterOn=!lighterOn; const li=ensureHeldLighter(); li.intensity = (player.inside && lighterOn) ? 0.85 : 0; toast(lighterOn?'Lighter ON':'Lighter OFF'); } // NOTE: off outside
-
-// --- Item actions (primary/secondary) ---
+// Item actions
 function useActiveItem(){
   const it = activeItem(); if(!it){ toast('Empty slot'); return; }
   switch(it.id){
@@ -406,8 +392,7 @@ function useActiveItem(){
     case 'smudge': burnSmudge(); break;
     default: toast('Use '+it.name);
   }
-} // NOTE: routes Use
-
+}
 function placeActiveItem(){
   const it = activeItem(); if(!it){ toast('Empty slot'); return; }
   switch(it.id){
@@ -416,14 +401,13 @@ function placeActiveItem(){
     case 'salt': placeSalt(); break;
     default: toast('Place '+it.name);
   }
-} // NOTE: routes Place
-
-function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); } // NOTE: hook for physics later
+}
+function tossActiveItem(){ toast('Toss '+(activeItem()?.name||'')); }
 </script>
 
 <script>
 /*** ==========================================================
-    INPUT (WASD + Pointer Lock + Touch) + PICKUP
+    INPUT (WASD/Touch) + PICKUP
     ========================================================== ***/
 const InputSystem = (()=>{
   let move={x:0,z:0}, running=false, lookDelta={x:0,y:0};
@@ -442,8 +426,7 @@ const InputSystem = (()=>{
     const f=(keys.has('fw')?1:0)+(keys.has('bk')?-1:0);
     const r=(keys.has('rt')?1:0)+(keys.has('lt')?-1:0);
     move.z=f; move.x=r; running=keys.has('run');
-  } // NOTE: translate keys to vec
-
+  }
   function onKey(e,down){
     const tag=keyMap[e.code];
     if(!tag) return;
@@ -456,7 +439,7 @@ const InputSystem = (()=>{
     if(tag==='pickup' && down) tryPickup();
     if(tag==='drop' && down)   tryDrop();
     recomputeMove();
-  } // NOTE: keyboard
+  }
 
   function bindPointerLock(){
     document.addEventListener('click', ()=>{ if(document.pointerLockElement!==canvas) canvas.requestPointerLock?.(); }, {capture:true});
@@ -466,8 +449,7 @@ const InputSystem = (()=>{
       lookDelta.x += e.movementX||0;
       lookDelta.y += e.movementY||0;
     });
-  } // NOTE: mouse look
-
+  }
   function bindTouchHalves(){
     const left=document.getElementById('touch-left'), right=document.getElementById('touch-right');
     let leftId=null, leftCenter=null, rightId=null, lastRight=null;
@@ -475,14 +457,8 @@ const InputSystem = (()=>{
     const norm=(v)=> Math.abs(v)<DEAD?0:v;
     const clamp=(v,m)=> Math.max(-m, Math.min(m, v));
 
-    left.addEventListener('touchstart', e=>{
-      for(const t of e.changedTouches){ if(leftId===null){ leftId=t.identifier; leftCenter={x:t.clientX,y:t.clientY}; break; } }
-      e.preventDefault();
-    },{passive:false});
-    right.addEventListener('touchstart', e=>{
-      for(const t of e.changedTouches){ if(rightId===null){ rightId=t.identifier; lastRight={x:t.clientX,y:t.clientY}; break; } }
-      e.preventDefault();
-    },{passive:false});
+    left.addEventListener('touchstart', e=>{ for(const t of e.changedTouches){ if(leftId===null){ leftId=t.identifier; leftCenter={x:t.clientX,y:t.clientY}; break; } } e.preventDefault(); },{passive:false});
+    right.addEventListener('touchstart', e=>{ for(const t of e.changedTouches){ if(rightId===null){ rightId=t.identifier; lastRight={x:t.clientX,y:t.clientY}; break; } } e.preventDefault(); },{passive:false});
 
     window.addEventListener('touchmove', e=>{
       for(const t of e.changedTouches){
@@ -498,7 +474,6 @@ const InputSystem = (()=>{
         }
       }
     },{passive:false});
-
     window.addEventListener('touchend', e=>{
       for(const t of e.changedTouches){
         if(t.identifier===leftId){ leftId=null; leftCenter=null; move.x=0; move.z=0; }
@@ -506,15 +481,13 @@ const InputSystem = (()=>{
       }
       e.preventDefault();
     },{passive:false});
-  } // NOTE: two-thumb
+  }
 
   function tryPickup(){
-    // ray from camera forward ~2m
     const ray = camera.getForwardRay(2.2);
     const hit = scene.pickWithRay(ray, m=>m && m.metadata?.itemId);
     if(hit?.pickedMesh?.metadata?.itemId){
       const id = hit.pickedMesh.metadata.itemId;
-      // put into belt if not present; otherwise replace active
       if(!belt.includes(id)){
         const empty = belt.findIndex(s=>!s);
         if(empty>=0) belt[empty]=id; else belt[activeSlot]=id;
@@ -524,11 +497,9 @@ const InputSystem = (()=>{
       const i = WORLD_ITEMS.findIndex(x=>x===hit.pickedMesh); if(i>=0) WORLD_ITEMS.splice(i,1);
       toast('Picked up '+itemById(id).name);
     }
-  } // NOTE: pickup
-
+  }
   function tryDrop(){
     const it = activeItem(); if(!it) return;
-    // drop a small box at feet as placeholder mesh
     const box = BABYLON.MeshBuilder.CreateBox("drop_"+it.id,{size:0.25},scene);
     box.position = camera.position.add(new BABYLON.Vector3(0,-0.9,0)).add(camera.getForwardRay().direction.scale(0.6));
     box.isPickable=true; box.checkCollisions=false;
@@ -536,7 +507,7 @@ const InputSystem = (()=>{
     const mat = new BABYLON.StandardMaterial("im_"+it.id,scene); mat.emissiveColor=new BABYLON.Color3(0.2,0.4,0.5); box.material=mat;
     WORLD_ITEMS.push(box);
     toast('Dropped '+it.name);
-  } // NOTE: drop
+  }
 
   return {
     init(){
@@ -550,12 +521,12 @@ const InputSystem = (()=>{
       lookDelta.x=0; lookDelta.y=0; return out;
     }
   };
-})(); // NOTE: input module
+})();
 </script>
 
 <script>
 /*** ==========================================================
-    MOVEMENT & LOOK (with step-up)
+    MOVEMENT & LOOK
     ========================================================== ***/
 function handleMovement(input, dt){
   if(!camera) return;
@@ -576,22 +547,21 @@ function handleMovement(input, dt){
       else camera.position = next;
     } else camera.position = next;
   }
-} // NOTE: ledge step-up
-
+}
 function applyLook(lookDelta){
   if(!camera) return;
   const sens = 0.0026;
   camera.rotation.y += lookDelta.x * sens;
-  const invertY = 1; // NOTE: up=up
+  const invertY = 1;
   const minPitch=-Math.PI/2+0.15, maxPitch=Math.PI/2-0.15;
   const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
   camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
-} // NOTE: mouse/touch look
+}
 </script>
 
 <script>
 /*** ==========================================================
-    WEATHER RENDERING + MOON (centered near house)
+    WEATHER & MOON
     ========================================================== ***/
 let __rainTex = null;
 function makeRainTexture(){
@@ -607,15 +577,14 @@ function makeRainTexture(){
   g.addColorStop(1.0,"rgba(255,255,255,0.00)");
   ctx.fillStyle=g; ctx.fillRect(0,0,w,h); dt.update(false);
   __rainTex=dt; return dt;
-} // NOTE: streak texture
-
+}
 function ensureRain(){
   if(weather.rainPS) return weather.rainPS;
   const ps=new BABYLON.ParticleSystem("rain", 2400, scene);
   ps.particleTexture=makeRainTexture();
-  ps.emitter = camera;                      // NOTE: follow player
+  ps.emitter = camera;
   ps.minEmitBox=new BABYLON.Vector3(-12, 10, -12);
-  ps.maxEmitBox=new BABYLON.Vector3( 12, 10,  12); // NOTE: lower & tighter to map
+  ps.maxEmitBox=new BABYLON.Vector3( 12, 10,  12);
   ps.minSize=0.9; ps.maxSize=1.2;
   ps.minLifeTime=0.7; ps.maxLifeTime=1.0;
   ps.direction1=new BABYLON.Vector3(-0.15,-1.7, 0.1);
@@ -628,8 +597,7 @@ function ensureRain(){
   ps.colorDead=new BABYLON.Color4(1,1,1,0.0);
   ps.disposeOnStop=false;
   weather.rainPS=ps; return ps;
-} // NOTE: camera-centric rain
-
+}
 function ensureSnow(){
   if(weather.snowPS) return weather.snowPS;
   const ps=new BABYLON.ParticleSystem("snow", 1800, scene);
@@ -651,22 +619,18 @@ function ensureSnow(){
   ps.color2=new BABYLON.Color4(1,1,1,0.70);
   ps.disposeOnStop=false;
   weather.snowPS=ps; return ps;
-} // NOTE: camera-centric snow
-
+}
 function setWeather(state){
   weather.state=state;
   document.getElementById('hud-weather').textContent=state;
   WeatherAudio.set(state);
-
   if(weather.rainPS) weather.rainPS.stop();
   if(weather.snowPS) weather.snowPS.stop();
-
   if(state==='Clear'){ /* none */ }
   if(state==='Snow'){ ensureSnow().start(); }
   if(state==='Rain'){ ensureRain().start(); scheduleNextLightning(); }
   if(state==='Blood Moon'){ ensureRain().start(); scheduleNextLightning(); }
-} // NOTE: swap particle beds + audio
-
+}
 async function loadMoon(){
   try{
     const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
@@ -677,7 +641,7 @@ async function loadMoon(){
       const mat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
       mat.disableLighting=true; mat.emissiveColor=new BABYLON.Color3(1,1,1);
       moonMesh.material=mat;
-      moonMesh.position.copyFromFloats(0, 120, 180); // NOTE: lower & closer so it’s visible over the house
+      moonMesh.position.copyFromFloats(0, 120, 180);
       scene.onBeforeRenderObservable.add(()=>{
         const t=performance.now()*0.00002;
         moonMesh.position.x=Math.cos(t)*180;
@@ -686,27 +650,23 @@ async function loadMoon(){
       });
     }
   }catch(e){ console.warn('Moon load failed', e); }
-} // NOTE: moon visible over map
+}
 </script>
 
 <script>
 /*** ==========================================================
-    MAP LOAD + COLLISIONS + ROOM/EXTERIOR TESTS + MARKER TOOL
+    MAP LOAD + COLLISIONS + ROOMS + MARKER TOOL (fixed)
     ========================================================== ***/
 function currentRoomName(){
   if(!window.MAP_DEF) return player.inside?'House':'Exterior';
   const pos = {x:camera.position.x, z:camera.position.z};
-  for(const r of MAP_DEF.rooms){
-    if(pointInPolyXZ(pos, r.poly)) return r.name;
-  }
+  for(const r of MAP_DEF.rooms){ if(pointInPolyXZ(pos, r.poly)) return r.name; }
   return player.inside ? 'House' : 'Exterior';
-} // NOTE: label used in HUD and sanity
-
+}
 function isInsideExterior(p){
   if(!window.MAP_DEF) return true;
   return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
-} // NOTE: confine ghost spawn & lights
-
+}
 async function loadMap(){
   try{
     const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "Abandoned_House.glb", scene);
@@ -716,38 +676,46 @@ async function loadMap(){
     console.warn('Map load failed; building ground fallback', e);
     const g=BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene); g.checkCollisions=true;
   }
-} // NOTE: GLB + collisions
+}
 
-// --- Marker Tool: LMB add, RMB remove, auto-link, close loop on first point ---
+/* --- Marker Tool (uses discs, not SpriteManager) --- */
 const MarkerTool = (()=>{
-  let enabled=false, interior=true, points=[]; // NOTE: room marking helper
-  let mesh=null, mat=null, firstSprite=null, sprites=[];
+  let enabled=false, interior=true, points=[];
+  let polyMesh=null, polyMat=null, discs=[];
 
   function toggle(){ enabled=!enabled; toast('Markers '+(enabled?'enabled':'disabled')); }
   function toggleFill(){ interior=!interior; document.getElementById('btn-marker-fill').textContent = 'Fill: ' + (interior?'Interior':'Exterior'); redraw(); }
-  function clear(){ points.length=0; sprites.forEach(s=>s.dispose()); sprites=[]; if(mesh){ mesh.dispose(); mesh=null; } if(firstSprite){firstSprite.dispose(); firstSprite=null;} }
+  function clear(){
+    points.length=0;
+    discs.forEach(d=>d.dispose()); discs=[];
+    if(polyMesh){ polyMesh.dispose(); polyMesh=null; }
+  }
 
   function pointerToGround(){
     const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
     const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
     return hit?.pickedPoint ? hit.pickedPoint.clone() : null;
   }
-
-  function redraw(){
-    if(mesh){ mesh.dispose(); mesh=null; }
-    if(points.length<3) return;
-    const path2D = points.map(p=> new BABYLON.Vector2(p.x, p.z));
-    const tri = BABYLON.PolygonMeshBuilder.BuildFromPoints("poly", path2D, scene);
-    mesh = tri || BABYLON.MeshBuilder.CreatePolygon("poly",{shape: path2D, depth:0.02}, scene);
-    if(!mat){ mat=new BABYLON.StandardMaterial("polyMat",scene); mat.alpha=0.35; }
-    mat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
-    mesh.material=mat; mesh.position.y = (camera.position.y-1.6)+0.05;
+  function addDisc(p){
+    const d = BABYLON.MeshBuilder.CreateDisc("mk", {radius:0.25, tessellation:24}, scene);
+    d.rotation.x = Math.PI/2;
+    d.position = new BABYLON.Vector3(p.x, p.y+0.02, p.z);
+    const m = new BABYLON.StandardMaterial("mkMat", scene);
+    m.emissiveColor = new BABYLON.Color3(0, 0.8, 0.8);
+    m.alpha = 0.8;
+    d.material = m;
+    discs.push(d);
   }
-
-  function ensureFirstSprite(p){
-    const ms = new BABYLON.SpriteManager("spr","",1,64,scene);
-    const s = new BABYLON.Sprite("first", ms); s.size=0.8; s.position= new BABYLON.Vector3(p.x, (camera.position.y-1.6)+0.02, p.z);
-    firstSprite = s;
+  function redraw(){
+    if(polyMesh){ polyMesh.dispose(); polyMesh=null; }
+    if(points.length<3) return;
+    const shape = points.map(p=> new BABYLON.Vector2(p.x, p.z));
+    const builder = new BABYLON.PolygonMeshBuilder("poly", shape, scene);
+    polyMesh = builder.build(false, 0.02);
+    if(!polyMat){ polyMat=new BABYLON.StandardMaterial("polyMat",scene); polyMat.alpha=0.35; }
+    polyMat.diffuseColor = interior? new BABYLON.Color3(0,0.3,0.3): new BABYLON.Color3(0.3,0,0.3);
+    polyMesh.material=polyMat;
+    polyMesh.position.y = discs[0]?.position.y ?? (camera.position.y-1.6)+0.05;
   }
 
   scene.onPointerObservable.add((pi)=>{
@@ -757,25 +725,23 @@ const MarkerTool = (()=>{
       const P = pointerToGround(); if(!P) return;
 
       if(ev.button===2){ // RMB remove last
-        ev.preventDefault(); if(points.length){ points.pop(); const s=sprites.pop(); if(s) s.dispose(); redraw(); }
+        ev.preventDefault();
+        if(points.length){
+          points.pop();
+          const d=discs.pop(); if(d) d.dispose();
+          redraw();
+        }
         return;
       }
 
-      // LMB
       if(points.length>0){
         const first=points[0];
         const d = Math.hypot(P.x-first.x, P.z-first.z);
-        if(d<0.8){ // close polygon
-          points.push({...first});
-          redraw(); toast('Polygon closed'); return;
-        }
+        if(d<0.8){ points.push({...first}); redraw(); toast('Polygon closed'); return; }
       }
 
       points.push({x:P.x,y:P.y,z:P.z});
-      const ms = new BABYLON.SpriteManager("sprs","",1,64,scene);
-      const s = new BABYLON.Sprite("p", ms); s.size=0.5; s.position = new BABYLON.Vector3(P.x, P.y+0.02, P.z);
-      sprites.push(s);
-      if(points.length===1) ensureFirstSprite(P);
+      addDisc(P);
       redraw();
     }
   });
@@ -796,17 +762,15 @@ document.getElementById('btn-marker-clear').onclick=()=>MarkerTool.clear();
 
 <script>
 /*** ==========================================================
-    ITEMS: random spawns + ghost toss
+    ITEMS: RANDOM SPAWN + GHOST TOSS
     ========================================================== ***/
 function randomPointInRoomPoly(poly){
-  // simple rejection sampling inside room polygon
   const xs=poly.map(p=>p.x), zs=poly.map(p=>p.z);
   const minx=Math.min(...xs), maxx=Math.max(...xs), minz=Math.min(...zs), maxz=Math.max(...zs);
   for(let tries=0; tries<80; tries++){
     const x=minx+(maxx-minx)*Math.random();
     const z=minz+(maxz-minz)*Math.random();
     if(pointInPolyXZ({x,z}, poly)){
-      // project to ground
       const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 12, z), new BABYLON.Vector3(0,-1,0), 40);
       const hit = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
       const y = hit?.pickedPoint ? hit.pickedPoint.y+0.05 : 1.7;
@@ -814,10 +778,8 @@ function randomPointInRoomPoly(poly){
     }
   }
   return new BABYLON.Vector3(poly[0].x, 1.7, poly[0].z);
-} // NOTE: uniform-ish in polygon bbox
-
+}
 function spawnWorldItems(){
-  // pick a subset and drop around selected rooms (skip Van)
   const rooms = (MAP_DEF?.rooms||[]).filter(r=>r.name!=='Van');
   if(rooms.length===0) return;
   const count = Math.min(ITEM_TYPES.length, 6);
@@ -830,27 +792,24 @@ function spawnWorldItems(){
     mesh.material=mat; mesh.position=pos; mesh.isPickable=true; mesh.metadata={ itemId:type.id };
     WORLD_ITEMS.push(mesh);
   }
-} // NOTE: scatter items to pick up
-
+}
 function ghostTossNearby(dt){
   if(!ghost.mesh || ghost.mode==='idle') return;
-  // find nearest item within 3m and nudge it
   let best=null, bd=99;
   for(const m of WORLD_ITEMS){
     const d = BABYLON.Vector3.Distance(m.position, ghost.mesh.position);
     if(d<3 && d<bd){ best=m; bd=d; }
   }
   if(best && Math.random()<0.02){
-    // simple toss: arc forward from ghost
     const dir = camera.position.subtract(ghost.mesh.position); dir.y=0; dir.normalize();
     best.position.addInPlace(dir.scale(0.8)).addInPlace(new BABYLON.Vector3(0,0.6,0));
   }
-} // NOTE: ghost poltergeist-ish shove
+}
 </script>
 
 <script>
 /*** ==========================================================
-    EVIDENCE UI
+    NOTEBOOK / EVIDENCE
     ========================================================== ***/
 function openNotebook(){
   const box=document.getElementById('notebook-modal');
@@ -864,23 +823,21 @@ function openNotebook(){
     row.appendChild(cb); row.appendChild(lbl); list.appendChild(row);
   });
   updatePossible(); box.style.display='block';
-} // NOTE: build evidence panel
-
-function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; } // NOTE: hide notebook
-function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); } // NOTE: clear all
-
+}
+function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
+function resetEvidence(){ for(const k of EVIDENCE) found[k]=false; updatePossible(); }
 function updatePossible(){
   const result = GHOSTS.filter(g=>{
     const ghostEv = new Set(g.ev); if (g.rules?.mimicOrbs) ghostEv.add('Orbs');
     return Object.entries(found).every(([e,has])=>!has || ghostEv.has(e));
   }).map(g=>g.name);
   document.getElementById('possible-ghosts').textContent = 'Possible: ' + (result.length? result.join(', ') : 'None');
-} // NOTE: filter list
+}
 </script>
 
 <script>
 /*** ==========================================================
-    GHOST (spawn inside, events, hunts, visibility)
+    GHOST: SPAWN, EVENTS, HUNTS, VISIBILITY
     ========================================================== ***/
 function makeFlickerController(mesh){
   let t=0,on=false,next=0,solid=0.85;
@@ -904,13 +861,11 @@ function makeFlickerController(mesh){
       function apply(a){ if(!mesh) return; if(mesh.material && 'alpha' in mesh.material) mesh.material.alpha=a; else mesh.visibility=a; }
     }
   };
-} // NOTE: flicker designer
-
+}
 function randomInsideExterior(){
   const poly = MAP_DEF?.exterior || [{x:-10,z:-10},{x:10,z:-10},{x:10,z:10},{x:-10,z:10}];
   return randomPointInRoomPoly(poly);
-} // NOTE: spawn inside house
-
+}
 async function spawnGhost(){
   const profile = GHOSTS[(Math.random()*GHOSTS.length)|0];
   ghost.type = profile.name;
@@ -945,8 +900,7 @@ async function spawnGhost(){
 
   ensureGhostAudio();
   ghost.audio.singing.attachToMesh(ghost.mesh);
-} // NOTE: single ghost instance
-
+}
 function wanderGhost(dt){
   if(!ghost.mesh) return;
   if(ghost.mode!=='idle' && ghost.mode!=='event') return;
@@ -958,19 +912,16 @@ function wanderGhost(dt){
   const step = ghost._dir.scale(dt);
   const cand = ghost.mesh.position.add(step);
   if(isInsideExterior(cand)) ghost.mesh.position = cand; else ghost._dir=null;
-} // NOTE: keep inside house
-
+}
 function startEvent(){
   ghost.mode='event';
   ghost._eventLeft = 3 + Math.random()*2;
   toast('You hear something...');
-} // NOTE: short scare window
-
+}
 function ghostEventTick(dt){
   ghost.eventTimer += dt;
   if(ghost.mode!=='hunt' && ghost.eventTimer>ghost.nextEvent){
     ghost.eventTimer=0; ghost.nextEvent=10+Math.random()*14;
-    // sanity-weighted chance
     const chance = clamp((80-player.sanity)/120,0.05,0.7);
     if(Math.random()<chance) startEvent();
   }
@@ -978,27 +929,23 @@ function ghostEventTick(dt){
     ghost._eventLeft -= dt;
     if(ghost._eventLeft<=0) ghost.mode='idle';
   }
-} // NOTE: events scheduled by sanity
-
+}
 function startHunt(){
   ghost.mode='hunt'; ghost._huntLeft = 8 + Math.random()*5;
   document.getElementById('hud-hunt').textContent='Hunting';
   toast('Hunt started!');
   if(!ghost.audio.heartbeat.isPlaying) ghost.audio.heartbeat.play();
   if(!ghost.audio.singing.isPlaying)   ghost.audio.singing.play();
-} // NOTE: begins hunt
-
+}
 function stopHunt(reason){
   ghost.mode='idle'; document.getElementById('hud-hunt').textContent='Calm';
-  toast('Hunt ended'+(reason?` (${reason})`:''));
+  toast('Hunt ended'+(reason?` (${reason})`:'')); 
   if(ghost.audio.heartbeat.isPlaying) ghost.audio.heartbeat.stop();
   if(ghost.audio.singing.isPlaying)   ghost.audio.singing.stop();
-} // NOTE: end hunt
-
+}
 function huntTick(dt){
   if(!ghost._huntTimer){ ghost._huntTimer=0; ghost._nextHunt=50+Math.random()*40; }
   if(ghost.mode==='hunt'){
-    // smudge suppression
     if(performance.now() < (ghost.smudgedUntil||0)) return;
     const dir = camera.position.subtract(ghost.mesh.position); dir.y=0;
     const dist = dir.length();
@@ -1014,76 +961,72 @@ function huntTick(dt){
     ghost._huntTimer += dt;
     if(ghost._huntTimer>ghost._nextHunt){
       ghost._huntTimer=0; ghost._nextHunt=55+Math.random()*45;
-      // sanity gate (lower sanity -> more hunts)
       if(player.sanity<65){ startHunt(); }
     }
   }
-} // NOTE: hunt scheduler + chase
-
+}
 function ghostVisibilityTick(dt){
   const profile = (ghost.type==='Phantom')?'phantom':(ghost.type==='Oni')?'oni':'default';
   const mode = (ghost.mode==='event' || ghost.mode==='hunt') ? ghost.mode : 'idle';
   ghost.flicker?.tick(dt, mode, profile);
   ghost.visible = (ghost.mesh.material?.alpha ?? ghost.mesh.visibility) > 0.05;
-} // NOTE: only seen in events/hunts
-
-function ghostAbortHunt(reason){ stopHunt(reason); } // NOTE: alias for item hooks
+}
+function ghostAbortHunt(reason){ stopHunt(reason); }
 </script>
 
 <script>
 /*** ==========================================================
-    SANITY: drains in dark/near ghost; recovers in light/van
+    SANITY (ties into lights, events, hunts)
     ========================================================== ***/
 function sanityTick(dt){
-  // recompute inside + room
   player.inside = isInsideExterior(camera.position);
   const roomNow = currentRoomName();
   if(roomNow!==player.room){ player.room = roomNow; document.getElementById('hud-room').textContent=roomNow; }
 
-  // compute lightLevel from held lights (only if inside)
+  // Held light contribution (only inside)
   const li = player.inside ? (
     (held.light?.intensity||0)*0.7 +
     (held.uvLight?.intensity||0)*0.5 +
     (held.lighter?.intensity||0)*0.8
   ) : 0;
-  player.lightLevel = clamp(li/2.5, 0, 1); // normalize ~0..1
+  player.lightLevel = clamp(li/2.5, 0, 1);
 
-  // base rates
-  let drain = 0.004;                 // passive drain
+  // Base rates
+  let drain = 0.004;  // ambient decay
   let recover = 0;
 
-  // light helps
+  // Recovery in light
   if(player.lightLevel>0.4) recover += 0.008 * (player.lightLevel-0.4);
 
-  // darkness hurts, more if weather ominous
+  // Darkness hurts (more in Blood Moon)
   if(player.lightLevel<0.25){
     drain += (0.010 * (0.25-player.lightLevel));
     if(weather.state==='Blood Moon') drain += 0.004;
   }
 
-  // ghost proximity
+  // Ghost proximity
   if(ghost.mesh){
     const d = BABYLON.Vector3.Distance(ghost.mesh.position, camera.position);
     if(d<6) drain += 0.016 * ((6-d)/6);
   }
 
-  // events/hunt
+  // Events & Hunts
   if(ghost.mode==='event') drain += 0.010;
   if(ghost.mode==='hunt')  drain += 0.020;
 
-  // van recovers
+  // Van recovers quickly
   if(player.room==='Van') recover += 0.040;
 
-  // apply
+  // Apply
   player.sanity = clamp(player.sanity + (recover - drain)*dt*60, 0, 100);
   document.getElementById('hud-sanity').textContent = Math.round(player.sanity)+'%';
-} // NOTE: sanity model
+}
 
-// --- audio gains vs distance ---
+// Audio gain vs distance/state
 function updateEventAudioGains(){
   if(!ghost.audio.heartbeat || !ghost.audio.singing) return;
   const d = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) : 99;
-  const near = clamp(1-(d/12), 0, 1); // 0..1
+  const near = clamp(1-(d/12), 0, 1);
   if(ghost.mode==='hunt'){
     ghost.audio.heartbeat.setVolume(0.18 + 0.40*near);
     ghost.audio.singing.setVolume(0.12 + 0.50*near);
@@ -1096,12 +1039,12 @@ function updateEventAudioGains(){
     ghost.audio.singing.setVolume(0);
     if(ghost.audio.singing.isPlaying) ghost.audio.singing.stop();
   }
-} // NOTE: distance-based loudness
+}
 </script>
 
 <script>
 /*** ==========================================================
-    SIMPLE ITEM ACTIONS (tied to sanity/evidence)
+    SIMPLE ITEM ACTIONS (hooks)
     ========================================================== ***/
 function takePhoto(){
   const flash = document.createElement('div');
@@ -1110,10 +1053,9 @@ function takePhoto(){
   setTimeout(()=>flash.style.opacity='0',40);
   setTimeout(()=>flash.remove(),180);
   if(ghost && ghost.visible) toast('Ghost captured!');
-} // NOTE: camera flash
-
-function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); } // NOTE: demo EMF
-function readTemp(){ toast('Temp: '+(player.room!=='Van' ? (ghost.visible?'-1°C':'5°C') : '18°C')); } // NOTE: colder in action
+}
+function pingEMF(){ toast('EMF: '+(ghost?.nearPlayer? 'Level 5!':'Level 2')); }
+function readTemp(){ toast('Temp: '+(player.room!=='Van' ? (ghost.visible?'-1°C':'5°C') : '18°C')); }
 function placeSalt(){ toast('Salt placed'); }
 function toggleDOTS(){ toast('DOTS toggled'); }
 function placeDOTS(){ toast('DOTS placed'); }
@@ -1125,7 +1067,7 @@ function burnSmudge(){ if(ghost){ ghost.smudgedUntil = performance.now()+6000; t
 
 <script>
 /*** ==========================================================
-    BOOT + MAIN LOOP + START
+    BOOT + MAIN LOOP
     ========================================================== ***/
 async function boot(){
   engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
@@ -1150,11 +1092,11 @@ async function boot(){
   hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemiLight.intensity = 0.06;
 
-  await loadMap();      // NOTE: GLB + collisions
-  await loadMoon();     // NOTE: sky prop
+  await loadMap();
+  await loadMoon();
   WeatherAudio.init(scene);
 
-  // Weather pick AFTER scene exists
+  // Weather
   const r=Math.random();
   const w = r<0.40?'Clear' : r<0.70?'Rain' : r<0.88?'Snow' : 'Blood Moon';
   setWeather(w);
@@ -1164,7 +1106,7 @@ async function boot(){
   InputSystem.init();
   canvas.focus();
 
-  // Spawn ghost/items inside
+  // Spawn ghost/items
   await spawnGhost();
   spawnWorldItems();
 
@@ -1184,7 +1126,7 @@ async function boot(){
     handleMovement(input, dt);
     applyLook(input.lookDelta);
 
-    // Attach held lights to camera + disable when outside
+    // Attach held lights to camera (force off outdoors)
     const camForward = camera.getForwardRay().direction;
     if(held.light){
       held.light.position = camera.position.add(new BABYLON.Vector3(0,0.3,0));
@@ -1227,12 +1169,12 @@ async function boot(){
 
   engine.runRenderLoop(()=>scene.render());
   window.addEventListener('resize', ()=>engine.resize());
-} // NOTE: boot
+}
 </script>
 
 <script>
 /*** ==========================================================
-    LIGHTNING FLASH (screen pop)
+    LIGHTNING FLASH FX
     ========================================================== ***/
 function lightningFlash(){
   const d=document.createElement('div');
@@ -1241,12 +1183,12 @@ function lightningFlash(){
   requestAnimationFrame(()=>{ d.style.opacity='0.55'; });
   setTimeout(()=>{ d.style.opacity='0'; }, 110);
   setTimeout(()=>{ d.remove(); }, 260);
-} // NOTE: used in rain/blood moon
+}
 </script>
 
 <script>
 /*** ==========================================================
-    START FLOW (title → game)
+    START FLOW
     ========================================================== ***/
 let __started=false;
 async function safeStart(){
