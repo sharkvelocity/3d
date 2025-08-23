@@ -557,6 +557,26 @@ function applyLook(lookDelta){
   const pitch=(camera.rotation.x||0)+(invertY * lookDelta.y * sens * 0.85);
   camera.rotation.x=Math.min(maxPitch, Math.max(minPitch, pitch));
 }
+
+/*** ==========================================================
+    CONTINUOUS GROUND SNAP
+    ========================================================== ***/
+const EYE_H = 1.7;
+function groundSnapTick(dt){
+  if(!camera || !scene) return;
+  // Ray start slightly above the player to ensure we hit floors even on slopes
+  const start = camera.position.add(new BABYLON.Vector3(0, 1.0, 0));
+  const ray   = new BABYLON.Ray(start, new BABYLON.Vector3(0,-1,0), 4.0);
+  const hit   = scene.pickWithRay(ray, m=>m && m.isPickable!==false);
+  if(hit && hit.pickedPoint){
+    const targetY = hit.pickedPoint.y + EYE_H;
+    // Smoothly approach to avoid jitter but clamp strong penetrations
+    const dy = targetY - camera.position.y;
+    const snap = Math.abs(dy) > 0.2 ? dy : dy * 0.25; // big correction if we sank
+    camera.position.y += snap;
+  }
+}
+
 </script>
 
 <script>
@@ -605,9 +625,20 @@ function ensureSnow(){
   const ctx=snowTex.getContext(); ctx.clearRect(0,0,8,8);
   ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(4,4,3,0,Math.PI*2); ctx.fill(); snowTex.update(false);
   ps.particleTexture=snowTex;
-  ps.emitter = camera;
-  ps.minEmitBox=new BABYLON.Vector3(-10, 8, -10);
-  ps.maxEmitBox=new BABYLON.Vector3( 10, 8,  10);
+
+  // Compute exterior bounds to anchor snowfall over the whole area
+  const ext = (window.MAP_DEF?.exterior)||[{x:-20,z:-20},{x:20,z:-20},{x:20,z:20},{x:-20,z:20}];
+  let minx=Infinity, maxx=-Infinity, minz=Infinity, maxz=-Infinity;
+  for(const p of ext){ if(p.x<minx) minx=p.x; if(p.x>maxx) maxx=p.x; if(p.z<minz) minz=p.z; if(p.z>maxz) maxz=p.z; }
+  const cx=(minx+maxx)/2, cz=(minz+maxz)/2;
+  const hx=(maxx-minx)/2, hz=(maxz-minz)/2;
+
+  const emitter = new BABYLON.TransformNode("snowEmitter", scene);
+  emitter.position = new BABYLON.Vector3(cx, 8, cz);
+  ps.emitter = emitter;
+  ps.minEmitBox=new BABYLON.Vector3(-hx, 8, -hz);
+  ps.maxEmitBox=new BABYLON.Vector3( hx, 8,  hz);
+
   ps.minSize=0.06; ps.maxSize=0.12;
   ps.minLifeTime=2.0; ps.maxLifeTime=3.2;
   ps.emitRate=900;
@@ -689,8 +720,41 @@ async function loadMap(){
 const MarkerTool = (()=>{
   let enabled=false, interior=true, points=[];
   let polyMesh=null, polyMat=null, discs=[];
+  let attached=false;
 
-  function toggle(){ enabled=!enabled; toast('Markers '+(enabled?'enabled':'disabled')); }
+  function attach(){
+    if(attached || !scene) return; // wait until scene exists
+    scene.onPointerObservable.add((pi)=>{
+      if(!enabled) return;
+      if(pi.type===BABYLON.PointerEventTypes.POINTERDOWN){
+        const ev = pi.event;
+        const P = pointerToGround(); if(!P) return;
+
+        if(ev.button===2){ // RMB remove last
+          ev.preventDefault();
+          if(points.length){
+            points.pop();
+            const d=discs.pop(); if(d) d.dispose();
+            redraw();
+          }
+          return;
+        }
+
+        if(points.length>0){
+          const first=points[0];
+          const d = Math.hypot(P.x-first.x, P.z-first.z);
+          if(d<0.8){ points.push({...first}); redraw(); toast('Polygon closed'); return; }
+        }
+
+        points.push({x:P.x,y:P.y,z:P.z});
+        addDisc(P);
+        redraw();
+      }
+    });
+    attached=true;
+  }
+
+  function toggle(){ enabled=!enabled; attach(); toast('Markers '+(enabled?'enabled':'disabled')); }
   function toggleFill(){ interior=!interior; document.getElementById('btn-marker-fill').textContent = 'Fill: ' + (interior?'Interior':'Exterior'); redraw(); }
   function clear(){
     points.length=0;
@@ -725,41 +789,13 @@ const MarkerTool = (()=>{
     polyMesh.position.y = discs[0]?.position.y ?? (camera.position.y-1.6)+0.05;
   }
 
-  scene.onPointerObservable.add((pi)=>{
-    if(!enabled) return;
-    if(pi.type===BABYLON.PointerEventTypes.POINTERDOWN){
-      const ev = pi.event;
-      const P = pointerToGround(); if(!P) return;
-
-      if(ev.button===2){ // RMB remove last
-        ev.preventDefault();
-        if(points.length){
-          points.pop();
-          const d=discs.pop(); if(d) d.dispose();
-          redraw();
-        }
-        return;
-      }
-
-      if(points.length>0){
-        const first=points[0];
-        const d = Math.hypot(P.x-first.x, P.z-first.z);
-        if(d<0.8){ points.push({...first}); redraw(); toast('Polygon closed'); return; }
-      }
-
-      points.push({x:P.x,y:P.y,z:P.z});
-      addDisc(P);
-      redraw();
-    }
-  });
-
   function save(){
     const data = { interior, points: points.map(p=>({x:p.x,y:p.y,z:p.z})) };
     const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='markers.json'; a.click();
   }
 
-  return { toggle, toggleFill, save, clear };
+  return { init: attach, toggle, toggleFill, save, clear };
 })();
 document.getElementById('btn-marker').onclick=()=>MarkerTool.toggle();
 document.getElementById('btn-marker-fill').onclick=()=>MarkerTool.toggleFill();
@@ -1094,7 +1130,7 @@ async function boot(){
   camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(MAP_DEF?.vanSpawn?.x||0, MAP_DEF?.vanSpawn?.y||2, MAP_DEF?.vanSpawn?.z||24), scene);
   camera.attachControl(canvas, true);
   camera.checkCollisions = true;
-  camera.applyGravity = true;
+  camera.applyGravity = false; // handled by groundSnapTick()
   camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
   camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
   camera.minZ = 0.1; camera.inertia=0;
@@ -1111,6 +1147,7 @@ async function boot(){
   await loadMap();
   await loadMoon();
   WeatherAudio.init(scene);
+  MarkerTool.init();
 
   // Weather
   const r=Math.random();
@@ -1141,6 +1178,7 @@ async function boot(){
 
     handleMovement(input, dt);
     applyLook(input.lookDelta);
+    groundSnapTick(dt);
 
     // Attach held lights to camera (force off outdoors)
     const camForward = camera.getForwardRay().direction;
