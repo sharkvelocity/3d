@@ -884,7 +884,10 @@ window.loadSelectedMap = async function(){
       res.meshes.forEach(m=>{ m.layerMask = (m.layerMask|0) | LAYERS.INTERIOR; });
     } catch(e) {}
 
-    // Apply map transform if provided by MAP_DEF
+// Force-origin mode
+    const FORCE_ORIGIN = true;
+
+        // Apply map transform if provided by MAP_DEF
     try {
       const s = (window.MAP_DEF && (MAP_DEF.scale||MAP_DEF.scaling)) ? (MAP_DEF.scale||MAP_DEF.scaling) : null;
       if (s && houseRoot && houseRoot.scaling) { houseRoot.scaling.set(s, s, s); }
@@ -893,6 +896,9 @@ window.loadSelectedMap = async function(){
       const ry = (window.MAP_DEF && (MAP_DEF.rotationY!==undefined)) ? (MAP_DEF.rotationY * Math.PI/180) : null;
       if (ry!==null && houseRoot && houseRoot.rotation) { houseRoot.rotation.y += ry; }
     } catch(e) { console.warn('Map transform apply failed', e); }
+
+    // Force each GLB root to origin (0,0,0)
+    try { if (FORCE_ORIGIN && houseRoot && houseRoot.position) { houseRoot.position.set(0,0,0); } } catch(e){}
 
     // WORLD_BOUNDS
     const bb = houseRoot?.getHierarchyBoundingVectors?.(true);
@@ -1073,7 +1079,13 @@ function isInsideExterior(p){
   return pointInPolyXZ({x:p.x, z:p.z}, MAP_DEF.exterior);
 }
 function isInsideHouse(p){
-  return !isInsideExterior(p);
+  if(!window.MAP_DEF) return true;
+  const poly = MAP_DEF.exterior || [];
+  const inside = pointInPolyXZ({x:p.x, z:p.z}, poly);
+  // If the map says 'interior', inside the polygon means *inside the house*.
+  // Otherwise (default 'exterior'), inside polygon means *outside* (yard), so invert.
+  const mode = (MAP_DEF.exteriorMode||'exterior');
+  return mode==='interior' ? inside : !inside;
 }
 function startEvent(){
   ghost.mode='event';
@@ -1250,14 +1262,21 @@ async function boot(){
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
   await loadSelectedMap();
+// Force player start at world origin for consistent authoring
+  if (true /* FORCE_ORIGIN */) {
+    try { camera.position = new BABYLON.Vector3(0, 1.8, 0); } catch(e){}
+  } else {
   // Move player camera to map-defined spawn if provided
   try {
-    if (window.MAP_DEF && MAP_DEF.spawn) {
-      const sp = MAP_DEF.spawn;
+    if (window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.vanSpawn)) {
+      const sp = MAP_DEF.spawn || MAP_DEF.vanSpawn;
       camera.position = new BABYLON.Vector3(sp.x||0, sp.y||1.8, sp.z||0);
     }
   } catch(e){ console.warn('Spawn apply failed', e); }
   await loadMoon();
+  // Make sure we truly end up at origin even if something later nudges us
+  try { camera.position = new BABYLON.Vector3(0, 1.8, 0); } catch(e){}
+
   WeatherAudio.init(scene);
 
   // Weather
