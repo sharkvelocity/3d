@@ -4,15 +4,13 @@
     title: "Abandoned House",
     file:  "Abandoned_House.glb",
 
-    // model transform (keep/tweak as needed)
     scale: 0.12,
     rotationY: 0,
     offset: { x: 0, y: 0, z: 0 },
 
-    // === player/van spawn (center of your Van poly) ===
-    // Van centroid: x=49.951885, z=-103.113540
-    spawn:    { x: 49.951885, y: 1.8, z: -103.113540 },
-    vanSpawn: { x: 49.951885, y: 1.8, z: -103.113540 },
+    // spawn here
+    spawn:    { x: 14.15, y: 1.80, z: 11.09 },
+    vanSpawn: { x: 14.15, y: 1.80, z: 11.09 },
     // (optional) if you want a facing: spawnYawDeg: 180,
 
     // Your polygon is an indoor boundary
