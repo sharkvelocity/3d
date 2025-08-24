@@ -3795,6 +3795,63 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   })();
 })();
 </script>
+
+<!-- PATCH: Third-Person Toggle -->
+<script>
+(function(){
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  function Canvas(){ var c=document.getElementById("renderCanvas")||document.getElementById("gameCanvas"); return c||document.querySelector("canvas")||null; }
+  function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
+
+  function ensureThirdPersonCam(){
+    var s=S(); if(!s) return null;
+    var canvas = Canvas();
+    var arc = (s.activeCamera && isArc(s.activeCamera)) ? s.activeCamera : null;
+    if (!arc){
+      var alpha = -Math.PI/2, beta = 1.2, radius = 4.0;
+      arc = new BABYLON.ArcRotateCamera("thirdPerson", alpha, beta, radius, new BABYLON.Vector3(0,1,0), s);
+      if (canvas) arc.attachControl(canvas, true);
+      arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = Math.PI/2.0;
+      arc.lowerRadiusLimit = 2.2; arc.upperRadiusLimit = 8.0;
+    }
+    return arc;
+  }
+
+  function followPlayer(){
+    var s=S(); if(!s) return;
+    if (s.__tpfollow) return;
+    s.__tpfollow = true;
+    s.onBeforeRenderObservable.add(function(){
+      try{
+        var pl = window.player || (s.getNodeByName && s.getNodeByName("player"));
+        var cam = s.activeCamera;
+        if (pl && cam && isArc(cam) && pl.position){
+          cam.target = pl.position;
+        }
+      }catch(_){}
+    });
+  }
+
+  (function setupToggle(){
+    var s=S(); if(!s){ setTimeout(setupToggle, 250); return; }
+    var firstCam = s.activeCamera;
+    addEventListener("keydown", function(e){
+      if ((e.key||"").toLowerCase()==="v" || e.keyCode===86){
+        var cam = s.activeCamera;
+        if (isArc(cam)){
+          if (firstCam && firstCam !== cam){
+            s.activeCamera = firstCam;
+            try { firstCam.attachControl(Canvas(), true); }catch(_){}
+          }
+        } else {
+          var arc = ensureThirdPersonCam();
+          if (arc){ s.activeCamera = arc; try{ arc.attachControl(Canvas(), true); }catch(_){ } followPlayer(); }
+        }
+      }
+    }, {passive:true});
+  })();
+})();
+</script>
 </body>
 
 <script>
