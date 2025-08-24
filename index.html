@@ -2114,5 +2114,134 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 })();
 </script>
 
+
+<script id="tweakpatch-manifest-hotfix">
+(function(){
+  const log = (...a)=>console.log("[ManifestHotfix]",...a);
+  const fixRepoPath = (p)=>{
+    if (typeof p !== "string") return p;
+    // normalize ./assets/map/* -> ./assets/models/map/*
+    return p.replace(/^\.\/assets\/map\//i, "./assets/models/map/");
+  };
+  const ensureGlbMapDef = async (entry)=>{
+    // Accepts entry with .glb; tries sibling config, else synthesize MAP_DEF
+    if (!entry) return false;
+    const glb = fixRepoPath(entry.glb || entry.file || entry.model || entry.path || entry.config);
+    if (!glb || !/\.glb(\?.*)?$/i.test(glb)) return false;
+
+    // Try sibling config first
+    const base = glb.replace(/\.glb(\?.*)?$/i, "");
+    const candidates = [base + ".config.js", base + ".js"];
+    for (const c of candidates){
+      try {
+        const cfg = fixRepoPath(c);
+        await import(cfg);
+        if (window.MAP_DEF && MAP_DEF.file) {
+          log("Loaded sibling config:", cfg);
+          return true;
+        }
+      } catch(e){ /* try next */ }
+    }
+
+    // Synthesize a minimal MAP_DEF
+    window.MAP_DEF = {
+      title: entry.name || "Map",
+      file: glb,
+      scale: 1.0,
+      rotationY: 0,
+      offset: {x:0,y:0,z:0},
+      spawn: {x:0,y:1.8,z:0},
+      exteriorMode: "exterior",
+      exterior: []
+    };
+    log("Synthesized MAP_DEF from GLB:", MAP_DEF);
+    if (window.__TweakPatch && __TweakPatch.showToast){
+      __TweakPatch.showToast("Using GLB-only map (no config). Spawn set to origin.");
+    }
+    return true;
+  };
+
+  // Override resolver to handle bad/GLB configs & path rewrites
+  function overrideResolver(){
+    const oldEnsure = window.ensureMapDef || (window.__TweakPatch && __TweakPatch.ensureMapDef);
+    async function ensure(){
+      // Try original ensure if present
+      if (typeof oldEnsure === "function"){
+        try{
+          const ok = await oldEnsure();
+          if (ok) return true;
+        }catch(e){ /* fall through */ }
+      }
+      // Pull last list cached by original patch if available
+      const patch = window.__ManifestPatchCache;
+      const list = patch && patch.list ? patch.list : null;
+
+      // If we have a bad 'config' like a .glb or wrong path, try to fix
+      if (list && list.length){
+        // If a selected map exists, use it; else try each until success
+        const sel = (function(){
+          const s = document.querySelector("#mapSelect, #map-select, select[name='map']");
+          return s ? s.value : null;
+        })();
+        const ordered = sel ?
+          list.sort((a,b)=> (a.name===sel?-1:0) - (b.name===sel?-1:0)) :
+          list;
+
+        for (const entry of ordered){
+          // Fix paths
+          if (entry.config) entry.config = fixRepoPath(entry.config);
+          if (entry.glb) entry.glb = fixRepoPath(entry.glb);
+
+          try{
+            if (entry.config && /\.js(\?.*)?$/i.test(entry.config)){
+              await import(entry.config);
+              if (window.MAP_DEF && MAP_DEF.file) {
+                return true;
+              }
+            }
+          } catch(e){
+            // If config import fails, try GLB path-based synth
+            const ok = await ensureGlbMapDef(entry);
+            if (ok) return true;
+          }
+          // If no config given, try GLB synth
+          if (!entry.config){
+            const ok = await ensureGlbMapDef(entry);
+            if (ok) return true;
+          }
+        }
+      }
+      return !!(window.MAP_DEF && MAP_DEF.file);
+    }
+
+    window.ensureMapDef = ensure;
+    if (window.__TweakPatch) window.__TweakPatch.ensureMapDef = ensure;
+  }
+
+  // Cache manifest list when loaded by earlier patch
+  (function hookManifestCache(){
+    const orig = window.fetch;
+    window.fetch = async function(){
+      const res = await orig.apply(this, arguments);
+      try {
+        const url = String(arguments[0]);
+        if (url.includes("/assets/models/map/maps.json")){
+          const clone = res.clone();
+          clone.json().then(data => {
+            window.__ManifestPatchCache = window.__ManifestPatchCache || {};
+            // Normalize to array of entries {name, config, glb}
+            const arr = Array.isArray(data) ? data : Object.keys(data||{}).map(k => ({ name:k, ...(data[k]||{}) }));
+            window.__ManifestPatchCache.list = arr;
+          }).catch(()=>{});
+        }
+      } catch(e){}
+      return res;
+    };
+  })();
+
+  overrideResolver();
+})();
+</script>
+
 </body>
 </html>
