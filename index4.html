@@ -361,25 +361,41 @@ function pointInPolyXZ(p, poly){
 }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 </script>
-
 <script>
-/*** ==========================================================
-    LOADER (progress + labels)
-    ========================================================== ***/
+  // -------------- LOADER
 const Loader = (() => {
-  const box  = () => document.getElementById('loading-box');
-  const text = () => document.getElementById('loading-text');
-  const fill = () => document.getElementById('loading-fill');
+  // Resolve elements no matter which ID set you use.
+  const box  = () =>
+      document.getElementById('loading-box')
+   || document.getElementById('bar')
+   || document.querySelector('#start .bar')       // common layout
+   || document.querySelector('#start #loading-box');
+
+  const text = () =>
+      document.getElementById('loading-text')
+   || document.getElementById('status')
+   || document.querySelector('#start #status');
+
+  const fill = () =>
+      document.getElementById('loading-fill')
+   || document.getElementById('fill')
+   || (box() ? box().querySelector('.fill') : null);
 
   let totalWeight = 0;
   let progressed  = 0;
-  let queue = [];
+  const queue = [];
 
-  function show(){ if(box()) box().style.display='flex'; }
-  function hide(){ if(box()) box().style.display='none'; }
-  function label(s){ if(text()) text.textContent = s; }
-  function pct(){ return totalWeight ? Math.max(0, Math.min(100, (progressed/totalWeight)*100)) : 0; }
-  function draw(){ if(fill()) fill.style.width = pct().toFixed(1) + '%'; }
+  function show(){ const b=box(); if (b) b.style.display='flex'; }
+  function hide(){ const b=box(); if (b) b.style.display='none'; }
+  function label(s){ const t=text(); if (t) t.textContent = s ?? ''; }
+
+  function pct01(){
+    return totalWeight ? Math.max(0, Math.min(1, progressed / totalWeight)) : 0;
+  }
+  function draw(){
+    const f = fill(); if (!f) return;            // guard prevents the crash
+    f.style.width = (pct01() * 100).toFixed(1) + '%';
+  }
 
   function addStep(label, fnOrPromise, weight=1){
     queue.push({label, run: fnOrPromise, weight});
@@ -387,9 +403,9 @@ const Loader = (() => {
   }
 
   async function run(){
-    // Loader is shown by safeStart(), not here.
-    for(const step of queue){
-      label(step.label); try{__dbg.show(step.label);}catch(_){}
+    // Loader is shown by safeStart()
+    for (const step of queue){
+      label(step.label);
       draw();
       try{
         if (typeof step.run === 'function') {
@@ -412,14 +428,17 @@ const Loader = (() => {
     hide();
   }
 
-  async function wrap(labelText, weight, fn){
+  function wrap(labelText, weight, fn){
     addStep(labelText, async ()=>{ await fn(); }, weight);
   }
 
-  return { addStep, run, wrap, show, hide, label, draw };
+  function reset(){
+    queue.length = 0; totalWeight = 0; progressed = 0; draw();
+  }
+
+  return { addStep, run, wrap, show, hide, label, draw, reset };
 })();
 </script>
-
 <script>
 /*** ==========================================================
     INSPECTOR TOP-MOST ENSURER
@@ -1424,60 +1443,79 @@ function lightningFlash(){
 </script>
 
 <script>
+<script>
 /*** ==========================================================
-    START FLOW (Loader after Start)
-    ========================================================== ***/
-let __started=false;
+    START FLOW (Loader after Start) — hardened
+========================================================== ***/
+let __started = false;
 
 async function safeStart(e){
   e?.preventDefault?.();
-  if(__started) return; __started = true;
+  if (__started) return;
+  __started = true;
 
-  // Hide the title screen immediately
-  document.getElementById('title-screen').style.display = 'none';
+  // Hide title screen (if present)
+  const title = document.getElementById('title-screen');
+  if (title) title.style.display = 'none';
 
-  // Show loader now (only after Start is pressed)
+  // Show loader
+  Loader.reset?.();
   Loader.show();
   Loader.label('Initializing…');
   Loader.draw();
 
-  // Build the queue of steps we want to show
-  Loader.addStep('Loading maps manifest…',       ()=>loadManifest(),               3);
-  Loader.addStep('Preparing Babylon engine…',    ()=>prepareEngineScene(),         2);
-  Loader.addStep('Setting up sky lights…',       ()=>setupLightsPreMoon(),         1);
-  Loader.addStep('Loading sky / moon…',          ()=>loadMoon(),                   2);
-  Loader.addStep('Initializing audio engine…',   ()=>WeatherAudio.init(scene),     1);
-  Loader.addStep('Loading player model…',        ()=>PlayerRig.load(),             3);
-  Loader.addStep('Loading selected map…',        ()=>loadSelectedMap(),            5);
-  Loader.addStep('Positioning player spawn…',    ()=>applySpawn(),                 2);
-  Loader.addStep('Selecting starting weather…',  ()=>pickAndSetWeather(),          1);
-  Loader.addStep('Building shadows & flags…',    ()=>markShadowable(scene.meshes), 1);
-  Loader.addStep('Wiring input + UI…',           ()=>postInitUI(),                 1);
-  Loader.addStep('Starting render loop…',        ()=>startRenderLoop(),            1);
+  // Helper: add a step only if the function exists
+  const add = (label, fnOrPromise, weight=1) => {
+    if (typeof fnOrPromise === 'function' || (fnOrPromise && typeof fnOrPromise.then === 'function')) {
+      Loader.addStep(label, fnOrPromise, weight);
+    } else {
+      // no-op step so the label still shows
+      Loader.addStep(label, async()=>{}, Math.max(1, weight));
+    }
+  };
+
+  // Build the queue (guards if any function is undefined)
+  add('Loading maps manifest…',       typeof loadManifest      === 'function' ? ()=>loadManifest()         : null, 3);
+  add('Preparing Babylon engine…',    typeof prepareEngineScene=== 'function' ? ()=>prepareEngineScene()   : null, 2);
+  add('Setting up sky lights…',       typeof setupLightsPreMoon=== 'function' ? ()=>setupLightsPreMoon()   : null, 1);
+  add('Loading sky / moon…',          typeof loadMoon          === 'function' ? ()=>loadMoon()             : null, 2);
+  add('Initializing audio engine…',   (window.WeatherAudio && WeatherAudio.init) ? ()=>WeatherAudio.init(scene) : null, 1);
+  add('Loading player model…',        (window.PlayerRig && PlayerRig.load)      ? ()=>PlayerRig.load()      : null, 3);
+  add('Loading selected map…',        typeof loadSelectedMap   === 'function' ? ()=>loadSelectedMap()      : null, 5);
+  add('Positioning player spawn…',    typeof applySpawn        === 'function' ? ()=>applySpawn()           : null, 2);
+  add('Selecting starting weather…',  typeof pickAndSetWeather === 'function' ? ()=>pickAndSetWeather()    : null, 1);
+  add('Building shadows & flags…',    typeof markShadowable    === 'function' ? ()=>markShadowable(scene.meshes) : null, 1);
+  add('Wiring input + UI…',           typeof postInitUI        === 'function' ? ()=>postInitUI()           : null, 1);
+  add('Starting render loop…',        typeof startRenderLoop   === 'function' ? ()=>startRenderLoop()      : null, 1);
 
   await Loader.run();
 
-  try{canvas.focus(); } catch(_){}
-  try{BABYLON.Engine.audioEngine?.unlock?.(); } catch(_){}
+  const canvas = window.canvas || document.getElementById('renderCanvas') || document.querySelector('canvas');
+  try { canvas?.focus?.(); } catch(_) {}
+  try { BABYLON.Engine.audioEngine?.unlock?.(); } catch(_) {}
 
-  // Auto-request pointer lock once everything is ready (desktop convenience)
+  // Desktop convenience: request pointer lock
   if (canvas?.requestPointerLock) {
     setTimeout(()=>{ try{ canvas.requestPointerLock(); }catch(_){/* user gesture rule */} }, 0);
   }
 }
 
-document.getElementById('start-button')?.addEventListener('click', safeStart, {passive:false});
+// Start button & keyboard wiring (all guarded)
+const startBtn = document.getElementById('start-button') || document.querySelector('#start button');
+startBtn?.addEventListener('click', safeStart, {passive:false});
 document.addEventListener('keydown', (e)=>{
-  if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(e); }
+  if (!__started && (e.key === 'Enter' || e.code === 'Space')) { e.preventDefault(); safeStart(e); }
 }, {passive:false});
 
-window.addEventListener("DOMContentLoaded", () => { if (typeof loadManifest === "function") loadManifest(); });
+// Optional: preload manifest after DOM ready
+window.addEventListener('DOMContentLoaded', () => {
+  if (typeof loadManifest === 'function') { try { loadManifest(); } catch(_) {} }
+});
 
-// Simple buttons wiring for notebook close/reset
-function closeNotebook(){ document.getElementById('notebook-modal').style.display='none'; }
-function resetEvidence(){ toast('Evidence reset'); }
+// Notebook helpers (guarded)
+function closeNotebook(){ const m=document.getElementById('notebook-modal'); if (m) m.style.display='none'; }
+function resetEvidence(){ typeof toast==='function' ? toast('Evidence reset') : console.log('Evidence reset'); }
 </script>
-
 <script>
 /*** ==========================================================
     SPAWN FALLBACKS (used only if no MAP_DEF.spawn)
@@ -1547,269 +1585,577 @@ const EMFAudio = (()=>{
   return { spike, startEMF5, extend };
 })();
 </script>
-
 <script>
 const GhostAudio = (()=>{
-  let whisper=null, slam1=null, slam2=null, creak1=null, creak2=null, toss=null;
+  let whisperSnd=null, slamSnd1=null, slamSnd2=null, creakSnd1=null, creakSnd2=null, tossSnd=null;
+  let lastCreakTime = 0;
+
   function ensure(){
     try{
-      whisper = whisper || new BABYLON.Sound('ga_whisper','./assets/audio/whisper.mp3',scene,null,{loop:false,autoplay:false,volume:0.7});
-      slam1   = slam1   || new BABYLON.Sound('ga_slam1','./assets/audio/doorSlam1.mp3',scene,null,{loop:false,autoplay:false,volume:0.9});
-      slam2   = slam2   || new BABYLON.Sound('ga_slam2','./assets/audio/doorSlam2.mp3',scene,null,{loop:false,autoplay:false,volume:0.9});
-      creak1  = creak1  || new BABYLON.Sound('ga_creak1','./assets/audio/doorCreak1.mp3',scene,null,{loop:false,autoplay:false,volume:0.7});
-      creak2  = creak2  || new BABYLON.Sound('ga_creak2','./assets/audio/doorCreak2.mp3',scene,null,{loop:false,autoplay:false,volume:0.7});
-      toss    = toss    || new BABYLON.Sound('ga_toss','./assets/audio/Toss.wav',scene,null,{loop:false,autoplay:false,volume:0.85});
+      const opt = { loop:false, autoplay:false };
+      whisperSnd = whisperSnd || new BABYLON.Sound('ga_whisper','./assets/audio/whisper.mp3', scene, null, { ...opt, volume:0.7 });
+      slamSnd1   = slamSnd1   || new BABYLON.Sound('ga_slam1','./assets/audio/doorSlam1.mp3', scene, null, { ...opt, volume:0.9 });
+      slamSnd2   = slamSnd2   || new BABYLON.Sound('ga_slam2','./assets/audio/doorSlam2.mp3', scene, null, { ...opt, volume:0.9 });
+      creakSnd1  = creakSnd1  || new BABYLON.Sound('ga_creak1','./assets/audio/doorCreak1.mp3', scene, null, { ...opt, volume:0.7 });
+      creakSnd2  = creakSnd2  || new BABYLON.Sound('ga_creak2','./assets/audio/doorCreak2.mp3', scene, null, { ...opt, volume:0.7 });
+      tossSnd    = tossSnd    || new BABYLON.Sound('ga_toss','./assets/audio/Toss.wav',         scene, null, { ...opt, volume:0.85 });
     }catch(_){}
   }
+
+  // optional positional attachment
+  function attachTo(node){
+    try{
+      whisperSnd?.attachToMesh?.(node);
+      slamSnd1?.attachToMesh?.(node);
+      slamSnd2?.attachToMesh?.(node);
+      creakSnd1?.attachToMesh?.(node);
+      creakSnd2?.attachToMesh?.(node);
+      tossSnd?.attachToMesh?.(node);
+    }catch(_){}
+  }
+
   return {
-    whisper(){ ensure(); try{ whisper && whisper.play(); }catch(_){}},
-    doorSlam(){ ensure(); try{ (Math.random()<0.5?slam1:slam2).play(); }catch(_){}},
-    doorCreak(){ ensure(); try{ (Math.random()<0.5?creak1:creak2).play(); }catch(_){}},
-    toss(){ ensure(); try{ toss && toss.play(); }catch(_){} }
+    ensure,
+    attachTo,
+    whisper(){ ensure(); try{ whisperSnd?.stop(); whisperSnd?.play(); }catch(_){} },
+    doorSlam(){ ensure(); try{ (Math.random()<0.5?slamSnd1:slamSnd2)?.play(); }catch(_){} },
+    doorCreak(){
+      ensure();
+      const now = performance.now();
+      if (now - lastCreakTime < 300) return; // debounce
+      lastCreakTime = now;
+      try{ (Math.random()<0.5?creakSnd1:creakSnd2)?.play(); }catch(_){}
+    },
+    toss(){ ensure(); try{ tossSnd?.stop(); tossSnd?.play(); }catch(_){} }
   };
 })();
 
 const RadioAudio = (()=>{
   let clip=null;
-  function ensure(){ try{ if(!clip) clip = new BABYLON.Sound('radio','./assets/audio/Radio.mp3',scene,null,{loop:false,autoplay:false,volume:0.85}); }catch(_){ } }
-  function playOnce(){ ensure(); try{ clip && (clip.stop(), clip.play()); }catch(_){ } try{ toast && toast('You hear a radio…'); }catch(_){} }
-  return { playOnce };
+  function ensure(){
+    try{
+      if(!clip){
+        clip = new BABYLON.Sound('radio','./assets/audio/Radio.mp3', scene, null, { loop:false, autoplay:false, volume:0.85 });
+      }
+    }catch(_){}
+  }
+  function playOnce(){
+    ensure();
+    try{ clip?.stop(); clip?.play(); }catch(_){}
+    try{ toast && toast('You hear a radio…'); }catch(_){}
+  }
+  return { ensure, playOnce };
 })();
 </script>
 
+
 <script>
-/*** Minimal ghost wander + events, with Shade suppression and radio chance ***/
+/*** Minimal ghost wander + events (hardened) ***/
 (function setupGhostLoop(){
-  function ensureGhostFields(){
-    ghost.position = ghost.position || new BABYLON.Vector3(0,0,0);
-    ghost.roomCenter = ghost.roomCenter || new BABYLON.Vector3(2,0,2);
+  // ---- shims / guards ------------------------------------------------------
+  const SceneRef = window.scene || BABYLON.Engine?.LastCreatedScene;
+  if (!SceneRef) { console.warn('[GhostLoop] No scene yet; delaying setup.'); 
+    const iv = setInterval(()=>{ if (window.scene || BABYLON.Engine?.LastCreatedScene){ clearInterval(iv); setupGhostLoop(); } }, 120);
+    return;
   }
+  const SCENE = window.scene || BABYLON.Engine.LastCreatedScene;
+  const ENGINE = SCENE.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
+  const CAMERA = SCENE.activeCamera;
+
+  // scene onBeforeRender helper
+  function onBeforeRenderAdd(fn){
+    try { SCENE.onBeforeRenderObservable.add(fn); } catch (_) {}
+  }
+
+  // poly check on XZ plane (fallback if user didn't define pointInPolyXZ)
+  const pointInPolyXZ = window.pointInPolyXZ || function(v3, poly){
+    if (!poly || poly.length < 3) return false;
+    const px = v3.x, pz = v3.z;
+    let inside = false;
+    for (let i=0,j=poly.length-1; i<poly.length; j=i++){
+      const xi = poly[i].x, zi = poly[i].z;
+      const xj = poly[j].x, zj = poly[j].z;
+      const intersect = ((zi>pz)!=(zj>pz)) && (px < (xj - xi) * (pz - zi) / ((zj - zi)||1e-9) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
+  // ghost object scaffold (non-destructive)
+  const ghost = (window.ghost = window.ghost || {});
+  if (!(ghost.position instanceof BABYLON.Vector3)) ghost.position = new BABYLON.Vector3(0, 0, 0);
+  if (!(ghost.roomCenter instanceof BABYLON.Vector3)) ghost.roomCenter = new BABYLON.Vector3(2, 0, 2);
+  ghost.type = ghost.type || 'Spirit';  // default type if not set
+
+  // map rooms (optional)
   function assignGhostRoomFromCenter(){
     try{
-      if(!window.MAP_DEF || !Array.isArray(MAP_DEF.rooms) || !ghost || !ghost.roomCenter) return;
-      for(const r of MAP_DEF.rooms){ if(pointInPolyXZ(ghost.roomCenter, r.poly)){ ghost.roomName=r.name; break; } }
+      const rooms = (window.MAP_DEF && Array.isArray(MAP_DEF.rooms)) ? MAP_DEF.rooms : null;
+      if (!rooms) return;
+      for (const r of rooms){
+        if (r?.poly && pointInPolyXZ(ghost.roomCenter, r.poly)) { ghost.roomName = r.name; break; }
+      }
     }catch(_){}
   }
-  function currentRoom(){ try{ return currentRoomName?currentRoomName():''; }catch(_){ return ''; } }
-  function isPlayerInGhostRoom(){
-    try{ return !!ghost.roomName && currentRoom()===ghost.roomName; }catch(_){ return false; }
-  }
-  function isShadeAndPlayerInRoom(){ return ((ghost?.type||'').toLowerCase()==='shade') && isPlayerInGhostRoom(); }
+  assignGhostRoomFromCenter();
 
-  ensureGhostFields(); assignGhostRoomFromCenter();
-  let t=0, next = 10+Math.random()*15, radioCooldown=0;
+  function currentRoomNameSafe(){
+    try { return (typeof window.currentRoomName === 'function') ? window.currentRoomName() : ''; }
+    catch(_) { return ''; }
+  }
+  function isPlayerInGhostRoom(){
+    try { return !!ghost.roomName && currentRoomNameSafe() === ghost.roomName; } catch(_) { return false; }
+  }
+  const isShade = () => (ghost?.type || '').toLowerCase() === 'shade';
+
+  // ---- loop state ----------------------------------------------------------
+  let t = 0;
+  let next = 10 + Math.random() * 15;
+  let radioCooldown = 0;
   let wanderTarget = ghost.roomCenter.clone();
 
+  // ---- main loop -----------------------------------------------------------
   onBeforeRenderAdd(()=>{
-    const dt = engine.getDeltaTime()/1000;
-    t += dt; if(radioCooldown>0) radioCooldown -= dt;
+    const dt = (ENGINE?.getDeltaTime?.() || 16.7) / 1000;
 
-    // simple wander near roomCenter
-    if(Math.random()<0.01){ wanderTarget = ghost.roomCenter.add(new BABYLON.Vector3((Math.random()-0.5)*4,0,(Math.random()-0.5)*4)); }
-    const dir = wanderTarget.subtract(ghost.position); dir.y=0; const L = dir.length(); if(L>0.01){ ghost.position = ghost.position.add(dir.normalize().scale(Math.min(L, dt*0.6))); }
-    try{ ghost.nearPlayer = BABYLON.Vector3.Distance(camera.position, ghost.position) < 5.0; }catch(_){}
+    t += dt;
+    if (radioCooldown > 0) radioCooldown -= dt;
 
-    if(t>=next){
-      t=0; next = 10 + Math.random()*15;
-      if(isShadeAndPlayerInRoom()){
-        // Shade: suppress noisy events when player is present
-        return;
-      }
+    // randomize wander target occasionally
+    if (Math.random() < 0.01) {
+      const dx = (Math.random() - 0.5) * 4;
+      const dz = (Math.random() - 0.5) * 4;
+      wanderTarget = ghost.roomCenter.add(new BABYLON.Vector3(dx, 0, dz));
+    }
+
+    // move toward wander target
+    const dir = wanderTarget.subtract(ghost.position);
+    dir.y = 0;
+    const L = dir.length();
+    if (L > 0.01) ghost.position = ghost.position.add(dir.normalize().scale(Math.min(L, dt * 0.6)));
+
+    try { ghost.nearPlayer = BABYLON.Vector3.Distance(CAMERA.position, ghost.position) < 5.0; } catch (_) {}
+
+    if (t >= next) {
+      t = 0; next = 10 + Math.random() * 15;
+
+      // Shade: suppress noisy events when player is present
+      if (isShade() && isPlayerInGhostRoom()) return;
+
+      // pick an event
       const r = Math.random();
-      if(r<0.25) GhostAudio.whisper();
-      else if(r<0.55) GhostAudio.doorCreak();
-      else if(r<0.80) GhostAudio.doorSlam();
-      else GhostAudio.toss();
+      try {
+        if (r < 0.25)      GhostAudio.whisper();
+        else if (r < 0.55) GhostAudio.doorCreak();
+        else if (r < 0.80) GhostAudio.doorSlam();
+        else               GhostAudio.toss();
+      } catch(_) {}
 
-      try{
-        const d = BABYLON.Vector3.Distance(camera.position, ghost.position||BABYLON.Vector3.Zero());
-        if(d<6.0) EMFAudio.extend(10 + Math.random()*5);
-        // radio more likely when player is in ghost room
+      // EMF & radio chance
+      try {
+        const d = BABYLON.Vector3.Distance(CAMERA.position, ghost.position || BABYLON.Vector3.Zero());
+        if (d < 6.0 && window.EMFAudio?.extend) EMFAudio.extend(10 + Math.random() * 5);
+
         const inRoom = isPlayerInGhostRoom();
         const radioChance = inRoom ? 0.45 : 0.12;
-        if(radioCooldown<=0 && Math.random()<radioChance){ RadioAudio.playOnce(); radioCooldown = 20 + Math.random()*20; }
+        if (radioCooldown <= 0 && Math.random() < radioChance) {
+          window.RadioAudio?.playOnce?.();
+          radioCooldown = 20 + Math.random() * 20;
+        }
+      } catch(_) {}
+    }
+  });
+})();
+</script>
+
+<script>
+/*** Ghost writing — hardened, positional audio, cooldown ***/
+(function(){
+  const SCENE  = window.scene || BABYLON.Engine?.LastCreatedScene;
+  const ENGINE = SCENE?.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
+  const CAMERA = SCENE?.activeCamera;
+
+  // safe observable add
+  function onBeforeRenderAdd(fn){ try{ SCENE?.onBeforeRenderObservable.add(fn); }catch(_){} }
+
+  // safe toast
+  function say(msg){ try{ toast && toast(msg); }catch(_){ console.log('[Book]', msg); } }
+
+  // ray helper if _aimPointOnGround is missing
+  function aimPointOnGround(maxDist=5){
+    if (typeof _aimPointOnGround === 'function') {
+      try { return _aimPointOnGround(maxDist); } catch(_){}
+    }
+    try{
+      const origin = CAMERA?.position ?? new BABYLON.Vector3(0,1.8,0);
+      const fwd = CAMERA?.getForwardRay?.(maxDist)?.direction ?? new BABYLON.Vector3(0,0,1);
+      const ray = new BABYLON.Ray(origin, fwd, maxDist);
+      const pick = SCENE?.pickWithRay?.(ray, m=>m?.isPickable!==false);
+      if (pick?.hit) return pick.pickedPoint;
+    }catch(_){}
+    return CAMERA?.position?.clone?.() ?? new BABYLON.Vector3(0,1.8,0);
+  }
+
+  // ----- Audio (positional) -----
+  const WritingAudio = (()=>{
+    let writeClip=null, tossClip=null;
+    function ensure(){
+      try{
+        const base = { loop:false, autoplay:false, spatialSound:true, refDistance:2, rolloffFactor:1.2, maxDistance:25 };
+        writeClip = writeClip || new BABYLON.Sound('ghostWriting','./assets/audio/GhostWriting1.mp3', SCENE, null, { ...base, volume:0.9 });
+        tossClip  = tossClip  || new BABYLON.Sound('bookToss','./assets/audio/Toss.wav',        SCENE, null, { ...base, volume:0.85 });
       }catch(_){}
     }
-  });
-})();
-</script>
+    function at(pos, snd){
+      try{
+        ensure();
+        snd?.setPosition?.(pos ?? CAMERA?.position ?? BABYLON.Vector3.Zero());
+        snd?.stop?.(); snd?.play?.();
+      }catch(_){}
+    }
+    return {
+      writeAt(pos){ at(pos, writeClip); },
+      tossAt(pos){ at(pos, tossClip); }
+    };
+  })();
 
-<script>
-const WritingAudio = (()=>{
-  let writeClip=null, tossClip=null;
-  function ensure(){
+  // ----- State -----
+  let BOOK_PLACED=false, BOOK_POS=null, BOOK_WRITTEN=false;
+  let bookCooldown = 0; // seconds
+
+  // expose your original API (kept name)
+  window.dropWritingBook = function dropWritingBook(){
+    BOOK_PLACED = true;
+    BOOK_WRITTEN = false;
+    const p = aimPointOnGround(3.8) || CAMERA?.position?.clone?.();
+    BOOK_POS = (p instanceof BABYLON.Vector3) ? p : new BABYLON.Vector3(p?.x||0, p?.y||0, p?.z||0);
+    bookCooldown = 2; // brief arming delay to avoid instant trigger
+    say('Book dropped');
+  };
+
+  // helpers used in logic
+  function isShadeAndPlayerInRoom(){
     try{
-      if(!writeClip) writeClip = new BABYLON.Sound('ghostWriting','./assets/audio/GhostWriting1.mp3',scene,null,{loop:false,autoplay:false,volume:0.9});
-      if(!tossClip)  tossClip  = new BABYLON.Sound('bookToss','./assets/audio/Toss.wav',scene,null,{loop:false,autoplay:false,volume:0.85});
-    }catch(_){}
+      const isShade = ((ghost?.type||'').toLowerCase() === 'shade');
+      const sameRoom = typeof currentRoomName === 'function' && ghost?.roomName && currentRoomName() === ghost.roomName;
+      return isShade && sameRoom;
+    }catch(_){ return false; }
   }
-  return { write(){ ensure(); try{ writeClip && writeClip.play(); }catch(_){} }, toss(){ ensure(); try{ tossClip && tossClip.play(); }catch(_){ } } };
-})();
-let BOOK_PLACED=false, BOOK_POS=null, BOOK_WRITTEN=false;
-function dropWritingBook(){
-  BOOK_PLACED=true; BOOK_WRITTEN=false;
-  try{ BOOK_POS = _aimPointOnGround(3.8) || camera.position.clone(); }catch(_){ BOOK_POS = camera.position.clone(); }
-  toast('Book dropped');
-}
-// Book check loop with Shade block
-(function bookLoop(){
-  let timer=0, nextCheck = 6 + Math.random()*10;
-  onBeforeRenderAdd(()=>{
-    const dt = engine.getDeltaTime()/1000; timer += dt;
-    if(!BOOK_PLACED || !BOOK_POS) return;
-    if(timer < nextCheck) return;
-    timer = 0; nextCheck = 8 + Math.random()*14;
-    const shadeBlock = ((ghost?.type||'').toLowerCase()==='shade') && (function(){ try{ return currentRoomName && ghost.roomName && currentRoomName()===ghost.roomName; }catch(_){ return false; } })();
-    if(shadeBlock) return;
-    try{
-      const near = BABYLON.Vector3.Distance(BOOK_POS, ghost.position||BABYLON.Vector3.Zero()) < 3.2;
-      if(!near) return;
-      if(ghostHasEvidence('writing')){
-        if(Math.random()<0.5){ WritingAudio.write(); BOOK_WRITTEN=true; toast('Ghost wrote in book!'); }
-        else { WritingAudio.toss(); BOOK_PLACED=false; toast('The book was tossed!'); }
-      } else {
-        // no writing evidence: may toss
-        WritingAudio.toss(); BOOK_PLACED=false; toast('The book was tossed!');
-      }
-    }catch(_){}
-  });
+  function ghostHasWritingEvidence(){
+    try { return typeof ghostHasEvidence === 'function' ? !!ghostHasEvidence('writing') : true; }
+    catch(_){ return true; } // default true so feature still works if checker missing
+  }
+
+  // ----- Loop -----
+  (function bookLoop(){
+    let timer=0, nextCheck = 6 + Math.random()*10;
+    onBeforeRenderAdd(()=>{
+      const dt = (ENGINE?.getDeltaTime?.() || 16.7) / 1000;
+      timer += dt;
+      if (bookCooldown > 0) bookCooldown -= dt;
+
+      if (!BOOK_PLACED || !BOOK_POS) return;
+      if (timer < nextCheck || bookCooldown > 0) return;
+
+      // reset window
+      timer = 0; nextCheck = 8 + Math.random()*14;
+
+      // Shade: suppress while player in ghost room
+      if (isShadeAndPlayerInRoom()) return;
+
+      try{
+        const gpos = ghost?.position || BABYLON.Vector3.Zero();
+        const near = BABYLON.Vector3.Distance(BOOK_POS, gpos) < 3.2;
+        if (!near) return;
+
+        if (ghostHasWritingEvidence()){
+          if (Math.random() < 0.5){
+            WritingAudio.writeAt(BOOK_POS);
+            BOOK_WRITTEN = true;
+            bookCooldown = 10; // avoid immediate repeats
+            say('Ghost wrote in book!');
+          } else {
+            WritingAudio.tossAt(BOOK_POS);
+            BOOK_PLACED = false;
+            bookCooldown = 5;
+            say('The book was tossed!');
+          }
+        } else {
+          // no writing evidence: likely toss
+          WritingAudio.tossAt(BOOK_POS);
+          BOOK_PLACED = false;
+          bookCooldown = 5;
+          say('The book was tossed!');
+        }
+      }catch(_){}
+    });
+  })();
 })();
 </script>
 
 <script>
-const DOTS = { projectors:[], monitorPlane:null, tripod:null, monitorText:null };
-function _makeDotsGrid(node){
-  const countX=10,countZ=10,spacing=0.25,size=0.03;
-  for(let ix=0; ix<countX; ix++){
-    for(let iz=0; iz<countZ; iz++){
-      const s = BABYLON.MeshBuilder.CreateSphere('dot',{diameter:size,segments:4},scene);
-      s.material = new BABYLON.StandardMaterial('dotMat',scene);
-      s.material.emissiveColor = new BABYLON.Color3(0,1,0);
-      s.material.disableLighting = true;
-      s.isPickable=false; s.parent=node;
-      s.position = new BABYLON.Vector3((ix-(countX/2))*spacing,0.9,(iz-(countZ/2))*spacing);
+const DOTS = window.DOTS || { projectors:[], monitorPlane:null, tripod:null, monitorText:null, _mat:null };
+
+/* ---------- helpers ---------- */
+(function(){
+  const SCENE  = window.scene || BABYLON.Engine?.LastCreatedScene;
+  const ENGINE = SCENE?.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
+  const CAMERA = SCENE?.activeCamera;
+
+  function say(msg){ try{ toast?.(msg); }catch(_){ console.log('[DOTS]', msg); } }
+
+  function aimPointOnGround(maxDist=4){
+    if (typeof _aimPointOnGround === 'function') {
+      try { const p = _aimPointOnGround(maxDist); if (p) return p; } catch(_){}
+    }
+    try{
+      const origin = CAMERA?.position ?? new BABYLON.Vector3(0,1.8,0);
+      const ray = CAMERA?.getForwardRay?.(maxDist) ?? new BABYLON.Ray(origin, new BABYLON.Vector3(0,0,1), maxDist);
+      const pick = SCENE?.pickWithRay?.(ray, m => m?.isPickable !== false);
+      if (pick?.hit) return pick.pickedPoint;
+    }catch(_){}
+    return (CAMERA?.position?.clone?.()) || new BABYLON.Vector3(0,1.8,0);
+  }
+
+  function ensureDotMaterial(){
+    if (DOTS._mat) return DOTS._mat;
+    const mat = new BABYLON.StandardMaterial('dotMat_shared', SCENE);
+    mat.emissiveColor = new BABYLON.Color3(0,1,0);
+    mat.disableLighting = true;
+    mat.specularColor = new BABYLON.Color3(0,0,0);
+    return (DOTS._mat = mat);
+  }
+
+  function _makeDotsGrid(node){
+    const countX=10, countZ=10, spacing=0.25, size=0.03;
+    const mat = ensureDotMaterial();
+    // create one base mesh, then instances for perf (100 per projector)
+    const base = BABYLON.MeshBuilder.CreateSphere('dotBase',{diameter:size, segments:4}, SCENE);
+    base.material = mat; base.isPickable = false; base.setEnabled(false); // hidden template
+
+    const halfX = (countX/2), halfZ = (countZ/2);
+    for(let ix=0; ix<countX; ix++){
+      for(let iz=0; iz<countZ; iz++){
+        const inst = base.createInstance('dotInst');
+        inst.isPickable = false;
+        inst.parent = node;
+        inst.position = new BABYLON.Vector3((ix-halfX)*spacing, 0.9, (iz-halfZ)*spacing);
+      }
+    }
+    return base; // caller may dispose template if desired
+  }
+
+  function ensureVanMonitor(){
+    if (DOTS.monitorPlane) return DOTS.monitorPlane;
+    const plane = BABYLON.MeshBuilder.CreatePlane('vanMonitor',{width:2.2,height:1.3}, SCENE);
+    plane.position = new BABYLON.Vector3(0,1.6,22.8);
+    plane.rotation.y = Math.PI;
+
+    const mat = new BABYLON.StandardMaterial('vanMonitorMat', SCENE);
+    mat.emissiveColor = new BABYLON.Color3(0.1,0.9,0.1);
+    mat.diffuseColor = mat.specularColor = new BABYLON.Color3(0,0,0);
+    plane.material = mat;
+
+    const dyn = new BABYLON.DynamicTexture('vanMonitorDT', {width:1024,height:512}, SCENE, true);
+    mat.emissiveTexture = dyn;
+    const ctx = dyn.getContext();
+    function writeMsg(msg){
+      ctx.save();
+      ctx.fillStyle = 'black'; ctx.fillRect(0,0,1024,512);
+      ctx.fillStyle = '#00ff88'; ctx.font = '36px monospace';
+      ctx.textBaseline = 'top';
+      ctx.fillText(msg, 40, 40);
+      ctx.restore();
+      dyn.update();
+    }
+    DOTS.monitorPlane = plane;
+    DOTS.monitorText = writeMsg;
+    writeMsg('Camera: offline');
+    return plane;
+  }
+
+  function ensureTripodAt(p){
+    if (DOTS.tripod) return DOTS.tripod;
+    const n = DOTS.tripod = new BABYLON.TransformNode('TripodCam', SCENE);
+    n.position = new BABYLON.Vector3(p.x,1.4,p.z);
+    const pole = BABYLON.MeshBuilder.CreateCylinder('tripodPole',{height:1.4,diameter:0.06}, SCENE);
+    const head = BABYLON.MeshBuilder.CreateBox('tripodHead',{size:0.12}, SCENE);
+    const m = new BABYLON.StandardMaterial('tripodMat', SCENE);
+    m.emissiveColor = new BABYLON.Color3(0.05,0.2,0.2);
+    pole.material = m; head.material = m;
+    pole.parent=n; head.parent=n; pole.position.y = -0.7;
+    return n;
+  }
+
+  // Public: place DOTS projector
+  window.placeDotsProjector = function placeDotsProjector(){
+    const p = aimPointOnGround(4.0);
+    const node = new BABYLON.TransformNode('DOTS_Projector', SCENE);
+    node.position = new BABYLON.Vector3(p.x, 0, p.z);
+    _makeDotsGrid(node);
+    DOTS.projectors.push({ node, radius:2.6, cooldown:0 });
+    say('DOTS projector placed');
+  };
+
+  // Public: van monitor + tripod cam
+  window.placeVideoCam = function placeVideoCam(){
+    ensureVanMonitor();
+    const p = aimPointOnGround(4.0);
+    ensureTripodAt(p);
+    DOTS.monitorText?.('Camera: online');
+  };
+
+  function _ghostInsideAnyDots(){
+    if (!DOTS.projectors.length) return null;
+    const gpos = ghost?.position || BABYLON.Vector3.Zero();
+    for (const p of DOTS.projectors){
+      try{
+        if (p.cooldown > 0) continue;
+        const d = BABYLON.Vector3.Distance(gpos, p.node.position);
+        if (d < p.radius) return p;
+      }catch(_){}
+    }
+    return null;
+  }
+
+  function _showDotsApparition(atPos, onlyOnMonitor=false){
+    const pos = atPos || ghost?.position || BABYLON.Vector3.Zero();
+    if (onlyOnMonitor){
+      ensureVanMonitor();
+      DOTS.monitorText?.('Camera: DOTS detected');
+      setTimeout(()=>DOTS.monitorText?.('Camera: online'), 2000);
+      return;
+    }
+    const plane = BABYLON.MeshBuilder.CreatePlane('dotsSil',{size:1.5}, SCENE);
+    plane.position = new BABYLON.Vector3(pos.x, 1.2, pos.z);
+    plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
+    const mat = new BABYLON.StandardMaterial('dotsSilMat', SCENE);
+    mat.diffuseColor = mat.emissiveColor = new BABYLON.Color3(0,1,0);
+    mat.alpha = 0.0; plane.material = mat;
+
+    let t=0;
+    const h = SCENE.onBeforeRenderObservable.add(()=>{
+      const dt = (ENGINE?.getDeltaTime?.() || 16.7)/1000;
+      t += dt;
+      mat.alpha = t < 0.2 ? t*4.5 : Math.max(0, 1.0 - (t-0.2)*1.2);
+      if (t > 1.2){
+        try{ SCENE.onBeforeRenderObservable.remove(h); plane.dispose(); }catch(_){}
+      }
+    });
+  }
+
+  function updateDOTS(dt){
+    // cooldown decay
+    for (const p of DOTS.projectors) if (p.cooldown > 0) p.cooldown = Math.max(0, p.cooldown - dt);
+
+    const hit = _ghostInsideAnyDots(); if (!hit) return;
+    if (!(typeof ghostHasEvidence === 'function' ? ghostHasEvidence('dots') : true)) return;
+
+    const isGoryo = ((ghost?.type||'').toLowerCase() === 'goryo');
+    const hasCamInRoom = !!DOTS.tripod && BABYLON.Vector3.Distance(DOTS.tripod.position, hit.node.position) < 6.5;
+
+    if (isGoryo){
+      if (hasCamInRoom){
+        _showDotsApparition(ghost?.position, true);
+        hit.cooldown = 3.0; // prevent spam
+      }
+    } else {
+      _showDotsApparition(ghost?.position, false);
+      hit.cooldown = 3.0;
     }
   }
-}
-function placeDotsProjector(){
-  const p = _aimPointOnGround(4.0);
-  const n = new BABYLON.TransformNode('DOTS_Projector', scene);
-  n.position = new BABYLON.Vector3(p.x,0,p.z);
-  _makeDotsGrid(n);
-  DOTS.projectors.push({node:n, radius:2.6});
-  toast('DOTS projector placed');
-}
-function ensureVanMonitor(){
-  if(DOTS.monitorPlane) return;
-  const plane = BABYLON.MeshBuilder.CreatePlane('vanMonitor',{width:2.2,height:1.3},scene);
-  plane.position = new BABYLON.Vector3(0,1.6,22.8);
-  plane.rotation.y = Math.PI;
-  const mat = new BABYLON.StandardMaterial('vanMonitorMat', scene);
-  mat.emissiveColor = new BABYLON.Color3(0.1,0.9,0.1);
-  mat.diffuseColor = new BABYLON.Color3(0,0,0);
-  mat.specularColor = new BABYLON.Color3(0,0,0);
-  plane.material = mat;
-  DOTS.monitorPlane=plane;
-  const dyn = new BABYLON.DynamicTexture('vanMonitorDT', {width:1024,height:512}, scene, true);
-  mat.emissiveTexture = dyn;
-  const ctx=dyn.getContext();
-  DOTS.monitorText = (msg)=>{ ctx.fillStyle='black'; ctx.fillRect(0,0,1024,512); ctx.fillStyle='#00ff88'; ctx.font='36px monospace'; ctx.fillText(msg,40,80); dyn.update(); };
-  DOTS.monitorText('Camera: offline');
-}
-function placeVideoCam(){
-  ensureVanMonitor();
-  const p = _aimPointOnGround(4.0);
-  DOTS.tripod = new BABYLON.TransformNode('TripodCam',scene);
-  DOTS.tripod.position = new BABYLON.Vector3(p.x,1.4,p.z);
-  const pole = BABYLON.MeshBuilder.CreateCylinder('tripodPole',{height:1.4,diameter:0.06},scene);
-  const head = BABYLON.MeshBuilder.CreateBox('tripodHead',{size:0.12},scene);
-  pole.parent=DOTS.tripod; head.parent=DOTS.tripod;
-  pole.position = new BABYLON.Vector3(0,-0.7,0);
-  head.position = new BABYLON.Vector3(0,0,0);
-  const m = new BABYLON.StandardMaterial('tripodMat',scene);
-  m.emissiveColor = new BABYLON.Color3(0.05,0.2,0.2);
-  pole.material = m; head.material = m;
-  DOTS.monitorText('Camera: online');
-}
-function _ghostInsideAnyDots(){
-  if(!DOTS.projectors.length) return null;
-  for(const p of DOTS.projectors){
-    try{
-      const d = BABYLON.Vector3.Distance(ghost.position||BABYLON.Vector3.Zero(), p.node.position);
-      if(d < p.radius) return p;
-    }catch(_){}
-  }
-  return null;
-}
-function _showDotsApparition(atPos, onlyOnMonitor=false){
-  const plane = BABYLON.MeshBuilder.CreatePlane('dotsSil',{size:1.5},scene);
-  plane.position = new BABYLON.Vector3(atPos.x,1.2,atPos.z);
-  plane.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
-  const mat = new BABYLON.StandardMaterial('dotsSilMat',scene);
-  mat.diffuseColor = new BABYLON.Color3(0,1,0);
-  mat.emissiveColor = new BABYLON.Color3(0,1,0);
-  mat.alpha = 0.0; plane.material=mat;
-  if(onlyOnMonitor){
-    plane.isVisible=false; ensureVanMonitor(); DOTS.monitorText('Camera: DOTS detected'); setTimeout(()=>DOTS.monitorText('Camera: online'), 2000);
-  } else {
-    let t=0; const h=onBeforeRenderAdd(()=>{ t+=engine.getDeltaTime()/1000; mat.alpha = t<0.2? t*4.5 : Math.max(0,1.0-(t-0.2)*1.2); if(t>1.2){ scene.onBeforeRenderObservable.remove(h); try{plane.dispose();}catch(_){}} });
-  }
-}
-function updateDOTS(){
-  const hit = _ghostInsideAnyDots(); if(!hit) return;
-  if(!(ghostHasEvidence('dots'))) return;
-  const isGoryo = ((ghost?.type||'').toLowerCase()==='goryo');
-  const hasCamInRoom = !!DOTS.tripod && BABYLON.Vector3.Distance(DOTS.tripod.position, hit.node.position) < 6.5;
-  if(isGoryo){ if(hasCamInRoom){ _showDotsApparition(ghost.position, true);} }
-  else { _showDotsApparition(ghost.position, false); }
-}
-(function hookDotsLoop(){ function tick(){ try{ updateDOTS(); }catch(_){ } requestAnimationFrame(tick);} requestAnimationFrame(tick);} )();
-</script>
 
+  // hook into Babylon's render loop instead of RAF
+  (function hookDotsLoop(){
+    SCENE.onBeforeRenderObservable.add(()=>{
+      const dt = (ENGINE?.getDeltaTime?.() || 16.7)/1000;
+      try { updateDOTS(dt); } catch(_){}
+    });
+  })();
+
+  // optional cleanup API
+  window.clearDotsProjectors = function(){
+    for (const p of DOTS.projectors){
+      try { p.node.getChildMeshes()?.forEach(m=>m.dispose()); p.node.dispose(); } catch(_){}
+    }
+    DOTS.projectors.length = 0;
+  };
+})();
+</script>
 <script>
-const SpiritBoxAudio = (()=>{
-  let active=false, loop=null, voice=null, lastSpeakAt=0;
-  function ensure(){
-    try{
-      if(!loop){ loop = new BABYLON.Sound('spiritboxLoop','./assets/audio/spiritbox.mp3',scene,null,{loop:true,autoplay:false,volume:0.45}); }
-      if(!voice){ voice = new BABYLON.Sound('spiritboxWhisper','./assets/audio/whisper.mp3',scene,null,{loop:false,autoplay:false,volume:0.9}); }
-    }catch(_){}
-  }
-  function on(){ ensure(); active=true; try{ if(loop&&!loop.isPlaying) loop.play(); }catch(_){ } }
-  function off(){ active=false; try{ loop&&loop.stop(); }catch(_){ } try{ voice&&voice.stop(); }catch(_){ } }
-  function toggle(){ active?off():on(); }
-  function isOn(){ return !!active; }
-  function speak(){
-    if(!active || !ghostHasEvidence('spiritbox')) return;
-    const now = performance.now?performance.now():Date.now();
-    if(now - lastSpeakAt < 1500) return;
-    lastSpeakAt = now;
-    try{ if(loop && !loop.isPlaying) loop.play(); }catch(_){}
-    try{ voice && voice.play(); }catch(_){}
-  }
-  return { on, off, toggle, isOn, speak };
-})();
 const SpiritBoxQuestions = (()=>{
-  const wrap = ()=>document.getElementById('sbox-questions');
-  function show(){ const el=wrap(); if(el) el.style.display='block'; }
-  function hide(){ const el=wrap(); if(el) el.style.display='none'; }
-  function isNearGhost(){ try{ return BABYLON.Vector3.Distance(camera.position, (ghost?.position||BABYLON.Vector3.Zero())) < 5.5; }catch(_){ return false; } }
-  function ask(q){
-    if(!SpiritBoxAudio.isOn()) return;
-    if(ghostHasEvidence('spiritbox') && isNearGhost() && Math.random()<0.20){ SpiritBoxAudio.speak(); toast('Spirit Box: "'+q+'"'); }
-    else toast('...static... "'+q+'"');
+  const WRAP_ID = 'sbox-questions';
+  const SCENE = window.scene || BABYLON.Engine?.LastCreatedScene;
+  let bound = false;
+  let lastAsk = 0;
+
+  function safeToast(msg){
+    try { if (typeof window.toast === 'function') window.toast(msg); else console.log(msg); }
+    catch(_) { console.log(msg); }
   }
-  function bind(){ const el=wrap(); if(!el) return; el.querySelectorAll('.sbox-q').forEach(btn=>btn.addEventListener('click',()=>ask(btn.textContent||'Question'))); }
-  setTimeout(bind,0);
-  return { show, hide, ask };
+
+  function wrap(){ return document.getElementById(WRAP_ID); }
+  function show(){ const el=wrap(); if (el) el.style.display='block'; }
+  function hide(){ const el=wrap(); if (el) el.style.display='none'; }
+
+  function _hasEvidenceSpirit(){
+    try { return (typeof ghostHasEvidence === 'function') ? !!ghostHasEvidence('spiritbox') : true; }
+    catch(_) { return true; }
+  }
+  function _nearGhost(){
+    try {
+      const cam = (SCENE?.activeCamera) || null;
+      const gpos = (ghost?.position) || BABYLON.Vector3.Zero();
+      return cam ? BABYLON.Vector3.Distance(cam.position, gpos) < 5.5 : false;
+    } catch(_) { return false; }
+  }
+
+  function ask(q){
+    const now = performance?.now?.() ?? Date.now();
+    if (now - lastAsk < 250) return; // debounce click spam
+    lastAsk = now;
+
+    if (!SpiritBoxAudio.isOn()) return;
+    const ok = _hasEvidenceSpirit() && _nearGhost() && Math.random() < 0.20;
+    try {
+      if (ok) { SpiritBoxAudio.speak(); safeToast(`Spirit Box: "${q}"`); }
+      else    { safeToast(`...static... "${q}"`); }
+    } catch(_) {}
+  }
+
+  // robust binder: run once; if the element isn't in DOM yet, retry
+  function bind(){
+    if (bound) return;
+    const el = wrap();
+    if (!el) { setTimeout(bind, 250); return; }
+
+    // Avoid duplicate listeners across re-binds by using a signal
+    const controller = new AbortController();
+    el.dataset.sbBind = '1';
+    el.querySelectorAll('.sbox-q').forEach(btn=>{
+      btn.addEventListener('click', ()=> ask(btn.textContent?.trim() || 'Question'), { signal: controller.signal });
+    });
+    // mark as bound
+    bound = true;
+  }
+  setTimeout(bind, 0);
+
+  return { show, hide, ask, _bind: bind };
 })();
-// periodic 1% chance near ghost while ON
+
+// periodic random whisper while ON, near ghost
 (function periodicSpiritSpeech(){
   function tick(){
     try{
-      if(SpiritBoxAudio.isOn() && ghostHasEvidence('spiritbox') && ghost && camera){
-        const d = BABYLON.Vector3.Distance(camera.position, ghost.position||BABYLON.Vector3.Zero());
-        if(d<5.5 && Math.random()<0.01){ SpiritBoxAudio.speak(); }
+      const SCENE = window.scene || BABYLON.Engine?.LastCreatedScene;
+      const cam = SCENE?.activeCamera;
+      const gpos = (ghost?.position) || BABYLON.Vector3.Zero();
+
+      if (SpiritBoxAudio.isOn() &&
+          (typeof ghostHasEvidence !== 'function' || ghostHasEvidence('spiritbox')) &&
+          cam) {
+        const d = BABYLON.Vector3.Distance(cam.position, gpos);
+        if (d < 5.5 && Math.random() < 0.01) SpiritBoxAudio.speak();
       }
     }catch(_){}
     setTimeout(tick, 850);
@@ -1820,12 +2166,140 @@ const SpiritBoxQuestions = (()=>{
 
 <script>
 function _shouldLeaveUVFromSalt(){
-  if(!ghostHasEvidence('uv')) return false;
-  const gt = (ghost?.type||'').toLowerCase();
-  if(gt==='obake' && Math.random()<0.30) return false;
-  return true;
+  try {
+    // If UV isn't part of the ghost's evidence, never leave prints
+    if (typeof ghostHasEvidence !== 'function' || !ghostHasEvidence('uv')) return false;
+
+    const gt = (ghost?.type || '').toLowerCase();
+
+    // Wraith: never leaves UV footprints from salt
+    if (gt === 'wraith') return false;
+
+    // Obake: 30% chance to leave no prints even if UV evidence
+    if (gt === 'obake' && Math.random() < 0.30) return false;
+
+    // Default: UV evidence → prints left
+    return true;
+  } catch(_) {
+    return false;
+  }
 }
 </script>
+<script>
+/*** UV FOOTPRINTS with timed fade + auto-dispose ***/
+(function(){
+  const SCENE  = window.scene || BABYLON.Engine?.LastCreatedScene;
+  const ENGINE = SCENE?.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
+  if (!SCENE) { console.warn('[UVPrints] No scene yet; delaying init.');
+    const iv=setInterval(()=>{ if (window.scene){ clearInterval(iv); (function(){ /* re-run self */ })(); } },150);
+    return;
+  }
+
+  // Config
+  const TEX_PATH = './assets/textures/uv_footprint.png';   // change if needed
+  const TTL      = 60;    // seconds total lifetime
+  const FADE     = 15;    // seconds at end to fade out (TTL-FADE is full visibility)
+  const SCALE    = 0.45;  // footprint size
+  const HEIGHT   = 0.02;  // lift off ground to avoid z-fighting
+
+  // Material (shared)
+  let mat;
+  function ensureMat(){
+    if (mat) return mat;
+    mat = new BABYLON.StandardMaterial('uv_print_mat', SCENE);
+    mat.diffuseTexture  = new BABYLON.Texture(TEX_PATH, SCENE, true, false);
+    mat.emissiveTexture = mat.diffuseTexture;
+    mat.opacityTexture  = mat.diffuseTexture;
+    mat.diffuseColor    = new BABYLON.Color3(0.0, 0.6, 0.2);
+    mat.emissiveColor   = new BABYLON.Color3(0.2, 1.0, 0.4);
+    mat.specularColor   = new BABYLON.Color3(0,0,0);
+    mat.backFaceCulling = false;
+    mat.freeze?.();
+    return mat;
+  }
+
+  // Store live prints
+  const PRINTS = [];
+
+  // Helpers
+  function now(){ return (performance?.now?.() ?? Date.now())/1000; }
+
+  function makePrintNode(pos, rotY=0, flip=false){
+    const plane = BABYLON.MeshBuilder.CreatePlane('uv_print', { size: SCALE, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, SCENE);
+    plane.material = ensureMat();
+    plane.rotation = new BABYLON.Vector3(Math.PI/2, 0, flip ? Math.PI : 0); // lie flat; flip to vary
+    plane.position = new BABYLON.Vector3(pos.x, (pos.y||0)+HEIGHT, pos.z);
+    plane.rotation.y = rotY;
+    plane.isPickable = false;
+    plane.alwaysSelectAsActiveMesh = false;
+    plane.doNotSyncBoundingInfo = true;
+    plane.freezeWorldMatrix?.();
+    return plane;
+  }
+
+  // Raycast to snap to ground if needed
+  function snapToGround(p){
+    try{
+      const ray = new BABYLON.Ray(new BABYLON.Vector3(p.x, (p.y||2)+5, p.z), new BABYLON.Vector3(0,-1,0), 20);
+      const hit = SCENE.pickWithRay(ray, m => m && m.isPickable !== false);
+      if (hit?.hit && hit.pickedPoint) return hit.pickedPoint;
+    }catch(_){}
+    return p;
+  }
+
+  // Public API
+  window.UVPrints = window.UVPrints || {};
+
+  // Add a single footprint at position with optional facing (rotY in radians)
+  UVPrints.addFootprint = function(pos, rotY=0){
+    const p = snapToGround(pos);
+    const flip = Math.random() < 0.5;
+    const mesh = makePrintNode(p, rotY, flip);
+    const born = now();
+    PRINTS.push({ mesh, born });
+    return mesh;
+  };
+
+  // Add a pair of prints like a step (offset along direction)
+  UVPrints.addStepPair = function(centerPos, dirYRad){
+    const dir = new BABYLON.Vector3(Math.sin(dirYRad), 0, Math.cos(dirYRad)); // Yaw to XZ
+    const side = BABYLON.Vector3.Cross(dir, BABYLON.Axis.Y).normalize();     // left/right
+    const stride = 0.35;  // forward spacing
+    const width  = 0.12;  // left/right spacing
+    // Left, then right (or randomize)
+    const pL = centerPos.add(dir.scale(stride)).add(side.scale(+width));
+    const pR = centerPos.add(dir.scale(stride*1.9)).add(side.scale(-width));
+    UVPrints.addFootprint(pL, dirYRad);
+    UVPrints.addFootprint(pR, dirYRad);
+  };
+
+  // Clear all (optional)
+  UVPrints.clear = function(){
+    for (const it of PRINTS){ try{ it.mesh.dispose(); }catch(_){ } }
+    PRINTS.length = 0;
+  };
+
+  // Fade + dispose loop
+  SCENE.onBeforeRenderObservable.add(()=>{
+    const t = now();
+    for (let i=PRINTS.length-1; i>=0; i--){
+      const it = PRINTS[i], age = t - it.born;
+      if (age >= TTL){
+        try{ it.mesh.dispose(); }catch(_){}
+        PRINTS.splice(i,1);
+        continue;
+      }
+      if (age >= (TTL - FADE)){
+        // fade alpha
+        const a = 1 - ((age - (TTL - FADE))/FADE);
+        const m = it.mesh.material;
+        if (m) { m.alpha = Math.max(0, Math.min(1, a)); }
+      }
+    }
+  });
+})();
+</script>
+
 
 <!-- ===== Safe fallbacks for undefined modules used in loops ===== -->
 <script>
