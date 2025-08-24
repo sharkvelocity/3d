@@ -1011,33 +1011,44 @@ function markShadowable(meshes){
 }
 /* Simple rain/snow particle systems so setWeather() has valid refs */
 function ensureRain(){
-  if(weather.rainPS) return weather.rainPS;
-  const ps = new BABYLON.ParticleSystem("rain", 4000, scene);
-  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/rain.png", scene, false, false);
-  ps.emitter = new BABYLON.Vector3(0, 30, 0);
-  ps.minEmitBox = new BABYLON.Vector3(-25, 0, -25);
-  ps.maxEmitBox = new BABYLON.Vector3(25, 0, 25);
-  ps.minSize = 0.05; ps.maxSize = 0.1;
+  if (weather.rainPS) return weather.rainPS;
+  var ps;
+  if (BABYLON.GPUParticleSystem){
+    ps = new BABYLON.GPUParticleSystem("pp_rain",{capacity:20000}, scene);
+  } else {
+    ps = new BABYLON.ParticleSystem("rain", 4000, scene);
+  }
+  try { ps.particleTexture = null; } catch(_) {}
+  ps.emitter = new BABYLON.Vector3(0, 40, 0);
+  ps.minEmitBox = new BABYLON.Vector3(-60, 0, -60);
+  ps.maxEmitBox = new BABYLON.Vector3( 60, 0,  60);
+  ps.minSize = 0.05; ps.maxSize = 0.12;
   ps.minLifeTime = 0.6; ps.maxLifeTime = 1.2;
-  ps.emitRate = 4500;
-  ps.gravity = new BABYLON.Vector3(0, -9.5, 0);
+  ps.emitRate = 15000;
+  ps.gravity = new BABYLON.Vector3(0, -9.81, 0);
   ps.direction1 = new BABYLON.Vector3(0, -1, 0);
   ps.direction2 = new BABYLON.Vector3(0, -1, 0);
   weather.rainPS = ps; return ps;
 }
 function ensureSnow(){
-  if(weather.snowPS) return weather.snowPS;
-  const ps = new BABYLON.ParticleSystem("snow", 1500, scene);
-  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/snow.png", scene, false, false);
-  ps.emitter = new BABYLON.Vector3(0, 20, 0);
-  ps.minEmitBox = new BABYLON.Vector3(-20, 0, -20);
-  ps.maxEmitBox = new BABYLON.Vector3(20, 0, 20);
-  ps.minSize = 0.08; ps.maxSize = 0.18;
-  ps.minLifeTime = 2.0; ps.maxLifeTime = 3.5;
-  ps.emitRate = 1200;
-  ps.gravity = new BABYLON.Vector3(0, -1.0, 0);
-  ps.direction1 = new BABYLON.Vector3(-0.3, -1, -0.2);
-  ps.direction2 = new BABYLON.Vector3(0.3, -1, 0.2);
+  if (weather.snowPS) return weather.snowPS;
+  var ps;
+  if (BABYLON.GPUParticleSystem){
+    ps = new BABYLON.GPUParticleSystem("pp_snow",{capacity:10000}, scene);
+  } else {
+    ps = new BABYLON.ParticleSystem("snow", 2000, scene);
+  }
+  // No texture for particles — generated points
+  try { ps.particleTexture = null; } catch(_) {}
+  ps.emitter = new BABYLON.Vector3(0, 30, 0);
+  ps.minEmitBox = new BABYLON.Vector3(-60, 0, -60);
+  ps.maxEmitBox = new BABYLON.Vector3( 60, 0,  60);
+  ps.minSize = 0.12; ps.maxSize = 0.28;
+  ps.minLifeTime = 3.0; ps.maxLifeTime = 5.5;
+  ps.emitRate = 2500;
+  ps.gravity = new BABYLON.Vector3(0, -1.5, 0);
+  ps.direction1 = new BABYLON.Vector3(-0.4, -1.2, -0.4);
+  ps.direction2 = new BABYLON.Vector3( 0.4, -1.6,  0.4);
   weather.snowPS = ps; return ps;
 }
 
@@ -1161,7 +1172,7 @@ function populateMapSelector(){
   const sel = document.getElementById('map-select'); if(!sel) return;
   if (!MAP_FILES.length) { sel.innerHTML = `<option value="-1">(no maps found)</option>`; return; }
   sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join('');
-  sel.value = "0";
+  try{ var _saved = localStorage.getItem("selectedMapIndex"); if(_saved!==null) sel.value = _saved; else sel.value = "0"; }catch(_){ sel.value="0"; };
   sel.addEventListener('change', ()=>{ try{window.CURRENT_MAP = getSelectedMap(); } catch(e){} });
 }
 
@@ -3512,6 +3523,106 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
     const id=setInterval(()=>{ if (tick()) clearInterval(id); }, 200);
     setTimeout(()=>{ try{clearInterval(id);}catch(e){} }, 12000);
   }
+})();
+</script>
+
+<!-- PATCH: Map Select Fixups -->
+<script>
+(function(){
+  function ready(fn){ if (document.readyState==="loading") document.addEventListener("DOMContentLoaded", fn, {once:true}); else fn(); }
+  ready(function(){
+    var btn = document.getElementById("startBtn") || document.getElementById("start-investigation") || null;
+    var host = (btn && btn.parentElement) || document.getElementById("title-screen") || document.body;
+
+    var label = document.getElementById("map-select-label");
+    if (!label){
+      label = document.createElement("label");
+      label.id = "map-select-label";
+      label.textContent = "Map:";
+      label.style.cssText = "display:inline-block;margin:8px 8px 8px 0;";
+      host.insertBefore(label, btn ? btn : host.firstChild);
+    }
+
+    var sel = document.getElementById("map-select");
+    if (!sel){
+      sel = document.createElement("select");
+      sel.id = "map-select";
+      sel.name = "map";
+      sel.style.cssText = "min-width:220px;padding:4px 6px;margin:6px 8px;";
+      host.insertBefore(sel, btn ? btn : host.firstChild);
+    }
+
+    // Restore previous choice if available
+    try{
+      var saved = localStorage.getItem("selectedMapIndex");
+      if (saved !== null) sel.value = saved;
+    }catch(_){}
+
+    sel.addEventListener("change", function(){
+      try{ localStorage.setItem("selectedMapIndex", sel.value); }catch(_){}
+      try{ window.CURRENT_MAP = (typeof getSelectedMap === "function") ? getSelectedMap() : window.CURRENT_MAP; }catch(_){}
+    });
+  });
+})();
+</script>
+
+<!-- PATCH: WASD + Shift Run (universal + arcrotate) -->
+<script>
+(function(){
+  var KEY = { W:87, A:65, S:83, D:68, SHIFT:16 };
+  var st = { w:0, a:0, s:0, d:0, run:false };
+  var WALK=1.6, RUN=3.0;
+
+  addEventListener("keydown", function(e){ if(e.repeat) return;
+    if(e.keyCode===KEY.W) st.w=1; else if(e.keyCode===KEY.S) st.s=1;
+    else if(e.keyCode===KEY.A) st.a=1; else if(e.keyCode===KEY.D) st.d=1;
+    else if(e.keyCode===KEY.SHIFT) st.run=true;
+  }, {passive:true});
+  addEventListener("keyup", function(e){
+    if(e.keyCode===KEY.W) st.w=0; else if(e.keyCode===KEY.S) st.s=0;
+    else if(e.keyCode===KEY.A) st.a=0; else if(e.keyCode===KEY.D) st.d=0;
+    else if(e.keyCode===KEY.SHIFT) st.run=false;
+  }, {passive:true});
+
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  function C(s){ return window.camera || (s && s.activeCamera) || null; }
+
+  function v3(cam){
+    try{
+      var f = cam.getDirection(BABYLON.Axis.Z), r = cam.getDirection(BABYLON.Axis.X);
+      f.y=0; r.y=0; f.normalize(); r.normalize();
+      var v = f.scale((st.w?1:0)+(st.s?-1:0)).addInPlace(r.scale((st.d?1:0)+(st.a?-1:0)));
+      if (v.lengthSquared()===0) return null;
+      v.normalize(); return v;
+    }catch(e){ return null; }
+  }
+
+  function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
+
+  (function attach(){
+    var s = S(); if(!s){ setTimeout(attach,120); return; }
+    s.onBeforeRenderObservable.add(function(){
+      var eng=(s.getEngine&&s.getEngine())||window.ENGINE;
+      var dt=((eng&&eng.getDeltaTime)?eng.getDeltaTime():16.7)/1000;
+      var cam=C(s); if(!cam) return;
+      var v=v3(cam); if(!v) return;
+      var sp=(st.run?RUN:WALK)*dt;
+
+      if (isArc(cam)) {
+        var d=v.scale(sp);
+        try{
+          cam.target = cam.target ? cam.target.add(d) : d;
+          cam.position = cam.position ? cam.position.add(d) : cam.position;
+        }catch(_){}
+      } else if (cam.moveWithCollisions) {
+        cam.moveWithCollisions(v.scale(sp));
+      } else if (cam.cameraDirection) {
+        cam.cameraDirection.addInPlace(v.scale(sp));
+      } else if (cam.position && cam.position.addInPlace) {
+        cam.position.addInPlace(v.scale(sp));
+      }
+    });
+  })();
 })();
 </script>
 </body>
