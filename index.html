@@ -1101,32 +1101,51 @@ function loadScriptOnce(src){
 
 /* Try explicit def, then inferred names, then the exact fallbacks requested */
 async function loadMatchingMapDef(mapFile, explicitDef){
-  const baseNoExt = (mapFile||'').replace(/\.[^.]+$/,'');
-  const candidates = [];
-
-  if (explicitDef) candidates.push(explicitDef);
-
-  // Inferred
-  candidates.push(baseNoExt + ".js");
-  candidates.push(baseNoExt + ".config.js");
-
-  // Special-case exact names requested
-  const low = (mapFile||'').toLowerCase();
-  if (low.includes('abandoned')) candidates.push("Abandoned_House.js");
-  if (low.includes('furnished')){
-    candidates.push("furnished_house.config.js");
-    candidates.push("fully_furnished.config.js");
+  // Normalize paths to map folder
+  const MAP_DIR = "./assets/models/map/";
+  function norm(p){
+    if(!p) return p;
+    if (/^https?:\/\//i.test(p)) return p;
+    if (p.startsWith("./assets/models/map/")) return p;
+    if (p.startsWith("./assets/map/")) return p.replace("./assets/map/","./assets/models/map/");
+    if (p.startsWith("./")) return MAP_DIR + p.replace(/^\.\/+/,"");
+    if (p.startsWith("/")) return p; // absolute
+    return MAP_DIR + p; // bare filename
   }
 
-  const tried = new Set(), ordered = candidates.filter(c=>{ if(tried.has(c)) return false; tried.add(c); return true; });
+  const baseNoExt = (mapFile||'').replace(/\.[^.]+$/,'');
+  const candidates = [];
+  let def = explicitDef;
+
+  // If manifest accidentally provided a .glb as def, ignore it
+  if (def && /\.glb(\?.*)?$/i.test(def)) def = "";
+
+  if (def) candidates.push(def);
+
+  // Inferred configs beside the GLB
+  if (baseNoExt) {
+    candidates.push(baseNoExt + ".js");
+    candidates.push(baseNoExt + ".config.js");
+  }
+
+  // Special-cases for your known maps
+  const low = (mapFile||'').toLowerCase();
+  if (low.includes('abandoned')) candidates.push("Abandoned_House.js");
+  if (low.includes('furnished')) candidates.push("furnished_house.config.js");
+
+  // Deduplicate and normalize
+  const tried = new Set();
+  const ordered = candidates
+    .map(c => norm(c))
+    .filter(c => !!c && !tried.has(c) && (tried.add(c) || true));
 
   let loadedAny = false;
-  for (const name of ordered){
-    const ok = await loadScriptOnce(`./assets/models/map/${name}`);
+  for (const src of ordered){
+    const ok = await loadScriptOnce(src);
     if (ok && window.MAP_DEF) { loadedAny = true; break; }
   }
   if (!loadedAny) {
-    console.warn("No map def loaded for", mapFile, "— spawn will use fallback.");
+    console.warn("No map def loaded for", mapFile, "Candidates tried:", ordered);
     window.MAP_DEF = undefined;
   }
 }
@@ -1140,7 +1159,7 @@ window.loadSelectedMap = async function(){
 
   Loader.label('Importing map meshes…');
   try{
-    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", (mapFile.startsWith("./")||mapFile.startsWith("/")? mapFile.split("/").pop(): mapFile), scene);
     houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
     res.meshes.forEach(m=>{
       try{
