@@ -1497,7 +1497,9 @@ function lightningFlash(){
 ========================================================== ***/
 let __started = false;
 
-async function safeStart(e){
+async async function safeStart(e){
+  try{ await ensureMapDefFromManifest(); }catch(_){}
+
   e?.preventDefault?.();
   if (__started) return;
   __started = true;
@@ -3340,13 +3342,6 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
     return scene.getMeshByName('player') || scene.getTransformNodeByName('player') ||
            scene.getMeshByName('avatar') || scene.getTransformNodeByName('avatar') || null;
   }
-  function forceSpawn(scene){
-    const p = playerNode(scene);
-    if (!p) return log('No player node found; spawn skipped.');
-    p.position.copyFrom(PATCH.spawnWS);
-    if (scene.activeCamera?.setTarget) scene.activeCamera.setTarget(PATCH.spawnWS);
-    log('Spawn set to', PATCH.spawnWS.toString());
-  }
   function makeFoliageGhost(scene){
     const re = new RegExp('(' + PATCH.noCollideHints.map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')','i');
     let n=0;
@@ -3424,7 +3419,7 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
     document.body.appendChild(btn);
   }
   function apply(scene){
-    try{ forceSpawn(scene); }catch(e){ log(e); }
+    try{ }catch(e){ log(e); }
     try{ makeFoliageGhost(scene); }catch(e){ log(e); }
     try{ tuneRain(scene); }catch(e){ log(e); }
     try{ ensureAmbient(scene); }catch(e){ log(e); }
@@ -3585,200 +3580,11 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
 
 
-<!-- PATCH: WASD + Shift Run (player-aware + arcrotate follow) -->
-<script>
-(function(){
-  var KEY = { W:87, A:65, S:83, D:68, SHIFT:16 };
-  var st = { w:0, a:0, s:0, d:0, run:false };
-  var WALK=1.6, RUN=3.0;
-
-  addEventListener("keydown", function(e){ if(e.repeat) return;
-    if(e.keyCode===KEY.W) st.w=1; else if(e.keyCode===KEY.S) st.s=1;
-    else if(e.keyCode===KEY.A) st.a=1; else if(e.keyCode===KEY.D) st.d=1;
-    else if(e.keyCode===KEY.SHIFT) st.run=true;
-  }, {passive:true});
-  addEventListener("keyup", function(e){
-    if(e.keyCode===KEY.W) st.w=0; else if(e.keyCode===KEY.S) st.s=0;
-    else if(e.keyCode===KEY.A) st.a=0; else if(e.keyCode===KEY.D) st.d=0;
-    else if(e.keyCode===KEY.SHIFT) st.run=false;
-  }, {passive:true});
-
-  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-  function C(s){ return window.camera || (s && s.activeCamera) || null; }
-  function getPlayer(s){
-    try{
-      if (window.player) return window.player;
-      if (s && s.getNodeByName){ var n = s.getNodeByName("player"); if(n) return n; }
-      if (s && s.getTransformNodeByName){ var t=s.getTransformNodeByName("player"); if(t) return t; }
-    }catch(_){}
-    return null;
-  }
-  function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
-
-  function v3(cam){
-    try{
-      var f = cam.getDirection(BABYLON.Axis.Z), r = cam.getDirection(BABYLON.Axis.X);
-      f.y=0; r.y=0; f.normalize(); r.normalize();
-      var v = f.scale((st.w?1:0)+(st.s?-1:0)).addInPlace(r.scale((st.d?1:0)+(st.a?-1:0)));
-      if (v.lengthSquared()===0) return null;
-      v.normalize(); return v;
-    }catch(e){ return null; }
-  }
-
-  (function attach(){
-    var s = S(); if(!s){ setTimeout(attach,120); return; }
-    s.onBeforeRenderObservable.add(function(){
-      var eng=(s.getEngine&&s.getEngine())||window.ENGINE;
-      var dt=((eng&&eng.getDeltaTime)?eng.getDeltaTime():16.7)/1000;
-      var cam=C(s); if(!cam) return;
-      var v=v3(cam); if(!v) return;
-      var sp=(st.run?RUN:WALK)*dt;
-      var pl=getPlayer(s);
-
-      if (pl){
-        // Prefer moving the player mesh
-        try{
-          pl.checkCollisions = true;
-          pl.ellipsoid = pl.ellipsoid || new BABYLON.Vector3(0.4,0.9,0.4);
-          pl.ellipsoidOffset = pl.ellipsoidOffset || new BABYLON.Vector3(0,0.9,0);
-          if (pl.moveWithCollisions) pl.moveWithCollisions(v.scale(sp));
-          else if (pl.position && pl.position.addInPlace) pl.position.addInPlace(v.scale(sp));
-        }catch(_){}
-        // If using ArcRotate third-person, keep camera aimed at player
-        if (isArc(cam) && pl.position){
-          try { cam.target = pl.position; } catch(_){}
-        }
-      } else {
-        // No player mesh -> move the camera (first-person / free)
-        if (isArc(cam)){
-          var d=v.scale(sp);
-          try{
-            cam.target = cam.target ? cam.target.add(d) : d;
-            cam.position = cam.position ? cam.position.add(d) : cam.position;
-          }catch(_){}
-        } else if (cam.moveWithCollisions) {
-          cam.moveWithCollisions(v.scale(sp));
-        } else if (cam.cameraDirection) {
-          cam.cameraDirection.addInPlace(v.scale(sp));
-        } else if (cam.position && cam.position.addInPlace) {
-          cam.position.addInPlace(v.scale(sp));
-        }
-      }
-    });
-  })();
-})();
-</script>
 
 
 
-<!-- PATCH: Player Model + Third-Person Rig -->
-<script>
-(function(){
-  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-  function Canvas(){ var c=document.getElementById("renderCanvas")||document.getElementById("gameCanvas"); return c||document.querySelector("canvas")||null; }
 
-  async function ensurePlayer(){
-    var s=S(); if(!s) return null;
-    // If already present
-    if (window.player) return window.player;
-    var n=null;
-    try { if (s.getNodeByName) n = s.getNodeByName("player"); } catch(_){}
-    if (n){ window.player = n; return n; }
 
-    // Try to load a GLB (best-guess paths). All are optional.
-    var paths = [
-      ["./assets/models/player/", "player.glb"],
-      ["./assets/models/", "player.glb"],
-      ["./assets/", "player.glb"]
-    ];
-    for (var i=0;i<paths.length;i++){
-      try{
-        var r = await BABYLON.SceneLoader.ImportMeshAsync("", paths[i][0], paths[i][1], s);
-        var mesh = r.meshes.find(m=>m && m.name && m.name!=="__root__") || r.meshes[0];
-        if (mesh){
-          mesh.name = "player";
-          mesh.checkCollisions = true;
-          mesh.ellipsoid = new BABYLON.Vector3(0.4,0.9,0.4);
-          mesh.ellipsoidOffset = new BABYLON.Vector3(0,0.9,0);
-          window.player = mesh;
-          // If has skeleton, store for later
-          try { window.playerSkeleton = r.skeletons && r.skeletons[0]; }catch(_){}
-          return mesh;
-        }
-      }catch(e){ /* ignore and try next */ }
-    }
-
-    // Fallback placeholder
-    try {
-      var cap = BABYLON.MeshBuilder.CreateCapsule("player", {height:1.8, radius:0.4, tessellation:12}, s);
-      cap.position = new BABYLON.Vector3(-46.18, 1.35, -105.50);
-      cap.checkCollisions = true;
-      cap.ellipsoid = new BABYLON.Vector3(0.4,0.9,0.4);
-      cap.ellipsoidOffset = new BABYLON.Vector3(0,0.9,0);
-      window.player = cap;
-      return cap;
-    } catch(e) {
-      return null;
-    }
-  }
-
-  function ensureThirdPersonCam(){
-    var s=S(); if(!s) return null;
-    var canvas = Canvas();
-    // Reuse ArcRotate if active
-    var arc = (s.activeCamera && s.activeCamera.alpha!==undefined) ? s.activeCamera : null;
-    if (!arc){
-      var alpha = -Math.PI/2, beta = 1.2, radius = 4.0;
-      arc = new BABYLON.ArcRotateCamera("tpc", alpha, beta, radius, new BABYLON.Vector3(0,1,0), s);
-      arc.attachControl(canvas, true);
-      arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = Math.PI/2.0;
-      arc.lowerRadiusLimit = 2.2; arc.upperRadiusLimit = 8.0;
-    }
-    return arc;
-  }
-
-  // Keep third-person camera locked to player
-  (function followLoop(){
-    var s=S(); if(!s){ setTimeout(followLoop, 250); return; }
-    s.onBeforeRenderObservable.add(function(){
-      var pl = window.player;
-      if (!pl || !pl.position) return;
-      var cam = s.activeCamera;
-      if (cam && cam.alpha!==undefined){ // ArcRotate
-        try { cam.target = pl.position; } catch(_){}
-      }
-    });
-  })();
-
-  // Toggle view with 'V': first-person (use existing cam) <-> third-person (ArcRotate)
-  (function setupToggle(){
-    var s=S(); if(!s){ setTimeout(setupToggle, 250); return; }
-    var firstCam = s.activeCamera;
-    addEventListener("keydown", function(e){
-      if ((e.key||"").toLowerCase()==="v".toLowerCase() || e.keyCode===86){
-        var cam = s.activeCamera;
-        if (cam && cam.alpha!==undefined){
-          // Currently third-person -> switch back to first
-          if (firstCam && firstCam !== cam){
-            s.activeCamera = firstCam;
-            try { firstCam.attachControl(Canvas(), true); }catch(_){}
-          }
-        } else {
-          // Switch to third-person
-          var arc = ensureThirdPersonCam();
-          if (arc){ s.activeCamera = arc; try{ arc.attachControl(Canvas(), true); }catch(_){ } }
-        }
-      }
-    });
-  })();
-
-  // Kick player load (lazy)
-  (function waitAndLoad(){
-    var s=S(); if(!s){ setTimeout(waitAndLoad, 250); return; }
-    ensurePlayer();
-  })();
-})();
-</script>
 
 
 <!-- PATCH: Items module include -->
@@ -3842,44 +3648,98 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
 
 
+
 <!-- PATCH: Unified Input + Camera Module -->
 <script>
 (function(){
-  if (window.__inputCamInstalled) return; window.__inputCamInstalled = true;
+  if (window.__inputCamInstalled_v2) return; window.__inputCamInstalled_v2 = true;
 
   var SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
   var SPEED_WALK = 1.9, SPEED_RUN = 3.3;
-  var TOUCH_LOOK_SENS = 0.0022, TOUCH_MOVE_SENS = 1.0;
+  var TOUCH_LOOK_SENS = 0.0022;
   var MOUSE_SENS = 0.002;
+  var PLAYER_GLB = ["assets/models/player/main_player.glb", "assets/models/player/player.glb"];
 
   function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
   function Canvas(){ return document.getElementById("renderCanvas") || document.getElementById("gameCanvas") || document.querySelector("canvas"); }
   function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
 
+  // Load and attach a visible player mesh (for third person). Hidden in FP.
+  async function ensurePlayerMesh(s){
+    s = s || S(); if (!s) return null;
+    if (s.__playerMesh) return s.__playerMesh;
+    let path=null,file=null;
+    for (let p of PLAYER_GLB){
+      try{
+        let i = p.lastIndexOf("/"); path = p.substring(0,i+1); file=p.substring(i+1);
+        let r = await BABYLON.SceneLoader.ImportMeshAsync("", path, file, s);
+        let root = r.meshes && r.meshes[0];
+        if (root){
+          root.name = "PlayerModel";
+          root.parent = s.__playerBody || null;
+          root.scaling = new BABYLON.Vector3(1,1,1);
+          // Adjust model offset so feet are near ground if needed
+          try{ root.position = new BABYLON.Vector3(0,-0.9,0); }catch(_){}
+          s.__playerMesh = root;
+          root.setEnabled(true);
+          updatePlayerVisibility();
+          return root;
+        }
+      }catch(_){ /* try next */ }
+    }
+    return null;
+  }
+
+  function updatePlayerVisibility(){
+    try{
+      var s=S(); if(!s) return;
+      var mesh=s.__playerMesh; if(!mesh) return;
+      var cam=s.activeCamera;
+      mesh.isVisible = !!(cam && isArc(cam)); // visible only in third person
+    }catch(_){}
+  }
+
   function ensureRig(s){
     s = s || S(); if (!s) return null;
-    if (s.__playerRig) return s.__playerRig;
-    var rig = s.__playerRig = new BABYLON.TransformNode("PlayerRig", s);
-    rig.position = SPAWN.clone();
-    var capsule = BABYLON.MeshBuilder.CreateCapsule("player_capsule", {height:1.8, radius:0.35, tessellation:8, capSubdivisions:4}, s);
-    capsule.visibility = 0; capsule.isPickable=false; capsule.parent = rig;
-    capsule.checkCollisions = true;
-    capsule.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
-    capsule.ellipsoidOffset = new BABYLON.Vector3(0,0.9,0);
-    s.__playerBody = capsule;
+    if (s.__playerBody && s.__playerRig && s.getCameraByName("FPCam") && s.getCameraByName("TPCam")){
+      return s.__playerRig;
+    }
+    s.collisionsEnabled = true; // allow collisions if ground has them
 
-    var fps = new BABYLON.UniversalCamera("FPCam", new BABYLON.Vector3(0, 1.6, 0), s);
-    fps.minZ = 0.1; fps.parent = rig; fps.speed = 0.0; fps.inertia = 0.0; fps.angularSensibility = 4000;
-    fps.attachControl(Canvas(), true);
+    // BODY: this moves with collisions
+    var body = s.__playerBody || BABYLON.MeshBuilder.CreateCapsule("player_capsule", {height:1.8, radius:0.35, tessellation:8, capSubdivisions:4}, s);
+    body.checkCollisions = true; body.visibility = 0; body.isPickable = false;
+    body.position = SPAWN.clone();
+    s.__playerBody = body;
 
-    var arc = new BABYLON.ArcRotateCamera("TPCam", -Math.PI/2, 1.2, 3.6, rig.position, s);
-    arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = 1.45; arc.lowerRadiusLimit = 2.4; arc.upperRadiusLimit = 7.5;
-    arc.wheelPrecision = 60; arc.attachControl(Canvas(), true);
+    // RIG: a transform parent attached to body (0,0,0)
+    var rig = s.__playerRig || new BABYLON.TransformNode("PlayerRig", s);
+    rig.parent = body; rig.position = new BABYLON.Vector3(0,0,0);
+    s.__playerRig = rig;
 
-    s.activeCamera = fps;
-    s.cameras = s.cameras || []; if (s.cameras.indexOf(fps)===-1) s.cameras.push(fps); if (s.cameras.indexOf(arc)===-1) s.cameras.push(arc);
-    window.camera = s.activeCamera;
-    window.player = rig;
+    // FIRST PERSON CAMERA (parented to rig -> follows body automatically)
+    var fps = s.getCameraByName("FPCam");
+    if (!fps){
+      fps = new BABYLON.UniversalCamera("FPCam", new BABYLON.Vector3(0, 1.6, 0), s);
+      fps.parent = rig; fps.minZ = 0.1; fps.speed = 0; fps.inertia = 0; fps.angularSensibility = 4000;
+      try{ fps.attachControl(Canvas(), true); }catch(_){}
+    }
+
+    // THIRD PERSON CAMERA (orbits body)
+    var arc = s.getCameraByName("TPCam");
+    if (!arc){
+      arc = new BABYLON.ArcRotateCamera("TPCam", -Math.PI/2, 1.2, 3.6, body.position.clone(), s);
+      arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = 1.45; arc.lowerRadiusLimit = 2.4; arc.upperRadiusLimit = 7.5;
+      arc.wheelPrecision = 60;
+      try{ arc.attachControl(Canvas(), true); }catch(_){}
+    }
+    arc.target = body; // auto-updates as body moves
+
+    // Activate FP by default
+    s.activeCamera = fps; window.camera = fps; window.player = body;
+
+    // kick off loading visible mesh (async)
+    ensurePlayerMesh(s);
     return rig;
   }
 
@@ -3887,7 +3747,13 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   addEventListener("keydown", function(e){ var k=(e.key||"").toLowerCase(),c=e.keyCode||0;
     if(e.repeat) return;
     if(k==="w"||c===87)K.w=1; else if(k==="a"||c===65)K.a=1; else if(k==="s"||c===83)K.s=1; else if(k==="d"||c===68)K.d=1; else if(k==="shift"||c===16)K.run=true;
-    if(k==="v"||c===86){ var s=S(); if(!s) return; ensureRig(s); var cam=s.activeCamera; if(isArc(cam)){ var fps=s.getCameraByName("FPCam"); if(fps){ s.activeCamera=fps; fps.attachControl(Canvas(), true);} } else { var arc=s.getCameraByName("TPCam"); if(arc){ s.activeCamera=arc; arc.attachControl(Canvas(), true);} } }
+    if(k==="v"||c===86){
+      var s=S(); if(!s) return; ensureRig(s);
+      var cam=s.activeCamera;
+      if (isArc(cam)){ var fps=s.getCameraByName("FPCam"); if(fps){ s.activeCamera=fps; fps.attachControl(Canvas(), true); } }
+      else { var arc=s.getCameraByName("TPCam"); if(arc){ s.activeCamera=arc; arc.attachControl(Canvas(), true); } }
+      updatePlayerVisibility();
+    }
   }, {passive:true});
   addEventListener("keyup", function(e){ var k=(e.key||"").toLowerCase(),c=e.keyCode||0;
     if(k==="w"||c===87)K.w=0; else if(k==="a"||c===65)K.a=0; else if(k==="s"||c===83)K.s=0; else if(k==="d"||c===68)K.d=0; else if(k==="shift"||c===16)K.run=false;
@@ -3952,11 +3818,11 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   function attachLoop(){
     var s=S(); if (!s) return false;
     ensureRig(s);
-    if (s.__inputCamLoop) return true;
-    s.__inputCamLoop = true;
+    if (s.__inputCamLoop_v2) return true;
+    s.__inputCamLoop_v2 = true;
     s.onBeforeRenderObservable.add(function(){
       var cam = s.activeCamera; if (!cam) return;
-      var body = s.__playerBody, rig = s.__playerRig; if (!rig) return;
+      var body = s.__playerBody; if (!body) return;
       var v = new BABYLON.Vector3(0,0,0);
       var fw=fwd(cam), rt=right(cam);
       if (K.w) v.addInPlace(fw);
@@ -3971,24 +3837,24 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
         var sp = (K.run?SPEED_RUN:SPEED_WALK)*dt;
         var d=v.scale(sp);
         try{
-          if (body && body.moveWithCollisions) body.moveWithCollisions(d);
-          else rig.position.addInPlace(d);
-          if (isArc(cam)) cam.target = rig.position;
+          if (body.moveWithCollisions) body.moveWithCollisions(d);
+          else body.position.addInPlace(d);
         }catch(_){}
       }
-      var fps = s.getCameraByName && s.getCameraByName("FPCam");
-      if (fps) fps.position = new BABYLON.Vector3(0,1.6,0);
+      updatePlayerVisibility();
     });
     return true;
   }
 
   (function wait(){
-    var s=S(); if (!s){ setTimeout(wait, 120); return; }
+    var s=S();
+    if (!s){ setTimeout(wait, 120); return; }
     ensureRig(s);
     attachLoop();
   })();
 })();
 </script>
+
 </body>
 
 <script>
@@ -4100,12 +3966,6 @@ function scatterItems(slots){
 }
 
 // Spawn correction (after map load)
-function forceSpawn(){
-  if (!scene.activeCamera) return;
-  scene.activeCamera.position.copyFrom(PP.cfg.spawnWS);
-  scene.activeCamera.setTarget(PP.cfg.spawnWS.add(new BABYLON.Vector3(0,1,2)));
-}
-
 // Exterior rain (world anchored around MAP_DEF.exterior)
 function exteriorRain(){
   const ext=(window.MAP_DEF && Array.isArray(window.MAP_DEF.exterior))?MAP_DEF.exterior:null;
@@ -4163,7 +4023,7 @@ function localToWorld(p, def){
   // If your build exposes a promise or callback for map load, attach here.
   // Otherwise, run after a small timeout (best effort).
   setTimeout(()=>{ try{
-    forceSpawn(); exteriorRain();
+    exteriorRain();
     const inv = PP.storage.loadInventory();
     if (!inv.slots.length) { if (window.openStorage) openStorage(); } else { buildBelt(inv.slots); scatterItems(inv.slots); }
   }catch(e){ console.warn('Merge patch post-load error', e); }}, 1500);
