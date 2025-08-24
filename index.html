@@ -1,6 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- PATCH: DOTS resolver stub (very early) -->
+<script>
+window.__dots_resolveScene = window.__dots_resolveScene || function(){
+  try{
+    var s = window.SCENE || window.scene ||
+            (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) ||
+            (window.BABYLON && BABYLON.Engine && BABYLON.Engine.LastCreatedScene) || null;
+    if (s) window.SCENE = s;
+    var e = (s && s.getEngine && s.getEngine()) ||
+            window.ENGINE ||
+            (window.BABYLON && BABYLON.Engine && BABYLON.Engine.LastCreatedEngine) || null;
+    if (e) window.ENGINE = e;
+    if (s && !window.camera) window.camera = s.activeCamera || window.camera;
+    return !!(window.SCENE && window.ENGINE);
+  }catch(_){ return false; }
+};
+</script>
+
   <meta charset="utf-8" />
   <title>PhasmaPhoney — Full Build (Loader after Start, Inspector Topmost, Fixed Movement)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
@@ -3762,6 +3780,123 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 })();
 </script>
 
+
+<!-- PATCH: Items module include -->
+<script src="items.js"></script>
+
+<!-- PATCH: Items module init -->
+<script>
+(function(){
+  function getScene(){
+    return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
+  }
+  function tryInit(){
+    try{
+      var s = getScene();
+      if (!s || !window.Items) return false;
+      // Configure paths
+      if (typeof Items.setAssetBase === "function") Items.setAssetBase("./assets/icons/");
+      if (typeof Items.setItemsModelPath === "function") Items.setItemsModelPath("assets/models/items/exploration_objects.glb");
+      // Init once
+      if (!s.__itemsInit){
+        Items.init(s);
+        s.__itemsInit = true;
+      }
+      return true;
+    }catch(e){ return false; }
+  }
+  var attempts = 0;
+  (function wait(){
+    if (tryInit()) return;
+    if (++attempts > 200) return; // ~20s max
+    setTimeout(wait, 100);
+  })();
+})();
+</script>
+
+<!-- PATCH: Third-Person Toggle -->
+<script>
+(function(){
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  function Canvas(){ var c=document.getElementById("renderCanvas")||document.getElementById("gameCanvas"); return c||document.querySelector("canvas")||null; }
+  function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
+
+  function ensureThirdPersonCam(){
+    var s=S(); if(!s) return null;
+    var canvas = Canvas();
+    var arc = (s.activeCamera && isArc(s.activeCamera)) ? s.activeCamera : null;
+    if (!arc){
+      var alpha = -Math.PI/2, beta = 1.2, radius = 4.0;
+      arc = new BABYLON.ArcRotateCamera("thirdPerson", alpha, beta, radius, new BABYLON.Vector3(0,1,0), s);
+      if (canvas) arc.attachControl(canvas, true);
+      arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = Math.PI/2.0;
+      arc.lowerRadiusLimit = 2.2; arc.upperRadiusLimit = 8.0;
+    }
+    return arc;
+  }
+
+  function followPlayer(){
+    var s=S(); if(!s) return;
+    if (s.__tpfollow) return;
+    s.__tpfollow = true;
+    s.onBeforeRenderObservable.add(function(){
+      try{
+        var pl = window.player || (s.getNodeByName && s.getNodeByName("player"));
+        var cam = s.activeCamera;
+        if (pl && cam && isArc(cam) && pl.position){
+          cam.target = pl.position;
+        }
+      }catch(_){}
+    });
+  }
+
+  (function setupToggle(){
+    var s=S(); if(!s){ setTimeout(setupToggle, 250); return; }
+    var firstCam = s.activeCamera;
+    addEventListener("keydown", function(e){
+      if ((e.key||"").toLowerCase()==="v" || e.keyCode===86){
+        var cam = s.activeCamera;
+        if (isArc(cam)){
+          if (firstCam && firstCam !== cam){
+            s.activeCamera = firstCam;
+            try { firstCam.attachControl(Canvas(), true); }catch(_){}
+          }
+        } else {
+          var arc = ensureThirdPersonCam();
+          if (arc){ s.activeCamera = arc; try{ arc.attachControl(Canvas(), true); }catch(_){ } followPlayer(); }
+        }
+      }
+    }, {passive:true});
+  })();
+})();
+</script>
+
+<!-- PATCH: DOTS robust hook (safe, idempotent) -->
+<script>
+(function(){
+  function hook(){
+    try{
+      if (!window.__dots_resolveScene || !window.__dots_resolveScene()) return false;
+      var s = window.SCENE;
+      if (!s || !s.onBeforeRenderObservable) return false;
+      if (s.__dotsHooked) return true;
+      s.__dotsHooked = true;
+      s.onBeforeRenderObservable.add(function(){
+        try { window.__dots_resolveScene && window.__dots_resolveScene(); } catch(_){}
+        var eng=(s.getEngine&&s.getEngine())||window.ENGINE;
+        var dt=((eng&&eng.getDeltaTime)?eng.getDeltaTime():16.7)/1000;
+        try { if (typeof updateDOTS === "function") updateDOTS(dt); } catch(_){}
+      });
+      return true;
+    }catch(e){ return false; }
+  }
+  var tries=0; (function wait(){
+    if (hook()) return;
+    if (++tries>200) return; // ~20s
+    setTimeout(wait, 100);
+  })();
+})();
+</script>
 </body>
 
 <script>
