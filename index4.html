@@ -3380,59 +3380,151 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   </div>
 
 
-<!-- PATCH: Third-Person Toggle -->
+
+<!-- PATCH: Unified Input + Camera Module -->
 <script>
 (function(){
+  if (window.__inputCamInstalled) return; window.__inputCamInstalled = true;
+
+  var SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
+  var SPEED_WALK = 1.9, SPEED_RUN = 3.3;
+  var TOUCH_LOOK_SENS = 0.0022, TOUCH_MOVE_SENS = 1.0;
+  var MOUSE_SENS = 0.002;
+
   function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-  function Canvas(){ var c=document.getElementById("renderCanvas")||document.getElementById("gameCanvas"); return c||document.querySelector("canvas")||null; }
+  function Canvas(){ return document.getElementById("renderCanvas") || document.getElementById("gameCanvas") || document.querySelector("canvas"); }
   function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
 
-  function ensureThirdPersonCam(){
-    var s=S(); if(!s) return null;
-    var canvas = Canvas();
-    var arc = (s.activeCamera && isArc(s.activeCamera)) ? s.activeCamera : null;
-    if (!arc){
-      var alpha = -Math.PI/2, beta = 1.2, radius = 4.0;
-      arc = new BABYLON.ArcRotateCamera("thirdPerson", alpha, beta, radius, new BABYLON.Vector3(0,1,0), s);
-      if (canvas) arc.attachControl(canvas, true);
-      arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = Math.PI/2.0;
-      arc.lowerRadiusLimit = 2.2; arc.upperRadiusLimit = 8.0;
-    }
-    return arc;
+  function ensureRig(s){
+    s = s || S(); if (!s) return null;
+    if (s.__playerRig) return s.__playerRig;
+    var rig = s.__playerRig = new BABYLON.TransformNode("PlayerRig", s);
+    rig.position = SPAWN.clone();
+    var capsule = BABYLON.MeshBuilder.CreateCapsule("player_capsule", {height:1.8, radius:0.35, tessellation:8, capSubdivisions:4}, s);
+    capsule.visibility = 0; capsule.isPickable=false; capsule.parent = rig;
+    capsule.checkCollisions = true;
+    capsule.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
+    capsule.ellipsoidOffset = new BABYLON.Vector3(0,0.9,0);
+    s.__playerBody = capsule;
+
+    var fps = new BABYLON.UniversalCamera("FPCam", new BABYLON.Vector3(0, 1.6, 0), s);
+    fps.minZ = 0.1; fps.parent = rig; fps.speed = 0.0; fps.inertia = 0.0; fps.angularSensibility = 4000;
+    fps.attachControl(Canvas(), true);
+
+    var arc = new BABYLON.ArcRotateCamera("TPCam", -Math.PI/2, 1.2, 3.6, rig.position, s);
+    arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = 1.45; arc.lowerRadiusLimit = 2.4; arc.upperRadiusLimit = 7.5;
+    arc.wheelPrecision = 60; arc.attachControl(Canvas(), true);
+
+    s.activeCamera = fps;
+    s.cameras = s.cameras || []; if (s.cameras.indexOf(fps)===-1) s.cameras.push(fps); if (s.cameras.indexOf(arc)===-1) s.cameras.push(arc);
+    window.camera = s.activeCamera;
+    window.player = rig;
+    return rig;
   }
 
-  function followPlayer(){
-    var s=S(); if(!s) return;
-    if (s.__tpfollow) return;
-    s.__tpfollow = true;
-    s.onBeforeRenderObservable.add(function(){
-      try{
-        var pl = window.player || (s.getNodeByName && s.getNodeByName("player"));
-        var cam = s.activeCamera;
-        if (pl && cam && isArc(cam) && pl.position){
-          cam.target = pl.position;
-        }
-      }catch(_){}
-    });
-  }
+  var K = {w:0,a:0,s:0,d:0,run:false};
+  addEventListener("keydown", function(e){ var k=(e.key||"").toLowerCase(),c=e.keyCode||0;
+    if(e.repeat) return;
+    if(k==="w"||c===87)K.w=1; else if(k==="a"||c===65)K.a=1; else if(k==="s"||c===83)K.s=1; else if(k==="d"||c===68)K.d=1; else if(k==="shift"||c===16)K.run=true;
+    if(k==="v"||c===86){ var s=S(); if(!s) return; ensureRig(s); var cam=s.activeCamera; if(isArc(cam)){ var fps=s.getCameraByName("FPCam"); if(fps){ s.activeCamera=fps; fps.attachControl(Canvas(), true);} } else { var arc=s.getCameraByName("TPCam"); if(arc){ s.activeCamera=arc; arc.attachControl(Canvas(), true);} } }
+  }, {passive:true});
+  addEventListener("keyup", function(e){ var k=(e.key||"").toLowerCase(),c=e.keyCode||0;
+    if(k==="w"||c===87)K.w=0; else if(k==="a"||c===65)K.a=0; else if(k==="s"||c===83)K.s=0; else if(k==="d"||c===68)K.d=0; else if(k==="shift"||c===16)K.run=false;
+  }, {passive:true});
 
-  (function setupToggle(){
-    var s=S(); if(!s){ setTimeout(setupToggle, 250); return; }
-    var firstCam = s.activeCamera;
-    addEventListener("keydown", function(e){
-      if ((e.key||"").toLowerCase()==="v" || e.keyCode===86){
-        var cam = s.activeCamera;
-        if (isArc(cam)){
-          if (firstCam && firstCam !== cam){
-            s.activeCamera = firstCam;
-            try { firstCam.attachControl(Canvas(), true); }catch(_){}
+  (function(){
+    var canvas = Canvas(); if (!canvas) return;
+    canvas.addEventListener("click", function(){ try{ canvas.requestPointerLock && canvas.requestPointerLock(); }catch(_){}});
+    addEventListener("mousemove", function(ev){
+      var s=S(), cam=s && s.activeCamera; if (!cam || isArc(cam)) return;
+      if (!(document.pointerLockElement===canvas || document.mozPointerLockElement===canvas || document.webkitPointerLockElement===canvas)) return;
+      var dx = ev.movementX || 0, dy = ev.movementY || 0;
+      cam.cameraRotation = cam.cameraRotation || new BABYLON.Vector2(0,0);
+      cam.cameraRotation.y += -dx * MOUSE_SENS;
+      cam.cameraRotation.x += -dy * MOUSE_SENS;
+    }, {passive:true});
+  })();
+
+  (function(){
+    var leftId=null,rightId=null, lx=0,ly=0, rx=0,ry=0;
+    addEventListener("touchstart", function(e){
+      for (var i=0;i<e.changedTouches.length;i++){
+        var t=e.changedTouches[i];
+        if (t.clientX < innerWidth*0.5 && leftId===null){ leftId=t.identifier; lx=t.clientX; ly=t.clientY; }
+        else if (t.clientX >= innerWidth*0.5 && rightId===null){ rightId=t.identifier; rx=t.clientX; ry=t.clientY; }
+      }
+    }, {passive:true});
+    addEventListener("touchmove", function(e){
+      var s=S(); if(!s) return;
+      for (var i=0;i<e.changedTouches.length;i++){
+        var t=e.changedTouches[i];
+        if (t.identifier===leftId){
+          var dx=(t.clientX-lx), dy=(t.clientY-ly);
+          K.w = dy < -10 ? 1:0; K.s = dy > 10 ? 1:0; K.a = dx < -10 ? 1:0; K.d = dx > 10 ? 1:0;
+        } else if (t.identifier===rightId){
+          var cam=s.activeCamera; if(!cam) continue;
+          if (isArc(cam)){
+            cam.alpha += -0.01 * (t.clientX - rx);
+            cam.beta  += -0.01 * (t.clientY - ry);
+            cam.beta = Math.min(cam.upperBetaLimit, Math.max(cam.lowerBetaLimit, cam.beta));
+          } else {
+            cam.cameraRotation = cam.cameraRotation || new BABYLON.Vector2(0,0);
+            cam.cameraRotation.y += -(t.clientX - rx) * TOUCH_LOOK_SENS;
+            cam.cameraRotation.x += -(t.clientY - ry) * TOUCH_LOOK_SENS;
           }
-        } else {
-          var arc = ensureThirdPersonCam();
-          if (arc){ s.activeCamera = arc; try{ arc.attachControl(Canvas(), true); }catch(_){ } followPlayer(); }
+          rx=t.clientX; ry=t.clientY;
         }
       }
     }, {passive:true});
+    addEventListener("touchend", function(e){
+      for (var i=0;i<e.changedTouches.length;i++){
+        var t=e.changedTouches[i];
+        if (t.identifier===leftId){ leftId=null; K.w=K.a=K.s=K.d=0; }
+        if (t.identifier===rightId){ rightId=null; }
+      }
+    }, {passive:true});
+  })();
+
+  function fwd(cam){ try{ var v=cam.getDirection(BABYLON.Axis.Z); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(0,0,1);}}
+  function right(cam){ try{ var v=cam.getDirection(BABYLON.Axis.X); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(1,0,0);}}
+
+  function attachLoop(){
+    var s=S(); if (!s) return false;
+    ensureRig(s);
+    if (s.__inputCamLoop) return true;
+    s.__inputCamLoop = true;
+    s.onBeforeRenderObservable.add(function(){
+      var cam = s.activeCamera; if (!cam) return;
+      var body = s.__playerBody, rig = s.__playerRig; if (!rig) return;
+      var v = new BABYLON.Vector3(0,0,0);
+      var fw=fwd(cam), rt=right(cam);
+      if (K.w) v.addInPlace(fw);
+      if (K.s) v.addInPlace(fw.scale(-1));
+      if (K.d) v.addInPlace(rt);
+      if (K.a) v.addInPlace(rt.scale(-1));
+      var len=v.length();
+      if (len>0){
+        v.scaleInPlace(1/len);
+        var eng=(s.getEngine&&s.getEngine())||window.ENGINE;
+        var dt=((eng&&eng.getDeltaTime)?eng.getDeltaTime():16.7)/1000;
+        var sp = (K.run?SPEED_RUN:SPEED_WALK)*dt;
+        var d=v.scale(sp);
+        try{
+          if (body && body.moveWithCollisions) body.moveWithCollisions(d);
+          else rig.position.addInPlace(d);
+          if (isArc(cam)) cam.target = rig.position;
+        }catch(_){}
+      }
+      var fps = s.getCameraByName && s.getCameraByName("FPCam");
+      if (fps) fps.position = new BABYLON.Vector3(0,1.6,0);
+    });
+    return true;
+  }
+
+  (function wait(){
+    var s=S(); if (!s){ setTimeout(wait, 120); return; }
+    ensureRig(s);
+    attachLoop();
   })();
 })();
 </script>
