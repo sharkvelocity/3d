@@ -176,7 +176,72 @@ Items.cloneItemMesh = function(name, s){
 
   // ---------------- Item definitions ----------------
 
-  // 1) EMF READER
+  
+  // --- EMF UI + Beep helpers ---
+  let __emf_leds = null;
+  let __emf_container = null;
+
+  function makeEmfUI(s){
+    try{
+      s = getScene(s);
+      const ui = ensureHud(s); // reuse main ADT
+      if (__emf_container) return __emf_leds;
+      const wrap = new BABYLON.GUI.StackPanel();
+      wrap.isVertical = false;
+      wrap.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+      wrap.verticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+      wrap.top = "6px";
+      ui.addControl(wrap);
+      __emf_container = wrap;
+
+      const leds = [];
+      const colors = ["#2ecc71","#a3e048","#f7d038","#ff8f1f","#ff3b30"]; // 1..5
+      for (let i=0;i<5;i++){
+        const r = new BABYLON.GUI.Rectangle();
+        r.width = "28px"; r.height = "12px";
+        r.thickness = 0;
+        r.color = "transparent";
+        r.background = "rgba(255,255,255,0.06)";
+        r.paddingLeft = "6px";
+        wrap.addControl(r);
+        leds.push({rect:r, color:colors[i]});
+      }
+      __emf_leds = leds;
+      return leds;
+    }catch(e){ return null; }
+  }
+
+  function setEmfLevel(n){
+    try{
+      makeEmfUI();
+      if (!__emf_leds) return;
+      for (let i=0;i<__emf_leds.length;i++){
+        const on = i < n;
+        const it = __emf_leds[i];
+        it.rect.background = on ? it.color : "rgba(255,255,255,0.06)";
+      }
+    }catch(_){}
+  }
+
+  // Simple WebAudio beep
+  function beep(level){
+    try{
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = (beep.__ctx = beep.__ctx || new AC());
+      const now = ctx.currentTime;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "square";
+      o.frequency.value = 500 + 120 * (level||1);
+      g.gain.setValueAtTime(0.0, now);
+      g.gain.linearRampToValueAtTime(0.05, now + 0.01);
+      g.gain.linearRampToValueAtTime(0.0, now + 0.09);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(now); o.stop(now + 0.1);
+    }catch(_){}
+  }
+// 1) EMF READER
   
   // 1) EMF READER  (event-driven)
   // EMF now reacts to ghost interactions/events/hunts instead of raw distance.
