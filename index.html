@@ -1964,5 +1964,155 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 })();
 </script>
 
+
+<script id="tweakpatch-manifest">
+(function(){
+  const log = (...a)=>console.log("[ManifestPatch]",...a);
+  const MAPS_JSON_PATH = "./assets/models/map/maps.json";
+  const $ = (s)=>document.querySelector(s);
+
+  // Normalize various manifest shapes into: [{name, config, glb}]
+  async function loadMapsManifest(){
+    try{
+      const res = await fetch(MAPS_JSON_PATH, {cache:"no-cache"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const data = await res.json();
+      let list = [];
+
+      if(Array.isArray(data)){
+        // Could be array of strings or objects
+        list = data.map((item)=>{
+          if(typeof item === "string"){
+            // Try to infer name + config from filename-ish
+            const base = item.replace(/^\.?\/*/,"");
+            const name = base.split("/").pop().replace(/\.(config\.)?js$/i,"").replace(/_/g," ").replace(/\b\w/g, c=>c.toUpperCase());
+            return { name, config: "./assets/models/map/" + base, glb: null };
+          } else if (item && typeof item === "object") {
+            // Expect keys like {name, config, glb}
+            const name = item.name || (item.config||item.path||item.file||"map").split("/").pop().replace(/\.(config\.)?js$/i,"");
+            return {
+              name,
+              config: item.config || item.path || item.file || null,
+              glb: item.glb || item.model || null
+            };
+          }
+          return null;
+        }).filter(Boolean);
+      } else if (data && typeof data === "object"){
+        // Maybe keyed object { "Abandoned House": {config:"...", glb:"..."} }
+        list = Object.keys(data).map((k)=>{
+          const v = data[k]||{};
+          return { name: k, config: v.config || v.path || v.file || null, glb: v.glb || v.model || null };
+        });
+      }
+
+      // Fallback: if empty, try to hardcode known files in repo
+      if(!list.length){
+        list = [
+          { name:"Abandoned House", config:"./assets/models/map/Abandoned_House.js", glb:"./assets/models/map/Abandoned_House.glb" },
+          { name:"Furnished House", config:"./assets/models/map/furnished_house.config.js", glb:"./assets/models/map/furnished_house.glb" },
+        ];
+      }
+
+      // Normalize paths to start with ./ if they look relative
+      list = list.map(m=>{
+        const norm = {...m};
+        if (typeof norm.config === "string" && !/^https?:\/\//i.test(norm.config)){
+          if (!norm.config.startsWith("./") && !norm.config.startsWith("/")) norm.config = "./" + norm.config;
+        }
+        if (typeof norm.glb === "string" && !/^https?:\/\//i.test(norm.glb)){
+          if (!norm.glb.startsWith("./") && !norm.glb.startsWith("/")) norm.glb = "./" + norm.glb;
+        }
+        return norm;
+      });
+
+      log("Loaded maps.json:", list);
+      return list;
+    }catch(e){
+      console.warn("maps.json load failed:", e);
+      // Fallback to known present files in your repo:
+      const list = [
+        { name:"Abandoned House", config:"./assets/models/map/Abandoned_House.js", glb:"./assets/models/map/Abandoned_House.glb" },
+        { name:"Furnished House", config:"./assets/models/map/furnished_house.config.js", glb:"./assets/models/map/furnished_house.glb" },
+      ];
+      // Try to toast via TweakPatch if available
+      if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("maps.json missing; using fallback list.");
+      return list;
+    }
+  }
+
+  function getSelectedMapName(){
+    const sel = $("#mapSelect") || $("#map-select") || $("select[name='map']");
+    if (sel && sel.value) return sel.value;
+    // Try data attr on start button
+    const btn = document.getElementById("startBtn") || document.getElementById("start-investigation");
+    if (btn && btn.dataset && btn.dataset.map) return btn.dataset.map;
+    return null;
+  }
+
+  async function populateDropdown(list){
+    let sel = $("#mapSelect") || $("#map-select") || $("select[name='map']");
+    if (!sel){
+      // Create one near the Start button if not present
+      const btn = document.getElementById("startBtn") || document.getElementById("start-investigation");
+      sel = document.createElement("select");
+      sel.id = "mapSelect";
+      sel.style.cssText = "position:relative; margin-top:12px;";
+      if (btn && btn.parentElement) btn.parentElement.appendChild(sel);
+      else document.body.appendChild(sel);
+    }
+    sel.innerHTML = "";
+    for (const m of list){
+      const opt = document.createElement("option");
+      opt.value = m.name;
+      opt.textContent = m.name;
+      sel.appendChild(opt);
+    }
+  }
+
+  function resolveConfigFor(name, list){
+    if (!name && list.length) return list[0].config;
+    const found = list.find(m=> (m.name||"").toLowerCase() === (name||"").toLowerCase());
+    return found ? found.config : (list[0] ? list[0].config : null);
+  }
+
+  async function ensureMapDefFromManifest(){
+    const list = await loadMapsManifest();
+    try { await populateDropdown(list); } catch(e){}
+    const chosen = getSelectedMapName();
+    const cfg = resolveConfigFor(chosen, list);
+    if (!cfg){
+      if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("No map config found in manifest.");
+      return false;
+    }
+    try{
+      await import(cfg);
+      if (window.MAP_DEF && MAP_DEF.spawn){
+        if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("Loaded map: " + (chosen || MAP_DEF.title || "Map"));
+        return true;
+      }
+    }catch(e){
+      console.warn("import failed for", cfg, e);
+    }
+    if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("Failed to load map config: " + cfg);
+    return false;
+  }
+
+  // If previous TweakPatch exists, override its ensureMapDef to use manifest
+  function patchEnsure(){
+    if (window.__TweakPatch){
+      window.__TweakPatch.ensureMapDef = ensureMapDefFromManifest;
+    }
+    // Also override any global helper used earlier
+    window.ensureMapDef = ensureMapDefFromManifest;
+  }
+
+  // Run ASAP
+  patchEnsure();
+  // Try load early to populate UI
+  document.addEventListener("DOMContentLoaded", ()=>{ ensureMapDefFromManifest(); }, {once:true});
+})();
+</script>
+
 </body>
 </html>
