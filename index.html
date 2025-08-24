@@ -1101,8 +1101,29 @@ async function loadMoon(){
   moonMesh.isPickable = false;
   moonMesh.applyFog   = false;
   moonMesh.renderingGroupId = 2;
-  moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
-  moonMesh.scaling.setAll(MOON_DIAM);
+  /* billboard/scale moved below based on mesh type */
+  
+  // patched: decide billboard & scale based on whether GLB or fallback disc
+  (function(){
+    var isFallbackDisc = false;
+    try { isFallbackDisc = (moonMesh && moonMesh.name === "MoonMesh"); } catch(_){}
+    if (isFallbackDisc){
+      moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+      if (moonMesh.scaling) moonMesh.scaling.setAll(1);
+    } else {
+      moonMesh.billboardMode = BABYLON.Mesh.BILLBOARDMODE_NONE;
+      try {
+        var bb = moonMesh.getBoundingInfo().boundingBox;
+        var size = bb.maximum.subtract(bb.minimum);
+        var currentDiam = Math.max(size.x, size.y, size.z);
+        var factor = currentDiam > 0 ? (18 / currentDiam) : 1;
+        if (moonMesh.scaling) moonMesh.scaling.setAll(factor);
+      } catch(e) {
+        try { if (moonMesh.scaling) moonMesh.scaling.setAll(1); } catch(_) {}
+      }
+    }
+  })();
+
   moonMesh.position.copyFrom(MOON_POS);
 
   if (moonLight){
