@@ -115,6 +115,67 @@ window.onBeforeRenderAdd = function(cb){
 })();
 </script>
 
+
+<style id="tweakpatch-css">
+  /* --- TweakPatch HUD + z-index rules --- */
+  #input-live-hud{
+    position:fixed; right:10px; bottom:10px; z-index:2147483646;
+    font:12px/1.3 monospace; color:#0ff; background:rgba(0,0,0,.55);
+    border:1px solid rgba(0,255,255,.35); padding:6px 8px; border-radius:6px; pointer-events:none
+  }
+  #map-toast{
+    position:fixed; left:50%; top:20px; transform:translateX(-50%);
+    z-index:2147483647; font:14px/1.4 monospace; color:#fff; background:#c0392b;
+    padding:10px 14px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,.45); display:none
+  }
+  /* Force Babylon Inspector on top of ALL */
+  .babylonjsInspector, .babylonjsInspector div, .babylonjsInspector * {
+    z-index: 2147483647 !important;
+  }
+</style>
+
+
+<style id="glbviewer-style">
+  #gv-btn{
+    position:fixed; left:12px; top:12px; z-index:2147483000;
+    background:#0b2e2e; color:#0ff; border:1px solid #0aa; padding:8px 10px;
+    border-radius:10px; cursor:pointer; user-select:none; font:14px/1.2 system-ui,Segoe UI,Arial;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+  #gv-btn:hover{ filter:brightness(1.2); }
+  #gv-overlay[hidden]{ display:none; }
+  #gv-overlay{
+    position:fixed; inset:0; z-index:2147483600; background:rgba(0,0,0,.65);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #gv-modal{
+    width:min(92vw,1100px); height:min(88vh,720px); background:#0b0f12; color:#cfe;
+    border:1px solid #1b3640; border-radius:14px; box-shadow:0 18px 36px rgba(0,0,0,.5);
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  #gv-bar{
+    display:flex; align-items:center; gap:10px; background:#08141a; padding:10px 12px; border-bottom:1px solid #123;
+  }
+  #gv-title{ font-weight:600; margin-right:auto; letter-spacing:.3px; }
+  #gv-close{
+    background:#1a2d33; border:1px solid #244; color:#9ff; padding:6px 10px; border-radius:10px; cursor:pointer;
+  }
+  #gv-controls{ display:flex; gap:10px; align-items:center; }
+  #gv-controls input[type="text"]{
+    width:360px; max-width:52vw; background:#0f1b20; color:#cff; border:1px solid #245; border-radius:8px; padding:6px 8px;
+  }
+  #gv-controls button, #gv-controls label{
+    background:#103039; border:1px solid #275; color:#bff; padding:6px 10px; border-radius:10px; cursor:pointer;
+  }
+  #gv-canvas{
+    flex:1; display:block; width:100%; height:100%; outline:none; background:#000;
+  }
+  #gv-drop-hint{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    color:#9ff; font:20px/1.3 system-ui; background:rgba(0,32,32,.35); pointer-events:none;
+  }
+  #gv-modal.dragover #gv-drop-hint{ display:flex; }
+</style>
 </head>
 <body>
   <!-- LOADING OVERLAY (hidden until Start) -->
@@ -318,7 +379,7 @@ const Loader = (() => {
   function hide(){ if(box()) box().style.display='none'; }
   function label(s){ if(text()) text.textContent = s; }
   function pct(){ return totalWeight ? Math.max(0, Math.min(100, (progressed/totalWeight)*100)) : 0; }
-  function draw(){ const el = fill(); if(el) el.style.width = pct().toFixed(1) + '%'; }
+  function draw(){ if(fill()) fill.style.width = pct().toFixed(1) + '%'; }
 
   function addStep(label, fnOrPromise, weight=1){
     queue.push({label, run: fnOrPromise, weight});
@@ -1778,5 +1839,937 @@ const CameraRig = { update: function(){ /* camera smoothing/OTS here */ } };
 window.Footsteps = window.Footsteps || { tick: function(){ /* no-op */ } };
 window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
+
+<!-- === TWEAKPATCH UI ELEMENTS =========================================== -->
+<div id="map-toast"></div>
+<div id="input-live-hud" aria-hidden="true">
+  <div><b>PointerLock:</b> <span id="hud-pl">no</span></div>
+  <div><b>W/A/S/D:</b> <span id="hud-wasd">----</span></div>
+  <div><b>Sprint:</b> <span id="hud-sprint">off</span></div>
+</div>
+
+
+<script id="tweakpatch-js">
+(function(){
+  const log = (...a)=>console.log("[TweakPatch]",...a);
+
+  // ------- Inspector super-topmost lifter
+  const liftInspector = () => {
+    const insp = document.querySelector(".babylonjsInspector, #inspector-host, .inspector");
+    if (insp) {
+      insp.style.zIndex = 2147483647;
+      insp.style.pointerEvents = "auto";
+    }
+  };
+  const mo = new MutationObserver(liftInspector);
+  mo.observe(document.documentElement, {subtree:true, childList:true, attributes:true});
+  liftInspector();
+
+  // ------- HUD helpers
+  const $ = sel => document.querySelector(sel);
+  const hudPL = $("#hud-pl");
+  const hudWASD = $("#hud-wasd");
+  const hudSprint = $("#hud-sprint");
+  const toast = $("#map-toast");
+
+  const keys = { w:false, a:false, s:false, d:false, shift:false };
+
+  const renderHud = () => {
+    if (hudPL) hudPL.textContent = (document.pointerLockElement ? "yes" : "no");
+    if (hudWASD) hudWASD.textContent = `${keys.w?'W':'-'}${keys.a?'A':'-'}${keys.s?'S':'-'}${keys.d?'D':'-'}`;
+    if (hudSprint) hudSprint.textContent = keys.shift ? "on" : "off";
+  };
+
+  window.addEventListener("keydown", (e)=>{
+    const k = e.key.toLowerCase();
+    if (k==='w') keys.w=true;
+    if (k==='a') keys.a=true;
+    if (k==='s') keys.s=true;
+    if (k==='d') keys.d=true;
+    if (k==='shift') keys.shift=true;
+    renderHud();
+  }, true);
+  window.addEventListener("keyup", (e)=>{
+    const k = e.key.toLowerCase();
+    if (k==='w') keys.w=false;
+    if (k==='a') keys.a=false;
+    if (k==='s') keys.s=false;
+    if (k==='d') keys.d=false;
+    if (k==='shift') keys.shift=false;
+    renderHud();
+  }, true);
+  document.addEventListener("pointerlockchange", renderHud, true);
+  renderHud();
+
+  // ------- Pointer lock helper on canvas
+  const tryPointerLock = () => {
+    const canvas = document.querySelector("canvas, #renderCanvas, #gameCanvas");
+    if (!canvas) return;
+    const req = () => {
+      if (!document.pointerLockElement) {
+        canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock || canvas.webkitRequestPointerLock;
+        try { canvas.requestPointerLock && canvas.requestPointerLock(); } catch(e){}
+      }
+    };
+    canvas.addEventListener("click", req);
+  };
+  tryPointerLock();
+
+  // ------- Map definition loader & spawn enforcement
+  async function ensureMapDef(){
+    // If MAP_DEF exists, we're good
+    if (window.MAP_DEF && window.MAP_DEF.spawn) { return true; }
+
+    // Try common candidates
+    const candidates = [
+      "./assets/models/map/furnished_house.js",
+      "./assets/models/map/fully_furnished.config.js",
+      "./assets/models/map/Abandoned_House.js",
+      "./assets/models/map/abandoned_house.js",
+      "./assets/models/map/furnished_house.config.js"
+    ];
+
+    for (const path of candidates){
+      try {
+        await import(path);
+        if (window.MAP_DEF && window.MAP_DEF.spawn) {
+          log("Loaded MAP_DEF from", path);
+          return true;
+        }
+      } catch(e){
+        // ignore 404s; try next
+      }
+    }
+
+    // If still missing, toast loudly
+    showToast("Map configuration not found. Expected MAP_DEF with spawn/file. Check assets/models/map/ paths.");
+    return false;
+  }
+
+  function showToast(msg){
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.style.display = "block";
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=> toast.style.display = "none", 6500);
+  }
+
+  // Hook Babylon if available to enforce spawn after scene load
+  function enforceSpawn(scene){
+    try {
+      if (!(window.MAP_DEF && MAP_DEF.spawn)) return;
+      const sp = MAP_DEF.spawn;
+      const cam = (scene && scene.activeCamera) || null;
+      if (cam) {
+        cam.position.x = sp.x ?? 0;
+        cam.position.y = sp.y ?? 1.8;
+        cam.position.z = sp.z ?? 0;
+      }
+      if (window.player && player.position){
+        player.position.set(sp.x ?? 0, sp.y ?? 1.8, sp.z ?? 0);
+      }
+      log("Spawn enforced:", sp);
+    } catch(e){
+      log("Spawn enforcement error:", e);
+    }
+  }
+
+  // Patch Babylon createScene if detectable
+  (function hookScene(){
+    if (!window.BABYLON){ return; }
+
+    // If there's a global createScene, wrap it
+    const g = window;
+    const origCreate = g.createScene;
+    if (typeof origCreate === "function"){
+      g.createScene = async function(){
+        await ensureMapDef();
+        const sc = await origCreate.apply(this, arguments);
+        try {
+          sc.executeWhenReady(()=> enforceSpawn(sc));
+        } catch{ enforceSpawn(sc); }
+        return sc;
+      };
+      log("Wrapped createScene with spawn enforcement");
+    } else {
+      // Fallback: try after load
+      window.addEventListener("load", async ()=>{
+        await ensureMapDef();
+        const engineScene = (g.scene || (g._scene && g._scene.scene));
+        if (engineScene) enforceSpawn(engineScene);
+      });
+    }
+  })();
+
+  // Expose for debugging
+  window.__TweakPatch = { ensureMapDef, enforceSpawn, showToast };
+})();
+</script>
+
+
+<script id="tweakpatch-manifest">
+(function(){
+  const log = (...a)=>console.log("[ManifestPatch]",...a);
+  const MAPS_JSON_PATH = "./assets/models/map/maps.json";
+  const $ = (s)=>document.querySelector(s);
+
+  // Normalize various manifest shapes into: [{name, config, glb}]
+  async function loadMapsManifest(){
+    try{
+      const res = await fetch(MAPS_JSON_PATH, {cache:"no-cache"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const data = await res.json();
+      let list = [];
+
+      if(Array.isArray(data)){
+        // Could be array of strings or objects
+        list = data.map((item)=>{
+          if(typeof item === "string"){
+            // Try to infer name + config from filename-ish
+            const base = item.replace(/^\.?\/*/,"");
+            const name = base.split("/").pop().replace(/\.(config\.)?js$/i,"").replace(/_/g," ").replace(/\b\w/g, c=>c.toUpperCase());
+            return { name, config: "./assets/models/map/" + base, glb: null };
+          } else if (item && typeof item === "object") {
+            // Expect keys like {name, config, glb}
+            const name = item.name || (item.config||item.path||item.file||"map").split("/").pop().replace(/\.(config\.)?js$/i,"");
+            return {
+              name,
+              config: item.config || item.path || item.file || null,
+              glb: item.glb || item.model || null
+            };
+          }
+          return null;
+        }).filter(Boolean);
+      } else if (data && typeof data === "object"){
+        // Maybe keyed object { "Abandoned House": {config:"...", glb:"..."} }
+        list = Object.keys(data).map((k)=>{
+          const v = data[k]||{};
+          return { name: k, config: v.config || v.path || v.file || null, glb: v.glb || v.model || null };
+        });
+      }
+
+      // Fallback: if empty, try to hardcode known files in repo
+      if(!list.length){
+        list = [
+          { name:"Abandoned House", config:"./assets/models/map/Abandoned_House.js", glb:"./assets/models/map/Abandoned_House.glb" },
+          { name:"Furnished House", config:"./assets/models/map/furnished_house.config.js", glb:"./assets/models/map/furnished_house.glb" },
+        ];
+      }
+
+      // Normalize paths to start with ./ if they look relative
+      list = list.map(m=>{
+        const norm = {...m};
+        if (typeof norm.config === "string" && !/^https?:\/\//i.test(norm.config)){
+          if (!norm.config.startsWith("./") && !norm.config.startsWith("/")) norm.config = "./" + norm.config;
+        }
+        if (typeof norm.glb === "string" && !/^https?:\/\//i.test(norm.glb)){
+          if (!norm.glb.startsWith("./") && !norm.glb.startsWith("/")) norm.glb = "./" + norm.glb;
+        }
+        return norm;
+      });
+
+      log("Loaded maps.json:", list);
+      return list;
+    }catch(e){
+      console.warn("maps.json load failed:", e);
+      // Fallback to known present files in your repo:
+      const list = [
+        { name:"Abandoned House", config:"./assets/models/map/Abandoned_House.js", glb:"./assets/models/map/Abandoned_House.glb" },
+        { name:"Furnished House", config:"./assets/models/map/furnished_house.config.js", glb:"./assets/models/map/furnished_house.glb" },
+      ];
+      // Try to toast via TweakPatch if available
+      if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("maps.json missing; using fallback list.");
+      return list;
+    }
+  }
+
+  function getSelectedMapName(){
+    const sel = $("#mapSelect") || $("#map-select") || $("select[name='map']");
+    if (sel && sel.value) return sel.value;
+    // Try data attr on start button
+    const btn = document.getElementById("startBtn") || document.getElementById("start-investigation");
+    if (btn && btn.dataset && btn.dataset.map) return btn.dataset.map;
+    return null;
+  }
+
+  async function populateDropdown(list){
+    let sel = $("#mapSelect") || $("#map-select") || $("select[name='map']");
+    if (!sel){
+      // Create one near the Start button if not present
+      const btn = document.getElementById("startBtn") || document.getElementById("start-investigation");
+      sel = document.createElement("select");
+      sel.id = "mapSelect";
+      sel.style.cssText = "position:relative; margin-top:12px;";
+      if (btn && btn.parentElement) btn.parentElement.appendChild(sel);
+      else document.body.appendChild(sel);
+    }
+    sel.innerHTML = "";
+    for (const m of list){
+      const opt = document.createElement("option");
+      opt.value = m.name;
+      opt.textContent = m.name;
+      sel.appendChild(opt);
+    }
+  }
+
+  function resolveConfigFor(name, list){
+    if (!name && list.length) return list[0].config;
+    const found = list.find(m=> (m.name||"").toLowerCase() === (name||"").toLowerCase());
+    return found ? found.config : (list[0] ? list[0].config : null);
+  }
+
+  async function ensureMapDefFromManifest(){
+    const list = await loadMapsManifest();
+    try { await populateDropdown(list); } catch(e){}
+    const chosen = getSelectedMapName();
+    const cfg = resolveConfigFor(chosen, list);
+    if (!cfg){
+      if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("No map config found in manifest.");
+      return false;
+    }
+    try{
+      await import(cfg);
+      if (window.MAP_DEF && MAP_DEF.spawn){
+        if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("Loaded map: " + (chosen || MAP_DEF.title || "Map"));
+        return true;
+      }
+    }catch(e){
+      console.warn("import failed for", cfg, e);
+    }
+    if (window.__TweakPatch && __TweakPatch.showToast) __TweakPatch.showToast("Failed to load map config: " + cfg);
+    return false;
+  }
+
+  // If previous TweakPatch exists, override its ensureMapDef to use manifest
+  function patchEnsure(){
+    if (window.__TweakPatch){
+      window.__TweakPatch.ensureMapDef = ensureMapDefFromManifest;
+    }
+    // Also override any global helper used earlier
+    window.ensureMapDef = ensureMapDefFromManifest;
+  }
+
+  // Run ASAP
+  patchEnsure();
+  // Try load early to populate UI
+  document.addEventListener("DOMContentLoaded", ()=>{ ensureMapDefFromManifest(); }, {once:true});
+})();
+</script>
+
+
+<script id="tweakpatch-manifest-hotfix">
+(function(){
+  const log = (...a)=>console.log("[ManifestHotfix]",...a);
+  const fixRepoPath = (p)=>{
+    if (typeof p !== "string") return p;
+    // normalize ./assets/map/* -> ./assets/models/map/*
+    return p.replace(/^\.\/assets\/map\//i, "./assets/models/map/");
+  };
+  const ensureGlbMapDef = async (entry)=>{
+    // Accepts entry with .glb; tries sibling config, else synthesize MAP_DEF
+    if (!entry) return false;
+    const glb = fixRepoPath(entry.glb || entry.file || entry.model || entry.path || entry.config);
+    if (!glb || !/\.glb(\?.*)?$/i.test(glb)) return false;
+
+    // Try sibling config first
+    const base = glb.replace(/\.glb(\?.*)?$/i, "");
+    const candidates = [base + ".config.js", base + ".js"];
+    for (const c of candidates){
+      try {
+        const cfg = fixRepoPath(c);
+        await import(cfg);
+        if (window.MAP_DEF && MAP_DEF.file) {
+          log("Loaded sibling config:", cfg);
+          return true;
+        }
+      } catch(e){ /* try next */ }
+    }
+
+    // Synthesize a minimal MAP_DEF
+    window.MAP_DEF = {
+      title: entry.name || "Map",
+      file: glb,
+      scale: 1.0,
+      rotationY: 0,
+      offset: {x:0,y:0,z:0},
+      spawn: {x:0,y:1.8,z:0},
+      exteriorMode: "exterior",
+      exterior: []
+    };
+    log("Synthesized MAP_DEF from GLB:", MAP_DEF);
+    if (window.__TweakPatch && __TweakPatch.showToast){
+      __TweakPatch.showToast("Using GLB-only map (no config). Spawn set to origin.");
+    }
+    return true;
+  };
+
+  // Override resolver to handle bad/GLB configs & path rewrites
+  function overrideResolver(){
+    const oldEnsure = window.ensureMapDef || (window.__TweakPatch && __TweakPatch.ensureMapDef);
+    async function ensure(){
+      // Try original ensure if present
+      if (typeof oldEnsure === "function"){
+        try{
+          const ok = await oldEnsure();
+          if (ok) return true;
+        }catch(e){ /* fall through */ }
+      }
+      // Pull last list cached by original patch if available
+      const patch = window.__ManifestPatchCache;
+      const list = patch && patch.list ? patch.list : null;
+
+      // If we have a bad 'config' like a .glb or wrong path, try to fix
+      if (list && list.length){
+        // If a selected map exists, use it; else try each until success
+        const sel = (function(){
+          const s = document.querySelector("#mapSelect, #map-select, select[name='map']");
+          return s ? s.value : null;
+        })();
+        const ordered = sel ?
+          list.sort((a,b)=> (a.name===sel?-1:0) - (b.name===sel?-1:0)) :
+          list;
+
+        for (const entry of ordered){
+          // Fix paths
+          if (entry.config) entry.config = fixRepoPath(entry.config);
+          if (entry.glb) entry.glb = fixRepoPath(entry.glb);
+
+          try{
+            if (entry.config && /\.js(\?.*)?$/i.test(entry.config)){
+              await import(entry.config);
+              if (window.MAP_DEF && MAP_DEF.file) {
+                return true;
+              }
+            }
+          } catch(e){
+            // If config import fails, try GLB path-based synth
+            const ok = await ensureGlbMapDef(entry);
+            if (ok) return true;
+          }
+          // If no config given, try GLB synth
+          if (!entry.config){
+            const ok = await ensureGlbMapDef(entry);
+            if (ok) return true;
+          }
+        }
+      }
+      return !!(window.MAP_DEF && MAP_DEF.file);
+    }
+
+    window.ensureMapDef = ensure;
+    if (window.__TweakPatch) window.__TweakPatch.ensureMapDef = ensure;
+  }
+
+  // Cache manifest list when loaded by earlier patch
+  (function hookManifestCache(){
+    const orig = window.fetch;
+    window.fetch = async function(){
+      const res = await orig.apply(this, arguments);
+      try {
+        const url = String(arguments[0]);
+        if (url.includes("/assets/models/map/maps.json")){
+          const clone = res.clone();
+          clone.json().then(data => {
+            window.__ManifestPatchCache = window.__ManifestPatchCache || {};
+            // Normalize to array of entries {name, config, glb}
+            const arr = Array.isArray(data) ? data : Object.keys(data||{}).map(k => ({ name:k, ...(data[k]||{}) }));
+            window.__ManifestPatchCache.list = arr;
+          }).catch(()=>{});
+        }
+      } catch(e){}
+      return res;
+    };
+  })();
+
+  overrideResolver();
+})();
+</script>
+
+
+<!-- ===== Back-to-Land Helper (non-destructive) =============================== -->
+<script>
+(function(){
+  if (window.__BACK_TO_LAND) return;
+  function toast(msg){
+    try{ (window.__TweakPatch && __TweakPatch.showToast) ? __TweakPatch.showToast(msg) : console.log("[BackToLand]", msg); }catch(e){}
+  }
+  function sceneRef(){ return window.scene || (window.engine && engine.scenes && engine.scenes[0]) || null; }
+  function camRef(sc){ return (sc && sc.activeCamera) || null; }
+  function bboxOf(meshes){
+    const b = {minX:Infinity,minY:Infinity,minZ:Infinity,maxX:-Infinity,maxY:-Infinity,maxZ:-Infinity};
+    for(const m of meshes){
+      if(!m || !m.getBoundingInfo) continue;
+      const bi = m.getBoundingInfo(); if(!bi) continue;
+      const bb = bi.boundingBox;
+      const vmin = bb.minimumWorld, vmax = bb.maximumWorld;
+      if(!vmin || !vmax) continue;
+      b.minX = Math.min(b.minX, vmin.x); b.maxX = Math.max(b.maxX, vmax.x);
+      b.minY = Math.min(b.minY, vmin.y); b.maxY = Math.max(b.maxY, vmax.y);
+      b.minZ = Math.min(b.minZ, vmin.z); b.maxZ = Math.max(b.maxZ, vmax.z);
+    }
+    return b;
+  }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+  async function backToLand(opts={}){
+    const sc = sceneRef();
+    const cam = camRef(sc);
+    if(!sc || !cam){ console.warn("[BackToLand] no scene/camera yet"); return false; }
+
+    // Candidate meshes: prefer houseRoot if present
+    const meshes = (window.houseRoot && window.houseRoot.getChildMeshes ? window.houseRoot.getChildMeshes(false) : sc.meshes) || sc.meshes;
+    const bb = bboxOf(meshes);
+    const cx = (bb.minX + bb.maxX)/2, cz = (bb.minZ + bb.maxZ)/2;
+    // Start from above the whole scene
+    const startY = (bb.maxY || cam.position.y || 10) + 200;
+    const rayLen = Math.max(1000, (bb.maxY - bb.minY) + 400);
+
+    function cast(x,z){
+      const from = new BABYLON.Vector3(x, startY, z);
+      const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,-1,0), rayLen);
+      const pick = sc.pickWithRay(ray, m => m && m.isPickable !== false);
+      return pick && pick.hit ? pick.pickedPoint : null;
+    }
+
+    // Try center, then a small spiral search
+    const offsets = [[0,0],[4,0],[-4,0],[0,4],[0,-4],[6,6],[-6,6],[6,-6],[-6,-6],[10,0],[0,10],[-10,0],[0,-10]];
+    let hit = null;
+    for(const [ox,oz] of offsets){
+      hit = cast(cx+ox, cz+oz);
+      if(hit) break;
+    }
+    if(!hit){
+      toast("Couldn't find ground by raycast; using bbox floor.");
+      hit = new BABYLON.Vector3(cx, bb.minY, cz);
+    }
+
+    // Place camera/player slightly above ground
+    const y = hit.y + (opts.eye || 1.8);
+    const pos = new BABYLON.Vector3(hit.x, y, hit.z);
+    if (cam && cam.position && cam.position.copyFrom) cam.position.copyFrom(pos);
+    if (window.player && player.position && player.position.copyFrom) player.position.copyFrom(pos);
+
+    // Safety: enable collisions/gravity if available
+    try {
+      sc.gravity = sc.gravity || new BABYLON.Vector3(0,-9.81,0);
+      sc.collisionsEnabled = true;
+      if (cam && "applyGravity" in cam) cam.applyGravity = true;
+      if (cam && "checkCollisions" in cam) cam.checkCollisions = true;
+    } catch(e){}
+
+    toast("Back on land ✔");
+    return true;
+  }
+
+  window.backToLand = backToLand;
+  window.__BACK_TO_LAND = true;
+
+  // Hotkey: press "L" to snap to ground
+  window.addEventListener("keydown", (e)=>{
+    if((e.key||"").toLowerCase() === "l"){ backToLand(); }
+  });
+
+  // Auto-run once the scene & camera are alive
+  function tryAuto(){
+    const sc = sceneRef(), cam = camRef(sc);
+    if (sc && cam){ backToLand(); return true; }
+    return false;
+  }
+  let tries = 0;
+  const iv = setInterval(()=>{ if (tryAuto() || ++tries > 40) clearInterval(iv); }, 500);
+})();
+</script>
+<!-- ========================================================================= -->
+
+<div id="gv-btn" title="Open GLB viewer">🔍 GLB Viewer</div>
+<div id="gv-overlay" hidden>
+  <div id="gv-modal" aria-modal="true" role="dialog">
+    <div id="gv-bar">
+      <div id="gv-title">GLB Viewer</div>
+      <div id="gv-controls">
+        <input id="gv-url" type="text" placeholder="Paste .glb/.gltf URL (or leave to use default)" />
+        <button id="gv-load-url">Load</button>
+        <input id="gv-file" type="file" accept=".glb,.gltf,.zip,.bin" style="display:none" />
+        <label for="gv-file">Choose File…</label>
+      </div>
+      <button id="gv-close">Close ✕</button>
+    </div>
+    <div id="gv-drop-hint">Drop a .glb/.gltf file here…</div>
+    <canvas id="gv-canvas"></canvas>
+  </div>
+</div>
+<script id="glbviewer-script">
+(function(){
+  if (window.__GLB_VIEWER__) return;
+  window.__GLB_VIEWER__ = true;
+
+  const el = (id)=>document.getElementById(id);
+  const overlay = el("gv-overlay");
+  const modal   = el("gv-modal");
+  const btn     = el("gv-btn");
+  const urlIn   = el("gv-url");
+  const loadBtn = el("gv-load-url");
+  const fileIn  = el("gv-file");
+  const closeBtn= el("gv-close");
+  const canvas  = el("gv-canvas");
+  const dropHint= el("gv-drop-hint");
+
+  const DEFAULT_URL = "./assets/models/map/Abandoned_House.glb"; // change if you like
+
+  let engine = null, scene = null, resizeObs = null, currentUrl = null, currentBlobUrl = null, shadowGen = null;
+
+  function openViewer(){
+    overlay.hidden = false;
+    if (!engine){
+      engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
+      scene  = buildScene(engine);
+      startRenderLoop();
+      const u = (urlIn.value && urlIn.value.trim()) || DEFAULT_URL;
+      loadModel(u);
+    }
+  }
+  function closeViewer(){
+    overlay.hidden = true;
+    stopRenderLoop();
+    if (scene){ scene.dispose(); scene = null; }
+    if (engine){ engine.dispose(); engine = null; }
+    if (currentBlobUrl){ URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+  }
+  function startRenderLoop(){
+    if (!engine || !scene) return;
+    engine.runRenderLoop(()=>{ if (scene.activeCamera) scene.render(); });
+    resizeObs = ()=>{ engine.resize(); };
+    window.addEventListener("resize", resizeObs);
+  }
+  function stopRenderLoop(){
+    window.removeEventListener("resize", resizeObs || (()=>{}));
+    if (engine){ engine.stopRenderLoop(); }
+  }
+
+  function buildScene(engine){
+    const sc = new BABYLON.Scene(engine);
+    sc.useRightHandedSystem = false;
+    sc.clearColor = new BABYLON.Color4(0,0,0,1);
+
+    const cam = new BABYLON.ArcRotateCamera("gvCam", Math.PI/2, Math.PI/3, 8, BABYLON.Vector3.Zero(), sc);
+    cam.attachControl(canvas, true);
+    cam.wheelPrecision = 50;
+    cam.panningSensibility = 800;
+    cam.minZ = 0.02;
+
+    new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0.2, 1, -0.2), sc);
+    const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.4,-1,0.2), sc);
+    shadowGen = new BABYLON.ShadowGenerator(2048, dir);
+    shadowGen.useExponentialShadowMap = true;
+
+    sc.createDefaultEnvironment({
+      createGround:true, groundSize: 30, groundColor: BABYLON.Color3.FromHexString("#0b0f12"),
+      skyboxSize: 60, enableGroundShadow:true
+    });
+
+    return sc;
+  }
+
+  async function loadModel(url){
+    try{
+      let src = url;
+      if (url instanceof File){
+        if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+        src = currentBlobUrl = URL.createObjectURL(url);
+      }
+      currentUrl = src;
+
+      if (!scene) return;
+      const before = [...scene.meshes];
+
+      const result = await BABYLON.SceneLoader.ImportMeshAsync("", "", src, scene);
+
+      const newMeshes = scene.meshes.filter(m => !before.includes(m));
+
+      const bb = getSceneBounds(newMeshes);
+      const center = new BABYLON.Vector3((bb.min.x+bb.max.x)/2, (bb.min.y+bb.max.y)/2, (bb.min.z+bb.max.z)/2);
+      const size   = bb.max.subtract(bb.min);
+      const radius = Math.max(size.x, size.y, size.z) * 0.6 + 0.01;
+      const cam = scene.activeCamera;
+      if (cam && cam.setTarget){
+        cam.setTarget(center);
+        if (cam.radius !== undefined) cam.radius = Math.max(3, radius);
+        cam.lowerRadiusLimit = 0.1;
+      }
+
+      scene.meshes.forEach(m=>{ try{ m.receiveShadows = true; shadowGen?.addShadowCaster(m); }catch(e){} });
+
+    }catch(e){
+      console.error("[GLB Viewer] Failed to load model:", e);
+      alert("Failed to load model.\nCheck the console for details.");
+    }
+  }
+
+  function getSceneBounds(meshes){
+    const inf = 1e9;
+    const b = { min: new BABYLON.Vector3( inf, inf, inf), max: new BABYLON.Vector3(-inf,-inf,-inf) };
+    const arr = meshes && meshes.length ? meshes : (scene ? scene.meshes : []);
+    for (const m of arr){
+      const bi = m.getBoundingInfo?.();
+      if (!bi) continue;
+      const bb = bi.boundingBox;
+      const min = bb.minimumWorld, max = bb.maximumWorld;
+      if (!min || !max) continue;
+      b.min.x = Math.min(b.min.x, min.x); b.min.y = Math.min(b.min.y, min.y); b.min.z = Math.min(b.min.z, min.z);
+      b.max.x = Math.max(b.max.x, max.x); b.max.y = Math.max(b.max.y, max.y); b.max.z = Math.max(b.max.z, max.z);
+    }
+    if (!isFinite(b.min.x)) { b.min.set(-1,-1,-1); b.max.set(1,1,1); }
+    return b;
+  }
+
+  // --- UI hooks
+  document.getElementById("gv-btn")?.addEventListener("click", openViewer);
+  document.getElementById("gv-close")?.addEventListener("click", closeViewer);
+  document.getElementById("gv-load-url")?.addEventListener("click", ()=>{
+    const u = (document.getElementById("gv-url")?.value || "").trim() || DEFAULT_URL;
+    loadModel(u);
+  });
+  document.getElementById("gv-file")?.addEventListener("change", (e)=>{
+    const f = e.target.files && e.target.files[0]; if (f) loadModel(f);
+  });
+
+  ["dragenter","dragover"].forEach(t=>{
+    document.getElementById("gv-modal")?.addEventListener(t, (ev)=>{ ev.preventDefault(); document.getElementById("gv-modal")?.classList.add("dragover"); });
+  });
+  ["dragleave","drop"].forEach(t=>{
+    document.getElementById("gv-modal")?.addEventListener(t, (ev)=>{ ev.preventDefault(); document.getElementById("gv-modal")?.classList.remove("dragover"); });
+  });
+  document.getElementById("gv-modal")?.addEventListener("drop", (ev)=>{
+    const f = ev.dataTransfer?.files?.[0];
+    if (f) loadModel(f);
+  });
+
+  window.addEventListener("keydown", (e)=>{ if (!document.getElementById("gv-overlay")?.hidden && e.key === "Escape"){ closeViewer(); } });
+
+  window.__openGlbViewer = openViewer;
+  window.__loadGlb = loadModel;
+})();
+</script>
+
+<!-- =================== Teleport-to-XYZ mini panel (non-destructive) =================== -->
+<style id="tp-style">
+  #tp-btn{
+    position:fixed; left:12px; top:56px; z-index:2147483000;
+    background:#2b1030; color:#f9c; border:1px solid #834; padding:6px 10px;
+    border-radius:10px; cursor:pointer; user-select:none; font:13px/1.2 system-ui,Segoe UI,Arial;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+  #tp-btn:hover{ filter:brightness(1.1); }
+  #tp-box[hidden]{ display:none; }
+  #tp-box{
+    position:fixed; left:12px; top:98px; z-index:2147483600;
+    background:#0b0f12; color:#cff; border:1px solid #234; border-radius:12px; padding:10px;
+    width:260px; box-shadow:0 10px 24px rgba(0,0,0,.45);
+  }
+  #tp-box .row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  #tp-box label{ width:18px; text-align:center; opacity:.8; }
+  #tp-box input[type="number"]{
+    flex:1; background:#0f1b20; color:#cff; border:1px solid #245; border-radius:8px; padding:6px 8px;
+  }
+  #tp-box .opts{ display:flex; gap:10px; align-items:center; margin:6px 0 10px; font-size:12px; opacity:.9; }
+  #tp-tele, #tp-close{
+    background:#103039; border:1px solid #275; color:#bff; padding:6px 10px; border-radius:8px; cursor:pointer;
+  }
+  #tp-tele{ margin-right:6px; }
+</style>
+
+<div id="tp-btn" title="Open Teleport panel">🧭 TP</div>
+<div id="tp-box" hidden>
+  <div class="row">
+    <label>X</label><input id="tp-x" type="number" step="0.01" placeholder="x">
+  </div>
+  <div class="row">
+    <label>Y</label><input id="tp-y" type="number" step="0.01" placeholder="y">
+  </div>
+  <div class="row">
+    <label>Z</label><input id="tp-z" type="number" step="0.01" placeholder="z">
+  </div>
+  <div class="opts">
+    <label><input id="tp-ground" type="checkbox" checked> Snap to ground</label>
+    <label><input id="tp-player" type="checkbox" checked> Move player</label>
+  </div>
+  <div class="row" style="justify-content:flex-end">
+    <button id="tp-tele">Teleport</button>
+    <button id="tp-close">Close</button>
+  </div>
+  <div style="font-size:11px;opacity:.7;margin-top:6px">Tip: press <b>T</b> to toggle this panel.</div>
+</div>
+
+<script id="tp-script">
+(function(){
+  if (window.__TP__) return;
+  window.__TP__ = true;
+
+  const el = (id)=>document.getElementById(id);
+  const btn = el("tp-btn"), box = el("tp-box");
+  const xi = el("tp-x"), yi = el("tp-y"), zi = el("tp-z");
+  const cbG = el("tp-ground"), cbP = el("tp-player");
+  const teleBtn = el("tp-tele"), closeBtn = el("tp-close");
+
+  function sc(){ return window.scene || (window.engine && engine.scenes && engine.scenes[0]) || null; }
+  function cam(){ const s=sc(); return s && s.activeCamera; }
+
+  function toggle(){ box.hidden = !box.hidden; if (!box.hidden) xi?.focus(); }
+  btn?.addEventListener("click", toggle);
+  closeBtn?.addEventListener("click", toggle);
+  window.addEventListener("keydown", (e)=>{ if ((e.key||"").toLowerCase()==="t") toggle(); });
+
+  function parsed(v, fallback){ const n = parseFloat(v); return Number.isFinite(n) ? n : fallback; }
+
+  function castDown(x, z, eye=1.8){
+    const S = sc(); if (!S) return null;
+    // estimate scene bounds
+    const meshes = (window.houseRoot && houseRoot.getChildMeshes?.(false)) || S.meshes;
+    let maxY=-1e9, minY=1e9;
+    for(const m of meshes){
+      const bi=m.getBoundingInfo?.(); if(!bi) continue;
+      const bb=bi.boundingBox, vmin=bb.minimumWorld, vmax=bb.maximumWorld;
+      if(!vmin||!vmax) continue;
+      if (vmax.y>maxY) maxY=vmax.y;
+      if (vmin.y<minY) minY=vmin.y;
+    }
+    const startY = (Number.isFinite(maxY)?maxY:10)+200;
+    const rayLen  = Math.max(1000, (Number.isFinite(maxY)&&Number.isFinite(minY)? (maxY-minY):100)+400);
+    const from = new BABYLON.Vector3(x, startY, z);
+    const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,-1,0), rayLen);
+    const pick = S.pickWithRay(ray, m => m && m.isPickable !== false);
+    if (pick && pick.hit) return pick.pickedPoint.y + eye;
+    return null;
+  }
+
+  function teleportToXYZ(x, y, z, opts={}){
+    const S = sc(); const C = cam();
+    if (!S || !C) return false;
+    let Y = y;
+    if (opts.snapGround){
+      const gy = castDown(x, z, opts.eye ?? 1.8);
+      if (gy != null) Y = gy;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return false;
+    if (!Number.isFinite(Y)) Y = (C.position?.y ?? 2);
+
+    const pos = new BABYLON.Vector3(x, Y, z);
+    C.position?.copyFrom?.(pos);
+    if (opts.movePlayer && window.player?.position) player.position.copyFrom(pos);
+    // ensure gravity/collisions
+    try{
+      S.gravity = S.gravity || new BABYLON.Vector3(0,-9.81,0);
+      S.collisionsEnabled = true;
+      if ("applyGravity" in C) C.applyGravity = true;
+      if ("checkCollisions" in C) C.checkCollisions = true;
+    }catch(e){}
+    return true;
+  }
+
+  function submit(){
+    const C = cam(); if(!C) return;
+    const x = parsed(xi.value, C.position?.x ?? 0);
+    const y = parsed(yi.value, C.position?.y ?? 2);
+    const z = parsed(zi.value, C.position?.z ?? 0);
+    const ok = teleportToXYZ(x, y, z, { snapGround: cbG.checked, movePlayer: cbP.checked, eye: 1.8 });
+    if (!ok) alert("Teleport failed — check your numbers.");
+  }
+
+  [xi, yi, zi].forEach(inp => inp?.addEventListener("keydown", e=>{ if(e.key==="Enter") submit(); }));
+  teleBtn?.addEventListener("click", submit);
+
+  // expose API
+  window.teleportToXYZ = (x,y,z,opts)=>teleportToXYZ(x,y,z,opts||{snapGround:true, movePlayer:true});
+})();
+</script>
+<!-- =================== /Teleport panel ============================================== -->
+
+
+<!-- =================== Input/Overlay Fix (keyboard focus + overlay dominance) =================== -->
+<script id="inputfix-script">
+(function(){
+  if (window.__INPUT_FIX__) return; window.__INPUT_FIX__ = true;
+
+  const selCanvas = ()=> document.querySelector("#renderCanvas, #gameCanvas, canvas");
+  // Ensure canvas focusability + pointer lock on click
+  function armCanvas(){
+    const c = selCanvas(); if (!c) return;
+    if (!c.hasAttribute("tabindex")) c.setAttribute("tabindex", "0");
+    c.style.outline = "none";
+    c.addEventListener("click", ()=>{
+      try{ c.focus(); }catch(e){}
+      if (c.requestPointerLock && !document.pointerLockElement){
+        try{ c.requestPointerLock(); }catch(e){}
+      }
+    }, {capture:true});
+  }
+
+  // Robust keyboard hookup (capture-level to beat page scroll)
+  const BLOCK_KEYS = new Set(["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"," ","space","shift","control"]);
+  window.__KEYS = window.__KEYS || Object.create(null);
+  function keySet(k, down){
+    window.__KEYS[k] = down;
+    // Fire a custom event other systems can subscribe to
+    document.dispatchEvent(new CustomEvent("pp-key", {detail:{key:k, down, state:window.__KEYS}}));
+  }
+  function onKey(e){
+    const k = (e.key||"").toLowerCase();
+    if (!k) return;
+    keySet(k, e.type === "keydown");
+    const pl = !!document.pointerLockElement;
+    if (pl || BLOCK_KEYS.has(k)){
+      // prevent the page from scrolling on arrows/space, etc.
+      e.preventDefault?.();
+      e.stopPropagation?.();
+    }
+  }
+  // capture to ensure we see the event first
+  window.addEventListener("keydown", onKey, true);
+  window.addEventListener("keyup", onKey, true);
+  // Also wire to canvas (some engines attach there)
+  setInterval(armCanvas, 800);
+
+  // Prevent scroll-jank
+  try {
+    document.body.style.overscrollBehavior = "none";
+  } catch(e){}
+
+  // -------- Overlay Dominance (mouse vs touch) --------
+  function isMobile(){
+    // signal true on touch-first or coarse-pointer environments
+    const uaM = /Android|iPhone|iPad|iPod|IEMobile|Windows Phone/i.test(navigator.userAgent||"");
+    const coarse = matchMedia && matchMedia("(pointer: coarse)").matches;
+    const maxTouch = (navigator.maxTouchPoints||0) > 0;
+    const uaData = navigator.userAgentData && navigator.userAgentData.mobile;
+    return !!(uaM || coarse || maxTouch || uaData);
+  }
+  const TOUCH_SEL = ["#touchControls", "#joystick", ".touch-overlay", "#touchOverlay", ".on-screen-joystick"];
+  const MOUSE_SEL = ["#mouseOverlay", ".mouse-overlay", "#mouse-controls"];
+  function qsa(list){ const out=[]; list.forEach(s=> document.querySelectorAll(s).forEach(n=>out.push(n))); return out; }
+
+  function applyOverlayMode(){
+    const mobile = isMobile();
+    const touch = qsa(TOUCH_SEL);
+    const mouse = qsa(MOUSE_SEL);
+    if (mobile){
+      touch.forEach(n=>{ n.style.display=""; });
+      mouse.forEach(n=>{ n.style.display="none"; });
+    } else {
+      // Non-mobile: mouse overlay is dominant; hide touch overlays
+      touch.forEach(n=>{ n.style.display="none"; });
+      mouse.forEach(n=>{ n.style.display=""; n.style.zIndex = "2147483500"; });
+    }
+  }
+  applyOverlayMode();
+  window.addEventListener("resize", applyOverlayMode);
+  // Some SPA setups add overlays later; poll briefly
+  let tries=0; const iv=setInterval(()=>{ applyOverlayMode(); if(++tries>20) clearInterval(iv); }, 500);
+
+  // Helpful debug
+  console.log("[InputFix] armed; canvas focus + pointer lock + overlay dominance ready.");
+})();
+</script>
+<!-- =================== /Input/Overlay Fix ============================================== -->
+
 </body>
 </html>
