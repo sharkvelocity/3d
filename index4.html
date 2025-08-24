@@ -3381,80 +3381,6 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 
 
 
-<!-- PATCH: Global Third-Person Toggle helper -->
-<script>
-(function(){
-  const canvas=()=>document.getElementById('renderCanvas')||document.querySelector('canvas');
-  const S=()=>window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null;
-  window.S = S;
-  const isArc=c=>c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
-
-  function whenSceneReady(cb){
-    (function tick(){
-      const s=S();
-      if (s && s.activeCamera){ try{ cb(s); }catch(_){ } return; }
-      requestAnimationFrame(tick);
-    })();
-  }
-
-  function ensureRig(s){
-    if (!s) return null;
-    if (!s.__playerBody){
-      const body = BABYLON.MeshBuilder.CreateCapsule("player_capsule",{height:1.8,radius:0.35,tessellation:8,capSubdivisions:4},s);
-      body.checkCollisions=true; body.visibility=0; body.isPickable=false;
-      s.__playerBody=body;
-    }
-    if (!s.__playerRig){
-      const rig = new BABYLON.TransformNode("PlayerRig", s);
-      rig.parent = s.__playerBody; s.__playerRig=rig;
-    }
-    return s.__playerRig;
-  }
-
-  function ensureCams(s){
-    ensureRig(s);
-    let fps=s.getCameraByName&&s.getCameraByName('FPCam');
-    let arc=s.getCameraByName&&s.getCameraByName('TPCam');
-    if (!fps){
-      fps=new BABYLON.UniversalCamera('FPCam', new BABYLON.Vector3(0,1.6,0), s);
-      fps.parent = s.__playerRig || s.__playerBody || null;
-      fps.minZ=0.1; fps.speed=0; fps.inertia=0; fps.angularSensibility=4000;
-    }
-    if (!arc){
-      const t=(s.__playerBody||s.activeCamera&&s.activeCamera.target)||BABYLON.Vector3.Zero();
-      arc=new BABYLON.ArcRotateCamera('TPCam', -Math.PI/2, 1.2, 3.6, t, s);
-      arc.lowerBetaLimit=.3; arc.upperBetaLimit=1.45; arc.lowerRadiusLimit=2.4; arc.upperRadiusLimit=7.5; arc.wheelPrecision=60;
-    }
-    return {fps,arc};
-  }
-
-  window.toggleThirdPerson = function(){
-    const s=S();
-    if (!s || !s.activeCamera){
-      // queue until scene exists
-      window.__tpPending = true;
-      whenSceneReady(()=>{ if (window.__tpPending){ window.__tpPending=false; window.toggleThirdPerson(); }});
-      return;
-    }
-    const {fps,arc}=ensureCams(s);
-    s.activeCamera = isArc(s.activeCamera) ? fps : arc;
-    try{ s.activeCamera.attachControl(canvas(), true);}catch(_){}
-  };
-
-  function keyHandler(e){
-    const k=(e.key||'').toLowerCase(), code=e.code||'', kc=e.keyCode||0;
-    if (k==='v'||code==='KeyV'||kc===86){ e.stopPropagation(); window.toggleThirdPerson(); }
-  }
-  // both capture & bubble to be resilient
-  window.addEventListener('keydown', keyHandler, false);
-  document.addEventListener('keydown', keyHandler, true);
-
-  // If user pressed V before scene existed, auto-run toggle when scene becomes ready
-  whenSceneReady(()=>{ if (window.__tpPending){ window.__tpPending=false; window.toggleThirdPerson(); }});
-})();
-</script>
-
-
 <!-- PATCH: TP lock + spawn enforce (index4) -->
 <script>
 (function(){
@@ -3532,6 +3458,108 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
       s.activeCamera = arc; try{ arc.attachControl(canvas(), true); }catch(_){}
     }
   };
+})();
+</script>
+
+<!-- PATCH: Third-Person Toggle (final hardwire) -->
+<style>
+  .tp-toggle-btn{position:fixed;top:10px;right:10px;z-index:2147483647;
+    background:#0b0f; color:#fff; font:600 12px/1 sans-serif; padding:6px 10px; border-radius:8px;
+    box-shadow:0 2px 10px rgba(0,0,0,.25); cursor:pointer; user-select:none; opacity:.8}
+  .tp-toggle-btn:hover{opacity:1}
+</style>
+<script>
+(function(){
+  // Safe scene getter
+  function S(){ return window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null; }
+  window.S = S;
+  const canvas=()=>document.getElementById('renderCanvas')||document.querySelector('canvas');
+  const isArc=c=>c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
+  const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+  const SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
+
+  function whenReady(cb){ (function tick(){ const s=S(); if (s && s.activeCamera){ try{ cb(s); }catch(_){ } return; } requestAnimationFrame(tick); })(); }
+
+  function ensureRigAndCams(s){
+    if (!s.__playerBody){
+      const body = BABYLON.MeshBuilder.CreateCapsule("player_capsule",{height:1.8,radius:0.35,tessellation:8,capSubdivisions:4},s);
+      body.checkCollisions=true; body.visibility=0; body.isPickable=false;
+      body.position=SPAWN.clone();
+      s.__playerBody=body;
+    }
+    if (!s.__playerRig){
+      const rig = new BABYLON.TransformNode("PlayerRig", s);
+      rig.parent = s.__playerBody; s.__playerRig=rig;
+    }
+    let fps=s.getCameraByName&&s.getCameraByName('FPCam');
+    if (!fps){
+      fps=new BABYLON.UniversalCamera('FPCam', new BABYLON.Vector3(0,1.6,0), s);
+      fps.parent = s.__playerRig || s.__playerBody || null;
+      fps.minZ=0.1; fps.speed=0; fps.inertia=0; fps.angularSensibility=4000;
+      try{ fps.attachControl(canvas(), true); }catch(_){}
+      if (s.cameras && s.cameras.indexOf(fps)===-1) s.cameras.push(fps);
+    }
+    let arc=s.getCameraByName&&s.getCameraByName('TPCam');
+    if (!arc){
+      const t=s.__playerBody ? s.__playerBody : (s.activeCamera && s.activeCamera.target) || BABYLON.Vector3.Zero();
+      arc=new BABYLON.ArcRotateCamera('TPCam', -Math.PI/2, 1.2, 3.6, (t.position||t), s);
+      arc.lowerBetaLimit=.3; arc.upperBetaLimit=1.45; arc.lowerRadiusLimit=2.4; arc.upperRadiusLimit=7.5; arc.wheelPrecision=60;
+      try{ arc.attachControl(canvas(), true); }catch(_){}
+      if (s.cameras && s.cameras.indexOf(arc)===-1) s.cameras.push(arc);
+    }
+    // lock TP to body
+    const arc2 = s.getCameraByName('TPCam');
+    if (arc2){
+      arc2.lockedTarget = s.__playerBody;
+      arc2.radius = clamp(arc2.radius||3.6, 3.0, 6.0);
+      arc2.alpha = -Math.PI/2; arc2.beta = 1.2;
+    }
+    return {fps: s.getCameraByName('FPCam'), arc: s.getCameraByName('TPCam')};
+  }
+
+  function doToggle(){
+    const s=S(); if(!s) return;
+    const cams = ensureRigAndCams(s); if (!cams.fps || !cams.arc) return;
+    if (isArc(s.activeCamera)){
+      s.activeCamera = cams.fps;
+      try{ cams.fps.attachControl(canvas(), true); }catch(_){}
+    } else {
+      cams.arc.lockedTarget = s.__playerBody;
+      cams.arc.radius = clamp(cams.arc.radius||3.6, 3.0, 6.0);
+      cams.arc.alpha = -Math.PI/2; cams.arc.beta = 1.2;
+      s.activeCamera = cams.arc;
+      try{ cams.arc.attachControl(canvas(), true); }catch(_){}
+    }
+    window.camera = s.activeCamera;
+    console.info("[View] ->", s.activeCamera.name);
+  }
+  window.toggleThirdPerson = function(){
+    const s=S();
+    if (!s || !s.activeCamera){ window.__tpPending = true; whenReady(()=>{ if (window.__tpPending){ window.__tpPending=false; doToggle(); } }); return; }
+    doToggle();
+  };
+
+  // Enforce spawn & lock TP once when ready
+  whenReady(function(s){
+    ensureRigAndCams(s);
+    if (!s.__spawnDone){ s.__playerBody.position = SPAWN.clone(); s.__spawnDone = true; }
+  });
+
+  // Multi-phase key bindings (capture + bubble) + canvas
+  function keyHandler(e){
+    const k=(e.key||'').toLowerCase(), code=e.code||'', kc=e.keyCode||0;
+    if (k==='v'||code==='KeyV'||kc===86){ e.stopPropagation(); window.toggleThirdPerson(); }
+  }
+  window.addEventListener('keydown', keyHandler, false);
+  document.addEventListener('keydown', keyHandler, true);
+  const c = canvas(); if (c){ c.addEventListener('keydown', keyHandler, true); c.setAttribute('tabindex','0'); }
+
+  // Optional on-screen button for manual toggle
+  (function(){
+    var b=document.createElement('div'); b.className='tp-toggle-btn'; b.textContent='3P / 1P  (V)';
+    b.addEventListener('click', function(){ window.toggleThirdPerson(); });
+    document.body.appendChild(b);
+  })();
 })();
 </script>
 </body>
