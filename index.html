@@ -2726,5 +2726,141 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
 <!-- === /Ghost System ============================================================ -->
 
+
+<!-- ========================= v2: override ensureMapDefFromManifest ========================= -->
+<script>
+(function EnsureMapDefV2(){
+  const LOG = (...a)=>console.log("%c[MapFix v2]","color:#0ff",...a);
+  const WARN = (...a)=>console.warn("%c[MapFix v2]","color:#fb5",...a);
+  const MAP_DIR = "./assets/models/map/";
+
+  function norm(p){
+    if (!p) return p;
+    if (/^https?:\/\//i.test(p)) return p;
+    if (p.startsWith(MAP_DIR)) return p;
+    if (p.startsWith("./assets/map/")) return p.replace("./assets/map/","./assets/models/map/");
+    if (p.startsWith("./")) return MAP_DIR + p.replace(/^\.\/+/,"");
+    if (p.startsWith("/")) return p;
+    return MAP_DIR + p;
+  }
+
+  function pickEntryByName(name, list){
+    if (!list || !list.length) return null;
+    if (!name) return list[0];
+    const low = name.toLowerCase();
+    return list.find(m => (m.name||m.title||"").toLowerCase() === low) || list[0];
+  }
+
+  // pulls list from any earlier patch cache or fetches fresh
+  async function getList(){
+    if (window.__ManifestPatchCache && __ManifestPatchCache.list) return __ManifestPatchCache.list;
+    try {
+      const res = await fetch(MAP_DIR + "maps.json", {cache:"no-cache"});
+      if (!res.ok) throw new Error("HTTP "+res.status);
+      const data = await res.json();
+      let list = [];
+      if (Array.isArray(data)){
+        list = data.map(item => {
+          if (typeof item === "string"){
+            const base = item.replace(/^\.?\/*/,"");
+            const name = base.split("/").pop().replace(/\.(config\.)?js$/i,"");
+            return { name, title:name.replace(/_/g," "), config:norm(base), glb:null, file:null, def:null };
+          } else if (item && typeof item === "object"){
+            const nm = item.name || item.title || (item.def || item.config || item.path || item.file || "map");
+            return {
+              name: nm, title: item.title || nm,
+              config: norm(item.def || item.config || item.path || null),
+              glb: norm(item.glb || item.model || item.file || null),
+              file: item.file || null,
+              def: item.def || null
+            };
+          }
+          return null;
+        }).filter(Boolean);
+      } else if (data && typeof data === "object"){
+        list = Object.keys(data).map(k=>{
+          const v = data[k]||{};
+          return {
+            name:k, title:v.title||k,
+            config: norm(v.def || v.config || v.path || null),
+            glb: norm(v.glb || v.model || v.file || null),
+            file: v.file || null,
+            def: v.def || null
+          };
+        });
+      }
+      window.__ManifestPatchCache = {list};
+      return list;
+    } catch(e){
+      WARN("maps.json load failed:", e);
+      const list = [
+        { name:"Abandoned House", title:"Abandoned House", config:norm("Abandoned_House.js"), glb:norm("Abandoned_House.glb"), file:"Abandoned_House.glb", def:"Abandoned_House.js" },
+        { name:"Furnished House", title:"Furnished House", config:norm("furnished_house.config.js"), glb:norm("furnished_house.glb"), file:"furnished_house.glb", def:"furnished_house.config.js" },
+        { name:"Apartment Floor Plan", title:"Apartment Floor Plan", config:null, glb:norm("apartment_floor_plan.glb"), file:"apartment_floor_plan.glb", def:null }
+      ];
+      window.__ManifestPatchCache = {list};
+      return list;
+    }
+  }
+
+  async function ensureMapDefFromManifest_v2(){
+    const list = await getList();
+    const selEl = document.querySelector("#mapSelect, #map-select, select[name='map']");
+    const name = selEl && selEl.value ? selEl.value : (list[0]?.name || list[0]?.title);
+    const entry = pickEntryByName(name, list);
+    if (!entry){ WARN("No manifest entries."); return false; }
+
+    // prefer explicit config/def, but skip if it's a .glb
+    let cfg = entry.config;
+    if (cfg && /\.glb(\?.*)?$/i.test(cfg)) {
+      LOG("Skipping .glb provided as config:", cfg);
+      cfg = null;
+    }
+
+    if (cfg){
+      try{
+        await (window.loadScriptOnce ? loadScriptOnce(cfg) : import(cfg));
+        if (window.MAP_DEF && MAP_DEF.file){ LOG("Loaded map-def:", cfg); return true; }
+      } catch(e){
+        WARN("Config import failed", cfg, e);
+      }
+    }
+
+    const glb = entry.glb || (entry.file ? norm(entry.file) : null);
+    if (glb && /\.glb(\?.*)?$/i.test(glb)){
+      const base = glb.replace(/\.glb(\?.*)?$/i,"");
+      const sibs = [ base + ".config.js", base + ".js" ];
+      for (const s of sibs){
+        try{
+          await (window.loadScriptOnce ? loadScriptOnce(s) : import(s));
+          if (window.MAP_DEF && MAP_DEF.file){ LOG("Loaded sibling map-def:", s); return true; }
+        }catch(_){}
+      }
+      // synthesize minimal MAP_DEF as last resort
+      window.MAP_DEF = {
+        title: entry.title || entry.name || "Map",
+        file: glb,
+        scale: 1.0,
+        rotationY: 0,
+        offset: {x:0,y:0,z:0},
+        spawn: {x:0,y:1.8,z:0},
+        exteriorMode: "exterior",
+        exterior: []
+      };
+      LOG("Synthesized MAP_DEF from GLB:", glb);
+      return true;
+    }
+
+    WARN("No usable config or GLB for entry:", entry);
+    return false;
+  }
+
+  // install override
+  window.ensureMapDefFromManifest = ensureMapDefFromManifest_v2;
+  if (window.__TweakPatch) window.__TweakPatch.ensureMapDef = ensureMapDefFromManifest_v2;
+  LOG("Installed ensureMapDefFromManifest v2 override.");
+})();
+</script>
+
 </body>
 </html>
