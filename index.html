@@ -3566,7 +3566,8 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 })();
 </script>
 
-<!-- PATCH: WASD + Shift Run (universal + arcrotate) -->
+
+<!-- PATCH: WASD + Shift Run (player-aware + arcrotate follow) -->
 <script>
 (function(){
   var KEY = { W:87, A:65, S:83, D:68, SHIFT:16 };
@@ -3586,6 +3587,15 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 
   function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
   function C(s){ return window.camera || (s && s.activeCamera) || null; }
+  function getPlayer(s){
+    try{
+      if (window.player) return window.player;
+      if (s && s.getNodeByName){ var n = s.getNodeByName("player"); if(n) return n; }
+      if (s && s.getTransformNodeByName){ var t=s.getTransformNodeByName("player"); if(t) return t; }
+    }catch(_){}
+    return null;
+  }
+  function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
 
   function v3(cam){
     try{
@@ -3597,8 +3607,6 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
     }catch(e){ return null; }
   }
 
-  function isArc(cam){ return cam && cam.alpha!==undefined && cam.beta!==undefined && cam.radius!==undefined; }
-
   (function attach(){
     var s = S(); if(!s){ setTimeout(attach,120); return; }
     s.onBeforeRenderObservable.add(function(){
@@ -3607,24 +3615,153 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
       var cam=C(s); if(!cam) return;
       var v=v3(cam); if(!v) return;
       var sp=(st.run?RUN:WALK)*dt;
+      var pl=getPlayer(s);
 
-      if (isArc(cam)) {
-        var d=v.scale(sp);
+      if (pl){
+        // Prefer moving the player mesh
         try{
-          cam.target = cam.target ? cam.target.add(d) : d;
-          cam.position = cam.position ? cam.position.add(d) : cam.position;
+          pl.checkCollisions = true;
+          pl.ellipsoid = pl.ellipsoid || new BABYLON.Vector3(0.4,0.9,0.4);
+          pl.ellipsoidOffset = pl.ellipsoidOffset || new BABYLON.Vector3(0,0.9,0);
+          if (pl.moveWithCollisions) pl.moveWithCollisions(v.scale(sp));
+          else if (pl.position && pl.position.addInPlace) pl.position.addInPlace(v.scale(sp));
         }catch(_){}
-      } else if (cam.moveWithCollisions) {
-        cam.moveWithCollisions(v.scale(sp));
-      } else if (cam.cameraDirection) {
-        cam.cameraDirection.addInPlace(v.scale(sp));
-      } else if (cam.position && cam.position.addInPlace) {
-        cam.position.addInPlace(v.scale(sp));
+        // If using ArcRotate third-person, keep camera aimed at player
+        if (isArc(cam) && pl.position){
+          try { cam.target = pl.position; } catch(_){}
+        }
+      } else {
+        // No player mesh -> move the camera (first-person / free)
+        if (isArc(cam)){
+          var d=v.scale(sp);
+          try{
+            cam.target = cam.target ? cam.target.add(d) : d;
+            cam.position = cam.position ? cam.position.add(d) : cam.position;
+          }catch(_){}
+        } else if (cam.moveWithCollisions) {
+          cam.moveWithCollisions(v.scale(sp));
+        } else if (cam.cameraDirection) {
+          cam.cameraDirection.addInPlace(v.scale(sp));
+        } else if (cam.position && cam.position.addInPlace) {
+          cam.position.addInPlace(v.scale(sp));
+        }
       }
     });
   })();
 })();
 </script>
+
+
+
+<!-- PATCH: Player Model + Third-Person Rig -->
+<script>
+(function(){
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  function Canvas(){ var c=document.getElementById("renderCanvas")||document.getElementById("gameCanvas"); return c||document.querySelector("canvas")||null; }
+
+  async function ensurePlayer(){
+    var s=S(); if(!s) return null;
+    // If already present
+    if (window.player) return window.player;
+    var n=null;
+    try { if (s.getNodeByName) n = s.getNodeByName("player"); } catch(_){}
+    if (n){ window.player = n; return n; }
+
+    // Try to load a GLB (best-guess paths). All are optional.
+    var paths = [
+      ["./assets/models/player/", "player.glb"],
+      ["./assets/models/", "player.glb"],
+      ["./assets/", "player.glb"]
+    ];
+    for (var i=0;i<paths.length;i++){
+      try{
+        var r = await BABYLON.SceneLoader.ImportMeshAsync("", paths[i][0], paths[i][1], s);
+        var mesh = r.meshes.find(m=>m && m.name && m.name!=="__root__") || r.meshes[0];
+        if (mesh){
+          mesh.name = "player";
+          mesh.checkCollisions = true;
+          mesh.ellipsoid = new BABYLON.Vector3(0.4,0.9,0.4);
+          mesh.ellipsoidOffset = new BABYLON.Vector3(0,0.9,0);
+          window.player = mesh;
+          // If has skeleton, store for later
+          try { window.playerSkeleton = r.skeletons && r.skeletons[0]; }catch(_){}
+          return mesh;
+        }
+      }catch(e){ /* ignore and try next */ }
+    }
+
+    // Fallback placeholder
+    try {
+      var cap = BABYLON.MeshBuilder.CreateCapsule("player", {height:1.8, radius:0.4, tessellation:12}, s);
+      cap.position = new BABYLON.Vector3(-46.18, 1.35, -105.50);
+      cap.checkCollisions = true;
+      cap.ellipsoid = new BABYLON.Vector3(0.4,0.9,0.4);
+      cap.ellipsoidOffset = new BABYLON.Vector3(0,0.9,0);
+      window.player = cap;
+      return cap;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  function ensureThirdPersonCam(){
+    var s=S(); if(!s) return null;
+    var canvas = Canvas();
+    // Reuse ArcRotate if active
+    var arc = (s.activeCamera && s.activeCamera.alpha!==undefined) ? s.activeCamera : null;
+    if (!arc){
+      var alpha = -Math.PI/2, beta = 1.2, radius = 4.0;
+      arc = new BABYLON.ArcRotateCamera("tpc", alpha, beta, radius, new BABYLON.Vector3(0,1,0), s);
+      arc.attachControl(canvas, true);
+      arc.lowerBetaLimit = 0.3; arc.upperBetaLimit = Math.PI/2.0;
+      arc.lowerRadiusLimit = 2.2; arc.upperRadiusLimit = 8.0;
+    }
+    return arc;
+  }
+
+  // Keep third-person camera locked to player
+  (function followLoop(){
+    var s=S(); if(!s){ setTimeout(followLoop, 250); return; }
+    s.onBeforeRenderObservable.add(function(){
+      var pl = window.player;
+      if (!pl || !pl.position) return;
+      var cam = s.activeCamera;
+      if (cam && cam.alpha!==undefined){ // ArcRotate
+        try { cam.target = pl.position; } catch(_){}
+      }
+    });
+  })();
+
+  // Toggle view with 'V': first-person (use existing cam) <-> third-person (ArcRotate)
+  (function setupToggle(){
+    var s=S(); if(!s){ setTimeout(setupToggle, 250); return; }
+    var firstCam = s.activeCamera;
+    addEventListener("keydown", function(e){
+      if ((e.key||"").toLowerCase()==="v".toLowerCase() || e.keyCode===86){
+        var cam = s.activeCamera;
+        if (cam && cam.alpha!==undefined){
+          // Currently third-person -> switch back to first
+          if (firstCam && firstCam !== cam){
+            s.activeCamera = firstCam;
+            try { firstCam.attachControl(Canvas(), true); }catch(_){}
+          }
+        } else {
+          // Switch to third-person
+          var arc = ensureThirdPersonCam();
+          if (arc){ s.activeCamera = arc; try{ arc.attachControl(Canvas(), true); }catch(_){ } }
+        }
+      }
+    });
+  })();
+
+  // Kick player load (lazy)
+  (function waitAndLoad(){
+    var s=S(); if(!s){ setTimeout(waitAndLoad, 250); return; }
+    ensurePlayer();
+  })();
+})();
+</script>
+
 </body>
 
 <script>
