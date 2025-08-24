@@ -178,30 +178,6 @@ window.onBeforeRenderAdd = function(cb){
 </style>
 </head>
 <body>
-<!-- PATCH: DOTS resolver (very early, body-top) -->
-<script>
-(function(){
-  if (!window.__dots_resolveScene){
-    window.__dots_resolveScene = function(){
-      try{
-        var s = window.SCENE || window.scene ||
-                (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) ||
-                (window.BABYLON && BABYLON.Engine && BABYLON.Engine.LastCreatedScene) || null;
-        if (s) window.SCENE = s;
-
-        var e = (s && s.getEngine && s.getEngine()) ||
-                window.ENGINE ||
-                (window.BABYLON && BABYLON.Engine && BABYLON.Engine.LastCreatedEngine) || null;
-        if (e) window.ENGINE = e;
-
-        if (s && !window.camera) window.camera = s.activeCamera || window.camera;
-        return !!(window.SCENE && window.ENGINE);
-      }catch(_){ return false; }
-    };
-  }
-})();
-</script>
-
   <!-- LOADING OVERLAY (hidden until Start) -->
   <div id="loading-box" aria-live="polite">
     <img src="logo.png" alt="Logo" id="loading-logo">
@@ -3786,6 +3762,39 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 })();
 </script>
 
+
+<!-- PATCH: Items module include -->
+<script src="items.js"></script>
+
+<!-- PATCH: Items module init -->
+<script>
+(function(){
+  function getScene(){
+    return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
+  }
+  function tryInit(){
+    try{
+      var s = getScene();
+      if (!s || !window.Items) return false;
+      // Configure paths
+      if (typeof Items.setAssetBase === "function") Items.setAssetBase("./assets/images/items/");
+      if (typeof Items.setItemsModelPath === "function") Items.setItemsModelPath("assets/models/items/exploration_objects.glb");
+      // Init once
+      if (!s.__itemsInit){
+        Items.init(s);
+        s.__itemsInit = true;
+      }
+      return true;
+    }catch(e){ return false; }
+  }
+  var attempts = 0;
+  (function wait(){
+    if (tryInit()) return;
+    if (++attempts > 200) return; // ~20s max
+    setTimeout(wait, 100);
+  })();
+})();
+</script>
 </body>
 
 <script>
