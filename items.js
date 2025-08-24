@@ -86,7 +86,7 @@ Items.cloneItemMesh = function(name, s){
     return inst;
   };
 
-  let ASSET_BASE = "./assets/images/items/"; // change with Items.setAssetBase()
+  let ASSET_BASE = "./assets/icons/"; // change with Items.setAssetBase()
 
   function getScene(s){
     return s || global.SCENE || global.scene || (global.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
@@ -379,7 +379,7 @@ Items.cloneItemMesh = function(name, s){
         if (!this.pickupMesh) {
           try { const mdl = await ensureItemModelFor(this, "Video Camera", s); if (mdl) this.pickupMesh = mdl; } catch(_){}
         }
-        if (!this.pickupMesh) this.pickupMesh = planePickup("cam_pickup", "camera.PNG", s);
+        if (!this.pickupMesh) this.pickupMesh = planePickup("cam_pickup", "camera.png", s);
         attachToCam(this.pickupMesh, s);
       })();
     }, 
@@ -407,7 +407,7 @@ Items.cloneItemMesh = function(name, s){
   // 5) SPELL BOOK / JOURNAL
   const Book = addItem({
     name: "Journal",
-    icon: "book.png",
+    icon: "notenotebook.png",
     pickupMesh: null,
     panel:null,
     onEquip(s){
