@@ -91,6 +91,30 @@
       background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff;
       z-index:10001; display:none; max-width:70vw; text-align:center; }
   </style>
+
+<script>
+// Safe queue for callbacks before Babylon 'scene' exists
+window.__pendingOBR = window.__pendingOBR || [];
+window.onBeforeRenderAdd = function(cb){
+  if (window.scene && scene.onBeforeRenderObservable) {
+    try { return onBeforeRenderAdd(cb); } catch(e) { try { console.warn(e); } catch(_) {} }
+  } else {
+    window.__pendingOBR.push(cb);
+    return null;
+  }
+};
+// When scene becomes available, flush pending once
+(function flushWhenReady(){
+  if (window.scene && scene.onBeforeRenderObservable) {
+    var list = window.__pendingOBR || [];
+    for (var i=0;i<list.length;i++){ try{ onBeforeRenderAdd(list[i]); } catch(e){} }
+    window.__pendingOBR = [];
+  } else {
+    setTimeout(flushWhenReady, 120);
+  }
+})();
+</script>
+
 </head>
 <body>
   <!-- LOADING OVERLAY (hidden until Start) -->
@@ -526,13 +550,13 @@ function spawnUVFootprints(origin, count=2, step=0.35){
     m.specularColor = new BABYLON.Color3(0,0,0);
     m.alpha = 0.0;
     quad.material = m;
-    let t=0; const fadeIn = scene.onBeforeRenderObservable.add(()=>{
+    let t=0; const fadeIn = onBeforeRenderAdd(()=>{
       t += engine.getDeltaTime()/1000; m.alpha = Math.min(0.9, t*3);
       if(m.alpha>=0.9) scene.onBeforeRenderObservable.remove(fadeIn);
     });
     setTimeout(()=>{
       let f=1;
-      const h = scene.onBeforeRenderObservable.add(()=>{
+      const h = onBeforeRenderAdd(()=>{
         f -= engine.getDeltaTime()/3; m.alpha = Math.max(0, f*0.9);
         if(m.alpha<=0){ scene.onBeforeRenderObservable.remove(h); try{quad.dispose(); } catch(e){}}
       });
@@ -1243,7 +1267,7 @@ function postInitUI(){
   rebuildBelt();
   InputSystem.init();
 
-  scene.onBeforeRenderObservable.add(()=>{
+  onBeforeRenderAdd(()=>{
     const dt = engine.getDeltaTime()/1000;
     const input = InputSystem.snapshot();
 
@@ -1458,7 +1482,7 @@ const EMFAudio = (()=>{
     if(emf5Until > now()){ if(!running){ running=true; _set(0.22);} }
     else if(running){ running=false; _set(0.0); }
   }
-  (function poll(){ if(window.scene&&window.engine){ scene.onBeforeRenderObservable.add(()=>{ try{ update(); }catch(_){ } }); } else setTimeout(poll,120); })();
+  (function poll(){ if(window.scene&&window.engine){ onBeforeRenderAdd(()=>{ try{ update(); }catch(_){ } }); } else setTimeout(poll,120); })();
   return { spike, startEMF5, extend };
 })();
 </script>
@@ -1515,7 +1539,7 @@ const RadioAudio = (()=>{
   let t=0, next = 10+Math.random()*15, radioCooldown=0;
   let wanderTarget = ghost.roomCenter.clone();
 
-  scene.onBeforeRenderObservable.add(()=>{
+  onBeforeRenderAdd(()=>{
     const dt = engine.getDeltaTime()/1000;
     t += dt; if(radioCooldown>0) radioCooldown -= dt;
 
@@ -1569,7 +1593,7 @@ function dropWritingBook(){
 // Book check loop with Shade block
 (function bookLoop(){
   let timer=0, nextCheck = 6 + Math.random()*10;
-  scene.onBeforeRenderObservable.add(()=>{
+  onBeforeRenderAdd(()=>{
     const dt = engine.getDeltaTime()/1000; timer += dt;
     if(!BOOK_PLACED || !BOOK_POS) return;
     if(timer < nextCheck) return;
@@ -1667,7 +1691,7 @@ function _showDotsApparition(atPos, onlyOnMonitor=false){
   if(onlyOnMonitor){
     plane.isVisible=false; ensureVanMonitor(); DOTS.monitorText('Camera: DOTS detected'); setTimeout(()=>DOTS.monitorText('Camera: online'), 2000);
   } else {
-    let t=0; const h=scene.onBeforeRenderObservable.add(()=>{ t+=engine.getDeltaTime()/1000; mat.alpha = t<0.2? t*4.5 : Math.max(0,1.0-(t-0.2)*1.2); if(t>1.2){ scene.onBeforeRenderObservable.remove(h); try{plane.dispose();}catch(_){}} });
+    let t=0; const h=onBeforeRenderAdd(()=>{ t+=engine.getDeltaTime()/1000; mat.alpha = t<0.2? t*4.5 : Math.max(0,1.0-(t-0.2)*1.2); if(t>1.2){ scene.onBeforeRenderObservable.remove(h); try{plane.dispose();}catch(_){}} });
   }
 }
 function updateDOTS(){
@@ -1749,12 +1773,10 @@ const Footsteps = { tick: function(){ /* plug SFX here */ } };
 const CameraRig = { update: function(){ /* camera smoothing/OTS here */ } };
 </script>
 
-
 <script>
 // === Safety shims to prevent runtime errors if optional modules are absent ===
 window.Footsteps = window.Footsteps || { tick: function(){ /* no-op */ } };
 window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
-
 </body>
 </html>
