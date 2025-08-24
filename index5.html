@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>index5 (merged from index4 + logic)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<!-- Local Babylon stack (expects ./cdn/* in the same folder as your GitHub CDN) -->
+<script src="./cdn/babylon.js"></script>
+<script src="./cdn/earcut.min.js"></script>
+<script src="./cdn/meshopt_decoder.js"></script>
+<script src="./cdn/draco_decoder_gltf.js"></script>
+<script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
+<script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+<script src="./cdn/gui/babylon.gui.min.js"></script>
+<script src="./cdn/serializers/babylonjs.serializers.min.js"></script>
+<script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+<style>
+  :root{--b:#1a2a3c;--ui:#0b111bcc;--btn:#13213a;--fg:#e6f1ff;--acc:#58a6ff}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#000;color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  #stage{position:fixed;inset:0}
+  #c{width:100%;height:100%;display:block}
+  /* Title + loader */
+  #title-screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:radial-gradient(1100px 600px at 50% 30%, #0b1522 0%, #05080e 60%, #000 100%);z-index:10}
+  #start-button{padding:10px 14px;border-radius:10px;border:1px solid var(--b);background:#111c2a;color:#dff;cursor:pointer;font-weight:700}
+  #loading-box{display:none;flex-direction:column;align-items:center;gap:8px}
+  .bar{width:340px;height:10px;border:1px solid var(--b);border-radius:999px;overflow:hidden}
+  .fill{height:100%;width:0;background:linear-gradient(90deg,#58a6ff,#7ee787)}
+  #loading-text{font:12px/1.2 ui-monospace,monospace;color:#9ad8ff;opacity:.9}
+  /* HUD */
+  #hud{position:fixed;left:12px;top:12px;display:grid;grid-template-columns:auto auto;gap:8px 12px;align-items:center;z-index:3}
+  #hud .card{padding:6px 10px;background:var(--ui);border:1px solid var(--b);border-radius:10px;font-size:12px;backdrop-filter:blur(3px)}
+  #xyz{position:fixed;right:12px;bottom:78px;padding:6px 10px;background:var(--ui);border:1px solid var(--b);border-radius:10px;font:12px/1.2 ui-monospace,monospace;z-index:3}
+  /* Item belt + storage */
+  #pp-itemBar{position:fixed;left:50%;transform:translateX(-50%);bottom:12px;display:flex;gap:8px;padding:8px 10px;background:var(--ui);border:1px solid var(--b);border-radius:12px;z-index:5000}
+  #pp-itemBar .slot{width:48px;height:48px;border-radius:10px;border:1px solid var(--b);background:#0e1622;display:grid;place-items:center;cursor:pointer}
+  #pp-itemBar .slot.active{outline:2px solid var(--acc)}
+  #pp-itemBar .slot img{max-width:36px;max-height:36px;opacity:.9}
+  #pp-storage{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:6000}
+  #pp-storage .panel{width:520px;max-width:92vw;max-height:80vh;overflow:auto;background:var(--ui);border:1px solid var(--b);border-radius:12px;padding:12px;color:#e6f1ff}
+  #pp-storage h3{margin:0 0 8px 0;font-size:14px;color:#9fd4ff;letter-spacing:.6px}
+  #pp-storage .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  #pp-storage .it{padding:8px;border:1px solid var(--b);border-radius:10px;background:#0e1622;cursor:pointer;text-align:center}
+  #pp-storage .it.sel{outline:2px solid #3ddc97}
+  /* Spirit Box */
+  #sbox-questions{position:fixed;right:12px;top:12px;width:360px;max-height:70vh;overflow:auto;background:var(--ui);border:1px solid var(--b);border-radius:12px;padding:10px;z-index:3;display:none}
+  #sbox-questions .sbox-q{padding:6px 8px;border-radius:8px;border:1px solid var(--b);background:#0c1422;color:#dff;margin:4px;cursor:pointer;display:inline-block}
+  /* Inspector top */
+  .babylon-inspector{z-index:9999 !important}
+</style>
+</head>
+<body>
+  <div id="stage"><canvas id="c"></canvas></div>
+
+  <!-- Title + Loader -->
+  <div id="title-screen">
+    <button id="start-button">Start Investigation</button>
+    <div id="loading-box">
+      <div class="bar" id="bar"><div class="fill" id="fill"></div></div>
+      <div id="loading-text">Initializing…</div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="card">Map: <span id="mapName">—</span></div>
+    <div class="card">Weather: <span id="weather">—</span></div>
+    <div class="card">Hunt: <span id="hunt">Calm</span></div>
+    <div class="card">Room: <span id="room">Van</span></div>
+    <div class="card">Sanity: <span id="sanity">100%</span></div>
+  </div>
+  <div id="xyz">XYZ: 0, 0, 0</div>
+
+  <!-- Storage + Belt -->
+  <div id="pp-itemBar"></div>
+  <div id="pp-storage">
+    <div class="panel">
+      <h3>Choose Your Loadout (pick up to 3)</h3>
+      <div id="pp-storeGrid" class="grid"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+        <button id="pp-storeConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spirit Box UI (click-to-ask) -->
+  <div id="sbox-questions">
+    <div class="sbox-q">Where are you?</div>
+    <div class="sbox-q">How old are you?</div>
+    <div class="sbox-q">Are you friendly?</div>
+    <div class="sbox-q">Do you want us here?</div>
+    <div class="sbox-q">Give us a sign</div>
+    <div class="sbox-q">Can you speak?</div>
+  </div>
+
+<script>
+/*** ==========================================================
+    Inspector always-on-top
+========================================================== ***/
+(function(){
+  const keepOnTop = () => {
+    document.querySelectorAll('.babylon-inspector, .inspector').forEach(el=>{
+      el.style.zIndex = '9999'; el.style.position = 'fixed';
+    });
+  };
+  const mo = new MutationObserver(keepOnTop);
+  mo.observe(document.documentElement, {subtree:true, childList:true, attributes:true});
+  keepOnTop();
+})();
+
+/*** ==========================================================
+    Engine + Scene boot
+========================================================== ***/
+const canvas = document.getElementById('c');
+const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
+const scene  = new BABYLON.Scene(engine);
+scene.useRightHandedSystem = true;
+scene.clearColor = new BABYLON.Color4(0,0,0,1);
+const camera = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(0, 1.8, 0), scene);
+camera.attachControl(canvas, true); camera.speed = 0.22; camera.inertia = 0.6; camera.minZ = 0.05;
+scene.activeCamera = camera;
+const light = new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0.25,1,0.25), scene);
+light.intensity = 0.95;
+
+/*** ==========================================================
+    onBeforeRender queue helper (SINGLE copy)
+========================================================== ***/
+function onBeforeRenderAdd(fn){ try{ scene.onBeforeRenderObservable.add(fn); }catch(_){} }
+
+/*** ==========================================================
+    Loader (robust resolver; supports #loading-* and #bar/#fill/#status)
+========================================================== ***/
+const Loader = (()=>{
+  const box  = ()=> document.getElementById('loading-box') || document.getElementById('bar') || document.querySelector('#title-screen .bar');
+  const text = ()=> document.getElementById('loading-text')|| document.getElementById('status')|| document.querySelector('#title-screen #status');
+  const fill = ()=> document.getElementById('loading-fill')|| document.getElementById('fill') || (box()? box().querySelector('.fill'): null);
+  let total=0, progressed=0; const queue=[];
+  function show(){ const b=box(); if(b) b.style.display='flex'; }
+  function hide(){ const b=box(); if(b) b.style.display='none'; }
+  function label(s){ const t=text(); if(t) t.textContent=s||''; }
+  function pct01(){ return total ? Math.max(0,Math.min(1, progressed/total)) : 0; }
+  function draw(){ const f=fill(); if(!f) return; f.style.width = (pct01()*100).toFixed(1)+'%'; }
+  function addStep(label, fnOrPr, weight=1){ queue.push({label, run:fnOrPr, weight}); total += weight; }
+  async function run(){
+    for(const step of queue){
+      label(step.label); draw();
+      try{
+        if (typeof step.run === 'function'){ const r = step.run(); if(r && typeof r.then==='function') await r; }
+        else if (step.run && typeof step.run.then==='function'){ await step.run; }
+      }catch(e){ console.warn('Loader step failed:', step.label, e); label(step.label+' — failed, continuing…'); await new Promise(r=>setTimeout(r,250)); }
+      progressed += step.weight; draw();
+    }
+    label('Finalizing…'); progressed = total; draw(); await new Promise(r=>setTimeout(r,150)); hide();
+  }
+  function reset(){ queue.length=0; total=0; progressed=0; draw(); }
+  return { show, hide, label, draw, addStep, run, reset };
+})();
+
+/*** ==========================================================
+    Basic HUD tick
+========================================================== ***/
+const hud = {
+  mapName: document.getElementById('mapName'),
+  weather: document.getElementById('weather'),
+  hunt: document.getElementById('hunt'),
+  room: document.getElementById('room'),
+  sanity: document.getElementById('sanity'),
+  xyz: document.getElementById('xyz')
+};
+engine.runRenderLoop(()=>{ scene.render(); const p=camera.position; hud.xyz.textContent=`XYZ: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`; });
+window.addEventListener('resize', ()=>engine.resize());
+
+/*** ==========================================================
+    Weather + Audio
+========================================================== ***/
+const WeatherAudio = (function(){
+  let amb=null, rain=null, snow=null, drone=null;
+  function ensure(){
+    try{
+      const scn=scene;
+      amb  = amb  || new BABYLON.Sound('amb','./assets/audio/ambient.mp3',scn,null,{loop:true,autoplay:false,volume:0.25});
+      rain = rain || new BABYLON.Sound('rain','./assets/audio/rainstorm.mp3',scn,null,{loop:true,autoplay:false,volume:0.35});
+      snow = snow || new BABYLON.Sound('snow','./assets/audio/clearWeather.mp3',scn,null,{loop:true,autoplay:false,volume:0.2});
+      drone= drone|| new BABYLON.Sound('drone','./assets/audio/drone.mp3',scn,null,{loop:true,autoplay:false,volume:0.25});
+    }catch(_){}
+  }
+  function fadeTo(target){ ensure(); [amb,rain,snow,drone].forEach(s=>{ try{s.setVolume(0);}catch(_){}}); try{amb.play();}catch(_){}
+    try{ if(target==='rain'){rain.play(); rain.setVolume(0.35); hud.weather.textContent='Rain';}
+         else if(target==='snow'){snow.play(); snow.setVolume(0.25); hud.weather.textContent='Snow';}
+         else { hud.weather.textContent='Clear'; } }catch(_){}
+  }
+  return { init(){ensure();}, set:k=>fadeTo(k) };
+})();
+
+/*** ==========================================================
+    Sun/Moon + Rain/Snow particles (world anchored)
+========================================================== ***/
+let weatherPS = { rain:null, snow:null };
+function setupLightsPreMoon(){
+  const sun = new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-0.3,-1,-0.2), scene); sun.intensity=0.8;
+  const moon= new BABYLON.DirectionalLight('moon',new BABYLON.Vector3(0.3,-1,0.2), scene); moon.intensity=0.2;
+  sun.shadowMinZ = 0.1; sun.shadowMaxZ = 200;
+}
+async function loadMoon(){
+  try{
+    const path='./assets/models/sky/'; const file='moon.glb';
+    const ctn = await BABYLON.SceneLoader.LoadAssetContainerAsync(path, file, scene);
+    ctn.addAllToScene();
+  }catch(_){
+    const d = BABYLON.MeshBuilder.CreateDisc('moon',{radius:10,tessellation:32},scene);
+    d.position = new BABYLON.Vector3(0,40,100); const m=new BABYLON.StandardMaterial('moonM',scene); m.emissiveColor=new BABYLON.Color3(0.9,0.9,1); d.material=m;
+  }
+}
+function makeRainAt(center){
+  const ps = new BABYLON.ParticleSystem("rain", 2000, scene);
+  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/rain.png", scene, true, false);
+  ps.createBoxEmitter(new BABYLON.Vector3(-25,0,-25), new BABYLON.Vector3(25,0,25), new BABYLON.Vector3(0,-1,0), 0, 0);
+  ps.minEmitPower=4; ps.maxEmitPower=7; ps.gravity=new BABYLON.Vector3(0,-9.81,0);
+  const n=new BABYLON.TransformNode('rain_emit',scene); n.position = center.clone().add(new BABYLON.Vector3(0,30,0)); ps.emitter=n; return ps;
+}
+function makeSnowAt(center){
+  const ps = new BABYLON.ParticleSystem("snow", 1500, scene);
+  ps.particleTexture = new BABYLON.Texture("./assets/images/particles/snow.png", scene, true, false);
+  ps.createBoxEmitter(new BABYLON.Vector3(-25,0,-25), new BABYLON.Vector3(25,0,25), new BABYLON.Vector3(0,-0.5,0), 0, 0);
+  const n=new BABYLON.TransformNode('snow_emit',scene); n.position = center.clone().add(new BABYLON.Vector3(0,30,0)); ps.emitter=n; return ps;
+}
+
+/*** ==========================================================
+    Map loader + spawn (kept)
+========================================================== ***/
+window.MAP_DEF = window.MAP_DEF || {
+  title: "Merged House", file: "Abandoned_House.glb",
+  scale:1, rotationY:0, offset:{x:0,y:0,z:0},
+  exterior: [ {x:-30,z:-30}, {x:30,z:-30}, {x:30,z:30}, {x:-30,z:30} ],
+  spawn: { x: 47.52, y: 0.22, z: -105.28 }
+};
+function toRad(d){return d*Math.PI/180;}
+function localToWorld(p, def){
+  const s=(def?.scale??1), yaw=toRad(def?.rotationY??0), cos=Math.cos(yaw), sin=Math.sin(yaw);
+  const x=(p?.x??0)*s, y=(p?.y??0)*s, z=(p?.z??0)*s; const xr=x*cos - z*sin, zr=x*sin + z*cos;
+  return new BABYLON.Vector3((def?.offset?.x??0)+xr, (def?.offset?.y??0)+y, (def?.offset?.z??0)+zr);
+}
+const MAP_CENTER = new BABYLON.Vector3(0,0,0);
+async function loadSelectedMap(){
+  const path="./assets/models/map/"; try{
+    const ctn = await BABYLON.SceneLoader.LoadAssetContainerAsync(path, MAP_DEF.file, scene);
+    ctn.addAllToScene();
+    document.getElementById('mapName').textContent = MAP_DEF.title || MAP_DEF.file;
+  }catch(e){ console.error('Map load failed',e); }
+}
+function applySpawn(){
+  const spawnWS = window.PP?.cfg?.spawnWS || (MAP_DEF.spawn ? new BABYLON.Vector3(MAP_DEF.spawn.x, MAP_DEF.spawn.y, MAP_DEF.spawn.z) : new BABYLON.Vector3(0,1.8,0));
+  camera.position.copyFrom(spawnWS);
+  camera.setTarget(spawnWS.add(new BABYLON.Vector3(0,1,2)));
+}
+
+/*** ==========================================================
+    Weather systems init
+========================================================== ***/
+function buildWeather(){
+  try{ weatherPS.rain?.dispose(); }catch(_){} try{ weatherPS.snow?.dispose(); }catch(_){}
+  weatherPS.rain = makeRainAt(MAP_CENTER); weatherPS.snow = makeSnowAt(MAP_CENTER);
+}
+
+/*** ==========================================================
+    Input: pointer lock + basic movement (kept simple)
+========================================================== ***/
+let keys={}; window.addEventListener('keydown',e=>keys[e.code]=true); window.addEventListener('keyup',e=>keys[e.code]=false);
+onBeforeRenderAdd(()=>{ const dt=engine.getDeltaTime()/1000; const sp=3.2; const fwd=camera.getDirection(BABYLON.Axis.Z); const right=camera.getDirection(BABYLON.Axis.X);
+  if(keys['KeyW']) camera.position.addInPlace(fwd.scale(sp*dt));
+  if(keys['KeyS']) camera.position.addInPlace(fwd.scale(-sp*dt));
+  if(keys['KeyA']) camera.position.addInPlace(right.scale(-sp*dt));
+  if(keys['KeyD']) camera.position.addInPlace(right.scale(sp*dt));
+});
+
+/*** ==========================================================
+    START FLOW (kept)
+========================================================== ***/
+let __started=false;
+async function safeStart(e){
+  e?.preventDefault?.(); if(__started) return; __started=true;
+  const title=document.getElementById('title-screen'); if(title) title.style.display='none';
+  Loader.reset(); Loader.show(); Loader.label('Initializing…'); Loader.draw();
+
+  const add=(label, fn, w=1)=> Loader.addStep(label, (typeof fn==='function'||(fn&&typeof fn.then==='function'))? fn : async()=>{}, w);
+
+  add('Preparing engine/scene…', ()=>Promise.resolve(), 1);
+  add('Setting up sky lights…', ()=>setupLightsPreMoon(), 1);
+  add('Loading moon…', ()=>loadMoon(), 2);
+  add('Initializing audio engine…', ()=>WeatherAudio.init(scene), 1);
+  add('Loading selected map…', ()=>loadSelectedMap(), 5);
+  add('Positioning player spawn…', ()=>applySpawn(), 2);
+  add('Building weather systems…', ()=>buildWeather(), 1);
+  add('Setting starting weather…', ()=>{ WeatherAudio.set('rain'); weatherPS.rain?.start(); }, 1);
+
+  await Loader.run();
+  try{ canvas.focus(); }catch(_){} try{ BABYLON.Engine.audioEngine?.unlock?.(); }catch(_){}
+  if (canvas?.requestPointerLock) { setTimeout(()=>{ try{ canvas.requestPointerLock(); }catch(_){} }, 0); }
+}
+document.getElementById('start-button')?.addEventListener('click', safeStart, {passive:false});
+document.addEventListener('keydown', (e)=>{ if(!__started && (e.key==='Enter'||e.code==='Space')){ e.preventDefault(); safeStart(e); } }, {passive:false});
+</script>
+
+<!-- ==========================================================
+     STORAGE + BELT  (from index3, no joysticks)
+========================================================== -->
+<script>
+window.PP = window.PP || {};
+(function(){
+  const ITEM_DEFS = [
+    {id:'emf', name:'EMF Reader', icon:'./assets/icons/emf.png'},
+    {id:'spirit', name:'Spirit Box', icon:'./assets/icons/spirit.png'},
+    {id:'uv', name:'UV Light', icon:'./assets/icons/uv.png'},
+    {id:'cam', name:'Photo Cam', icon:'./assets/icons/camera.png'},
+    {id:'salt', name:'Salt', icon:'./assets/icons/salt.png'},
+    {id:'lighter', name:'Lighter', icon:'./assets/icons/lighter.png'},
+    {id:'notebook', name:'Notebook', icon:'./assets/icons/notebook.png'}
+  ];
+  const storageEl = document.getElementById('pp-storage');
+  const storeGrid = document.getElementById('pp-storeGrid');
+  const storeConfirm = document.getElementById('pp-storeConfirm');
+  const itemBar = document.getElementById('pp-itemBar');
+  PP.storage = PP.storage || (function(){
+    const KEY='pp_inventory_v1';
+    function get(){ try{return JSON.parse(localStorage.getItem(KEY))||{slots:[],equipped:0};}catch(_){return {slots:[],equipped:0};} }
+    function set(v){ localStorage.setItem(KEY, JSON.stringify(v)); return v; }
+    return { load:get, save:set };
+  })();
+  let selected = new Set(PP.storage.load().slots);
+  function rebuildGrid(){
+    storeGrid.innerHTML=''; for(const it of ITEM_DEFS){
+      const d=document.createElement('div'); d.className='it'+(selected.has(it.id)?' sel':''); d.dataset.id=it.id;
+      d.innerHTML=`<img src="${it.icon}" style="display:block;margin:0 auto 6px;max-width:48px;max-height:48px"><div style="font-size:12px">${it.name}</div>`;
+      d.onclick=()=>{ if(selected.has(it.id)){selected.delete(it.id); d.classList.remove('sel');} else { if(selected.size>=3) return; selected.add(it.id); d.classList.add('sel'); } };
+      storeGrid.appendChild(d);
+    }
+  }
+  function rebuildBelt(slots){
+    itemBar.innerHTML=''; const inv=PP.storage.load();
+    slots.forEach((id,i)=>{ const def=ITEM_DEFS.find(x=>x.id===id)||{name:id,icon:''}; const s=document.createElement('div');
+      s.className='slot'+(i===inv.equipped?' active':''); s.title=def.name;
+      s.innerHTML = def.icon ? `<img src="${def.icon}">` : `<span style="font-size:10px">${def.name}</span>`;
+      s.onclick=()=>{ const inv=PP.storage.load(); inv.equipped=i; PP.storage.save(inv); updateActive(); };
+      itemBar.appendChild(s);
+    });
+  }
+  function updateActive(){ const inv=PP.storage.load(); [...itemBar.children].forEach((el,idx)=> el.classList.toggle('active', idx===inv.equipped)); }
+  window.addEventListener('wheel',(e)=>{ const inv=PP.storage.load(); if(!inv.slots.length) return;
+    inv.equipped = (inv.equipped + (e.deltaY>0?1:-1) + inv.slots.length) % inv.slots.length; PP.storage.save(inv); updateActive();
+  }, {passive:true});
+  storeConfirm.onclick=()=>{ const slots=[...selected]; const inv=PP.storage.load(); inv.slots=slots; inv.equipped=0; PP.storage.save(inv);
+    storageEl.style.display='none'; rebuildBelt(slots); try{ window.scatterItems?.(slots); }catch(_){} };
+  window.openLoadout = function(){ selected = new Set(PP.storage.load().slots); rebuildGrid(); storageEl.style.display='flex'; };
+  setTimeout(()=>{ const inv=PP.storage.load(); if(!inv.slots.length) openLoadout(); else rebuildBelt(inv.slots); },0);
+})();
+</script>
+
+<!-- ==========================================================
+     DOTS (instanced; SINGLE impl kept)
+========================================================== -->
+<script>
+const DOTS = window.DOTS || { projectors:[], monitorPlane:null, tripod:null, monitorText:null, _mat:null };
+(function(){
+  function ensureDotMaterial(){
+    if (DOTS._mat) return DOTS._mat;
+    const mat = new BABYLON.StandardMaterial('dotMat_shared', scene);
+    mat.emissiveColor = new BABYLON.Color3(0,1,0); mat.disableLighting = true; mat.specularColor = new BABYLON.Color3(0,0,0);
+    return (DOTS._mat=mat);
+  }
+  function _makeDotsGrid(node){
+    const countX=10,countZ=10,spacing=0.25,size=0.03; const mat=ensureDotMaterial();
+    const base = BABYLON.MeshBuilder.CreateSphere('dotBase',{diameter:size,segments:4},scene);
+    base.material=mat; base.isPickable=false; base.setEnabled(false);
+    const halfX=(countX/2), halfZ=(countZ/2);
+    for(let ix=0; ix<countX; ix++){
+      for(let iz=0; iz<countZ; iz++){
+        const inst = base.createInstance('dotInst');
+        inst.isPickable=false; inst.parent=node;
+        inst.position = new BABYLON.Vector3((ix-halfX)*spacing, 0.9, (iz-halfZ)*spacing);
+      }
+    }
+  }
+  function ensureVanMonitor(){
+    if(DOTS.monitorPlane) return DOTS.monitorPlane;
+    const plane = BABYLON.MeshBuilder.CreatePlane('vanMonitor',{width:2.2,height:1.3},scene);
+    plane.position = new BABYLON.Vector3(0,1.6,22.8); plane.rotation.y=Math.PI;
+    const mat = new BABYLON.StandardMaterial('vanMonitorMat', scene);
+    mat.emissiveColor=new BABYLON.Color3(0.1,0.9,0.1); mat.diffuseColor=mat.specularColor=new BABYLON.Color3(0,0,0);
+    plane.material=mat;
+    const dyn=new BABYLON.DynamicTexture('vanMonitorDT',{width:1024,height:512},scene,true); mat.emissiveTexture=dyn;
+    const ctx=dyn.getContext(); function write(msg){ ctx.save(); ctx.fillStyle='black'; ctx.fillRect(0,0,1024,512); ctx.fillStyle='#00ff88'; ctx.font='36px monospace'; ctx.textBaseline='top'; ctx.fillText(msg,40,40); ctx.restore(); dyn.update(); }
+    DOTS.monitorPlane=plane; DOTS.monitorText=write; write('Camera: offline'); return plane;
+  }
+  window.placeDotsProjector = function(){
+    const p = scene.activeCamera?.position||BABYLON.Vector3.Zero();
+    const n=new BABYLON.TransformNode('DOTS_Projector',scene); n.position=new BABYLON.Vector3(p.x,0,p.z);
+    _makeDotsGrid(n); DOTS.projectors.push({node:n,radius:2.6,cooldown:0});
+  };
+  window.placeVideoCam = function(){ ensureVanMonitor(); const p=camera.position; DOTS.tripod = DOTS.tripod || new BABYLON.TransformNode('TripodCam',scene); DOTS.tripod.position=new BABYLON.Vector3(p.x,1.4,p.z); DOTS.monitorText?.('Camera: online'); };
+  function _ghostInsideAnyDots(){ if(!DOTS.projectors.length) return null; const gpos=ghost?.position||BABYLON.Vector3.Zero(); for(const p of DOTS.projectors){ try{ if(p.cooldown>0) continue; const d=BABYLON.Vector3.Distance(gpos,p.node.position); if(d<p.radius) return p; }catch(_){}} return null; }
+  function _showDotsApparition(atPos, monitorOnly){
+    const pos=atPos||ghost?.position||BABYLON.Vector3.Zero();
+    if(monitorOnly){ ensureVanMonitor(); DOTS.monitorText?.('Camera: DOTS detected'); setTimeout(()=>DOTS.monitorText?.('Camera: online'),2000); return; }
+    const plane=BABYLON.MeshBuilder.CreatePlane('dotsSil',{size:1.5},scene); plane.position=new BABYLON.Vector3(pos.x,1.2,pos.z); plane.billboardMode=BABYLON.Mesh.BILLBOARDMODE_Y;
+    const m=new BABYLON.StandardMaterial('dotsSilMat',scene); m.diffuseColor=m.emissiveColor=new BABYLON.Color3(0,1,0); m.alpha=0; plane.material=m;
+    let t=0; const h=scene.onBeforeRenderObservable.add(()=>{ const dt=(engine.getDeltaTime()||16.7)/1000; t+=dt; m.alpha = t<0.2? t*4.5 : Math.max(0,1-(t-0.2)*1.2); if(t>1.2){ try{scene.onBeforeRenderObservable.remove(h); plane.dispose();}catch(_){}} });
+  }
+  function updateDOTS(dt){
+    for(const p of DOTS.projectors) if(p.cooldown>0) p.cooldown=Math.max(0,p.cooldown-dt);
+    const hit=_ghostInsideAnyDots(); if(!hit) return;
+    const has = (typeof ghostHasEvidence==='function'? ghostHasEvidence('dots') : true); if(!has) return;
+    const isGoryo=((ghost?.type||'').toLowerCase()==='goryo'); const hasCam=!!DOTS.tripod && BABYLON.Vector3.Distance(DOTS.tripod.position, hit.node.position) < 6.5;
+    if(isGoryo){ if(hasCam){ _showDotsApparition(ghost?.position,true); hit.cooldown=3.0; } }
+    else { _showDotsApparition(ghost?.position,false); hit.cooldown=3.0; }
+  }
+  onBeforeRenderAdd(()=>{ const dt=(engine.getDeltaTime()||16.7)/1000; try{ updateDOTS(dt); }catch(_){ } });
+})();
+</script>
+
+<!-- ==========================================================
+     SALT + UV FOOTPRINTS (single impl kept)
+========================================================== -->
+<script>
+(function(){
+  const SCENE=scene; const TEX_PATH='./assets/textures/uv_footprint.png', TTL=60, FADE=15, SCALE=0.45, HEIGHT=0.02; let mat;
+  function ensureMat(){ if(mat) return mat; mat=new BABYLON.StandardMaterial('uv_print_mat',SCENE);
+    mat.diffuseTexture=mat.emissiveTexture=mat.opacityTexture=new BABYLON.Texture(TEX_PATH,SCENE,true,false);
+    mat.diffuseColor=new BABYLON.Color3(0.0,0.6,0.2); mat.emissiveColor=new BABYLON.Color3(0.2,1.0,0.4); mat.specularColor=new BABYLON.Color3(0,0,0); mat.backFaceCulling=false; return mat;
+  }
+  const PRINTS=[]; const now=()=> (performance?.now?.() ?? Date.now())/1000;
+  function addFootprint(pos, rotY=0){
+    const plane=BABYLON.MeshBuilder.CreatePlane('uv_print',{size:SCALE, sideOrientation:BABYLON.Mesh.DOUBLESIDE},SCENE);
+    plane.material=ensureMat(); plane.rotation=new BABYLON.Vector3(Math.PI/2,0,Math.random()<0.5?Math.PI:0);
+    plane.position=new BABYLON.Vector3(pos.x,(pos.y||0)+HEIGHT,pos.z); plane.rotation.y=rotY; plane.isPickable=false; plane.freezeWorldMatrix?.();
+    PRINTS.push({mesh:plane, born:now()}); return plane;
+  }
+  SCENE.onBeforeRenderObservable.add(()=>{ const t=now(); for(let i=PRINTS.length-1;i>=0;i--){const it=PRINTS[i],age=t-it.born; if(age>=TTL){try{it.mesh.dispose();}catch(_){ } PRINTS.splice(i,1); continue;}
+    if(age>=(TTL-FADE)){ const a=1-((age-(TTL-FADE))/FADE); const m=it.mesh.material; if(m) m.alpha=Math.max(0,Math.min(1,a)); }
+  }});
+  window.UVPrints = window.UVPrints || { addFootprint };
+})();
+</script>
+
+<!-- ==========================================================
+     EVIDENCE / AUDIO / GHOST AI / SPIRIT BOX
+========================================================== -->
+<script>
+// Evidence gate (non-destructive; uses ghost.evidence if present)
+window.ghostHasEvidence = window.ghostHasEvidence || function(name){ try{ return !!(window.ghost?.evidence?.includes?.(name)); }catch(_){ return false; } };
+
+// UV-from-salt rules (Wraith never, Obake 30% skip)
+window._shouldLeaveUVFromSalt = window._shouldLeaveUVFromSalt || function(){
+  try{
+    if (typeof ghostHasEvidence !== 'function' || !ghostHasEvidence('uv')) return false;
+    const gt=(ghost?.type||'').toLowerCase();
+    if (gt==='wraith') return false;
+    if (gt==='obake' && Math.random()<0.30) return false;
+    return true;
+  }catch(_){ return false; }
+};
+
+// GhostAudio
+const GhostAudio = window.GhostAudio || (()=>{ let whisperSnd=null, slamSnd1=null, slamSnd2=null, creakSnd1=null, creakSnd2=null, tossSnd=null;
+  function ensure(){ try{ const opt={loop:false,autoplay:false}; const scn=scene;
+    whisperSnd=whisperSnd||new BABYLON.Sound('ga_whisper','./assets/audio/whisper.mp3',scn,null,{...opt,volume:0.7});
+    slamSnd1  =slamSnd1  ||new BABYLON.Sound('ga_slam1','./assets/audio/doorSlam1.mp3',scn,null,{...opt,volume:0.9});
+    slamSnd2  =slamSnd2  ||new BABYLON.Sound('ga_slam2','./assets/audio/doorSlam2.mp3',scn,null,{...opt,volume:0.9});
+    creakSnd1 =creakSnd1 ||new BABYLON.Sound('ga_creak1','./assets/audio/doorCreak1.mp3',scn,null,{...opt,volume:0.7});
+    creakSnd2 =creakSnd2 ||new BABYLON.Sound('ga_creak2','./assets/audio/doorCreak2.mp3',scn,null,{...opt,volume:0.7});
+    tossSnd   =tossSnd   ||new BABYLON.Sound('ga_toss','./assets/audio/Toss.wav',scn,null,{...opt,volume:0.85});
+  }catch(_){} }
+  return { ensure,
+    whisper(){ ensure(); try{ whisperSnd?.stop(); whisperSnd?.play(); }catch(_){ } },
+    doorSlam(){ ensure(); try{ (Math.random()<0.5?slamSnd1:slamSnd2)?.play(); }catch(_){ } },
+    doorCreak(){ ensure(); try{ (Math.random()<0.5?creakSnd1:creakSnd2)?.play(); }catch(_){ } },
+    toss(){ ensure(); try{ tossSnd?.stop(); tossSnd?.play(); }catch(_){ } }
+  };
+})();
+
+// EMF timer
+const EMFAudio = window.EMFAudio || (function(){ let endAt=0; return {
+  extend(sec){ endAt = Math.max(endAt, (performance?.now?.() ?? Date.now())/1000 + (sec||5)); },
+  isActive(){ return ((performance?.now?.() ?? Date.now())/1000) < endAt; }
+};})();
+
+// CameraRig stub
+window.CameraRig = window.CameraRig || {
+  head(){ try{ return scene?.activeCamera; }catch(_){ return null; } },
+  setHeight(h){ try{ if(scene?.activeCamera) scene.activeCamera.position.y=h; }catch(_){ } }
+};
+
+// Ghost wander + events (Shade suppression)
+(function setupGhostLoop(){
+  const SCENE=scene, ENGINE=engine, CAMERA=scene.activeCamera;
+  const ghost = (window.ghost = window.ghost || {});
+  if (!(ghost.position instanceof BABYLON.Vector3)) ghost.position = new BABYLON.Vector3(0,0,0);
+  if (!(ghost.roomCenter instanceof BABYLON.Vector3)) ghost.roomCenter = new BABYLON.Vector3(2,0,2);
+  ghost.type = ghost.type || 'Spirit';
+  function currentRoomNameSafe(){ try{ return (typeof window.currentRoomName==='function')? window.currentRoomName():''; }catch(_){ return ''; } }
+  function isPlayerInGhostRoom(){ try{ return !!ghost.roomName && currentRoomNameSafe()===ghost.roomName; }catch(_){ return false; } }
+  const isShade=()=> (ghost?.type||'').toLowerCase()==='shade';
+  let t=0, next=10+Math.random()*15, wanderTarget=ghost.roomCenter.clone();
+  onBeforeRenderAdd(()=>{
+    const dt=(ENGINE.getDeltaTime()||16.7)/1000; t+=dt;
+    if(Math.random()<0.01){ const dx=(Math.random()-0.5)*4, dz=(Math.random()-0.5)*4; wanderTarget = ghost.roomCenter.add(new BABYLON.Vector3(dx,0,dz)); }
+    const dir=wanderTarget.subtract(ghost.position); dir.y=0; const L=dir.length(); if(L>0.01){ ghost.position=ghost.position.add(dir.normalize().scale(Math.min(L,dt*0.6))); }
+    try{ ghost.nearPlayer = BABYLON.Vector3.Distance(CAMERA.position, ghost.position) < 5.0; }catch(_){}
+    if(t>=next){
+      t=0; next=10+Math.random()*15; if(isShade() && isPlayerInGhostRoom()) return;
+      const r=Math.random();
+      try{
+        if(r<0.25) GhostAudio.whisper(); else if(r<0.55) GhostAudio.doorCreak(); else if(r<0.80) GhostAudio.doorSlam(); else GhostAudio.toss();
+        const d = BABYLON.Vector3.Distance(CAMERA.position, ghost.position||BABYLON.Vector3.Zero());
+        if(d<6.0) EMFAudio.extend(10+Math.random()*5);
+      }catch(_){}
+    }
+  });
+})();
+
+// Spirit Box audio + questions
+const SpiritBoxAudio = (()=>{
+  const SCENE=scene; const CAMERA=scene.activeCamera;
+  let active=false, loopSnd=null, voiceSnd=null, lastSpeakAt=0, duckTimer=null;
+  function ensure(){ try{
+    if(!loopSnd){ loopSnd=new BABYLON.Sound('spiritboxLoop','./assets/audio/spiritbox.mp3',SCENE,null,{loop:true,autoplay:false,volume:0.45, spatialSound:true, refDistance:2, rolloffFactor:1.1, maxDistance:18}); loopSnd.setPosition?.(CAMERA?.position||BABYLON.Vector3.Zero()); }
+    if(!voiceSnd){ voiceSnd=new BABYLON.Sound('spiritboxWhisper','./assets/audio/whisper.mp3',SCENE,null,{loop:false,autoplay:false,volume:0.9, spatialSound:true, refDistance:2, rolloffFactor:1.1, maxDistance:18}); }
+  }catch(_){ } }
+  function _duck(start=true){ try{ clearTimeout(duckTimer); if(loopSnd) loopSnd.setVolume(start?0.18:0.45); if(start) duckTimer=setTimeout(()=>_duck(false),1200);}catch(_){ } }
+  function _ghostPos(){ try{ return (ghost?.position instanceof BABYLON.Vector3)? ghost.position : BABYLON.Vector3.Zero(); }catch(_){ return BABYLON.Vector3.Zero(); } }
+  function _hasEv(){ try{ return typeof ghostHasEvidence==='function'? !!ghostHasEvidence('spiritbox') : true; }catch(_){ return true; } }
+  function on(){ ensure(); active=true; try{ loopSnd?.setPosition?.(CAMERA?.position||BABYLON.Vector3.Zero()); if(loopSnd && !loopSnd.isPlaying) loopSnd.play(); }catch(_){ } }
+  function off(){ active=false; try{ loopSnd?.stop(); voiceSnd?.stop(); clearTimeout(duckTimer); _duck(false);}catch(_){ } }
+  function toggle(){ active?off():on(); }
+  function isOn(){ return !!active; }
+  function speak(){ const now=(performance?.now?.() ?? Date.now()); if(!active||!_hasEv()) return; if(now-lastSpeakAt<1200) return; lastSpeakAt=now;
+    ensure(); try{ const pos=_ghostPos(); loopSnd?.setPosition?.(pos); voiceSnd?.setPosition?.(pos); if(loopSnd && !loopSnd.isPlaying) loopSnd.play(); _duck(true); voiceSnd?.stop?.(); voiceSnd?.play?.(); }catch(_){ }
+  }
+  scene.onBeforeRenderObservable.add(()=>{ if(!active) return; try{ loopSnd?.setPosition?.(scene.activeCamera?.position||BABYLON.Vector3.Zero()); }catch(_){ } });
+  return { on, off, toggle, isOn, speak, ensure };
+})();
+
+const SpiritBoxQuestions = (()=>{
+  const WRAP_ID='sbox-questions'; const SCENE=scene; let bound=false, lastAsk=0;
+  function safeToast(m){ try{ toast?.(m); }catch(_){ console.log(m); } }
+  function wrap(){ return document.getElementById(WRAP_ID); }
+  function show(){ const el=wrap(); if(el) el.style.display='block'; }
+  function hide(){ const el=wrap(); if(el) el.style.display='none'; }
+  function _hasEv(){ try{ return typeof ghostHasEvidence==='function' ? !!ghostHasEvidence('spiritbox') : true; }catch(_){ return true; } }
+  function _near(){ try{ const cam=SCENE.activeCamera; const g=ghost?.position||BABYLON.Vector3.Zero(); return cam? BABYLON.Vector3.Distance(cam.position,g)<5.5 : false; }catch(_){ return false; } }
+  function ask(q){ const now=performance?.now?.() ?? Date.now(); if(now-lastAsk<250) return; lastAsk=now; if(!SpiritBoxAudio.isOn()) return;
+    const ok=_hasEv()&&_near()&&Math.random()<0.20; try{ if(ok){ SpiritBoxAudio.speak(); safeToast(`Spirit Box: "${q}"`);} else { safeToast(`...static... "${q}"`);} }catch(_){ }
+  }
+  function bind(){ if(bound) return; const el=wrap(); if(!el){ setTimeout(bind,250); return; } el.querySelectorAll('.sbox-q').forEach(btn=> btn.addEventListener('click',()=>ask(btn.textContent?.trim()||'Question'))); bound=true; }
+  setTimeout(bind,0); return { show, hide, ask, _bind:bind };
+})();
+(function periodicSpiritSpeech(){ function tick(){ try{ const cam=scene.activeCamera; const g=ghost?.position||BABYLON.Vector3.Zero();
+  if(SpiritBoxAudio.isOn() && (typeof ghostHasEvidence!=='function' || ghostHasEvidence('spiritbox')) && cam){ const d=BABYLON.Vector3.Distance(cam.position,g); if(d<5.5 && Math.random()<0.01) SpiritBoxAudio.speak(); } }catch(_){}
+  setTimeout(tick,850);} setTimeout(tick,1200);})();
+</script>
+
+</body>
+</html>
