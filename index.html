@@ -2052,22 +2052,9 @@ const DOTS = window.DOTS || { projectors:[], monitorPlane:null, tripod:null, mon
     });
   }
 
-  function updateDOTS(dt){
-    // cooldown decay
-    for (const p of DOTS.projectors) if (p.cooldown > 0) p.cooldown = Math.max(0, p.cooldown - dt);
-
-    const hit = _ghostInsideAnyDots(); if (!hit) return;
-    if (!(typeof ghostHasEvidence === 'function' ? ghostHasEvidence('dots') : true)) return;
-
-    const isGoryo = ((ghost?.type||'').toLowerCase() === 'goryo');
-    const hasCamInRoom = !!DOTS.tripod && BABYLON.Vector3.Distance(DOTS.tripod.position, hit.node.position) < 6.5;
-
-    if (isGoryo){
-      if (hasCamInRoom){
-        _showDotsApparition(ghost?.position, true);
-        hit.cooldown = 3.0; // prevent spam
-      }
-    } else {
+  
+<!-- removed DOTS -->
+} else {
       _showDotsApparition(ghost?.position, false);
       hit.cooldown = 3.0;
     }
@@ -2674,7 +2661,7 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
       scale: 1.0,
       rotationY: 0,
       offset: {x:0,y:0,z:0},
-      spawn: {x:-46.18,y:1.35,z:-105.5},
+      spawn: {x:-46.18,y:1.35,z:-105.50},
       exteriorMode: "exterior",
       exterior: []
     };
@@ -3479,26 +3466,9 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 
 
 <!-- PATCH: Safe DOTS hook -->
-<script>
-(function hookDotsLoop(){
-  var hooked = false;
-  function tryHook(){
-    var s = (window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0])) || null;
-    if (!s || !s.onBeforeRenderObservable) return false;
-    if (hooked) return true;
-    hooked = true;
-    s.onBeforeRenderObservable.add(function(){
-      var dt = ((window.ENGINE && ENGINE.getDeltaTime && ENGINE.getDeltaTime()) || 16.7) / 1000;
-      try { if (typeof updateDOTS === "function") updateDOTS(dt); } catch(e){}
-    });
-    return true;
-  }
-  if (!tryHook()){
-    var id = setInterval(function(){ if (tryHook()) clearInterval(id); }, 120);
-    setTimeout(function(){ try { clearInterval(id); } catch(e){} }, 15000);
-  }
-})();
-</script>
+
+<!-- removed DOTS -->
+
 
 </body>
 
@@ -3790,81 +3760,107 @@ function localToWorld(p, def){
 })();
 </script>
     
-<!-- Auto-closed unbalanced <div> from line 3419 -->
-</div>
-
-<!-- Auto-closed unbalanced <div> id='pp-storage' from line 3418 -->
-</div>
-
-<!-- PATCH: Reference fixups (non-destructive) -->
+<!-- PATCH: FrameBus (replaces DOTS; updateDOTS kept as no-op) -->
 <script>
 (function(){
-  function ensure(parent, tag, id, attrs){
-    var d = document.getElementById(id);
-    if (d) return d;
-    d = document.createElement(tag);
-    d.id = id;
-    if (attrs) for (var k in attrs) try{ d.setAttribute(k, attrs[k]); }catch(e){}
-    (parent || document.body).appendChild(d);
-    return d;
+  window.FrameBus = window.FrameBus || {
+    _fns: [], add(fn){ if (typeof fn === "function") this._fns.push(fn); },
+    tick(dt){ for (var i=0;i<this._fns.length;i++){ try{ this._fns[i](dt); }catch(e){} } }
+  };
+  window.updateDOTS = function(){}; // no-op to satisfy any old calls
+  function hook(){
+    var s = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
+    if (!s || !s.onBeforeRenderObservable) { setTimeout(hook, 120); return; }
+    s.onBeforeRenderObservable.add(function(){
+      var eng = (s.getEngine && s.getEngine()) || window.ENGINE;
+      var dt = ((eng && eng.getDeltaTime) ? eng.getDeltaTime() : 16.7) / 1000;
+      try { FrameBus.tick(dt); } catch(e){}
+    });
   }
-  function ready(fn){
-    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn, {once:true});
-    else fn();
-  }
-  ready(function(){
-    var loading = document.getElementById("loading-box") || document.body;
-    var title   = document.getElementById("title-screen") || document.body;
-
-    // Loading UI bits
-    ensure(loading, "div", "status");
-    ensure(loading, "div", "bar");
-    ensure(loading, "div", "fill");
-
-    // Start buttons expected by scripts
-    ensure(title, "button", "startBtn");
-    ensure(title, "button", "start-investigation");
-
-    // Canvas alias so code referencing #gameCanvas won't crash
-    ensure(document.body, "canvas", "gameCanvas", { width: "1280", height: "720", style: "display:none" });
-
-    // Inspector host used by Babylon's inspector if referenced
-    ensure(document.body, "div", "inspector-host", { style: "display:none" });
-  });
+  hook();
 })();
 </script>
 
-<!-- PATCH: Safe DOTS hook (waits for real scene, no nulls) -->
+<!-- PATCH: Spawn Enforcer -->
 <script>
-(function hookDotsLoop(){
-  let hooked=false, tries=0;
-  function getScene(){
-    return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
-  }
-  function tryHook(){
-    const s=getScene();
-    if(!s||!s.onBeforeRenderObservable) return false;
-    if(hooked||s.__dotsHooked) return true;
-    hooked=s.__dotsHooked=true;
-    s.onBeforeRenderObservable.add(function(){
-      let dtMs=16.7;
-      try{ const eng=(s.getEngine&&s.getEngine())||window.ENGINE; if(eng&&eng.getDeltaTime) dtMs=eng.getDeltaTime(); }catch(_){}
-      try{ if(typeof updateDOTS==="function") updateDOTS(dtMs/1000); }catch(_){}
-    });
+(function(){
+  var SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
+  var start = (typeof performance!=="undefined" ? performance.now() : Date.now());
+  function force(){
+    var s = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
+    var cam = window.camera || (s && s.activeCamera) || null;
+    if (!s || !cam) return false;
+    try{
+      if (cam.position && cam.position.copyFrom) {
+        cam.position.copyFrom(SPAWN);
+      } else if (cam.setPosition) {
+        cam.setPosition(SPAWN);
+      }
+      if (cam.setTarget) {
+        try { cam.setTarget(cam.position.add(new BABYLON.Vector3(0,1,2))); } catch(_){}
+      }
+    }catch(e){}
     return true;
   }
-  (function wait(){
-    if(tryHook()) return;
-    if(++tries>150) { console.warn("DOTS: scene never ready"); return; }
-    setTimeout(wait,100);
-  })();
+  function loop(){
+    var now = (typeof performance!=="undefined" ? performance.now() : Date.now());
+    var elapsed = (now - start)/1000;
+    // Keep enforcing for first ~5 seconds to beat async map spawns
+    if (elapsed < 5){
+      if (!force()) { /* scene not ready yet */ }
+      setTimeout(loop, 150);
+    } else {
+      force(); // final snap
+    }
+  }
+  loop();
+})();
+</script>
+
+<!-- PATCH: Audio Bootstrap -->
+<script>
+(function(){
+  function unlock(){
+    try {
+      if (BABYLON && BABYLON.Engine && BABYLON.Engine.audioEngine && BABYLON.Engine.audioEngine.unlock) {
+        BABYLON.Engine.audioEngine.unlock();
+      }
+      var a = new Audio();
+      a.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABYAAAABAAACAgAAAAAAAAAAA";
+      a.muted = true; a.play().catch(function(){});
+    } catch(e) {}
+    window.removeEventListener("pointerdown", unlock, true);
+    window.removeEventListener("keydown", unlock, true);
+  }
+  window.addEventListener("pointerdown", unlock, true);
+  window.addEventListener("keydown", unlock, true);
+
+  if (window.BABYLON && BABYLON.Sound && !BABYLON.__SoundWrapped) {
+    BABYLON.__SoundWrapped = true;
+    var Orig = BABYLON.Sound;
+    BABYLON.Sound = function(name, urlOrArrayBuffer, sceneOrEngine, onReady, options){
+      var s = sceneOrEngine || window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
+      var opts = options || {}; if (opts.autoplay === undefined) opts.autoplay = false;
+      try {
+        var snd = new Orig(name, urlOrArrayBuffer, s, onReady, opts);
+        // helpful logs
+        try { console.log("[AUDIO] created", name || urlOrArrayBuffer); } catch(e){}
+        return snd;
+      } catch(e) {
+        try { console.warn("[AUDIO] create failed; will retry", name, e); } catch(_){}
+        setTimeout(function(){
+          try { new Orig(name, urlOrArrayBuffer, (window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||s), onReady, opts); } catch(__){}
+        }, 500);
+        return { play: function(){}, stop: function(){} };
+      }
+    };
+  }
 })();
 </script>
 
 <!-- PATCH: Global engine/scene aliases -->
 <script>
 (function(){
-  // Try to pick up existing engine/scene instances and expose globals for code that expects them.
   function tick(){
     try{
       if (!window.ENGINE && window.BABYLON && BABYLON.Engine && BABYLON.Engine.Instances && BABYLON.Engine.Instances[0]) {
@@ -3875,33 +3871,12 @@ function localToWorld(p, def){
         else if (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) window.SCENE = ENGINE.scenes[0];
       }
       if (window.ENGINE && window.SCENE) return true;
-    }catch(e){}
+    } catch(e) {}
     return false;
   }
-  if (!tick()){
-    const id=setInterval(()=>{ if (tick()) clearInterval(id); }, 200);
-    setTimeout(()=>{ try{clearInterval(id);}catch(e){} }, 12000);
-  }
-})();
-</script>
-
-<!-- PATCH: Injected spawn override -->
-<script>
-(function(){
-  const target = new BABYLON.Vector3(-46.18, 1.35, -105.50);
-  function apply(){
-    try{
-      if (window.camera && camera.position) {
-        camera.position.copyFrom(target);
-        if (camera.setTarget) camera.setTarget(camera.position.add(new BABYLON.Vector3(0,1,2)));
-        return true;
-      }
-    }catch(e){}
-    return false;
-  }
-  if (!apply()){
-    const id=setInterval(()=>{ if (apply()) clearInterval(id); }, 200);
-    setTimeout(()=>{ try{clearInterval(id);}catch(e){} }, 12000);
+  if (!tick()) {
+    var id = setInterval(function(){ if (tick()) clearInterval(id); }, 200);
+    setTimeout(function(){ try{clearInterval(id);}catch(e){} }, 12000);
   }
 })();
 </script>
