@@ -2428,5 +2428,303 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
 <!-- === /Ghost System ============================================================ -->
 
+
+<!-- ======================================================================
+     ANNOTATED FIX BLOCK (non-destructive overrides, safe to remove later)
+     ----------------------------------------------------------------------
+     Why this exists:
+
+     1) Fixes the "Failed to load map config: ./Abandoned_House.glb" class of errors
+        by NEVER treating a .glb as a JS config. We sanitize 'def' values and normalize
+        all paths into ./assets/models/map/ (the repo's canonical map dir).
+
+     2) Normalizes relative paths like "./assets/map/..." → "./assets/models/map/..."
+        and bare basenames → "./assets/models/map/<name>".
+
+     3) Ensures SceneLoader.ImportMeshAsync always addresses the GLB from the map dir,
+        even if the manifest provided "./Abandoned_House.glb" or "./assets/map/...".
+
+     4) Keeps your original code untouched. We REDEFINE functions later in the DOM so
+        your build continues to work, but with safer behavior and richer diagnostics.
+   ====================================================================== -->
+<script>
+(function AnnotatedMapFix(){
+  const log = (...a)=>console.log("%c[MapFix]","color:#0ff",...a);
+  const warn = (...a)=>console.warn("%c[MapFix]","color:#fb5",...a);
+  const MAP_DIR = "./assets/models/map/";
+
+  // ---------- Path tools ----------
+  function normPath(p){
+    if (!p) return p;
+    if (/^https?:\/\//i.test(p)) return p;                          // leave URLs alone
+    if (p.startsWith(MAP_DIR)) return p;                             // already canonical
+    if (p.startsWith("./assets/map/")) return p.replace("./assets/map/","./assets/models/map/");
+    if (p.startsWith("./")) return MAP_DIR + p.replace(/^\.\/+/,""); // "./foo.js" -> "./assets/models/map/foo.js"
+    if (p.startsWith("/")) return p;                                 // absolute (leave it)
+    return MAP_DIR + p;                                              // bare filename -> canonical
+  }
+  function fileBaseNoExt(file){ return (file||"").replace(/^.*[\\/]/,"").replace(/\.[^.]+$/,""); }
+  function fileJustName(file){ return (file||"").replace(/^.*[\\/]/,""); }
+
+  // ---------- Safe loader helper (re-use existing if present) ----------
+  window.loadScriptOnce = window.loadScriptOnce || function loadScriptOnce(src){
+    return new Promise((resolve)=>{
+      const s=document.createElement("script");
+      s.src=src; s.onload=()=>resolve(true); s.onerror=()=>resolve(false);
+      document.head.appendChild(s);
+    });
+  };
+
+  // ---------- OVERRIDE: strict map-def resolver ----------
+  window.loadMatchingMapDef = async function(mapFile, explicitDef){
+    const base = fileBaseNoExt(mapFile);
+    let def = explicitDef;
+
+    // Ignore any accidental .glb passed as config:
+    if (def && /\.glb(\?.*)?$/i.test(def)) {
+      warn("Manifest 'def' was a GLB; ignoring:", def);
+      def = "";
+    }
+
+    // Candidate list (deduped later, then normalized to MAP_DIR)
+    const cand = [];
+    if (def) cand.push(def);
+    if (base) {
+      cand.push(base + ".js");
+      cand.push(base + ".config.js");
+    }
+    const low = (mapFile||"").toLowerCase();
+    if (low.includes("abandoned")) cand.push("Abandoned_House.js");
+    if (low.includes("furnished")) cand.push("furnished_house.config.js");
+
+    const tried = new Set();
+    const ordered = cand.map(normPath).filter(c=>!!c && !tried.has(c) && (tried.add(c) || true));
+
+    log("Trying map-def candidates:", ordered);
+    let loadedAny = false;
+    for (const src of ordered){
+      const ok = await window.loadScriptOnce(src);
+      if (ok && window.MAP_DEF){
+        log("Loaded map-def:", src, "→", window.MAP_DEF?.name || "(unnamed)");
+        loadedAny = true; break;
+      }
+    }
+    if (!loadedAny){
+      warn("No map-def found for", mapFile, "Candidates:", ordered);
+      window.MAP_DEF = undefined;
+    }
+  };
+
+  // ---------- OVERRIDE: strict map mesh import ----------
+  window.loadSelectedMap = async function(){
+    const map = (window.CURRENT_MAP = (typeof getSelectedMap==="function") ? getSelectedMap() : (window.MAP_FILES?.[0]||null));
+    const rawFile = map?.file || "Abandoned_House.glb";
+    const fileNameOnly = fileJustName(rawFile); // strip leading ./ or paths
+    const safeFile = fileNameOnly || "Abandoned_House.glb";
+
+    // Load map-def (JS) if available
+    try {
+      log("Loading map definition for:", rawFile, "explicit def:", map?.def);
+      await window.loadMatchingMapDef(rawFile, map?.def);
+    } catch(e){ warn("loadMatchingMapDef threw; continuing without a map-def.", e); }
+
+    // Load GLB mesh (always from MAP_DIR, using filename only)
+    try {
+      log("Importing GLB:", MAP_DIR + safeFile);
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", MAP_DIR, safeFile, scene);
+      window.houseRoot = res.meshes[0] || res.meshes.find(m=>m.name==="__root__") || null;
+      try{
+        res.meshes.forEach(m=>{ m.receiveShadows = true; });
+      }catch(_){}
+      if (window.sunShadows) res.meshes.forEach(m=>{ try{ sunShadows.addShadowCaster(m,true); } catch(_){} });
+      if (window.moonShadows) res.meshes.forEach(m=>{ try{ moonShadows.addShadowCaster(m,true);} catch(_){} });
+    } catch(e){
+      warn("Map GLB import failed; building flat-ground fallback.", e);
+      const g = BABYLON.MeshBuilder.CreateGround("fallback",{width:180,height:180},scene);
+      g.checkCollisions=true; g.receiveShadows=true;
+      try{ sunShadows?.addShadowCaster(g,true); moonShadows?.addShadowCaster(g,true);}catch(_){}
+    }
+  };
+
+  log("Annotated map fixes installed.");
+})();
+</script>
+
+<!-- ======================================================================
+     OPTIONAL: inline developer tips visible in DevTools only
+   ====================================================================== -->
+<script>
+  (function devTips(){
+    try { console.log("%c[Tips]","color:#9ef",
+      "• Map manifest is read from ./assets/models/map/maps.json",
+      "\\n• You can set window.CURRENT_MAP = {file:'furnished_house.glb', def:'furnished_house.config.js'} and call loadSelectedMap()",
+      "\\n• If you ever see 'Failed to load map config: <x>.glb' again, the override above guards against it."
+    ); } catch(e){}
+  })();
+</script>
+
+
+<!-- === Appended: PhasmaPhoney Ghost System (namespaced, non-destructive) === -->
+<script id="pp-ghosts">
+(function(){
+  if (window.__PP_GHOST && window.__PP_GHOST.__loaded) return;
+  const log = (...a)=>console.log("[Ghost]",...a);
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const rng = Math.random;
+  const pick = (arr)=>arr[(Math.random()*arr.length)|0];
+  const now = ()=>performance.now();
+
+  // ----- Profiles (evidence + rules)
+  const GHOSTS = [
+    {name:"Spirit",      ev:["emf","writing","spiritbox"], rules:{smudgeCooldown:180}},
+    {name:"Wraith",      ev:["emf","spiritbox","dots"],    rules:{wraithNoSalt:true}},
+    {name:"Phantom",     ev:["spiritbox","uv","dots"],     rules:{photoVanish:true}},
+    {name:"Poltergeist", ev:["spiritbox","uv","writing"],  rules:{throwAggro:true}},
+    {name:"Banshee",     ev:["uv","dots","orbs"],          rules:{targetsOne:true}},
+    {name:"Jinn",        ev:["emf","uv","freezing"],       rules:{breakerBoost:true}},
+    {name:"Mare",        ev:["spiritbox","orbs","writing"],rules:{lightAverse:true}},
+    {name:"Revenant",    ev:["freezing","orbs","writing"], rules:{revChase:true}},
+    {name:"Shade",       ev:["emf","freezing","writing"],  rules:{noActivityNearPlayer:true}},
+    {name:"Demon",       ev:["uv","freezing","writing"],   rules:{lowHuntCooldown:true}},
+    {name:"Yurei",       ev:["freezing","orbs","dots"],    rules:{smudgeRoomLock:5}},
+    {name:"Oni",         ev:["emf","freezing","dots"],     rules:{noMist:true, lessBlink:true}},
+    {name:"Hantu",       ev:["uv","orbs","freezing"],      rules:{coldSpeed:true}},
+    {name:"Yokai",       ev:["spiritbox","orbs","dots"],   rules:{talkAggro:true}},
+    {name:"Goryo",       ev:["emf","uv","dots"],           rules:{dotsCameraOnly:true}},
+    {name:"Myling",      ev:["emf","uv","writing"],        rules:{footstepsQuiet:true}},
+    {name:"Onryo",       ev:["spiritbox","orbs","freezing"], rules:{fireRule:true}},
+    {name:"The Twins",   ev:["emf","freezing","spiritbox"], rules:{twinsDual:true}},
+    {name:"Raiju",       ev:["emf","orbs","dots"],         rules:{electronicsSpeed:true}},
+    {name:"Obake",       ev:["emf","uv","orbs"],           rules:{uvFail30:true, shapeShift:true}},
+    {name:"The Mimic",   ev:["spiritbox","uv","freezing","orbs"], rules:{mimic:true}},
+    {name:"Moroi",       ev:["spiritbox","writing","freezing"], rules:{sanitySpeed:true, longSmudgeStun:7.5}},
+    {name:"Deogen",      ev:["spiritbox","writing","dots"], rules:{alwaysTrack:true, closeSlow:true}},
+    {name:"Thaye",       ev:["orbs","writing","dots"],     rules:{ages:true}},
+    {name:"Succubus",    ev:["spiritbox","writing","orbs"],rules:{charmClose:true}}
+  ];
+
+  // ----- Module state
+  const CTRL = {
+    scene:null, root:null, mesh:null, profile:null,
+    state:{ hunting:false, visible:false, nextEventAt:0, smudgeBlockUntil:0, ageTier:0, lastMimicAt:0 },
+    params:{ baseSpeed:1.7, huntMs:30000, bloodMoon:false }
+  };
+
+  const AudioFX = {
+    hb: "./assets/audio/gameKilled.mp3",
+    whisper: "./assets/audio/whisper.mp3",
+    slam: "./assets/audio/doorSlam2.mp3",
+    creak: "./assets/audio/doorCreak1.mp3",
+    toss: "./assets/audio/Toss.wav"
+  };
+  function play(path, vol=0.8){
+    try{ const a=new Audio(path); a.volume=clamp(vol,0,1); a.play().catch(()=>{}); return a; }catch(e){ return null; }
+  }
+
+  // ----- Helpers
+  function targetPos(){
+    if (window.player && player && player.position) return player.position.clone?.() || new BABYLON.Vector3(player.position.x, player.position.y, player.position.z);
+    if (CTRL.scene?.activeCamera) return CTRL.scene.activeCamera.position;
+    return new BABYLON.Vector3(0,1.7,0);
+  }
+  function setVisible(v){ CTRL.state.visible=!!v; CTRL.root && CTRL.root.setEnabled(CTRL.state.visible); }
+  function scheduleEvent(msMin=8000,msMax=22000){ CTRL.state.nextEventAt = performance.now() + (msMin + Math.random()*(msMax-msMin)); }
+
+  // ----- Mesh
+  async function loadMesh(scene){
+    const files=["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
+    try{
+      const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", files[(Math.random()*files.length)|0], scene);
+      const root = new BABYLON.TransformNode("ppGhostRoot", scene);
+      r.meshes.forEach(m=>{ if(!m.parent) m.parent=root; m.isPickable=false; });
+      root.setEnabled(false);
+      return root;
+    }catch(e){
+      const s = BABYLON.MeshBuilder.CreateSphere("ppGhostFallback",{diameter:0.6},scene);
+      s.visibility = 0; return s;
+    }
+  }
+
+  function move(dt){
+    if (!CTRL.root) return;
+    const t = targetPos();
+    const g = CTRL.root.position;
+    const dx=t.x-g.x, dz=t.z-g.z;
+    const dist = Math.hypot(dx,dz);
+    let speed = CTRL.params.baseSpeed;
+
+    const r = CTRL.profile?.rules || {};
+    if (CTRL.state.hunting){
+      if (r.revChase && dist>3) speed = Math.max(speed,3.0);
+      if (r.breakerBoost && window.__POWER_ON && dist>3) speed = Math.max(speed,2.5);
+      if (r.electronicsSpeed && window.__ELECTRONICS_ACTIVE) speed = Math.max(speed,2.5);
+      if (r.sanitySpeed) {
+        const s = Math.max(0, Math.min(100, window.__SANITY ?? 100));
+        speed = Math.max(speed, 1.7 + (100 - s) * 0.02);
+      }
+      if (r.alwaysTrack && dist>1.8) speed = Math.max(speed, 3.0);
+      if (r.closeSlow && dist<1.8) speed = Math.min(speed, 0.45);
+      if (r.ages) speed *= (1 - Math.max(0, Math.min(0.8, CTRL.state.ageTier*0.08)));
+      if (r.coldSpeed && !window.__POWER_ON) speed = Math.max(speed,2.4);
+      if (CTRL.params.bloodMoon) speed *= 1.15;
+    } else {
+      speed = 0.6;
+    }
+    const dirx = dist>0? dx/dist:0, dirz=dist>0? dz/dist:0;
+    CTRL.root.position.x += dirx * speed * dt;
+    CTRL.root.position.z += dirz * speed * dt;
+  }
+
+  function tryEvent(){
+    if (CTRL.state.hunting || performance.now() < CTRL.state.nextEventAt) return;
+    const r = Math.random();
+    if (r < 0.25) play(AudioFX.creak,0.8);
+    else if (r < 0.5) play(AudioFX.whisper,0.75);
+    else if (r < 0.75) play(AudioFX.slam,0.8);
+    else play(AudioFX.toss,0.6);
+    setVisible(true); setTimeout(()=>setVisible(false), 1800);
+    scheduleEvent();
+  }
+
+  function canHunt(){ return performance.now() >= CTRL.state.smudgeBlockUntil; }
+  function startHunt(){
+    if (!canHunt()) return;
+    CTRL.state.hunting = true; setVisible(true); play(AudioFX.hb,0.9);
+    setTimeout(stopHunt, CTRL.params.huntMs);
+  }
+  function stopHunt(){ CTRL.state.hunting = false; setVisible(false); scheduleEvent(4000,9000); }
+  function smudge(){ const r=CTRL.profile?.rules||{}; const block = r.smudgeCooldown ? r.smudgeCooldown : 90; CTRL.state.smudgeBlockUntil = performance.now() + block*1000; }
+
+  function update(){
+    const dt = (CTRL.scene?.getEngine()?.getDeltaTime()||16)/1000;
+    move(dt); tryEvent();
+  }
+
+  async function init(scene){
+    CTRL.scene = scene;
+    CTRL.profile = (GHOSTS[(Math.random()*GHOSTS.length)|0]);
+    CTRL.root = await loadMesh(scene);
+    CTRL.root.position = new BABYLON.Vector3(0,1.6,0);
+    CTRL.root.setEnabled(false);
+    scheduleEvent(5000,12000);
+    scene.onBeforeRenderObservable.add(update);
+    log("Ready as", CTRL.profile.name);
+  }
+
+  window.__PP_GHOST = { init, startHunt, stopHunt, smudge, CTRL, GHOSTS, __loaded:true };
+
+  if (window.scene || (window.engine && engine.scenes && engine.scenes[0])) {
+    const sc = window.scene || (engine.scenes && engine.scenes[0]);
+    if (sc) init(sc);
+  } else {
+    window.addEventListener("load", ()=>{
+      const sc = window.scene || (window.engine && engine.scenes && engine.scenes[0]);
+      sc && init(sc);
+    }, {once:true});
+  }
+})();
+</script>
+<!-- === /Ghost System ============================================================ -->
+
 </body>
 </html>
