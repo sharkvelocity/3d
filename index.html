@@ -3763,6 +3763,7 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
 
 
+
 <!-- PATCH: Global Third-Person Toggle helper -->
 <script>
 (function(){
@@ -3770,6 +3771,14 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   const S=()=>window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null;
   window.S = S;
   const isArc=c=>c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
+
+  function whenSceneReady(cb){
+    (function tick(){
+      const s=S();
+      if (s && s.activeCamera){ try{ cb(s); }catch(_){ } return; }
+      requestAnimationFrame(tick);
+    })();
+  }
 
   function ensureRig(s){
     if (!s) return null;
@@ -3803,7 +3812,13 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   }
 
   window.toggleThirdPerson = function(){
-    const s=S(); if(!s) return;
+    const s=S();
+    if (!s || !s.activeCamera){
+      // queue until scene exists
+      window.__tpPending = true;
+      whenSceneReady(()=>{ if (window.__tpPending){ window.__tpPending=false; window.toggleThirdPerson(); }});
+      return;
+    }
     const {fps,arc}=ensureCams(s);
     s.activeCamera = isArc(s.activeCamera) ? fps : arc;
     try{ s.activeCamera.attachControl(canvas(), true);}catch(_){}
@@ -3816,6 +3831,29 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   // both capture & bubble to be resilient
   window.addEventListener('keydown', keyHandler, false);
   document.addEventListener('keydown', keyHandler, true);
+
+  // If user pressed V before scene existed, auto-run toggle when scene becomes ready
+  whenSceneReady(()=>{ if (window.__tpPending){ window.__tpPending=false; window.toggleThirdPerson(); }});
+})();
+</script>
+
+
+<script>
+// PATCH: one-time spawn enforce after scene starts
+(function(){
+  var SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  var done=false;
+  function tick(){
+    var s=S();
+    if (!s || !s.activeCamera){ requestAnimationFrame(tick); return; }
+    if (done) return;
+    try{
+      if (s.__playerBody){ s.__playerBody.position = SPAWN.clone(); done=true; }
+    }catch(_){}
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 })();
 </script>
 </body>
