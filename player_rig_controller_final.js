@@ -1,24 +1,21 @@
 
 (function(){ 'use strict';
-  if (window.__rigFinal) return; window.__rigFinal = true;
+  if (window.__rigFinal_v2) return; window.__rigFinal_v2 = true;
 
-  // --- Config ---
   const SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
   const SPEED_WALK = 1.9, SPEED_RUN = 3.3;
   const MOUSE_SENS = 0.002, TOUCH_LOOK_SENS = 0.0022;
   const PLAYER_GLB = ["assets/models/player/main_player.glb","assets/models/player/player.glb"];
 
-  // --- Helpers ---
   const canvas = () => document.getElementById('renderCanvas') || document.querySelector('canvas');
   function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
   window.S = S;
   const isArc = c => c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
   const clamp = (v,a,b)=>Math.min(Math.max(v,a),b);
+  const UP = new BABYLON.Vector3(0,1,0);
 
-  // --- Input state ---
   const K = {w:0,a:0,s:0,d:0,run:false};
 
-  // --- Key input (capture + bubble + canvas) ---
   function keyDown(e){
     const k=(e.key||'').toLowerCase(), c=e.keyCode||0, code=e.code||'';
     if(k==='w'||c===87)K.w=1; else if(k==='a'||c===65)K.a=1; else if(k==='s'||c===83)K.s=1; else if(k==='d'||c===68)K.d=1; else if(k==='shift'||c===16)K.run=true;
@@ -33,7 +30,6 @@
   document.addEventListener('keydown', keyDown, true);
   document.addEventListener('keyup',   keyUp,   true);
 
-  // --- Mouse look for FP ---
   (function(){
     const c = canvas(); if(!c) return;
     c.setAttribute('tabindex','0');
@@ -48,7 +44,6 @@
     }, true);
   })();
 
-  // --- Touch (left=move, right=look) ---
   (function(){
     let leftId=null,rightId=null,lx=0,ly=0,rx=0,ry=0;
     addEventListener('touchstart', e=>{
@@ -86,7 +81,6 @@
     }, {passive:true});
   })();
 
-  // --- Rig + Cameras ---
   function ensureRig(s){
     if (!s.__playerBody){
       const body = BABYLON.MeshBuilder.CreateCapsule('player_capsule',{height:1.8,radius:0.35,tessellation:8,capSubdivisions:4},s);
@@ -118,7 +112,6 @@
     return {fps, arc};
   }
 
-  // --- Visible player mesh (feet visible) ---
   async function ensurePlayerMesh(s){
     if (s.__playerMesh) return s.__playerMesh;
     for (const p of PLAYER_GLB){
@@ -135,27 +128,36 @@
     return null;
   }
 
-  // --- Movement loop ---
-  function fwd(cam){ try{ const v=cam.getDirection(BABYLON.Axis.Z); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(0,0,1); } }
-  function right(cam){ try{ const v=cam.getDirection(BABYLON.Axis.X); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(1,0,0); } }
+  function forwardOnXZ(cam){
+    const front = cam.getFrontPosition(1);
+    const f = front.subtract(cam.position);
+    f.y = 0; if (f.length() > 0.0001) f.normalize();
+    return f;
+  }
+  function rightOnXZ(cam){
+    const f = forwardOnXZ(cam);
+    const r = BABYLON.Vector3.Cross(UP, f);
+    if (r.length() > 0.0001) r.normalize();
+    return r;
+  }
 
   function attachLoop(s){
-    if (s.__rigLoopFinal) return; s.__rigLoopFinal = true;
+    if (s.__rigLoopFinal_v2) return; s.__rigLoopFinal_v2 = true;
     s.onNewCameraAddedObservable.add(()=>{ const f=s.getCameraByName('FPCam'); if (f) s.activeCamera=f; });
     s.onBeforeRenderObservable.add(function(){
-      // ENFORCE OUR CAMERA
       if (s.activeCamera && s.activeCamera.name!=='FPCam' && s.activeCamera.name!=='TPCam'){
         const f=s.getCameraByName('FPCam'), t=s.getCameraByName('TPCam'); s.activeCamera = f || t || s.activeCamera;
       }
       const cam=s.activeCamera; if(!cam) return;
       const body=s.__playerBody; if(!body) return;
-      // movement
+
       let v=new BABYLON.Vector3(0,0,0);
-      const fw=fwd(cam), rt=right(cam);
+      const fw=forwardOnXZ(cam), rt=rightOnXZ(cam);
       if (K.w) v.addInPlace(fw);
       if (K.s) v.addInPlace(fw.scale(-1));
       if (K.d) v.addInPlace(rt);
       if (K.a) v.addInPlace(rt.scale(-1));
+
       const len=v.length();
       if (len>0){
         v.scaleInPlace(1/len);
@@ -168,7 +170,6 @@
     });
   }
 
-  // --- Toggle FP <-> TP ---
   function doToggle(){
     const s=S(); if(!s) return;
     const {fps,arc} = ensureRig(s); if (!fps||!arc) return;
@@ -188,11 +189,10 @@
     doToggle();
   };
 
-  // --- Ready gate ---
   function whenReady(cb){ (function tick(){ const s=S(); if (s && s.activeCamera){ try{ cb(s); }catch(_){ } return; } requestAnimationFrame(tick); })(); }
   whenReady(async function(s){
     const cams = ensureRig(s);
-    s.activeCamera = cams.fps; window.camera = cams.fps; // force our camera
+    s.activeCamera = cams.fps; window.camera = cams.fps;
     attachLoop(s);
     await ensurePlayerMesh(s);
     if (!s.__spawnDone){ s.__playerBody.position = SPAWN.clone(); s.__spawnDone = true; }
