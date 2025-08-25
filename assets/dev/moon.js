@@ -1,42 +1,29 @@
-/* assets/dev/moon.js — Apply external moon.jpg texture to moon.glb */
+// moon.js
+// Renders a visible billboarded moon using ./assets/textures/moon.jpg
+
 (function(){
-  function S(){ 
-    return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]); 
+  'use strict';
+  if (window.__MoonReady) return; window.__MoonReady = true;
+
+  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
+
+  function createMoon(){
+    const s=SCENE(); if (!s) { setTimeout(createMoon, 120); return; }
+    const MOON_DIAM = 18;
+    const MOON_POS  = new BABYLON.Vector3(0, 120, 160);
+
+    const disc = BABYLON.MeshBuilder.CreateDisc('MoonMesh',{radius:MOON_DIAM*0.5, tessellation:64}, s);
+    disc.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    disc.isPickable = false; disc.applyFog = false; disc.renderingGroupId = 2;
+
+    const mat = new BABYLON.StandardMaterial('moonMat', s);
+    mat.diffuseTexture = new BABYLON.Texture('./assets/textures/moon.jpg', s, true, false);
+    mat.emissiveTexture = mat.diffuseTexture;
+    mat.emissiveColor = new BABYLON.Color3(1,1,1);
+    mat.specularColor = new BABYLON.Color3(0,0,0);
+    mat.backFaceCulling = false;
+    disc.material = mat;
+    disc.position.copyFrom(MOON_POS);
   }
-
-  function applyMoonTexture(scene){
-    if (!scene) return;
-    try {
-      // Load the moon.jpg from your textures folder
-      const moonTex = new BABYLON.Texture("./assets/textures/moon.jpg", scene);
-
-      // Get the material by name (from moon.glb)
-      const mat = scene.getMaterialByName("Sphere_Material.002_0");
-
-      if (mat) {
-        if (mat.diffuseTexture === undefined && mat.albedoTexture === undefined) {
-          // If the material is just a plain PBR/Standard without a texture yet
-          mat.diffuseTexture = moonTex;
-        } else if (mat.albedoTexture !== undefined) {
-          // PBRMaterial
-          mat.albedoTexture = moonTex;
-        } else {
-          // StandardMaterial
-          mat.diffuseTexture = moonTex;
-        }
-        console.log("[moon.js] Applied moon.jpg to Sphere_Material.002_0");
-      } else {
-        console.warn("[moon.js] Could not find Sphere_Material.002_0 in scene");
-      }
-    } catch(e){
-      console.error("[moon.js] Error applying moon texture:", e);
-    }
-  }
-
-  // Attach to Babylon scene lifecycle
-  window.addEventListener("DOMContentLoaded", ()=>{
-    const s = S();
-    if (!s) return;
-    s.executeWhenReady(()=> applyMoonTexture(s));
-  });
+  createMoon();
 })();

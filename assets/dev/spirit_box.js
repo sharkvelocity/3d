@@ -1,38 +1,41 @@
-<script>
+// spirit_box.js
+// Spirit box logic + UI hook + audio stubs that rely on SoundEngine being present.
+
 (function(){
-  const SB = (window.SpiritBoxAudio = window.SpiritBoxAudio || {});
-  let scene=null, on=false, noise=null, voice=null;
+  'use strict';
+  if (window.SpiritBoxAudio) return;
 
-  function whenScene(cb){ (function w(){ if(window.scene){ cb(window.scene); } else requestAnimationFrame(w); })(); }
-  function ensure(sceneRef){
-    scene=sceneRef;
-    if (!noise) noise=new BABYLON.Sound('sb_noise','./assets/audio/static.mp3', scene, null, { loop:true, autoplay:false, volume:0.35 });
-    if (!voice) voice=new BABYLON.Sound('sb_voice','./assets/audio/ghostVoice.mp3', scene, null, { loop:false, autoplay:false, volume:0.9, spatialSound:true, maxDistance:25, refDistance:2 });
-  }
-  SB.on = function(){ if(!scene) return; try{ noise?.play(); on=true; }catch(_){ } };
-  SB.off=function(){ try{ noise?.stop(); on=false; }catch(_){ } };
-  SB.isOn=()=>on;
+  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
 
-  SB.speak=function(){
-    if (!on || !scene) return;
+  let on = false, staticSnd=null, speakSnd=null;
+
+  function ensure(){
+    const s=SCENE(); if (!s) return;
     try{
-      const cam=scene.activeCamera, gpos=(window.ghost?.position)||cam?.position||BABYLON.Vector3.Zero();
-      voice?.setPosition?.(gpos); voice?.stop?.(); voice?.play?.();
+      staticSnd = staticSnd || new BABYLON.Sound('sbox_static','./assets/audio/spiritbox_static.mp3', s, null, { loop:true, autoplay:false, volume:0.35 });
+      speakSnd  = speakSnd  || new BABYLON.Sound('sbox_voice','./assets/audio/spiritbox_voice.mp3',  s, null, { loop:false, autoplay:false, volume:0.9 });
     }catch(_){}
-  };
-
-  function nearGhost(){
-    try{
-      const cam=scene.activeCamera, gpos=(window.ghost?.position)||BABYLON.Vector3.Zero();
-      return cam ? BABYLON.Vector3.Distance(cam.position,gpos)<5.5 : false;
-    }catch(_){ return false; }
   }
-  window.askSpiritBox = function(text){
-    if (!on) return;
-    const ok = (typeof ghostHasEvidence!=='function' || ghostHasEvidence('spiritbox')) && nearGhost() && Math.random()<0.20;
-    if (ok) SB.speak(); else try{ toast?.(`...static... "${text||'Question'}"`); }catch(_){}
-  };
 
-  whenScene(ensure);
+  const API = {};
+  API.on = function(){ ensure(); try{ staticSnd?.play(); on=true; }catch(_){ on=true; } };
+  API.off = function(){ try{ staticSnd?.stop(); }catch(_){ } on=false; };
+  API.isOn = function(){ return on; };
+  API.speak = function(){ ensure(); try{ speakSnd?.stop(); speakSnd?.play(); }catch(_){} };
+
+  window.SpiritBoxAudio = API;
+
+  // Optional UI binding (buttons with .sbox-q class)
+  setTimeout(()=>{
+    const wrap = document.getElementById('sbox-questions'); if (!wrap) return;
+    function ask(q){
+      if (!on) return;
+      const near = true; // simplified; hook to ghost distance if needed
+      const ok = (window.ghostHasEvidence? ghostHasEvidence('spiritbox') : true) && near && Math.random()<0.25;
+      if (ok) API.speak();
+    }
+    wrap.querySelectorAll('.sbox-q').forEach(btn=>{
+      btn.addEventListener('click', ()=> ask(btn.textContent?.trim()||'Question'));
+    });
+  }, 0);
 })();
-</script>

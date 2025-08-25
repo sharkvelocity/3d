@@ -1,92 +1,90 @@
-<script>
+// ghost_logic.js
+// Minimal, deterministic-safe ghost wander + events, integrates with EMF/DOTS/SpiritBox etc.
+
 (function(){
-  // Public ghost object + API
-  const g = (window.ghost = window.ghost || {});
-  if (!(g.position instanceof BABYLON.Vector3)) g.position = new BABYLON.Vector3(0,0,0);
-  g.type = g.type || 'Spirit';
-  g.roomCenter = g.roomCenter || new BABYLON.Vector3(2,0,2);
-  g.wanderRadius = g.wanderRadius || 8;
-  g.visible = !!g.visible;
-  g.roomName = g.roomName || 'House'; // optional
+  'use strict';
+  if (window.__GhostLogicReady) return; window.__GhostLogicReady = true;
 
-  window.setGhostType = (name)=>{ g.type = String(name||'Spirit'); };
-  window.getGhostType = ()=> g.type;
+  const S = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
 
-  // Optional current room helper (used by Shade/DOTS/Writing)
-  window.currentRoomName = window.currentRoomName || function(){ return g.roomName || 'House'; };
+  const ghost = (window.ghost = window.ghost || {});
+  if (!(ghost.position instanceof BABYLON.Vector3)) ghost.position = new BABYLON.Vector3(0, 0, 0);
+  ghost.type = ghost.type || 'Spirit';
+  ghost.mode = ghost.mode || 'idle';
+  ghost.roomCenter = ghost.roomCenter || new BABYLON.Vector3(2,0,2);
+  ghost.nearPlayer = false;
+  ghost.visible = false;
 
-  // Simple event bus
-  function emit(name, detail){
-    try{ window.dispatchEvent(new CustomEvent(name, { detail })); }catch(_){}
-  }
-
-  function whenScene(cb){ (function wait(){ if (window.scene) cb(window.scene); else requestAnimationFrame(wait); })(); }
-
-  // SFX local
-  const SFX = {};
-  function ensureSfx(scene){
-    const opt = { loop:false, autoplay:false };
+  function currentRoomName(){
     try{
-      SFX.whisper = SFX.whisper || new BABYLON.Sound('ga_whisper','./assets/audio/whisper.mp3', scene, null, { ...opt, volume:0.7 });
-      SFX.slam1   = SFX.slam1   || new BABYLON.Sound('ga_slam1','./assets/audio/doorSlam1.mp3', scene, null, { ...opt, volume:0.9 });
-      SFX.slam2   = SFX.slam2   || new BABYLON.Sound('ga_slam2','./assets/audio/doorSlam2.mp3', scene, null, { ...opt, volume:0.9 });
-      SFX.creak1  = SFX.creak1  || new BABYLON.Sound('ga_creak1','./assets/audio/doorCreak1.mp3', scene, null, { ...opt, volume:0.7 });
-      SFX.creak2  = SFX.creak2  || new BABYLON.Sound('ga_creak2','./assets/audio/doorCreak2.mp3', scene, null, { ...opt, volume:0.7 });
-      SFX.toss    = SFX.toss    || new BABYLON.Sound('ga_toss',  './assets/audio/Toss.wav',       scene, null, { ...opt, volume:0.85 });
-      SFX.radio   = SFX.radio   || new BABYLON.Sound('ga_radio', './assets/audio/Radio.mp3',      scene, null, { ...opt, volume:0.85 });
+      if (typeof window.currentRoomName==='function') return window.currentRoomName();
     }catch(_){}
+    return '';
   }
-  const randCreak = ()=>{ try{ (Math.random()<0.5?SFX.creak1:SFX.creak2)?.play(); }catch(_){} };
-  const randSlam  = ()=>{ try{ (Math.random()<0.5?SFX.slam1:SFX.slam2)?.play(); }catch(_){} };
 
-  whenScene(function(scene){
-    ensureSfx(scene);
-    let t=0, next=8+Math.random()*12, radioCD=0;
-    let wanderTarget = g.roomCenter.clone();
+  function isShadeAndPlayerInRoom(){
+    try{
+      const isShade = ((ghost?.type||'').toLowerCase()==='shade');
+      const same = !!ghost.roomName && currentRoomName()===ghost.roomName;
+      return isShade && same;
+    }catch(_){ return false; }
+  }
 
-    scene.onBeforeRenderObservable.add(()=>{
-      const dt = (scene.getEngine()?.getDeltaTime?.()||16.7)/1000;
+  let t=0, nextEvent=10+Math.random()*10;
+  let radioCooldown = 0;
+  let wanderTarget = ghost.roomCenter.clone();
 
-      // Wander
-      if (Math.random()<0.01){
+  function attachLoop(){
+    const sc=S(); if (!sc) { setTimeout(attachLoop, 120); return; }
+    const eng = sc.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
+    sc.onBeforeRenderObservable.add(()=>{
+      const dt = ((eng?.getDeltaTime?.()||16.7)/1000);
+
+      t += dt;
+      if (radioCooldown>0) radioCooldown -= dt;
+
+      // target drift
+      if (Math.random() < 0.01) {
         const dx=(Math.random()-0.5)*4, dz=(Math.random()-0.5)*4;
-        wanderTarget = g.roomCenter.add(new BABYLON.Vector3(dx,0,dz));
+        wanderTarget = ghost.roomCenter.add(new BABYLON.Vector3(dx,0,dz));
       }
-      const to = wanderTarget.subtract(g.position); to.y=0;
-      const L = to.length(); if (L>0.01) g.position = g.position.add(to.normalize().scale(Math.min(L, dt*0.6)));
 
-      // Timer
-      t += dt; if (radioCD>0) radioCD -= dt;
-      if (t >= next){
-        t=0; next=8+Math.random()*12;
+      // move
+      const dir = wanderTarget.subtract(ghost.position); dir.y=0;
+      const L = dir.length();
+      const speed = 0.6;
+      if (L>0.01) ghost.position = ghost.position.add(dir.normalize().scale(Math.min(L, dt*speed)));
 
-        const isShade = (g.type||'').toLowerCase()==='shade';
-        const sameRoom = typeof window.currentRoomName==='function' && g.roomName && currentRoomName()===g.roomName;
-        if (!(isShade && sameRoom)){
-          const r = Math.random();
-          if (r < 0.25) { try{ SFX.whisper?.stop(); SFX.whisper?.play(); }catch(_){} emit('ghost:whisper',{pos:g.position.clone()}); }
-          else if (r < 0.55) { randCreak(); emit('ghost:creak',{pos:g.position.clone()}); }
-          else if (r < 0.80) { randSlam();  emit('ghost:slam',{pos:g.position.clone()}); }
-          else { try{ SFX.toss?.stop(); SFX.toss?.play(); }catch(_){} emit('ghost:toss',{pos:g.position.clone()}); }
+      try{
+        const cam = sc.activeCamera;
+        ghost.nearPlayer = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position) < 5.0 : false;
+      }catch(_){}
+
+      if (t >= nextEvent){
+        t = 0; nextEvent = 8 + Math.random()*12;
+        if (!isShadeAndPlayerInRoom()){
+          try{
+            const r = Math.random();
+            if (r < 0.25) window.GhostAudio?.whisper?.();
+            else if (r < 0.55) window.GhostAudio?.doorCreak?.();
+            else if (r < 0.80) window.GhostAudio?.doorSlam?.();
+            else window.GhostAudio?.toss?.();
+          }catch(_){}
         }
 
-        // EMF sustain if near player
         try{
-          const cam = scene.activeCamera;
-          if (cam && window.EMFAudio?.extend){
-            const d = BABYLON.Vector3.Distance(cam.position, g.position||BABYLON.Vector3.Zero());
-            if (d < 6.0) EMFAudio.extend(10 + Math.random()*5);
+          const cam = sc.activeCamera;
+          const d = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position) : 999;
+          if (d<6.0) window.EMFAudio?.extend?.(10+Math.random()*5);
+          const inRoom = (currentRoomName() && ghost.roomName && currentRoomName()===ghost.roomName);
+          const radioChance = inRoom ? 0.45 : 0.12;
+          if (radioCooldown<=0 && Math.random()<radioChance){
+            window.RadioAudio?.playOnce?.();
+            radioCooldown = 20 + Math.random()*20;
           }
         }catch(_){}
-
-        // Occasional radio
-        if (radioCD<=0 && Math.random()<0.2){
-          try{ SFX.radio?.stop(); SFX.radio?.play(); }catch(_){}
-          radioCD = 18 + Math.random()*20;
-          emit('ghost:radio',{pos:g.position.clone()});
-        }
       }
     });
-  });
+  }
+  attachLoop();
 })();
-</script>

@@ -1,338 +1,182 @@
-/**
- * assets/dev/sound_engine.js
- * Modular audio system for Babylon.js with surface auto-detection (raycast).
- * Expanded with UI, ambient, and SFX categories.
- */
+// sound_engine.js
+// Consolidated SFX: footsteps + ghost SFX + radio + EMF tone + ambient weather
+
 (function(){
   'use strict';
+  if (window.SoundEngine) return;
 
-  const SoundEngine = window.SoundEngine = window.SoundEngine || {};
+  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
 
-  const _state = {
-    scene: null,
-    masterVolume: 0.85,
-    categories: {},
-    unlocked: false,
-    ready: false,
-  };
-
-  const BASE = "./assets/audio/";
-  const MANIFEST = {
-    footsteps: {
-      gravel: [
-        BASE + "footsteps/footstep_gravel.mp3",
-        BASE + "footsteps/footstep_gravel_2.mp3"
-      ],
-      wood: [
-        BASE + "footsteps/footstep_wood_2.mp3",
-        BASE + "footsteps/footstep_wood_3.mp3"
-      ],
-      carpet: [
-        BASE + "footsteps/footstep_carpet_2.mp3",
-        BASE + "footsteps/footstep_carpet_3.mp3"
-      ],
-      asphalt: [
-        BASE + "footsteps/footstep_asphalt_2.mp3",
-        BASE + "footsteps/footstep_asphalt_3.mp3"
-      ],
-      generic: [
-        BASE + "footsteps/footstep.mp3"
-      ]
-    },
-
-    ui: {
-      notebook: [ BASE + "notebook_open.mp3" ],
-      tarot:    [ BASE + "tarot_card_flip.mp3" ],
-      toss:     [ BASE + "Toss.wav" ]
-    },
-
-    ambient: {
-      ambient:      [ BASE + "ambient.mp3" ],
-      clearWeather: [ BASE + "clearWeather.mp3" ],
-      rain:         [ BASE + "rainstorm.mp3" ]
-    },
-
-    sfx: {
-      doorCreak:   [ BASE + "doorCreak1.mp3", BASE + "doorCreak2.mp3" ],
-      doorSlam:    [ BASE + "doorSlam1.mp3", BASE + "doorSlam2.mp3" ],
-      gameKilled:  [ BASE + "gameKilled.mp3" ],
-      ghostLaugh:  [ BASE + "ghostLaugh.mp3" ],
-      ghostWriting:[ BASE + "GhostWriting1.mp3" ],
-      radio:       [ BASE + "Radio.mp3" ],
-      spiritbox:   [ BASE + "spiritbox.mp3" ],
-      whisper:     [ BASE + "whisper.mp3" ],
-      musicBox:    [ BASE + "music_box_play.mp3" ]
+  // ----- EMF tone (WebAudio) -----
+  const EMFAudio = (function(){
+    let ctx=null, osc=null, gain=null;
+    let emf5Until = 0, running=false;
+    const MAX_EXTEND_MS = 120000;
+    function ensure(){
+      try{
+        ctx = BABYLON.Engine.audioEngine?.audioContext || ctx;
+        if(!ctx) return false;
+        if(!gain){ gain = ctx.createGain(); gain.gain.value = 0; gain.connect(ctx.destination); }
+        if(!osc){ osc = ctx.createOscillator(); osc.type='square'; osc.frequency.value=1150; osc.connect(gain); try{osc.start();}catch(_){}} 
+        return true;
+      }catch(_){ return false; }
     }
-  };
-
-  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-  function clamp(v,a,b){ return Math.min(Math.max(v,a),b); }
-  function log(){ try{ console.log("[SoundEngine]", ...arguments);}catch(_){ } }
-  function warn(){ try{ console.warn("[SoundEngine]", ...arguments);}catch(_){ } }
-
-  function unlockIfNeeded(scene){
-    if (_state.unlocked) return;
-    const audioEngine = BABYLON.Engine.audioEngine;
-    if (!audioEngine) return;
-    const handler = ()=>{
-      try{ audioEngine.unlock(); _state.unlocked = true; log("Audio unlocked"); }catch(e){ warn("Audio unlock failed", e); }
-      window.removeEventListener("pointerdown", handler, true);
-      window.removeEventListener("touchstart", handler, true);
-      window.removeEventListener("keydown", handler, true);
-    };
-    window.addEventListener("pointerdown", handler, true);
-    window.addEventListener("touchstart", handler, true);
-    window.addEventListener("keydown", handler, true);
-  }
-
-  SoundEngine.init = function(scene){
-    _state.scene = scene || S();
-    if (!_state.scene) { warn("No scene for SoundEngine.init"); return; }
-    unlockIfNeeded(_state.scene);
-
-    const categories = {};
-    Object.keys(MANIFEST).forEach(catName=>{
-      const group = MANIFEST[catName];
-      categories[catName] = {};
-      Object.keys(group).forEach(key=>{
-        const arr = group[key];
-        if (!Array.isArray(arr)) return;
-        const sounds = [];
-        arr.forEach((url)=>{
-          try{
-            const s = new BABYLON.Sound(url.split("/").pop(), url, _state.scene, null, { volume: _state.masterVolume, spatialSound: false });
-            sounds.push(s);
-          }catch(e){ warn("Failed to create sound for", url, e); }
-        });
-        categories[catName][key] = sounds;
-      });
-    });
-    _state.categories = categories;
-    _state.ready = true;
-    log("Initialized with categories:", Object.keys(categories));
-  };
-
-  SoundEngine.setVolume = function(v){ _state.masterVolume = clamp(v,0,1); SoundEngine.refreshVolumes(); };
-  SoundEngine.refreshVolumes = function(){
-    Object.values(_state.categories).forEach(group=>{
-      Object.values(group).forEach(list=>{
-        list.forEach(snd=>{ try{ snd.setVolume(_state.masterVolume); }catch(_){ } });
-      });
-    });
-  };
-  SoundEngine.mute = function(flag){
-    const val = !!flag ? 0 : _state.masterVolume || 0.85;
-    Object.values(_state.categories).forEach(group=>{
-      Object.values(group).forEach(list=>{
-        list.forEach(snd=>{ try{ snd.setVolume(val); }catch(_){ } });
-      });
-    });
-  };
-
-  // -------- Surface detection helpers --------
-  function _raycastDown(scene, origin){
-    try{
-      const o = origin || BABYLON.Vector3.Zero();
-      const ray = new BABYLON.Ray(o.add(new BABYLON.Vector3(0, 0.5, 0)), new BABYLON.Vector3(0,-1,0), 6);
-      const predicate = function(m){
-        if (!m) return false;
-        const n = (m.name||"").toLowerCase();
-        if (n.includes("player_capsule") || n.includes("player") || n.includes("rig") || n.includes("helper")) return false;
-        return m.isPickable !== false;
-      };
-      return scene.pickWithRay(ray, predicate);
-    }catch(e){ return null; }
-  }
-
-  function _surfaceFromString(s){
-    if (!s) return null;
-    s = (""+s).toLowerCase();
-    if (s.includes("wood") || s.includes("plank") || s.includes("floorboard")) return "wood";
-    if (s.includes("carpet") || s.includes("rug")) return "carpet";
-    if (s.includes("gravel") || s.includes("pebble")) return "gravel";
-    if (s.includes("asphalt") || s.includes("road") || s.includes("concrete") || s.includes("pavement")) return "asphalt";
-    if (s.includes("grass") || s.includes("dirt") || s.includes("soil") || s.includes("mud")) return "gravel";
-    if (s.includes("tile") || s.includes("stone") || s.includes("marble") || s.includes("granite")) return "asphalt";
-    if (s.includes("sand") || s.includes("beach")) return "gravel";
-    return null;
-  }
-
-  function _surfaceFromMesh(mesh){
-    if (!mesh) return null;
-    try{
-      const meta = mesh.metadata;
-      if (meta && meta.surface){
-        const v = (typeof meta.surface === "string") ? meta.surface : (meta.surface.type || meta.surface.name);
-        const m = _surfaceFromString(v);
-        if (m) return m;
-      }
-    }catch(_){}
-    const n = (mesh.name||"");
-    let m = _surfaceFromString(n);
-    if (m) return m;
-    try{
-      const matName = mesh.material && mesh.material.name;
-      m = _surfaceFromString(matName);
-      if (m) return m;
-    }catch(_){}
-    try{
-      let p = mesh.parent, hops=0;
-      while(p && hops++<3){
-        m = _surfaceFromString(p.name);
-        if (m) return m;
-        p = p.parent;
-      }
-    }catch(_){}
-    return null;
-  }
-
-  // -------- Footstep auto-trigger helper --------
-  SoundEngine.attachFootsteps = function(scene, opts){
-    scene = scene || S(); if (!scene) return;
-    if (!_state.ready) SoundEngine.init(scene);
-
-    opts = opts || {};
-    const isMoving = opts.isMoving || (function(){
-      const k = window.__keys || window.K;
-      return !!(k && (k.w||k.a||k.s||k.d));
-    });
-
-    const getSurface = opts.getSurface || (function(){
-      const b = (scene.__playerBody || (scene.getMeshByName && scene.getMeshByName("player_capsule")));
-      const origin = b ? b.position : (scene.activeCamera && scene.activeCamera.position) || BABYLON.Vector3.Zero();
-      const pick = _raycastDown(scene, origin);
-      if (pick && pick.hit){
-        const surf = _surfaceFromMesh(pick.pickedMesh);
-        return surf || "generic";
-      }
-      return "generic";
-    });
-
-    const getPos = opts.getPosition || (function(){
-      const b = (scene.__playerBody || (scene.getMeshByName && scene.getMeshByName("player_capsule")));
-      return b ? b.position : (scene.activeCamera && scene.activeCamera.position) || BABYLON.Vector3.Zero();
-    });
-
-    let lastPos = getPos().clone();
-    let acc = 0;
-    const stepBase = (typeof opts.stepDistance === "number") ? opts.stepDistance : 1.6;
-
-    let lastSurface = "generic";
-    let surfaceCooldown = 0;
-
-    scene.onBeforeRenderObservable.add(()=>{
-      const now = getPos();
-      const d = BABYLON.Vector3.Distance(now, lastPos);
-      lastPos.copyFrom(now);
-      if (!isMoving()) { acc = 0; return; }
-
-      if (surfaceCooldown-- <= 0){
-        lastSurface = getSurface();
-        surfaceCooldown = 6; // ~100ms
-      }
-
-      acc += d;
-      const running = !!(window.K && window.K.run);
-      const stepDist = running ? (stepBase * 0.72) : stepBase;
-      if (acc >= stepDist){
-        acc = 0;
-        SoundEngine.playFootstep(lastSurface);
-      }
-    });
-  };
-
-  SoundEngine.playFootstep = function(surface){
-    if (!_state.ready) SoundEngine.init();
-    const group = _state.categories.footsteps || {};
-    const list = group[surface] || group.generic || [];
-    if (!list.length) return;
-    const choice = list[(Math.random() * list.length) | 0];
-    try{ choice.play(); }catch(e){ warn("playFootstep error:", e); }
-  };
-
-  SoundEngine.play = function(category, key){
-    if (!_state.ready) SoundEngine.init();
-    const group = _state.categories[category] || {};
-    const list = group[key] || [];
-    if (!list.length) return;
-    const choice = list[(Math.random() * list.length) | 0];
-    try{ choice.play(); }catch(e){ warn("play error:", e); }
-  };
-
-  window.addEventListener("DOMContentLoaded", function(){
-    const s = S(); if (!s) return;
-    SoundEngine.init(s);
-  });
-
-
-  // -------- Ambient loop / crossfade --------
-  /**
-   * Manage a single ambient loop with crossfade between named tracks (from MANIFEST.ambient).
-   * API: SoundEngine.ambient.set(name, fadeSec), SoundEngine.ambient.stop(fadeSec)
-   */
-  SoundEngine.ambient = (function(){
-    let current = null;      // { name, snd }
-    let fading  = null;      // snd that is fading out
-
-    function _getAmbientList(name){
-      const g = _state.categories.ambient || {};
-      const list = g[name] || [];
-      return list;
+    function now(){ return (typeof performance!=='undefined'?performance.now():Date.now()); }
+    function _set(v){ try{ gain && gain.gain.setTargetAtTime(v, ctx.currentTime, 0.005);}catch(_){ } }
+    function spike(){
+      if(!ensure()) return;
+      const pattern=[1,0,1,0,1,0], dur=0.12, gap=0.12; let t=0;
+      pattern.forEach(on=>{ setTimeout(()=>_set(on?0.18:0.0), Math.round(t*1000)); t += on?dur:gap; });
+      setTimeout(()=>_set(0.0), Math.round(t*1000)+20);
     }
-
-    function _fadeTo(sndIn, sndOut, fadeSec){
-      fadeSec = Math.max(0.05, fadeSec||1.5);
-      const steps = Math.max(3, Math.floor(60 * fadeSec));
-      let i = 0;
-      if (sndIn){
-        try{ sndIn.setVolume(0); sndIn.setLoop(true); sndIn.play(); }catch(_){}
-      }
-      const iv = (_state.scene && _state.scene.onBeforeRenderObservable)
-
-      let t = 0;
-      const observer = _state.scene.onBeforeRenderObservable.add(()=>{
-        t++; const k = Math.min(1, t/steps);
-        try{ if (sndIn)  sndIn.setVolume(_state.masterVolume * k); }catch(_){}
-        try{ if (sndOut) sndOut.setVolume(_state.masterVolume * (1-k)); }catch(_){}
-        if (k >= 1){
-          _state.scene.onBeforeRenderObservable.remove(observer);
-          try{ if (sndOut){ sndOut.stop(); } }catch(_){}
-        }
-      });
+    function startEMF5(seconds){
+      if(!ensure()) return;
+      const add = Math.max(0.5, seconds||10+Math.random()*5);
+      const stopAt = now() + add*1000;
+      emf5Until = Math.min(now()+MAX_EXTEND_MS, Math.max(emf5Until, stopAt));
+      running=true; _set(0.22);
     }
+    function extend(seconds){
+      if(emf5Until<=now()) return;
+      const add = Math.max(1.0, seconds||10+Math.random()*5);
+      emf5Until = Math.min(now()+MAX_EXTEND_MS, emf5Until + add*1000);
+    }
+    function update(){
+      if(emf5Until > now()){ if(!running){ running=true; _set(0.22);} }
+      else if(running){ running=false; _set(0.0); }
+    }
+    (function poll(){
+      const s=SCENE(); if (s && s.onBeforeRenderObservable){
+        s.onBeforeRenderObservable.add(()=>{ try{ update(); }catch(_){ } });
+      } else setTimeout(poll,120);
+    })();
+    return { spike, startEMF5, extend };
+  })();
 
+  // ----- Ghost SFX -----
+  const GhostAudio = (function(){
+    let whisperSnd=null, slamSnd1=null, slamSnd2=null, creakSnd1=null, creakSnd2=null, tossSnd=null;
+    function ensure(){
+      const s=SCENE(); if (!s) return;
+      const opt = { loop:false, autoplay:false };
+      whisperSnd = whisperSnd || new BABYLON.Sound('ga_whisper','./assets/audio/whisper.mp3', s, null, { ...opt, volume:0.7 });
+      slamSnd1   = slamSnd1   || new BABYLON.Sound('ga_slam1','./assets/audio/doorSlam1.mp3', s, null, { ...opt, volume:0.9 });
+      slamSnd2   = slamSnd2   || new BABYLON.Sound('ga_slam2','./assets/audio/doorSlam2.mp3', s, null, { ...opt, volume:0.9 });
+      creakSnd1  = creakSnd1  || new BABYLON.Sound('ga_creak1','./assets/audio/doorCreak1.mp3', s, null, { ...opt, volume:0.7 });
+      creakSnd2  = creakSnd2  || new BABYLON.Sound('ga_creak2','./assets/audio/doorCreak2.mp3', s, null, { ...opt, volume:0.7 });
+      tossSnd    = tossSnd    || new BABYLON.Sound('ga_toss','./assets/audio/Toss.wav',         s, null, { ...opt, volume:0.85 });
+    }
+    function attachTo(node){ try{ whisperSnd?.attachToMesh?.(node); slamSnd1?.attachToMesh?.(node); slamSnd2?.attachToMesh?.(node); creakSnd1?.attachToMesh?.(node); creakSnd2?.attachToMesh?.(node); tossSnd?.attachToMesh?.(node);}catch(_){ } }
     return {
-      /**
-       * Crossfade to an ambient by name from MANIFEST.ambient
-       */
-      set: function(name, fadeSec){
-        if (!_state.ready) SoundEngine.init();
-        const list = _getAmbientList(name);
-        if (!list.length){ warn("ambient not found:", name); return; }
-        const sndIn = list[(Math.random()*list.length)|0];
-        const sndOut = current && current.snd || null;
-        current = { name, snd: sndIn };
-        _fadeTo(sndIn, sndOut, fadeSec);
-      },
-      /**
-       * Stop current ambient with fade
-       */
-      stop: function(fadeSec){
-        const sndOut = current && current.snd || null;
-        current = null;
-        if (!sndOut) return;
-        fadeSec = Math.max(0.05, fadeSec||1.0);
-        let t=0, steps=Math.max(3, Math.floor(60*fadeSec));
-        const obs = _state.scene.onBeforeRenderObservable.add(()=>{
-          t++; const k = Math.min(1, t/steps);
-          try{ sndOut.setVolume(_state.masterVolume * (1-k)); }catch(_){}
-          if (k>=1){
-            _state.scene.onBeforeRenderObservable.remove(obs);
-            try{ sndOut.stop(); }catch(_){}
-          }
-        });
+      ensure,
+      attachTo,
+      whisper(){ ensure(); try{ whisperSnd?.stop(); whisperSnd?.play(); }catch(_){} },
+      doorSlam(){ ensure(); try{ (Math.random()<0.5?slamSnd1:slamSnd2)?.play(); }catch(_){} },
+      doorCreak(){ ensure(); try{ (Math.random()<0.5?creakSnd1:creakSnd2)?.play(); }catch(_){} },
+      toss(){ ensure(); try{ tossSnd?.stop(); tossSnd?.play(); }catch(_){} }
+    };
+  })();
+
+  // ----- Radio SFX -----
+  const RadioAudio = (function(){
+    let clip=null;
+    function ensure(){
+      const s=SCENE(); if (!s) return;
+      if(!clip){ clip = new BABYLON.Sound('radio','./assets/audio/Radio.mp3', s, null, { loop:false, autoplay:false, volume:0.85 }); }
+    }
+    return { ensure, playOnce(){ ensure(); try{ clip?.stop(); clip?.play(); }catch(_){} } };
+  })();
+
+  // ----- Footsteps (tick from movement loop) -----
+  const Footsteps = (function(){
+    let last=0, stepEvery=0.42, runEvery=0.28;
+    let stepClips = {};
+    function ensure(){
+      const s=SCENE(); if (!s) return;
+      // You can add more materials; default to a handful
+      function snd(name, file, vol){ return new BABYLON.Sound(name, file, s, null, { loop:false, autoplay:false, volume:vol }); }
+      if (!stepClips['default']){
+        stepClips['default'] = [
+          snd('fs1','./assets/audio/footstep.mp3', 0.25),
+          snd('fs2','./assets/audio/footstep_gravel.mp3', 0.25),
+          snd('fs3','./assets/audio/footstep_asphalt_2.mp3', 0.25),
+        ];
+      }
+      if (!stepClips['wood']){
+        stepClips['wood'] = [
+          snd('fsw1','./assets/audio/footstep_wood_2.mp3', 0.28),
+          snd('fsw2','./assets/audio/footstep_wood_3.mp3', 0.28),
+        ];
+      }
+      if (!stepClips['carpet']){
+        stepClips['carpet'] = [
+          snd('fsc1','./assets/audio/footstep_carpet_2.mp3', 0.22),
+          snd('fsc2','./assets/audio/footstep_carpet_3.mp3', 0.22),
+        ];
+      }
+    }
+    function playOne(arr){ try{ (arr[Math.floor(Math.random()*arr.length)]).play(); }catch(_){ } }
+    function materialUnderCam(){
+      try{
+        const s=SCENE(); const cam=s.activeCamera;
+        const ray = new BABYLON.Ray(cam.position.add(new BABYLON.Vector3(0,0.2,0)), new BABYLON.Vector3(0,-1,0), 2.5);
+        const pick = s.pickWithRay(ray, m=>m && m.isPickable!==false);
+        const name = (pick?.pickedMesh?.material?.name||'').toLowerCase();
+        if (name.includes('wood')) return 'wood';
+        if (name.includes('carpet')) return 'carpet';
+      }catch(_){}
+      return 'default';
+    }
+    return {
+      tick(isMoving, running){
+        ensure();
+        const t = performance.now()/1000;
+        if (!isMoving) { last = t; return; }
+        const period = running ? runEvery : stepEvery;
+        if (t - last >= period){
+          last = t;
+          const mat = materialUnderCam();
+          const pool = stepClips[mat] || stepClips['default'];
+          playOne(pool);
+        }
       }
     };
   })();
 
+  // Ambient/weather backing (minimal)
+  const WeatherAmbient = (function(){
+    let tracks={ clear:null, rain:null, snow:null, drone:null }, current='';
+    function ensure(){
+      const s=SCENE(); if (!s) return;
+      tracks.clear = tracks.clear || new BABYLON.Sound('amb_clear','./assets/audio/clearWeather.mp3', s, null,{ loop:true, autoplay:false, volume:0.45 });
+      tracks.rain  = tracks.rain  || new BABYLON.Sound('amb_rain','./assets/audio/rainstorm.mp3', s, null,{ loop:true, autoplay:false, volume:0.55 });
+      tracks.snow  = tracks.snow  || new BABYLON.Sound('amb_snow','./assets/audio/ambient.mp3', s, null,{ loop:true, autoplay:false, volume:0.28 });
+      tracks.drone = tracks.drone || new BABYLON.Sound('amb_drone','./assets/audio/ambient.mp3', s, null,{ loop:true, autoplay:false, volume:0.18 });
+    }
+    function fadeTo(target){
+      ensure();
+      if (current===target) return;
+      const want={ clear:(target==='Clear'||target==='Sunset'), rain:(target==='Rain'||target==='Blood Moon'), snow:target==='Snow', drone:target==='Blood Moon' };
+      for(const k of Object.keys(tracks)){
+        const snd = tracks[k]; if(!snd) continue;
+        const tgt = (k==='clear'&&want.clear)?0.45:(k==='rain'&&want.rain)?0.55:(k==='snow'&&want.snow)?0.28:(k==='drone'&&want.drone)?0.18:0.0;
+        if(tgt>0){ if(!snd.isPlaying) { try{snd.setVolume(0); snd.play(); } catch(e){} } }
+        const start = snd.getVolume();
+        let i=0, steps=18, stepMs=40;
+        const id=setInterval(()=>{
+          i++; const a=i/steps; const ease=(x)=>x<.5?2*x*x:-1+(4-2*x)*x;
+          snd.setVolume(start + (tgt-start)*ease(a));
+          if(i>=steps){ clearInterval(id); if(tgt===0 && snd.isPlaying) try{snd.stop(); } catch(e){} }
+        }, stepMs);
+      }
+      current=target;
+    }
+    return { set:fadeTo };
+  })();
+
+  window.SoundEngine = { EMFAudio, GhostAudio, RadioAudio, Footsteps, ambient: WeatherAmbient };
+  window.EMFAudio = EMFAudio;     // convenience for existing code
+  window.GhostAudio = GhostAudio;
+  window.RadioAudio = RadioAudio;
+  window.Footsteps = Footsteps;
 })();
