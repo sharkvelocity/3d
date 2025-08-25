@@ -1,25 +1,27 @@
-// movement_rig_clean.js — authoritative movement/camera rig
+
+// movement_rig_clean.js (hardened) — WASD + FP/TP + visible body with fallback
 (function(){ 'use strict';
   if (window.__rigFinal) return; window.__rigFinal = true;
 
-  // Pull spawn from the active map, with a safe fallback
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  function canvas(){ return document.getElementById('renderCanvas') || document.querySelector('canvas'); }
+  const isArc = c => c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
+  const clamp = (v,a,b)=>Math.min(Math.max(v,a),b);
+  const K = {w:0,a:0,s:0,d:0,run:false};
+
+  const SPEED_WALK = 1.9, SPEED_RUN = 3.3;
+  const MOUSE_SENS = 0.002, TOUCH_LOOK_SENS = 0.0022;
+  const PLAYER_GLB = ["assets/models/player/main_player.glb","assets/models/player/player.glb"];
+
   function getSpawn(){
     if (window.MAP_DEF && window.MAP_DEF.spawn){
       const sp = window.MAP_DEF.spawn;
       return new BABYLON.Vector3(sp.x||0, sp.y||1.35, sp.z||0);
     }
-    return new BABYLON.Vector3(0, 1.35, 0); // sensible default at origin
+    return new BABYLON.Vector3(0,1.35,0);
   }
-  const SPEED_WALK = 1.9, SPEED_RUN = 3.3;
-  const MOUSE_SENS = 0.002, TOUCH_LOOK_SENS = 0.0022;
-  const PLAYER_GLB = ["assets/models/player/main_player.glb","assets/models/player/player.glb"];
-  const canvas = () => document.getElementById('renderCanvas') || document.querySelector('canvas');
-  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-  const isArc = c => c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
-  const clamp = (v,a,b)=>Math.min(Math.max(v,a),b);
-  const K = {w:0,a:0,s:0,d:0,run:false};
 
-  // Keyboard
+  // Input
   function keyDown(e){
     const k=(e.key||'').toLowerCase(), c=e.keyCode||0, code=e.code||'';
     if(k==='w'||c===87)K.w=1; else if(k==='a'||c===65)K.a=1; else if(k==='s'||c===83)K.s=1; else if(k==='d'||c===68)K.d=1; else if(k==='shift'||c===16)K.run=true;
@@ -29,17 +31,15 @@
     const k=(e.key||'').toLowerCase(), c=e.keyCode||0;
     if(k==='w'||c===87)K.w=0; else if(k==='a'||c===65)K.a=0; else if(k==='s'||c===83)K.s=0; else if(k==='d'||c===68)K.d=0; else if(k==='shift'||c===16)K.run=false;
   }
-  window.addEventListener('keydown', keyDown, false);
-  window.addEventListener('keyup',   keyUp,   false);
-  document.addEventListener('keydown', keyDown, true);
-  document.addEventListener('keyup',   keyUp,   true);
+  addEventListener('keydown', keyDown, true);
+  addEventListener('keyup',   keyUp,   true);
 
-  // Pointer-lock mouse look
+  // Pointer lock mouse look
   (function(){
     const c = canvas(); if(!c) return;
     c.setAttribute('tabindex','0');
-    c.addEventListener('click', ()=>{ try{ c.requestPointerLock && c.requestPointerLock(); }catch(_){ } });
-    window.addEventListener('mousemove', ev=>{
+    c.addEventListener('click', ()=>{ try{ c.requestPointerLock && c.requestPointerLock(); c.focus(); }catch(_){ } });
+    addEventListener('mousemove', ev=>{
       const s=S(), cam=s&&s.activeCamera; if(!cam || isArc(cam)) return;
       if(document.pointerLockElement!==c) return;
       const dx=ev.movementX||0, dy=ev.movementY||0;
@@ -49,7 +49,7 @@
     }, true);
   })();
 
-  // Touch controls
+  // Touch look/move
   (function(){
     let leftId=null,rightId=null,lx=0,ly=0,rx=0,ry=0;
     addEventListener('touchstart', e=>{
@@ -66,9 +66,7 @@
           K.w = dy<-10?1:0; K.s = dy>10?1:0; K.a = dx<-10?1:0; K.d = dx>10?1:0;
         } else if (t.identifier===rightId){
           const cam=s.activeCamera; if(!cam) continue;
-          if (isArc(cam)){
-            cam.alpha += -0.01*(t.clientX-rx);
-            cam.beta  += -0.01*(t.clientY-ry);
+          if (isArc(cam)){ cam.alpha += -0.01*(t.clientX-rx); cam.beta += -0.01*(t.clientY-ry);
             cam.beta = clamp(cam.beta, cam.lowerBetaLimit||0.3, cam.upperBetaLimit||1.45);
           } else {
             cam.cameraRotation = cam.cameraRotation || new BABYLON.Vector2(0,0);
@@ -87,11 +85,20 @@
     }, {passive:true});
   })();
 
-  // Rig + cameras
+  function ensureSceneFlags(s){
+    try{
+      s.collisionsEnabled = true;
+      s.gravity = new BABYLON.Vector3(0, -0.5, 0);
+    }catch(_){}
+  }
+
   function ensureRig(s){
+    ensureSceneFlags(s);
     if (!s.__playerBody){
       const body = BABYLON.MeshBuilder.CreateCapsule('player_capsule',{height:1.8,radius:0.35,tessellation:8,capSubdivisions:4},s);
-      body.checkCollisions=true; body.visibility=0; body.isPickable=false;
+      body.checkCollisions=true; body.isPickable=false; body.visibility=0.0;
+      body.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
+      body.ellipsoidOffset = new BABYLON.Vector3(0,0.9,0);
       body.position = getSpawn();
       s.__playerBody = body;
     }
@@ -121,6 +128,7 @@
 
   async function ensurePlayerMesh(s){
     if (s.__playerMesh) return s.__playerMesh;
+    // Try GLBs
     for (const p of PLAYER_GLB){
       try{
         const i=p.lastIndexOf('/'); const path=p.substring(0,i+1), file=p.substring(i+1);
@@ -132,7 +140,12 @@
         s.__playerMesh = root; return root;
       }catch(_){}
     }
-    return null;
+    // Fallback visible placeholder so user sees "body"
+    const box = BABYLON.MeshBuilder.CreateBox("PlayerModel_Fallback",{width:0.5,height:1.7,depth:0.3},s);
+    box.parent = s.__playerBody; box.position = new BABYLON.Vector3(0,-0.05,0);
+    const mat = new BABYLON.StandardMaterial("pmat", s); mat.emissiveColor = new BABYLON.Color3(0.1,0.9,0.9);
+    box.material = mat;
+    s.__playerMesh = box; return box;
   }
 
   function fwd(cam){ try{ const v=cam.getDirection(BABYLON.Axis.Z); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(0,0,1); } }
@@ -140,13 +153,16 @@
 
   function attachLoop(s){
     if (s.__rigLoopFinal) return; s.__rigLoopFinal = true;
-    s.onNewCameraAddedObservable.add(()=>{ const f=s.getCameraByName('FPCam'); if (f) s.activeCamera=f; });
+    s.onNewCameraAddedObservable.add(()=>{ const t=s.getCameraByName('TPCam'); if (t) s.activeCamera=t; });
     s.onBeforeRenderObservable.add(function(){
+      // Force a known active camera (default to third-person so user sees body)
       if (s.activeCamera && s.activeCamera.name!=='FPCam' && s.activeCamera.name!=='TPCam'){
-        const f=s.getCameraByName('FPCam'), t=s.getCameraByName('TPCam'); s.activeCamera = f || t || s.activeCamera;
+        const f=s.getCameraByName('FPCam'), t=s.getCameraByName('TPCam'); s.activeCamera = t || f || s.activeCamera;
       }
       const cam=s.activeCamera; if(!cam) return;
       const body=s.__playerBody; if(!body) return;
+
+      // Movement vector
       let v=new BABYLON.Vector3(0,0,0);
       const fw=fwd(cam), rt=right(cam);
       if (K.w) v.addInPlace(fw);
@@ -187,7 +203,8 @@
   function whenReady(cb){ (function tick(){ const s=S(); if (s && s.activeCamera){ try{ cb(s); }catch(_){ } return; } requestAnimationFrame(tick); })(); }
   whenReady(async function(s){
     const cams = ensureRig(s);
-    s.activeCamera = cams.fps; window.camera = cams.fps;
+    // Default to third-person so avatar is visible immediately
+    s.activeCamera = cams.arc; window.camera = cams.arc;
     attachLoop(s);
     await ensurePlayerMesh(s);
     if (!s.__spawnDone){ s.__playerBody.position = getSpawn(); s.__spawnDone = true; }
