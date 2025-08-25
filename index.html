@@ -137,8 +137,7 @@ window.onBeforeRenderAdd = function(cb){
 
 <style id="glbviewer-style">
   #gv-btn{
-    bottom:12px;
-    position:fixed; left:12px;  z-index:2147483000;
+    position:fixed; left:12px; top:12px; z-index:2147483000;
     background:#0b2e2e; color:#0ff; border:1px solid #0aa; padding:8px 10px;
     border-radius:10px; cursor:pointer; user-select:none; font:14px/1.2 system-ui,Segoe UI,Arial;
     box-shadow:0 4px 14px rgba(0,0,0,.35);
@@ -1068,7 +1067,7 @@ function ensureSnow(){
 function setWeather(state){
   weather.state=state;
   const hw=document.getElementById('hud-weather'); if(hw) hw.textContent=state;
-  WeatherAudio.set(state);
+  SoundEngine.ambient.set(state);
 
   if(hemiLight) hemiLight.dispose();
   setupSun(); setupMoon();
@@ -2458,108 +2457,97 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   };
   tryPointerLock();
 
- 
- // ------- Map definition loader & spawn enforcement (patched)
-(function(){
-  // Simple logger fallback
-  function log(){ try{ console.log.apply(console, arguments); } catch(_){ } }
-
-  // Script loader (works without ESM)
-  function loadScript(path){
-    return new Promise((resolve,reject)=>{
-      const s=document.createElement('script'); s.src=path; s.async=true;
-      s.onload=()=>resolve(true); s.onerror=()=>resolve(false);
-      document.head.appendChild(s);
-    });
-  }
-
+  // ------- Map definition loader & spawn enforcement
   async function ensureMapDef(){
-    try{
-      if (window.MAP_DEF && window.MAP_DEF.spawn) return true;
-      const candidates = [
-        "./assets/models/map/furnished_house.js",
-        "./assets/models/map/fully_furnished.config.js",
-        "./assets/models/map/Abandoned_House.js",
-        "./assets/models/map/abandoned_house.js",
-        "./assets/models/map/furnished_house.config.js"
-      ];
-      for (const path of candidates){
-        const ok = await loadScript(path);
-        if (ok && window.MAP_DEF && window.MAP_DEF.spawn){
+    // If MAP_DEF exists, we're good
+    if (window.MAP_DEF && window.MAP_DEF.spawn) { return true; }
+
+    // Try common candidates
+    const candidates = [
+      "./assets/models/map/furnished_house.js",
+      "./assets/models/map/fully_furnished.config.js",
+      "./assets/models/map/Abandoned_House.js",
+      "./assets/models/map/abandoned_house.js",
+      "./assets/models/map/furnished_house.config.js"
+    ];
+
+    for (const path of candidates){
+      try {
+        await import(path);
+        if (window.MAP_DEF && window.MAP_DEF.spawn) {
           log("Loaded MAP_DEF from", path);
           return true;
         }
+      } catch(e){
+        // ignore 404s; try next
       }
-    }catch(e){}
-    try{
-      const t=document.getElementById('toast');
-      if(t){ t.textContent="Map configuration not found. Expected MAP_DEF with spawn/file."; t.style.display="block";
-             setTimeout(()=>t.style.display="none", 6500); }
-    }catch(_){}
+    }
+
+    // If still missing, toast loudly
+    showToast("Map configuration not found. Expected MAP_DEF with spawn/file. Check assets/models/map/ paths.");
     return false;
   }
 
-  function enforceSpawn(sc){
-    try{
-      if (!(window.MAP_DEF && MAP_DEF.spawn)) return;
-      const sp = MAP_DEF.spawn;
-      // Primary movement in this build uses the UniversalCamera
-      if (window.camera){
-        camera.position.x = Number.isFinite(sp.x) ? sp.x : 0;
-        camera.position.y = Number.isFinite(sp.y) ? sp.y : 1.8;
-        camera.position.z = Number.isFinite(sp.z) ? sp.z : 0;
-      }
-      // If a capsule/body exists in other rigs, nudge it too.
-      const body = (sc && (sc.__playerBody || (sc.getMeshByName && sc.getMeshByName("player_capsule")))) || null;
-      if(body){
-        try{ body.position.set(sp.x||0, sp.y||1.35, sp.z||0); }
-        catch(_){ body.position = new BABYLON.Vector3(sp.x||0, sp.y||1.35, sp.z||0); }
-      }
-      log("Spawn enforced:", sp);
-    }catch(e){ log("Spawn enforcement error:", e); }
+  function showToast(msg){
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.style.display = "block";
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=> toast.style.display = "none", 6500);
   }
 
-  // Hook createScene or arm a first-render one-shot so we apply spawn
+  // Hook Babylon if available to enforce spawn after scene load
+  function enforceSpawn(scene){
+    try {
+      if (!(window.MAP_DEF && MAP_DEF.spawn)) return;
+      const sp = MAP_DEF.spawn;
+      const cam = (scene && scene.activeCamera) || null;
+      if (cam) {
+        cam.position.x = sp.x ?? 0;
+        cam.position.y = sp.y ?? 1.8;
+        cam.position.z = sp.z ?? 0;
+      }
+      if (window.player && player.position){
+        player.position.set(sp.x ?? 0, sp.y ?? 1.8, sp.z ?? 0);
+      }
+      log("Spawn enforced:", sp);
+    } catch(e){
+      log("Spawn enforcement error:", e);
+    }
+  }
+
+  // Patch Babylon createScene if detectable
   (function hookScene(){
-    if (!window.BABYLON) return;
+    if (!window.BABYLON){ return; }
+
+    // If there's a global createScene, wrap it
     const g = window;
     const origCreate = g.createScene;
-
-    function armOnce(sc){
-      // Call once when either camera is ready or body exists
-      let done = false;
-      const sub = sc.onBeforeRenderObservable.add(()=>{
-        if (done) return;
-        if (!g.camera && !sc.__playerBody && !(sc.getMeshByName && sc.getMeshByName("player_capsule"))) return;
-        enforceSpawn(sc);
-        done = true;
-        try{ sc.onBeforeRenderObservable.remove(sub); }catch(_){}
-      });
-    }
-
     if (typeof origCreate === "function"){
       g.createScene = async function(){
         await ensureMapDef();
         const sc = await origCreate.apply(this, arguments);
-        try{ sc.executeWhenReady(()=>armOnce(sc)); } catch(_){ armOnce(sc); }
-        log("Wrapped createScene with spawn enforcement");
+        try {
+          sc.executeWhenReady(()=> enforceSpawn(sc));
+        } catch{ enforceSpawn(sc); }
         return sc;
       };
+      log("Wrapped createScene with spawn enforcement");
     } else {
+      // Fallback: try after load
       window.addEventListener("load", async ()=>{
         await ensureMapDef();
-        const sc = g.scene || (g._scene && g._scene.scene);
-        if (sc) armOnce(sc);
+        const engineScene = (g.scene || (g._scene && g._scene.scene));
+        if (engineScene) enforceSpawn(engineScene);
       });
     }
   })();
 
   // Expose for debugging
-  window.__TweakPatch = window.__TweakPatch || {};
-  window.__TweakPatch.ensureMapDef = ensureMapDef;
-  window.__TweakPatch.enforceSpawn = enforceSpawn;
+  window.__TweakPatch = { ensureMapDef, enforceSpawn, showToast };
 })();
 </script>
+
 
 <script id="tweakpatch-manifest">
 (function(){
@@ -3787,12 +3775,377 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
 
 
-<!-- DEV FOLDER PATCH JS -->
-<script src="./assets/dev/movement_rig_clean.js"></script>
-<script src="./assets/dev/minimap_northup_xyz.js"></script>
-<script src="./assets/dev/spawn_fix.js"></script>
-<script src="./assets/dev/moon.js"></script>
-<script src="./assets/dev/merge_patch.js"></script>
+<!-- PLAYER RIG CONTROLLER — FINAL -->
+<script>
 
+(function(){ 'use strict';
+  if (window.__rigFinal) return; window.__rigFinal = true;
+
+  const SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
+  const SPEED_WALK = 1.9, SPEED_RUN = 3.3;
+  const MOUSE_SENS = 0.002, TOUCH_LOOK_SENS = 0.0022;
+  const PLAYER_GLB = ["assets/models/player/main_player.glb","assets/models/player/player.glb"];
+
+  const canvas = () => document.getElementById('renderCanvas') || document.querySelector('canvas');
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  window.S = S;
+  const isArc = c => c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
+  const clamp = (v,a,b)=>Math.min(Math.max(v,a),b);
+
+  const K = {w:0,a:0,s:0,d:0,run:false};
+
+  function keyDown(e){
+    const k=(e.key||'').toLowerCase(), c=e.keyCode||0, code=e.code||'';
+    if(k==='w'||c===87)K.w=1; else if(k==='a'||c===65)K.a=1; else if(k==='s'||c===83)K.s=1; else if(k==='d'||c===68)K.d=1; else if(k==='shift'||c===16)K.run=true;
+    if(k==='v' || code==='KeyV' || c===86){ e.stopPropagation(); toggleThirdPerson(); }
+  }
+  function keyUp(e){
+    const k=(e.key||'').toLowerCase(), c=e.keyCode||0;
+    if(k==='w'||c===87)K.w=0; else if(k==='a'||c===65)K.a=0; else if(k==='s'||c===83)K.s=0; else if(k==='d'||c===68)K.d=0; else if(k==='shift'||c===16)K.run=false;
+  }
+  window.addEventListener('keydown', keyDown, false);
+  window.addEventListener('keyup',   keyUp,   false);
+  document.addEventListener('keydown', keyDown, true);
+  document.addEventListener('keyup',   keyUp,   true);
+
+  (function(){
+    const c = canvas(); if(!c) return;
+    c.setAttribute('tabindex','0');
+    c.addEventListener('click', ()=>{ try{ c.requestPointerLock && c.requestPointerLock(); }catch(_){ } });
+    window.addEventListener('mousemove', ev=>{
+      const s=S(), cam=s&&s.activeCamera; if(!cam || isArc(cam)) return;
+      if(document.pointerLockElement!==c) return;
+      const dx=ev.movementX||0, dy=ev.movementY||0;
+      cam.cameraRotation = cam.cameraRotation || new BABYLON.Vector2(0,0);
+      cam.cameraRotation.y += -dx*MOUSE_SENS;
+      cam.cameraRotation.x += -dy*MOUSE_SENS;
+    }, true);
+  })();
+
+  (function(){
+    let leftId=null,rightId=null,lx=0,ly=0,rx=0,ry=0;
+    addEventListener('touchstart', e=>{
+      for(const t of e.changedTouches){
+        if(t.clientX < innerWidth*0.5 && leftId===null){ leftId=t.identifier; lx=t.clientX; ly=t.clientY; }
+        else if(t.clientX >= innerWidth*0.5 && rightId===null){ rightId=t.identifier; rx=t.clientX; ry=t.clientY; }
+      }
+    }, {passive:true});
+    addEventListener('touchmove', e=>{
+      const s=S(); if(!s) return;
+      for(const t of e.changedTouches){
+        if(t.identifier===leftId){
+          const dx=t.clientX-lx, dy=t.clientY-ly;
+          K.w = dy<-10?1:0; K.s = dy>10?1:0; K.a = dx<-10?1:0; K.d = dx>10?1:0;
+        } else if (t.identifier===rightId){
+          const cam=s.activeCamera; if(!cam) continue;
+          if (isArc(cam)){
+            cam.alpha += -0.01*(t.clientX-rx);
+            cam.beta  += -0.01*(t.clientY-ry);
+            cam.beta = clamp(cam.beta, cam.lowerBetaLimit||0.3, cam.upperBetaLimit||1.45);
+          } else {
+            cam.cameraRotation = cam.cameraRotation || new BABYLON.Vector2(0,0);
+            cam.cameraRotation.y += -(t.clientX-rx)*TOUCH_LOOK_SENS;
+            cam.cameraRotation.x += -(t.clientY-ry)*TOUCH_LOOK_SENS;
+          }
+          rx=t.clientX; ry=t.clientY;
+        }
+      }
+    }, {passive:true});
+    addEventListener('touchend', e=>{
+      for(const t of e.changedTouches){
+        if(t.identifier===leftId){ leftId=null; K.w=K.a=K.s=K.d=0; }
+        if(t.identifier===rightId) rightId=null;
+      }
+    }, {passive:true});
+  })();
+
+  function ensureRig(s){
+    if (!s.__playerBody){
+      const body = BABYLON.MeshBuilder.CreateCapsule('player_capsule',{height:1.8,radius:0.35,tessellation:8,capSubdivisions:4},s);
+      body.checkCollisions=true; body.visibility=0; body.isPickable=false;
+      body.position = SPAWN.clone();
+      s.__playerBody = body;
+    }
+    if (!s.__playerRig){
+      const rig = new BABYLON.TransformNode('PlayerRig', s);
+      rig.parent = s.__playerBody; s.__playerRig = rig;
+    }
+    let fps = s.getCameraByName && s.getCameraByName('FPCam');
+    if (!fps){
+      fps = new BABYLON.UniversalCamera('FPCam', new BABYLON.Vector3(0,1.6,0), s);
+      fps.parent = s.__playerRig; fps.minZ=0.1; fps.speed=0; fps.inertia=0; fps.angularSensibility=4000;
+      try{ fps.attachControl(canvas(), true); }catch(_){}
+      s.cameras && s.cameras.indexOf(fps)===-1 && s.cameras.push(fps);
+    }
+    let arc = s.getCameraByName && s.getCameraByName('TPCam');
+    if (!arc){
+      arc = new BABYLON.ArcRotateCamera('TPCam', -Math.PI/2, 1.2, 3.6, s.__playerBody.position.clone(), s);
+      arc.lowerBetaLimit=0.3; arc.upperBetaLimit=1.45; arc.lowerRadiusLimit=2.4; arc.upperRadiusLimit=7.5; arc.wheelPrecision=60;
+      try{ arc.attachControl(canvas(), true); }catch(_){}
+      s.cameras && s.cameras.indexOf(arc)===-1 && s.cameras.push(arc);
+    }
+    arc.lockedTarget = s.__playerBody;
+    arc.radius = clamp(arc.radius||3.6, 3.0, 6.0);
+    arc.alpha = -Math.PI/2; arc.beta = 1.2;
+    return {fps, arc};
+  }
+
+  async function ensurePlayerMesh(s){
+    if (s.__playerMesh) return s.__playerMesh;
+    for (const p of PLAYER_GLB){
+      try{
+        const i=p.lastIndexOf('/'); const path=p.substring(0,i+1), file=p.substring(i+1);
+        const r = await BABYLON.SceneLoader.ImportMeshAsync('', path, file, s);
+        const root = r.meshes && r.meshes[0]; if(!root) continue;
+        root.name='PlayerModel'; root.parent = s.__playerBody; root.position = new BABYLON.Vector3(0,-1.1,0);
+        if (root.getChildMeshes) root.getChildMeshes().forEach(m=>m.layerMask=0x1);
+        root.layerMask = 0x1;
+        s.__playerMesh = root; return root;
+      }catch(_){}
+    }
+    return null;
+  }
+
+  function fwd(cam){ try{ const v=cam.getDirection(BABYLON.Axis.Z); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(0,0,1); } }
+  function right(cam){ try{ const v=cam.getDirection(BABYLON.Axis.X); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(1,0,0); } }
+
+  function attachLoop(s){
+    if (s.__rigLoopFinal) return; s.__rigLoopFinal = true;
+    s.onNewCameraAddedObservable.add(()=>{ const f=s.getCameraByName('FPCam'); if (f) s.activeCamera=f; });
+    s.onBeforeRenderObservable.add(function(){
+      if (s.activeCamera && s.activeCamera.name!=='FPCam' && s.activeCamera.name!=='TPCam'){
+        const f=s.getCameraByName('FPCam'), t=s.getCameraByName('TPCam'); s.activeCamera = f || t || s.activeCamera;
+      }
+      const cam=s.activeCamera; if(!cam) return;
+      const body=s.__playerBody; if(!body) return;
+      let v=new BABYLON.Vector3(0,0,0);
+      const fw=fwd(cam), rt=right(cam);
+      if (K.w) v.addInPlace(fw);
+      if (K.s) v.addInPlace(fw.scale(-1));
+      if (K.d) v.addInPlace(rt);
+      if (K.a) v.addInPlace(rt.scale(-1));
+      const len=v.length();
+      if (len>0){
+        v.scaleInPlace(1/len);
+        const eng=s.getEngine&&s.getEngine()||window.ENGINE;
+        const dt=((eng&&eng.getDeltaTime)?eng.getDeltaTime():16.7)/1000;
+        const sp=(K.run?SPEED_RUN:SPEED_WALK)*dt;
+        const d=v.scale(sp);
+        try{ body.moveWithCollisions ? body.moveWithCollisions(d) : body.position.addInPlace(d); }catch(_){}
+      }
+    });
+  }
+
+  function doToggle(){
+    const s=S(); if(!s) return;
+    const {fps,arc} = ensureRig(s); if (!fps||!arc) return;
+    if (isArc(s.activeCamera)){
+      s.activeCamera = fps; try{ fps.attachControl(canvas(), true); }catch(_){}
+    } else {
+      arc.lockedTarget = s.__playerBody;
+      arc.radius = clamp(arc.radius||3.6, 3.0, 6.0);
+      arc.alpha = -Math.PI/2; arc.beta = 1.2;
+      s.activeCamera = arc; try{ arc.attachControl(canvas(), true); }catch(_){}
+    }
+    window.camera = s.activeCamera;
+  }
+  window.toggleThirdPerson = function(){
+    const s=S();
+    if (!s || !s.activeCamera){ whenReady(()=>doToggle()); return; }
+    doToggle();
+  };
+
+  function whenReady(cb){ (function tick(){ const s=S(); if (s && s.activeCamera){ try{ cb(s); }catch(_){ } return; } requestAnimationFrame(tick); })(); }
+  whenReady(async function(s){
+    const cams = ensureRig(s);
+    s.activeCamera = cams.fps; window.camera = cams.fps;
+    attachLoop(s);
+    await ensurePlayerMesh(s);
+    if (!s.__spawnDone){ s.__playerBody.position = SPAWN.clone(); s.__spawnDone = true; }
+  });
+})();
+
+</script>
+<script src="./assets/dev/sound_engine.js"></script>
 </body>
+
+<script>
+// === Merge Patch: storage (from index3), belt, spawn, exterior rain, and joystick removal ===
+window.PP = window.PP || {}; PP.cfg = PP.cfg || {}; PP.state = PP.state || {};
+PP.cfg.spawnWS = PP.cfg.spawnWS || new BABYLON.Vector3(47.52, 0.22, -105.28);
+
+// Remove touch joysticks/halves if present
+(function killJoysticks(){
+  ['#joystickLeft','#joystickRight','#joystick-left','#joystick-right','#touch-left','#touch-right','.virtual-joystick','.touch-joy']
+    .forEach(sel => document.querySelectorAll(sel).forEach(n=>n.remove()));
+})();
+
+// Simple storage API
+PP.storage = PP.storage || (function(){
+  const KEY_INV='pp_inventory_v1', KEY_FLAGS='pp_flags_v1';
+  function get(k,d){ try{return JSON.parse(localStorage.getItem(k)) ?? d;}catch(_){return d;} }
+  function set(k,v){ localStorage.setItem(k, JSON.stringify(v)); return v; }
+  return {
+    saveInventory: inv => set(KEY_INV, inv),
+    loadInventory: () => get(KEY_INV, {slots:[], equipped:0}),
+    getFlag: (k,d=false)=>{ const f=get(KEY_FLAGS,{}); return (k in f)?f[k]:d; },
+    setFlag: (k,v)=>{ const f=get(KEY_FLAGS,{}); f[k]=v; set(KEY_FLAGS,f); }
+  };
+})();
+
+// Item defs (adjust icons to your actual paths)
+const ITEM_DEFS = [
+  {id:'emf', name:'EMF Reader', icon:'./assets/icons/emf.png'},
+  {id:'spirit', name:'Spirit Box', icon:'./assets/icons/spirit.png'},
+  {id:'uv', name:'UV Light', icon:'./assets/icons/uv.png'},
+  {id:'cam', name:'Photo Cam', icon:'./assets/icons/camera.png'},
+  {id:'salt', name:'Salt', icon:'./assets/icons/salt.png'},
+  {id:'lighter', name:'Lighter', icon:'./assets/icons/lighter.png'},
+  {id:'notebook', name:'Notebook', icon:'./assets/icons/notebook.png'}
+];
+
+// Storage modal logic
+(function(){
+  const storageEl = document.getElementById('storage');
+  const grid = document.getElementById('storeGrid');
+  const confirmBtn = document.getElementById('storeConfirm');
+  if (!storageEl) return; // if not present in this page
+  let selected = new Set(PP.storage.loadInventory().slots);
+  function rebuildGrid(){
+    grid.innerHTML='';
+    ITEM_DEFS.forEach(it=>{
+      const cell=document.createElement('div');
+      cell.className='it'+(selected.has(it.id)?' sel':'');
+      cell.style.cssText='padding:8px;border:1px solid #1a2a3c;border-radius:10px;background:#0e1622;cursor:pointer;text-align:center';
+      cell.innerHTML = (it.icon?`<img src="${it.icon}" style="display:block;margin:0 auto 6px;max-width:48px;max-height:48px">`:'')
+        + `<div style="font-size:12px">${it.name}</div>`;
+      cell.onclick=()=>{
+        if (selected.has(it.id)) { selected.delete(it.id); cell.classList.remove('sel'); }
+        else { if (selected.size>=3) return; selected.add(it.id); cell.classList.add('sel'); }
+      };
+      grid.appendChild(cell);
+    });
+  }
+  rebuildGrid();
+  confirmBtn.onclick=()=>{
+    const slots=[...selected];
+    PP.storage.saveInventory({slots, equipped:0});
+    buildBelt(slots);
+    storageEl.style.display='none';
+    try { scatterItems(slots); } catch(_) {}
+  };
+  // Expose open
+  window.openStorage = function(){ rebuildGrid(); storageEl.style.display='flex'; };
+})();
+
+// Belt (uses bottom bar from index3)
+const itemBar = document.getElementById('itemBar');
+function buildBelt(slots){
+  if (!itemBar) return;
+  itemBar.innerHTML='';
+  slots.forEach((id,i)=>{
+    const def = ITEM_DEFS.find(d=>d.id===id) || {name:id,icon:''};
+    const el=document.createElement('div');
+    el.className='slot'+(i===0?' active':'');
+    el.style.cssText='width:48px;height:48px;border-radius:10px;border:1px solid #1a2a3c;background:#0e1622;display:grid;place-items:center;cursor:pointer';
+    el.innerHTML = def.icon?`<img src="${def.icon}" style="max-width:36px;max-height:36px;opacity:.9">`:`<span style="font-size:10px">${def.name}</span>`;
+    el.onclick = ()=> setEquipped(i);
+    itemBar.appendChild(el);
+  });
+}
+function setEquipped(i){
+  const inv = PP.storage.loadInventory();
+  inv.equipped = Math.max(0, Math.min(i, inv.slots.length-1));
+  PP.storage.saveInventory(inv);
+  [...itemBar.children].forEach((el,idx)=> el.classList.toggle('active', idx===inv.equipped));
+}
+function cycleSlot(dir){
+  const inv = PP.storage.loadInventory();
+  if (!inv.slots.length) return;
+  inv.equipped = (inv.equipped + (dir>0?1:-1) + inv.slots.length) % inv.slots.length;
+  PP.storage.saveInventory(inv);
+  [...itemBar.children].forEach((el,idx)=> el.classList.toggle('active', idx===inv.equipped));
+}
+window.addEventListener('wheel',(e)=>{ if (e.deltaY>0) cycleSlot(+1); else cycleSlot(-1); }, {passive:true});
+
+// Scatter items (placeholder: attach nodes near spawn; replace with your real mesh spawns if needed)
+function scatterItems(slots){
+  const s = PP.cfg.spawnWS || new BABYLON.Vector3(0,1.8,0);
+  (slots||PP.storage.loadInventory().slots).forEach((id,idx)=>{
+    const node=new BABYLON.TransformNode('item_'+id, scene);
+    node.position = new BABYLON.Vector3(s.x+1.2+0.6*idx, s.y+0.1, s.z-1.5);
+  });
+}
+
+// Spawn correction (after map load)
+function forceSpawn(){
+  if (!scene.activeCamera) return;
+  scene.activeCamera.position.copyFrom(PP.cfg.spawnWS);
+  scene.activeCamera.setTarget(PP.cfg.spawnWS.add(new BABYLON.Vector3(0,1,2)));
+}
+
+// Exterior rain (world anchored around MAP_DEF.exterior)
+function exteriorRain(){
+  const ext=(window.MAP_DEF && Array.isArray(window.MAP_DEF.exterior))?MAP_DEF.exterior:null;
+  if(!ext || ext.length<3) return;
+  const likelyLocal = Math.max(...ext.map(p=>Math.abs(p.x))) < 100 && Math.max(...ext.map(p=>Math.abs(p.z))) < 100;
+  const poly = likelyLocal ? ext.map(p=>localToWorld(p, MAP_DEF)) : ext.map(p=>new BABYLON.Vector3(p.x,0,p.z));
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  for(const v of poly){ minX=Math.min(minX,v.x); maxX=Math.max(maxX,v.x); minZ=Math.min(minZ,v.z); maxZ=Math.max(maxZ,v.z); }
+  function inside(px,pz){
+    let ok=false; for(let i=0,j=poly.length-1;i<poly.length;j=i){
+      const A=poly[i], B=poly[j];
+      const hit=((A.z>pz)!=(B.z>pz)) && (px < (B.x-A.x)*(pz-A.z)/((B.z-A.z)||1e-9)+A.x);
+      if(hit) ok=!ok;
+    } return ok;
+  }
+  const tpl = new BABYLON.ParticleSystem("rain_template", 2000, scene);
+  tpl.particleTexture = new BABYLON.Texture("./assets/textures/rain.png", scene, true, false);
+  tpl.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  tpl.isBillboardBased = true; tpl.updateSpeed=0.02;
+  tpl.minSize=0.05; tpl.maxSize=0.15; tpl.minEmitPower=4; tpl.maxEmitPower=7;
+  tpl.gravity = new BABYLON.Vector3(0,-9.81,0);
+  const STEP=6, YTOP=14, EMIT=5, MAXR=60;
+  const centers=[];
+  for(let x=minX;x<=maxX;x+=STEP){ for(let z=minZ;z<=maxZ;z+=STEP){ if(inside(x,z)) centers.push(new BABYLON.Vector3(x,YTOP,z)); } }
+  const emitters=[];
+  for(const c of centers){
+    const node=new BABYLON.TransformNode("rain_emitter",scene); node.position.copyFrom(c);
+    const ps=tpl.clone("rain_ps",node); ps.isLocal=false; ps.emitter=node;
+    ps.createBoxEmitter(new BABYLON.Vector3(-EMIT,0,-EMIT),new BABYLON.Vector3(EMIT,0,EMIT),new BABYLON.Vector3(0,-1,0),0,0);
+    emitters.push({node,ps});
+  }
+  scene.onBeforeRenderObservable.add(()=>{
+    const p=scene.activeCamera?.position||BABYLON.Vector3.Zero(); const r2=MAXR*MAXR;
+    for(const e of emitters){
+      const d2=BABYLON.Vector3.DistanceSquared(p,e.node.position);
+      const on=d2<r2; if(on && !e.ps.isStarted()) e.ps.start(); else if(!on && e.ps.isStarted()) e.ps.stop();
+    }
+  });
+}
+
+// Helper from earlier
+function toRad(d){ return d*Math.PI/180; }
+function localToWorld(p, def){
+  const s=(def?.scale ?? 1), yaw=toRad(def?.rotationY ?? 0);
+  const cos=Math.cos(yaw), sin=Math.sin(yaw);
+  const x=(p?.x??0)*s, y=(p?.y??0)*s, z=(p?.z??0)*s;
+  const xr=x*cos - z*sin, zr=x*sin + z*cos;
+  return new BABYLON.Vector3((def?.offset?.x??0)+xr, (def?.offset?.y??0)+y, (def?.offset?.z??0)+zr);
+}
+
+// Try to hook into your map-load complete
+(function attachAfterLoad(){
+  const s = window.scene || BABYLON.Engine?.LastCreatedScene;
+  if (!s) return;
+  // If your build exposes a promise or callback for map load, attach here.
+  // Otherwise, run after a small timeout (best effort).
+  setTimeout(()=>{ try{
+    forceSpawn(); exteriorRain();
+    const inv = PP.storage.loadInventory();
+    if (!inv.slots.length) { if (window.openStorage) openStorage(); } else { buildBelt(inv.slots); scatterItems(inv.slots); }
+  }catch(e){ console.warn('Merge patch post-load error', e); }}, 1500);
+})();
+</script>
+
 </html>

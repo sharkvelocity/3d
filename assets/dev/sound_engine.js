@@ -264,4 +264,75 @@
     SoundEngine.init(s);
   });
 
+
+  // -------- Ambient loop / crossfade --------
+  /**
+   * Manage a single ambient loop with crossfade between named tracks (from MANIFEST.ambient).
+   * API: SoundEngine.ambient.set(name, fadeSec), SoundEngine.ambient.stop(fadeSec)
+   */
+  SoundEngine.ambient = (function(){
+    let current = null;      // { name, snd }
+    let fading  = null;      // snd that is fading out
+
+    function _getAmbientList(name){
+      const g = _state.categories.ambient || {};
+      const list = g[name] || [];
+      return list;
+    }
+
+    function _fadeTo(sndIn, sndOut, fadeSec){
+      fadeSec = Math.max(0.05, fadeSec||1.5);
+      const steps = Math.max(3, Math.floor(60 * fadeSec));
+      let i = 0;
+      if (sndIn){
+        try{ sndIn.setVolume(0); sndIn.setLoop(true); sndIn.play(); }catch(_){}
+      }
+      const iv = (_state.scene && _state.scene.onBeforeRenderObservable)
+
+      let t = 0;
+      const observer = _state.scene.onBeforeRenderObservable.add(()=>{
+        t++; const k = Math.min(1, t/steps);
+        try{ if (sndIn)  sndIn.setVolume(_state.masterVolume * k); }catch(_){}
+        try{ if (sndOut) sndOut.setVolume(_state.masterVolume * (1-k)); }catch(_){}
+        if (k >= 1){
+          _state.scene.onBeforeRenderObservable.remove(observer);
+          try{ if (sndOut){ sndOut.stop(); } }catch(_){}
+        }
+      });
+    }
+
+    return {
+      /**
+       * Crossfade to an ambient by name from MANIFEST.ambient
+       */
+      set: function(name, fadeSec){
+        if (!_state.ready) SoundEngine.init();
+        const list = _getAmbientList(name);
+        if (!list.length){ warn("ambient not found:", name); return; }
+        const sndIn = list[(Math.random()*list.length)|0];
+        const sndOut = current && current.snd || null;
+        current = { name, snd: sndIn };
+        _fadeTo(sndIn, sndOut, fadeSec);
+      },
+      /**
+       * Stop current ambient with fade
+       */
+      stop: function(fadeSec){
+        const sndOut = current && current.snd || null;
+        current = null;
+        if (!sndOut) return;
+        fadeSec = Math.max(0.05, fadeSec||1.0);
+        let t=0, steps=Math.max(3, Math.floor(60*fadeSec));
+        const obs = _state.scene.onBeforeRenderObservable.add(()=>{
+          t++; const k = Math.min(1, t/steps);
+          try{ sndOut.setVolume(_state.masterVolume * (1-k)); }catch(_){}
+          if (k>=1){
+            _state.scene.onBeforeRenderObservable.remove(obs);
+            try{ sndOut.stop(); }catch(_){}
+          }
+        });
+      }
+    };
+  })();
+
 })();
