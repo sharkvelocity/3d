@@ -178,6 +178,18 @@ window.onBeforeRenderAdd = function(cb){
 </style>
 </head>
 <body>
+<!-- PATCH: DOTS shim to prevent boot errors -->
+<script>
+(function(){
+  if (window.__dots_resolveScene) return;
+  window.__dots_resolveScene = function(){
+    return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
+  };
+  window.updateDOTS = window.updateDOTS || function(){ /* no-op (real DOTS module can override) */ };
+  window.DOTS = window.DOTS || { projectors: [] };
+})();
+</script>
+
   <!-- LOADING OVERLAY (hidden until Start) -->
   <div id="loading-box" aria-live="polite">
     <img src="logo.png" alt="Logo" id="loading-logo">
@@ -3763,71 +3775,46 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 </script>
 
 
-
+<!-- PLAYER RIG CONTROLLER — FINAL -->
 <script>
-// PATCH: one-time spawn enforce after scene starts
-(function(){
-  var SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
-  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-  var done=false;
-  function tick(){
-    var s=S();
-    if (!s || !s.activeCamera){ requestAnimationFrame(tick); return; }
-    if (done) return;
-    try{
-      if (s.__playerBody){ s.__playerBody.position = SPAWN.clone(); done=true; }
-    }catch(_){}
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-})();
-</script>
 
+(function(){ 'use strict';
+  if (window.__rigFinal) return; window.__rigFinal = true;
 
-<!-- PATCH: PlayerRig Controller v3 -->
-<script>
-(function(){'use strict';
-  if (window.__playerRigV3) return; window.__playerRigV3 = true;
-
-  // --- Config ---
   const SPAWN = new BABYLON.Vector3(-46.18, 1.35, -105.50);
   const SPEED_WALK = 1.9, SPEED_RUN = 3.3;
   const MOUSE_SENS = 0.002, TOUCH_LOOK_SENS = 0.0022;
   const PLAYER_GLB = ["assets/models/player/main_player.glb","assets/models/player/player.glb"];
 
-  // --- Helpers ---
-  const canvas=()=>document.getElementById('renderCanvas')||document.querySelector('canvas');
-  function S(){ return window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null; }
+  const canvas = () => document.getElementById('renderCanvas') || document.querySelector('canvas');
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
   window.S = S;
-  const isArc=c=>c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
-  const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+  const isArc = c => c && c.alpha!==undefined && c.beta!==undefined && c.radius!==undefined;
+  const clamp = (v,a,b)=>Math.min(Math.max(v,a),b);
 
-  // --- State ---
-  const K={w:0,a:0,s:0,d:0,run:false};
+  const K = {w:0,a:0,s:0,d:0,run:false};
 
-  // --- Input (desktop) ---
   function keyDown(e){
     const k=(e.key||'').toLowerCase(), c=e.keyCode||0, code=e.code||'';
     if(k==='w'||c===87)K.w=1; else if(k==='a'||c===65)K.a=1; else if(k==='s'||c===83)K.s=1; else if(k==='d'||c===68)K.d=1; else if(k==='shift'||c===16)K.run=true;
-    if (k==='v'||code==='KeyV'||c===86) { e.stopPropagation(); toggleThirdPerson(); }
+    if(k==='v' || code==='KeyV' || c===86){ e.stopPropagation(); toggleThirdPerson(); }
   }
   function keyUp(e){
     const k=(e.key||'').toLowerCase(), c=e.keyCode||0;
     if(k==='w'||c===87)K.w=0; else if(k==='a'||c===65)K.a=0; else if(k==='s'||c===83)K.s=0; else if(k==='d'||c===68)K.d=0; else if(k==='shift'||c===16)K.run=false;
   }
   window.addEventListener('keydown', keyDown, false);
+  window.addEventListener('keyup',   keyUp,   false);
   document.addEventListener('keydown', keyDown, true);
-  window.addEventListener('keyup', keyUp, false);
-  document.addEventListener('keyup', keyUp, true);
+  document.addEventListener('keyup',   keyUp,   true);
 
-  // --- Mouse look for FPS ---
   (function(){
-    const c=canvas(); if(!c) return;
+    const c = canvas(); if(!c) return;
     c.setAttribute('tabindex','0');
-    c.addEventListener('click', function(){ try{ c.requestPointerLock&&c.requestPointerLock(); }catch(_ ){} });
-    window.addEventListener('mousemove', function(ev){
-      const s=S(), cam=s&&s.activeCamera; if(!cam||isArc(cam)) return;
-      if(!(document.pointerLockElement===c)) return;
+    c.addEventListener('click', ()=>{ try{ c.requestPointerLock && c.requestPointerLock(); }catch(_){ } });
+    window.addEventListener('mousemove', ev=>{
+      const s=S(), cam=s&&s.activeCamera; if(!cam || isArc(cam)) return;
+      if(document.pointerLockElement!==c) return;
       const dx=ev.movementX||0, dy=ev.movementY||0;
       cam.cameraRotation = cam.cameraRotation || new BABYLON.Vector2(0,0);
       cam.cameraRotation.y += -dx*MOUSE_SENS;
@@ -3835,19 +3822,18 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
     }, true);
   })();
 
-  // --- Touch (left=move, right=look) ---
   (function(){
     let leftId=null,rightId=null,lx=0,ly=0,rx=0,ry=0;
-    window.addEventListener('touchstart', function(e){
-      for (let t of e.changedTouches){
-        if (t.clientX<innerWidth*0.5 && leftId===null){ leftId=t.identifier; lx=t.clientX; ly=t.clientY; }
-        else if (t.clientX>=innerWidth*0.5 && rightId===null){ rightId=t.identifier; rx=t.clientX; ry=t.clientY; }
+    addEventListener('touchstart', e=>{
+      for(const t of e.changedTouches){
+        if(t.clientX < innerWidth*0.5 && leftId===null){ leftId=t.identifier; lx=t.clientX; ly=t.clientY; }
+        else if(t.clientX >= innerWidth*0.5 && rightId===null){ rightId=t.identifier; rx=t.clientX; ry=t.clientY; }
       }
-    },{passive:true});
-    window.addEventListener('touchmove', function(e){
+    }, {passive:true});
+    addEventListener('touchmove', e=>{
       const s=S(); if(!s) return;
-      for (let t of e.changedTouches){
-        if (t.identifier===leftId){
+      for(const t of e.changedTouches){
+        if(t.identifier===leftId){
           const dx=t.clientX-lx, dy=t.clientY-ly;
           K.w = dy<-10?1:0; K.s = dy>10?1:0; K.a = dx<-10?1:0; K.d = dx>10?1:0;
         } else if (t.identifier===rightId){
@@ -3864,16 +3850,15 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
           rx=t.clientX; ry=t.clientY;
         }
       }
-    },{passive:true});
-    window.addEventListener('touchend', function(e){
-      for (let t of e.changedTouches){
-        if (t.identifier===leftId){ leftId=null; K.w=K.a=K.s=K.d=0; }
-        if (t.identifier===rightId) rightId=null;
+    }, {passive:true});
+    addEventListener('touchend', e=>{
+      for(const t of e.changedTouches){
+        if(t.identifier===leftId){ leftId=null; K.w=K.a=K.s=K.d=0; }
+        if(t.identifier===rightId) rightId=null;
       }
-    },{passive:true});
+    }, {passive:true});
   })();
 
-  // --- Rig & Cameras ---
   function ensureRig(s){
     if (!s.__playerBody){
       const body = BABYLON.MeshBuilder.CreateCapsule('player_capsule',{height:1.8,radius:0.35,tessellation:8,capSubdivisions:4},s);
@@ -3883,22 +3868,20 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
     }
     if (!s.__playerRig){
       const rig = new BABYLON.TransformNode('PlayerRig', s);
-      rig.parent = s.__playerBody;
-      s.__playerRig = rig;
+      rig.parent = s.__playerBody; s.__playerRig = rig;
     }
-    // cameras
     let fps = s.getCameraByName && s.getCameraByName('FPCam');
     if (!fps){
       fps = new BABYLON.UniversalCamera('FPCam', new BABYLON.Vector3(0,1.6,0), s);
       fps.parent = s.__playerRig; fps.minZ=0.1; fps.speed=0; fps.inertia=0; fps.angularSensibility=4000;
-      try{ fps.attachControl(canvas(), true); }catch(_ ){}
+      try{ fps.attachControl(canvas(), true); }catch(_){}
       s.cameras && s.cameras.indexOf(fps)===-1 && s.cameras.push(fps);
     }
     let arc = s.getCameraByName && s.getCameraByName('TPCam');
     if (!arc){
       arc = new BABYLON.ArcRotateCamera('TPCam', -Math.PI/2, 1.2, 3.6, s.__playerBody.position.clone(), s);
       arc.lowerBetaLimit=0.3; arc.upperBetaLimit=1.45; arc.lowerRadiusLimit=2.4; arc.upperRadiusLimit=7.5; arc.wheelPrecision=60;
-      try{ arc.attachControl(canvas(), true); }catch(_ ){}
+      try{ arc.attachControl(canvas(), true); }catch(_){}
       s.cameras && s.cameras.indexOf(arc)===-1 && s.cameras.push(arc);
     }
     arc.lockedTarget = s.__playerBody;
@@ -3907,31 +3890,32 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
     return {fps, arc};
   }
 
-  // --- Player mesh (always visible) ---
   async function ensurePlayerMesh(s){
     if (s.__playerMesh) return s.__playerMesh;
-    for (let p of PLAYER_GLB){
+    for (const p of PLAYER_GLB){
       try{
         const i=p.lastIndexOf('/'); const path=p.substring(0,i+1), file=p.substring(i+1);
         const r = await BABYLON.SceneLoader.ImportMeshAsync('', path, file, s);
         const root = r.meshes && r.meshes[0]; if(!root) continue;
         root.name='PlayerModel'; root.parent = s.__playerBody; root.position = new BABYLON.Vector3(0,-1.1,0);
-        // visible in both FP and TP
         if (root.getChildMeshes) root.getChildMeshes().forEach(m=>m.layerMask=0x1);
         root.layerMask = 0x1;
         s.__playerMesh = root; return root;
-      }catch(_ ){}
+      }catch(_){}
     }
     return null;
   }
 
-  // --- Movement loop ---
-  function fwd(cam){ try{ const v=cam.getDirection(BABYLON.Axis.Z); v.y=0; v.normalize(); return v; }catch(_ ){ return new BABYLON.Vector3(0,0,1); } }
-  function right(cam){ try{ const v=cam.getDirection(BABYLON.Axis.X); v.y=0; v.normalize(); return v; }catch(_ ){ return new BABYLON.Vector3(1,0,0); } }
+  function fwd(cam){ try{ const v=cam.getDirection(BABYLON.Axis.Z); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(0,0,1); } }
+  function right(cam){ try{ const v=cam.getDirection(BABYLON.Axis.X); v.y=0; v.normalize(); return v; }catch(_){ return new BABYLON.Vector3(1,0,0); } }
 
   function attachLoop(s){
-    if (s.__rigLoopV3) return; s.__rigLoopV3 = true;
+    if (s.__rigLoopFinal) return; s.__rigLoopFinal = true;
+    s.onNewCameraAddedObservable.add(()=>{ const f=s.getCameraByName('FPCam'); if (f) s.activeCamera=f; });
     s.onBeforeRenderObservable.add(function(){
+      if (s.activeCamera && s.activeCamera.name!=='FPCam' && s.activeCamera.name!=='TPCam'){
+        const f=s.getCameraByName('FPCam'), t=s.getCameraByName('TPCam'); s.activeCamera = f || t || s.activeCamera;
+      }
       const cam=s.activeCamera; if(!cam) return;
       const body=s.__playerBody; if(!body) return;
       let v=new BABYLON.Vector3(0,0,0);
@@ -3947,37 +3931,40 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
         const dt=((eng&&eng.getDeltaTime)?eng.getDeltaTime():16.7)/1000;
         const sp=(K.run?SPEED_RUN:SPEED_WALK)*dt;
         const d=v.scale(sp);
-        try{ body.moveWithCollisions?body.moveWithCollisions(d):body.position.addInPlace(d); }catch(_ ){}
+        try{ body.moveWithCollisions ? body.moveWithCollisions(d) : body.position.addInPlace(d); }catch(_){}
       }
     });
   }
 
-  // --- Toggle ---
   function doToggle(){
     const s=S(); if(!s) return;
-    const {fps,arc} = ensureRig(s);
-    if (!fps||!arc) return;
+    const {fps,arc} = ensureRig(s); if (!fps||!arc) return;
     if (isArc(s.activeCamera)){
-      s.activeCamera=fps; try{ fps.attachControl(canvas(), true); }catch(_ ){}
+      s.activeCamera = fps; try{ fps.attachControl(canvas(), true); }catch(_){}
     } else {
-      arc.lockedTarget=s.__playerBody; arc.radius=clamp(arc.radius||3.6,3.0,6.0); arc.alpha=-Math.PI/2; arc.beta=1.2;
-      s.activeCamera=arc; try{ arc.attachControl(canvas(), true); }catch(_ ){}
+      arc.lockedTarget = s.__playerBody;
+      arc.radius = clamp(arc.radius||3.6, 3.0, 6.0);
+      arc.alpha = -Math.PI/2; arc.beta = 1.2;
+      s.activeCamera = arc; try{ arc.attachControl(canvas(), true); }catch(_){}
     }
     window.camera = s.activeCamera;
   }
-  window.toggleThirdPerson = function(){ const s=S(); if(!s||!s.activeCamera){ window.__tpPending=true; whenReady(()=>{ if(window.__tpPending){ window.__tpPending=false; doToggle(); } }); return; } doToggle(); };
+  window.toggleThirdPerson = function(){
+    const s=S();
+    if (!s || !s.activeCamera){ whenReady(()=>doToggle()); return; }
+    doToggle();
+  };
 
-  // --- Ready gating ---
-  function whenReady(cb){ (function tick(){ const s=S(); if (s && s.activeCamera){ try{ cb(s); }catch(_ ){} return; } requestAnimationFrame(tick); })(); }
+  function whenReady(cb){ (function tick(){ const s=S(); if (s && s.activeCamera){ try{ cb(s); }catch(_){ } return; } requestAnimationFrame(tick); })(); }
   whenReady(async function(s){
-    const cams=ensureRig(s);
-    s.activeCamera = cams.fps; window.camera=cams.fps; // force ours
+    const cams = ensureRig(s);
+    s.activeCamera = cams.fps; window.camera = cams.fps;
     attachLoop(s);
     await ensurePlayerMesh(s);
     if (!s.__spawnDone){ s.__playerBody.position = SPAWN.clone(); s.__spawnDone = true; }
   });
-
 })();
+
 </script>
 </body>
 
@@ -4159,6 +4146,5 @@ function localToWorld(p, def){
   }catch(e){ console.warn('Merge patch post-load error', e); }}, 1500);
 })();
 </script>
-<script src="assets/dev/player_rig_controller_final.js"></script>
 
 </html>
