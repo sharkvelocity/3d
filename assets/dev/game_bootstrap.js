@@ -1,253 +1,255 @@
-/* game_bootstrap.js — one-stop controller
-   - Populates map dropdown from ./assets/models/map/maps.json
-   - Starts engine/scene on "Start Investigation"
-   - Pointer-lock + mouse-look (no Babylon default mouse input conflicts)
-   - Loads optional map config (.js) then GLB model
-   - Applies MAP_DEF.spawn if provided
-   - Updates XYZ HUD each frame
-*/
-(function(){
-  if (window.__GameBootstrap) return; window.__GameBootstrap = true;
+/* game_bootstrap.js — start flow + map select + map load + spawn + pointer lock */
+(function () {
+  if (window.__GameBootstrapReady) return;
+  window.__GameBootstrapReady = true;
 
-  /* ---------- tiny DOM helpers ---------- */
-  const $ = (s)=>document.querySelector(s);
-  const $$ = (s)=>Array.from(document.querySelectorAll(s));
+  // ---------- small helpers ----------
+  const $ = (sel) => document.querySelector(sel);
+  const log = (...a) => { try { console.log("[bootstrap]", ...a); } catch (_) {} };
+  const warn = (...a) => { try { console.warn("[bootstrap]", ...a); } catch (_) {} };
 
-  /* ---------- loader UI ---------- */
-  const LoaderUI = {
-    show(label){ const b=$("#loading-box"); if(b) b.style.display="flex"; this.label(label||"Initializing…"); this.pct(0); },
-    hide(){ const b=$("#loading-box"); if(b) b.style.display="none"; },
-    label(s){ const t=$("#loading-text"); if(t) t.textContent = s||""; },
-    pct(p01){ const f=$("#loading-fill"); if(f) f.style.width = ((p01||0)*100).toFixed(1)+"%"; }
-  };
-
-  /* ---------- manifest / maps ---------- */
-  const MAPS_JSON = "./assets/models/map/maps.json";
-  let MAP_LIST = [];
-
-  async function loadManifest(){
-    try{
-      const res = await fetch(MAPS_JSON, { cache:"no-store" });
-      if (!res.ok) throw new Error("HTTP "+res.status);
-      const data = await res.json();
-      let list = Array.isArray(data) ? data : (Array.isArray(data.maps) ? data.maps : []);
-      // normalize
-      MAP_LIST = list.map(m=>{
-        if (typeof m === "string") return { title:m.replace(/\.(glb|js)$/i,""), file:m };
-        return {
-          title: m.title || m.name || (m.file||m.glb||"map").replace(/\.(glb|js)$/i,""),
-          file:  m.file  || m.glb  || "Abandoned_House.glb",
-          def:   m.def   || m.config || null
-        };
-      });
-    }catch(e){
-      console.warn("[bootstrap] manifest fallback:", e);
-      MAP_LIST = [
-        { title:"Abandoned House", file:"Abandoned_House.glb", def:"Abandoned_House.js" },
-        { title:"Furnished House", file:"furnished_house.glb", def:"furnished_house.js" },
-        { title:"Jailhouse",       file:"jailhouse.glb",       def:"jailhouse.config.js" }
-      ];
-    }
+  function docResolve(path) {
+    try { return new URL(path, document.baseURI).toString(); }
+    catch (_) { return path; }
   }
 
-  function populateMapSelect(){
-    const sel = $("#map-select"); if (!sel) return;
-    sel.innerHTML = MAP_LIST.map((m,i)=>`<option value="${i}">${m.title}</option>`).join("");
-    try{
-      const idx = Number(localStorage.getItem("selectedMapIndex") || "0") || 0;
-      sel.value = String(Math.max(0, Math.min(MAP_LIST.length-1, idx)));
-    }catch(_){}
-    sel.onchange = ()=>{ try{ localStorage.setItem("selectedMapIndex", sel.value); }catch(_){ } };
-  }
-
-  function getSelectedMap(){
-    const sel = $("#map-select");
-    const i = Math.max(0, Math.min(MAP_LIST.length-1, parseInt(sel?.value||"0",10)||0));
-    return MAP_LIST[i] || MAP_LIST[0];
-  }
-
-  /* ---------- script loader (classic) ---------- */
-  function loadScriptOnce(url){
-    return new Promise(resolve=>{
+  function loadScriptOnce(path) {
+    return new Promise((resolve) => {
       const s = document.createElement("script");
-      s.src = url; s.async = true;
-      s.onload = ()=>resolve(true);
-      s.onerror = ()=>resolve(false);
+      s.src = docResolve(path) + (path.includes("?") ? "" : `?v=${Date.now()}`);
+      s.async = true;
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
       document.head.appendChild(s);
     });
   }
 
-  /* ---------- engine/scene setup ---------- */
-  async function ensureEngineScene(){
-    if (window.engine && window.scene && window.camera) return;
-    const canvas = $("#renderCanvas");
-    const eng = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
-    const sc  = new BABYLON.Scene(eng);
-    sc.collisionsEnabled = true;
-    sc.gravity = new BABYLON.Vector3(0,-0.9,0);
-
-    const cam = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 1.8, 8), sc);
-    cam.attachControl(canvas, true);
-    cam.checkCollisions = true;
-    cam.applyGravity = true;
-    cam.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
-    cam.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
-    cam.minZ = 0.1; cam.inertia = 0;
-
-    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), sc);
-    hemi.intensity = 0.35;
-    sc.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
-
-    window.engine = eng; window.scene = sc; window.camera = cam;
+  async function fetchJSON(url) {
+    try {
+      const r = await fetch(docResolve(url), { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+      return await r.json();
+    } catch (e) {
+      warn("fetchJSON failed", url, e);
+      return null;
+    }
   }
 
-  /* ---------- mouse look: pointer lock + custom rotation ---------- */
-  function setupPointerLockAndLook(){
-    const canvas = $("#renderCanvas");
-    const cam = window.camera; const sc = window.scene; if (!canvas || !cam || !sc) return;
-
-    // remove Babylon's conflicting inputs
-    try { cam.inputs.removeByType("FreeCameraMouseInput"); } catch(_){}
-    try { cam.inputs.removeByType("FreeCameraTouchInput"); } catch(_){}
-    try { cam.inputs.removeByType("FreeCameraKeyboardMoveInput"); } catch(_){}
-
-    canvas.tabIndex = 0;
-
-    const reqLock = ()=> {
-      if (document.pointerLockElement === canvas) return;
-      (canvas.requestPointerLock || canvas.mozRequestPointerLock || canvas.webkitRequestPointerLock)?.call(canvas);
-      canvas.focus();
+  // ---------- map list / selector ----------
+  let MAP_FILES = [];
+  function populateMapSelector() {
+    const sel = $("#map-select");
+    if (!sel) return;
+    sel.innerHTML = MAP_FILES.length
+      ? MAP_FILES.map((m, i) => `<option value="${i}">${m.title || m.file}</option>`).join("")
+      : `<option value="-1">(no maps found)</option>`;
+    try {
+      const saved = localStorage.getItem("selectedMapIndex");
+      sel.value = saved && MAP_FILES[+saved] ? saved : "0";
+    } catch (_) {
+      sel.value = "0";
+    }
+    sel.onchange = () => {
+      try { localStorage.setItem("selectedMapIndex", sel.value); } catch (_) {}
     };
-    canvas.addEventListener("click", reqLock, { passive:true });
-    document.addEventListener("pointerlockchange", ()=>{
-      if (document.pointerLockElement !== canvas){
-        try{ window.toast?.("Pointer unlocked — click to lock"); }catch(_){}
+  }
+
+  async function loadManifest() {
+    // Prefer real manifest; fallback to known local files that exist in your repo.
+    const j = await fetchJSON("./assets/models/map/maps.json");
+    if (Array.isArray(j)) MAP_FILES = j;
+    else if (j && Array.isArray(j.maps)) MAP_FILES = j.maps;
+    if (!MAP_FILES.length) {
+      MAP_FILES = [
+        { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.js" },
+        { file: "furnished_house.glb", title: "Furnished House", def: "furnished_house.js" },
+        { file: "jailhouse.glb", title: "Jailhouse", def: "jailhouse.js" },
+      ];
+    }
+    populateMapSelector();
+  }
+
+  function getSelectedMap() {
+    const sel = $("#map-select");
+    const idx = Math.max(0, Math.min(MAP_FILES.length - 1, parseInt(sel?.value || "0", 10) || 0));
+    return MAP_FILES[idx];
+  }
+
+  // ---------- loader UI ----------
+  const Loader = (() => {
+    const box = () => $("#loading-box");
+    const text = () => $("#loading-text");
+    const fill = () => $("#loading-fill");
+    let stepsDone = 0, stepsTotal = 0;
+    function show() { const b = box(); if (b) b.style.display = "flex"; }
+    function hide() { const b = box(); if (b) b.style.display = "none"; }
+    function label(s) { const t = text(); if (t) t.textContent = s || ""; }
+    function draw() {
+      const f = fill(); if (!f) return;
+      const pct = stepsTotal ? (stepsDone / stepsTotal) : 0;
+      f.style.width = (pct * 100).toFixed(1) + "%";
+    }
+    const queue = [];
+    function addStep(lbl, fn) { queue.push({ lbl, fn }); stepsTotal = queue.length; }
+    async function run() {
+      show(); draw();
+      for (const s of queue) {
+        label(s.lbl); draw();
+        try { await s.fn(); } catch (e) { warn("step failed:", s.lbl, e); }
+        stepsDone++; draw();
       }
-    });
-
-    let yaw   = cam.rotation?.y || 0;
-    let pitch = cam.rotation?.x || 0;
-    const SENS = 0.0025, MINP = -Math.PI/2 + 0.15, MAXP = Math.PI/2 - 0.15;
-
-    function onMove(e){
-      if (document.pointerLockElement !== canvas) return;
-      yaw   += (e.movementX || 0) * SENS;
-      // flip the sign below if you prefer invert-Y
-      pitch += (e.movementY || 0) * SENS * 0.85;
-      if (pitch < MINP) pitch = MINP;
-      if (pitch > MAXP) pitch = MAXP;
-      cam.rotation.y = yaw;
-      cam.rotation.x = pitch;
+      label("Finalizing…"); draw();
+      await new Promise(r => setTimeout(r, 120));
+      hide();
     }
-    window.addEventListener("mousemove", onMove, { passive:true });
+    function reset(){ queue.length = 0; stepsDone = 0; stepsTotal = 0; draw(); }
+    return { addStep, run, reset, show, hide, label };
+  })();
 
-    // keep compatibility if something calls applyLook
-    window.applyLook = function(){ /* rotation is handled by onMove */ };
-  }
+  // ---------- Babylon setup ----------
+  let engine, scene, camera, hemi;
+  async function prepareEngineScene() {
+    const canvas = document.getElementById("renderCanvas");
+    engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    scene = new BABYLON.Scene(engine);
+    scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+    scene.fogDensity = 0.0045;
+    scene.fogColor = new BABYLON.Color3(0.02, 0.03, 0.05);
+    hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
+    hemi.intensity = 0.35;
 
-  /* ---------- map loading ---------- */
-  async function loadSelectedMap(){
-    const sc = window.scene;
-    const choice = getSelectedMap();
-    const base = "./assets/models/map/";
+    camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 1.8, 0), scene);
+    camera.attachControl(canvas, true);
+    camera.minZ = 0.1;
+    camera.inertia = 0;
+    camera.applyGravity = true;
+    camera.checkCollisions = true;
+    camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+    camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
 
-    // Optional config first
-    if (choice.def){
-      const ok = await loadScriptOnce(base + choice.def);
-      if (!ok) console.warn("[bootstrap] config not found:", choice.def);
-    }
+    // Make sure keyboard/mouse both work together
+    camera.inputs.clear(); // avoid double/legacy bindings
+    camera.inputs.addMouse();
+    camera.inputs.addKeyboard();
 
-    // GLB
-    try{
-      const res = await BABYLON.SceneLoader.ImportMeshAsync("", base, choice.file, sc);
-      const root = res.meshes[0] || res.meshes.find(m=>m.name==="__root__");
-      if (root) { root.receiveShadows = true; }
-    }catch(e){
-      console.error("[bootstrap] GLB load failed:", choice.file, e);
-      const g = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:180, height:180 }, sc);
-      g.checkCollisions = true; g.receiveShadows = true;
-    }
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
 
-    // Spawn from MAP_DEF if present
-    try{
-      if (window.MAP_DEF && MAP_DEF.spawn && sc.activeCamera){
-        const s = MAP_DEF.spawn;
-        sc.activeCamera.position.set(s.x||0, s.y||1.8, s.z||0);
-      }
-    }catch(_){}
-  }
-
-  /* ---------- simple moon (texture on sphere) ---------- */
-  function ensureMoon(){
-    if (window.__MoonSetup) return;
-    const sc = window.scene;
-    const m = BABYLON.MeshBuilder.CreateSphere("moon_sphere", { diameter:18, segments:16 }, sc);
-    const mat = new BABYLON.StandardMaterial("moonMat", sc);
-    mat.diffuseTexture  = new BABYLON.Texture("./assets/images/sky/moon.jpg", sc, true, false);
-    mat.emissiveTexture = mat.diffuseTexture; mat.disableLighting = true; mat.specularColor = new BABYLON.Color3(0,0,0);
-    m.material = mat; m.position = new BABYLON.Vector3(0,120,160);
-    m.isPickable=false; m.applyFog=false;
-    window.__MoonSetup = true;
-  }
-
-  /* ---------- HUD XYZ updater ---------- */
-  function startHudXYZ(){
+    // HUD XYZ visible
     const hud = $("#hud-xyz"); if (hud) hud.style.display = "block";
-    const x = $("#hud-x"), y=$("#hud-y"), z=$("#hud-z");
-    window.scene.onBeforeRenderObservable.add(()=>{
-      const p = window.camera?.position;
-      if (!p) return;
-      if (x) x.textContent = p.x.toFixed(2);
-      if (y) y.textContent = p.y.toFixed(2);
-      if (z) z.textContent = p.z.toFixed(2);
+    scene.onBeforeRenderObservable.add(() => {
+      try {
+        $("#hud-x").textContent = camera.position.x.toFixed(2);
+        $("#hud-y").textContent = camera.position.y.toFixed(2);
+        $("#hud-z").textContent = camera.position.z.toFixed(2);
+      } catch (_) {}
     });
   }
 
-  /* ---------- start button ---------- */
-  async function safeStart(e){
-    e?.preventDefault?.();
-    if (window.__GameStarted) return;
-    window.__GameStarted = true;
+  // ---------- map def loading ----------
+  async function tryLoadMapDef(defNameOrNull, mapFile) {
+    // Try explicit def, then inferred names
+    const baseNoExt = (mapFile || "").replace(/\.[^.]+$/, "");
+    const candidates = [];
+    if (defNameOrNull) candidates.push(`./assets/models/map/${defNameOrNull}`);
+    candidates.push(`./assets/models/map/${baseNoExt}.js`);
+    candidates.push(`./assets/models/map/${baseNoExt}.config.js`);
+    // your known defs:
+    candidates.push("./assets/models/map/Abandoned_House.js");
+    candidates.push("./assets/models/map/furnished_house.js");
+    candidates.push("./assets/models/map/jailhouse.js");
 
-    const title = $("#title-screen"); if (title) title.style.display = "none";
-    LoaderUI.show("Preparing engine…");
-
-    await ensureEngineScene(); LoaderUI.pct(0.15);
-    setupPointerLockAndLook();
-
-    LoaderUI.label("Loading maps manifest…");
-    await loadManifest(); populateMapSelect(); LoaderUI.pct(0.35);
-
-    LoaderUI.label("Loading map…");
-    await loadSelectedMap(); LoaderUI.pct(0.75);
-
-    LoaderUI.label("Setting sky…");
-    try{ ensureMoon(); }catch(_){}
-    LoaderUI.pct(0.85);
-
-    startHudXYZ();
-
-    LoaderUI.label("Starting…");
-    engine.runRenderLoop(()=>scene.render());
-    window.addEventListener("resize", ()=>engine.resize());
-    try { ($("#renderCanvas")).focus(); } catch(_){}
-    try { BABYLON.Engine.audioEngine?.unlock?.(); } catch(_){}
-    LoaderUI.pct(1); LoaderUI.hide();
+    for (const c of candidates) {
+      const ok = await loadScriptOnce(c);
+      if (ok && window.MAP_DEF && MAP_DEF.spawn) { log("Loaded MAP_DEF from", c); return true; }
+    }
+    warn("No MAP_DEF found; synthesizing minimal fallback.");
+    window.MAP_DEF = window.MAP_DEF || {};
+    MAP_DEF.spawn = MAP_DEF.spawn || { x: 0, y: 1.8, z: 0 };
+    return true;
   }
 
-  /* ---------- wire UI ---------- */
-  document.addEventListener("DOMContentLoaded", ()=>{
-    // Preload manifest just to fill the dropdown visually
-    loadManifest().then(populateMapSelect).catch(()=>{});
-    const startBtn = $("#start-button");
-    startBtn?.addEventListener("click", safeStart, { passive:false });
-    // Enter/Space
-    document.addEventListener("keydown", (e)=>{
-      if (window.__GameStarted) return;
-      if (e.key === "Enter" || e.code === "Space"){ e.preventDefault(); safeStart(e); }
-    }, { passive:false });
-  });
+  async function loadSelectedMap() {
+    const chosen = getSelectedMap();
+    const mapFile = chosen?.file || "Abandoned_House.glb";
+    await tryLoadMapDef(chosen?.def, mapFile);
 
-  // expose for console debugging
-  window.__safeStart = safeStart;
+    // Import meshes
+    try {
+      const res = await BABYLON.SceneLoader.ImportMeshAsync(
+        "",
+        "./assets/models/map/",
+        mapFile,
+        scene
+      );
+      const root = res.meshes[0] || null;
+      if (root) {
+        res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch (_) {} });
+      }
+      log("Map imported:", mapFile);
+    } catch (e) {
+      warn("Map import failed, creating ground fallback", e);
+      BABYLON.MeshBuilder.CreateGround("fallback", { width: 180, height: 180 }, scene).checkCollisions = true;
+    }
+  }
+
+  function enforceSpawn() {
+    if (!(window.MAP_DEF && MAP_DEF.spawn)) return;
+    const sp = MAP_DEF.spawn || { x: 0, y: 1.8, z: 0 };
+    camera.position.set(sp.x || 0, sp.y || 1.8, sp.z || 0);
+    log("Spawn:", sp);
+  }
+
+  function enablePointerLock() {
+    const canvas = document.getElementById("renderCanvas");
+    if (!canvas || !canvas.requestPointerLock) return;
+    // On initial click lock, and on Escape show hint
+    canvas.addEventListener("click", () => {
+      if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch (_) {} }
+    });
+    document.addEventListener("pointerlockchange", () => {
+      if (document.pointerLockElement !== canvas) {
+        // unlocked – show a quick toast hint if you have toast()
+        try { (window.toast || ((m)=>console.log(m)))("Click the canvas to lock mouse"); } catch (_) {}
+      }
+    });
+  }
+
+  // ---------- start button flow ----------
+  let started = false;
+  async function safeStart(e) {
+    e?.preventDefault?.();
+    if (started) return;
+    started = true;
+
+    // Hide title
+    const title = $("#title-screen"); if (title) title.style.display = "none";
+
+    Loader.reset(); Loader.label("Initializing…"); Loader.show();
+
+    Loader.addStep("Loading map list…", async () => await loadManifest());
+    Loader.addStep("Preparing engine…", async () => await prepareEngineScene());
+    Loader.addStep("Loading selected map…", async () => await loadSelectedMap());
+    Loader.addStep("Enforcing spawn…", async () => enforceSpawn());
+    Loader.addStep("Pointer lock ready…", async () => enablePointerLock());
+
+    await Loader.run();
+
+    // Focus canvas and try to lock pointer once
+    const canvas = document.getElementById("renderCanvas");
+    try { canvas?.focus?.(); } catch (_) {}
+    try { canvas?.requestPointerLock?.(); } catch (_) {}
+  }
+
+  // hook UI
+  (function wireStart() {
+    const btn = $("#start-button");
+    if (btn) btn.addEventListener("click", safeStart, { passive: false });
+    document.addEventListener("keydown", (e) => {
+      if (!started && (e.key === "Enter" || e.code === "Space")) { e.preventDefault(); safeStart(e); }
+    }, { passive: false });
+
+    // Preload manifest early so the dropdown shows data on first paint
+    window.addEventListener("DOMContentLoaded", () => { loadManifest().catch(()=>{}); });
+  })();
 })();
