@@ -1,29 +1,31 @@
-(function () {
+(function(){
+  // Minimal config for the Jailhouse map. This is DATA ONLY.
+  // Your loader will import this file and then import MAP_DEF.file (the GLB).
+  // Adjust spawn/offset/rotationY/scale as you refine the layout.
   window.MAP_DEF = {
     title: "Jailhouse",
-    file:  "jailhouse.glb",       // put your .glb in the same folder
-    scale: 0.10,                  // adjust if needed
-    rotationY: 0,
+    // Put your actual GLB here (same folder by default):
+    file: "./assets/models/map/jailhouse.glb",
+    // Global transforms if your GLB needs nudging in world space:
+    scale: 1.0,
+    rotationY: 0,          // degrees
     offset: { x: 0, y: 0, z: 0 },
+    // Initial player position (camera/capsule). Tweak as needed:
+    spawn: { x: 2, y: 1.8, z: -8 },
 
-    // Player & van spawn locations
-    spawn:    { x: 0, y: 1.8, z: 0 },
-    vanSpawn: { x: 0, y: 1.8, z: -8 },
-
-    // Exterior polygon (used for rain/ambient)
+    // Optional exterior polygon for rain/snow systems. Coarse rectangle for now.
+    // Update to your real yard footprint when known.
     exteriorMode: "exterior",
     exterior: [
-      { x:-40, z:-60 }, { x:40, z:-60 },
-      { x:40,  z:60 },  { x:-40, z:60 }
+      { x: -60, z: -80 },
+      { x:  60, z: -80 },
+      { x:  60, z:  80 },
+      { x: -60, z:  80 }
     ],
 
-    // Rooms (placeholder polygons; you’ll want to refine with real coords)
-    rooms: [
-      { name:"Cell Block A", poly:[ {x:-20,z:-20}, {x:0,z:-20}, {x:0,z:20}, {x:-20,z:20} ] },
-      { name:"Cell Block B", poly:[ {x:0,z:-20}, {x:20,z:-20}, {x:20,z:20}, {x:0,z:20} ] },
-      { name:"Warden Office", poly:[ {x:-10,z:25}, {x:10,z:25}, {x:10,z:35}, {x:-10,z:35} ] },
-      { name:"Cafeteria", poly:[ {x:-20,z:-40}, {x:20,z:-40}, {x:20,z:-20}, {x:-20,z:-20} ] },
-      { name:"Yard", poly:[ {x:-30,z:40}, {x:30,z:40}, {x:30,z:60}, {x:-30,z:60} ] }
-    ]
+    // Rooms can be filled in later for more accurate logic (temperature, ghost room, etc.).
+    // Leave empty if you don't have per-room polygons yet.
+    rooms: []
   };
+  console.log("[MapConfig] MAP_DEF set for Jailhouse:", window.MAP_DEF);
 })();

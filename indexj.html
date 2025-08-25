@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PhasmaPhoney — Modular Build (Movement + XYZ HUD)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+
+  <!-- Babylon core + loaders (keep these paths as you had them) -->
+  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/earcut.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js"></script>
+  <script src="./cdn/draco_decoder_gltf.js"></script>
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+
+  <style>
+    html, body { margin:0; height:100%; width:100%; overflow:hidden; background:#000; font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
+
+    /* Title / Start */
+    #title {
+      position:fixed; inset:0; display:flex; flex-direction:column; gap:16px;
+      align-items:center; justify-content:center; background:rgba(0,0,0,0.9); color:#bff; z-index:9000;
+    }
+    #startBtn {
+      padding:12px 20px; border-radius:12px; border:1px solid #0aa; background:#0b1820; color:#cff; cursor:pointer; font-size:18px;
+    }
+
+    /* XYZ HUD */
+    #hud-xyz {
+      position:fixed; top:14px; right:12px; z-index:6000;
+      padding:6px 8px; border:1px solid rgba(0,255,255,.35); border-radius:8px;
+      background:rgba(0,0,0,0.55); color:#0ff; font:12px/1.3 monospace;
+    }
+    #hud-xyz b { color:#9ff; }
+
+    /* Toast (optional) */
+    #toast {
+      position:fixed; left:50%; top:18px; transform:translateX(-50%);
+      padding:8px 12px; border:1px solid #066; border-radius:8px; color:#0ff;
+      background:rgba(0,0,0,.7); z-index:6500; display:none; max-width:70vw; text-align:center;
+      font:13px/1.35 monospace;
+    }
+
+    /* Make any GLB Viewer button sit bottom-left (your devtools usually adds #gv-btn) */
+    #gv-btn {
+      position:fixed; left:12px; bottom:12px; top:auto !important;
+      z-index:2147483000; background:#0b2e2e; color:#0ff; border:1px solid #0aa; padding:8px 10px;
+      border-radius:10px; cursor:pointer; user-select:none; font:14px/1.2 system-ui,Segoe UI,Arial;
+      box-shadow:0 4px 14px rgba(0,0,0,.35);
+    }
+    #gv-btn:hover{ filter:brightness(1.15); }
+  </style>
+</head>
+<body>
+
+  <!-- Title / Start -->
+  <div id="title">
+    <img src="./logo.png" alt="PhasmaPhoney" style="max-width:65vw; max-height:32vh; object-fit:contain; filter:drop-shadow(0 0 12px #0ff4)">
+    <button id="startBtn">Start Investigation</button>
+    <div style="opacity:.75; font:12px monospace;">Click Start, then click the canvas to lock pointer. Use W/A/S/D + Shift.</div>
+  </div>
+
+  <!-- Canvas -->
+  <canvas id="renderCanvas" tabindex="0"></canvas>
+
+  <!-- Simple toast -->
+  <div id="toast"></div>
+
+  <!-- XYZ HUD -->
+  <div id="hud-xyz">XYZ: <b id="hud-x">0</b>, <b id="hud-y">0</b>, <b id="hud-z">0</b></div>
+
+  <!-- ======================= Core Bootstrap ======================= -->
+  <script>
+    // Minimal global refs (some modules look for these)
+    let engine = null, scene = null;
+
+    function toast(msg, ms=1400){
+      const t = document.getElementById('toast'); if (!t) return;
+      t.textContent = msg; t.style.display = 'block';
+      clearTimeout(toast._t); toast._t = setTimeout(()=> t.style.display = 'none', ms);
+    }
+
+    async function initBabylon() {
+      const canvas = document.getElementById('renderCanvas');
+      engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+      scene  = new BABYLON.Scene(engine);
+      window.engine = engine; window.scene = scene; // expose for modules
+
+      // Base scene setup (no camera here — your movement rig will create FPCam/TPCam)
+      scene.collisionsEnabled = true;
+      scene.gravity = new BABYLON.Vector3(0, -0.9, 0);
+      scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+      scene.fogDensity = 0.0045;
+      scene.fogColor = new BABYLON.Color3(0.02, 0.03, 0.05);
+      scene.clearColor = new BABYLON.Color4(0.01,0.01,0.02,1);
+
+      // Render loop
+      engine.runRenderLoop(()=> { try { scene.render(); } catch(e) { /* keep running */ }});
+      window.addEventListener('resize', ()=>engine.resize());
+
+      // Focus canvas; pointer lock on click
+      canvas.addEventListener('click', ()=>{
+        if (document.pointerLockElement !== canvas) {
+          try { canvas.requestPointerLock(); } catch(_){}
+        }
+      });
+
+      // If your spawn_fix exposes ensureMapDef/enforceSpawn, call them once after load
+      setTimeout(async ()=>{
+        try {
+          if (typeof window.ensureMapDef === 'function') await window.ensureMapDef();
+          if (window.__TweakPatch && typeof window.__TweakPatch.enforceSpawn === 'function') {
+            window.__TweakPatch.enforceSpawn(scene);
+          } else if (typeof window.enforceSpawn === 'function') {
+            window.enforceSpawn(scene);
+          }
+        } catch(_) {}
+      }, 400);
+    }
+
+    function startXYZHud() {
+      const hx = document.getElementById('hud-x');
+      const hy = document.getElementById('hud-y');
+      const hz = document.getElementById('hud-z');
+      if (!hx || !hy || !hz) return;
+
+      const update = ()=>{
+        try{
+          const cam = scene && scene.activeCamera;
+          if (!cam) return;
+          hx.textContent = cam.position.x.toFixed(2);
+          hy.textContent = cam.position.y.toFixed(2);
+          hz.textContent = cam.position.z.toFixed(2);
+        }catch(_){}
+        requestAnimationFrame(update);
+      };
+      update();
+    }
+
+    async function safeStart(ev){
+      ev && ev.preventDefault && ev.preventDefault();
+      const cover = document.getElementById('title');
+      if (cover) cover.style.display = 'none';
+
+      await initBabylon();
+
+      // Initialize audio engine if provided by your modular file
+      try { BABYLON.Engine.audioEngine?.unlock?.(); } catch(_) {}
+      try { window.SoundEngine && SoundEngine.init && SoundEngine.init(scene); } catch(_) {}
+
+      // If your minimap module exposes init, wire it
+      try { window.Minimap && Minimap.init && Minimap.init(scene); } catch(_) {}
+
+      startXYZHud();
+
+      // Convenience: request pointer lock once after start (desktop)
+      const canvas = document.getElementById('renderCanvas');
+      setTimeout(()=>{ try { canvas.requestPointerLock && canvas.requestPointerLock(); } catch(_){ } }, 50);
+    }
+
+    // Wire Start button + Enter
+    window.addEventListener('DOMContentLoaded', ()=>{
+      const btn = document.getElementById('startBtn');
+      btn && btn.addEventListener('click', safeStart);
+      document.addEventListener('keydown', (e)=>{
+        if (document.getElementById('title')?.style.display !== 'none' && (e.key === 'Enter' || e.code === 'Space')){
+          e.preventDefault(); safeStart(e);
+        }
+      }, {passive:false});
+    });
+  </script>
+
+  <!-- ======================= Modular System (dev) ======================= -->
+  <!-- Order matters a bit: helpers first, then features, then rig -->
+  <!-- Spawn/map helper (loads MAP_DEF and enforces spawn if createScene/scene detected) -->
+  <script src="./assets/dev/spawn_fix.js"></script>
+
+  <!-- Sound engine (your new modular system for SFX/ambience/footsteps etc.) -->
+  <script src="./assets/dev/sound_engine.js"></script>
+
+  <!-- Moon (renders visible moon with ./assets/textures/moon.jpg if present) -->
+  <script src="./assets/dev/moon.js"></script>
+
+  <!-- Minimap (north-up + M overlay toggle & pointer-lock safe handling) -->
+  <script src="./assets/dev/minimap_northup_xyz.js"></script>
+
+  <!-- Movement rig (WASD, Shift run, pointer lock look, V third-person toggle, visible body) -->
+  <script src="./assets/dev/movement_rig_clean.js"></script>
+
+  <!-- Optional: dev tools (GLB viewer, etc.). The CSS above pins #gv-btn to bottom-left -->
+  <script src="./assets/dev/devtools.js"></script>
+
+  <!-- Optional: extra merge patch utilities (if you use them) -->
+  <script src="./assets/dev/merge_patch.js"></script>
+
+  <!-- DO NOT include the legacy player_rig_controller_final.js (we're using movement_rig_clean.js) -->
+  <!-- <script src="./assets/dev/player_rig_controller_final.js"></script> -->
+
+</body>
+</html>
