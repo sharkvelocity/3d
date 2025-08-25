@@ -1,11 +1,35 @@
-// spawn_fix.js
-// Loads MAP_DEF from common locations and enforces spawn on scene load.
 
+/* spawn_fix.js — robust MAP_DEF loader + spawn enforcement (document-relative paths)
+   - Resolves candidate config URLs against document.baseURI to avoid "assets/dev/assets/..." bugs
+   - Loads via <script> tags (classic) so it works with <script src="..."> (no ESM import())
+   - Enforces MAP_DEF.spawn onto active camera (or player_capsule if present)
+*/
 (function(){
-  'use strict';
   if (window.__SpawnFixReady) return; window.__SpawnFixReady = true;
 
-  const CANDIDATES = [
+  var log = function(){ try{ console.log.apply(console, ["[spawn_fix]"].concat([].slice.call(arguments))); }catch(_){}};
+
+  // Resolve a URL relative to the HTML document, NOT this JS file.
+  function docResolve(path){
+    try { return new URL(path, document.baseURI).toString(); }
+    catch(e){ return path; }
+  }
+
+  // Load a script tag once (classic, not module), resolve relative to document
+  function loadScriptOnce(path){
+    return new Promise(function(resolve){
+      var url = docResolve(path);
+      var s = document.createElement("script");
+      s.src = url;
+      s.async = true;
+      s.onload = function(){ resolve(true); };
+      s.onerror = function(){ resolve(false); };
+      document.head.appendChild(s);
+    });
+  }
+
+  // Candidate map config files (document-relative)
+  var candidates = [
     "./assets/models/map/furnished_house.js",
     "./assets/models/map/fully_furnished.config.js",
     "./assets/models/map/Abandoned_House.js",
@@ -14,55 +38,82 @@
   ];
 
   async function ensureMapDef(){
-    if (window.MAP_DEF && window.MAP_DEF.spawn) return true;
-    for (const path of CANDIDATES){
-      try {
-        await import(path);
-        if (window.MAP_DEF && window.MAP_DEF.spawn) return true;
-      } catch(e){ /* ignore */ }
+    try{
+      if (window.MAP_DEF && window.MAP_DEF.spawn) return true;
+
+      // Try each candidate in order
+      for (var i=0;i<candidates.length;i++){
+        var ok = await loadScriptOnce(candidates[i]);
+        if (ok && window.MAP_DEF && window.MAP_DEF.spawn){
+          log("Loaded MAP_DEF from", candidates[i]);
+          return true;
+        }
+      }
+
+      // If still not present, synthesize a minimal one so the game keeps going
+      if (!window.MAP_DEF){
+        window.MAP_DEF = {
+          title: "Fallback Map",
+          file: null,
+          scale: 1,
+          rotationY: 0,
+          offset: {x:0,y:0,z:0},
+          spawn: {x:0, y:1.8, z:0}
+        };
+        log("Synthesized fallback MAP_DEF (no config found).");
+      }
+      return !!(window.MAP_DEF && window.MAP_DEF.spawn);
+    }catch(e){
+      log("ensureMapDef error:", e);
+      return false;
     }
-    return false;
   }
 
   function enforceSpawn(scene){
-    try {
+    try{
       if (!(window.MAP_DEF && MAP_DEF.spawn)) return;
-      const sp = MAP_DEF.spawn;
-      const cam = (scene && scene.activeCamera) || null;
-      if (cam) {
-        cam.position.x = sp.x ?? 0;
-        cam.position.y = sp.y ?? 1.8;
-        cam.position.z = sp.z ?? 0;
+      var sp = MAP_DEF.spawn || {x:0,y:1.8,z:0};
+      // Prefer player capsule if present
+      var pc = (scene && scene.getMeshByName && scene.getMeshByName("player_capsule")) || null;
+      if (pc && pc.position) { pc.position.copyFromFloats(sp.x||0, sp.y||1.8, sp.z||0); }
+      // Camera
+      var cam = scene && scene.activeCamera;
+      if (cam && cam.position){
+        cam.position.x = (sp.x||0);
+        cam.position.y = (sp.y||1.8);
+        cam.position.z = (sp.z||0);
       }
-      if (scene.__playerBody){
-        scene.__playerBody.position.set(sp.x ?? 0, sp.y ?? 1.8, sp.z ?? 0);
-      }
-      console.log("[spawn_fix] Spawn enforced:", sp);
-    } catch(e){
-      console.warn("[spawn_fix] Spawn error:", e);
+      log("Spawn enforced:", sp);
+    }catch(e){
+      log("enforceSpawn error:", e);
     }
   }
 
-  (function hook(){
-    if (!window.BABYLON){ return; }
-    const g = window;
-    const origCreate = g.createScene;
+  // Hook Babylon createScene if present; else run after load
+  (function hookScene(){
+    var g = window;
+    var origCreate = g.createScene;
     if (typeof origCreate === "function"){
       g.createScene = async function(){
         await ensureMapDef();
-        const sc = await origCreate.apply(this, arguments);
-        try { sc.executeWhenReady(()=> enforceSpawn(sc)); } catch{ enforceSpawn(sc); }
+        var sc = await origCreate.apply(this, arguments);
+        try { sc.executeWhenReady(function(){ enforceSpawn(sc); }); }
+        catch(_){ enforceSpawn(sc); }
         return sc;
       };
-      console.log("[spawn_fix] Wrapped createScene");
+      log("Wrapped createScene for spawn enforcement");
     } else {
-      window.addEventListener("load", async ()=>{
-        await ensureMapDef();
-        const sc = window.scene || BABYLON.Engine?.LastCreatedScene;
-        if (sc) enforceSpawn(sc);
+      window.addEventListener("load", function(){
+        // try a little later to let Babylon build scene
+        setTimeout(async function(){
+          await ensureMapDef();
+          var sc = g.scene || (g._scene && g._scene.scene) || g.SCENE || null;
+          if (sc) enforceSpawn(sc);
+        }, 300);
       });
     }
   })();
 
-  window.__SpawnFix = { ensureMapDef, enforceSpawn };
+  // Expose for debugging
+  window.__SpawnFix = { ensureMapDef: ensureMapDef, enforceSpawn: enforceSpawn };
 })();
