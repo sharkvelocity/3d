@@ -3966,7 +3966,6 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
 })();
 
 </script>
-</body>
 
 <script>
 // === Merge Patch: storage (from index3), belt, spawn, exterior rain, and joystick removal ===
@@ -4146,5 +4145,105 @@ function localToWorld(p, def){
   }catch(e){ console.warn('Merge patch post-load error', e); }}, 1500);
 })();
 </script>
+<!-- MINIMAP (click to teleport) -->
+<script>
+(function(){ 'use strict';
+  if (window.__minimapInstalled) return; window.__minimapInstalled = true;
 
+  // helpers
+  const S = ()=>window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null;
+  const whenReady = (cb)=>{ (function tick(){ const s=S(); if (s && s.activeCamera){ try{cb(s);}catch(_){ } return; } requestAnimationFrame(tick); })(); };
+  const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
+
+  // config
+  const VIEWPORT = { x: 0.02, y: 0.73, w: 0.24, h: 0.24 };  // (0,0) is bottom-left in Babylon viewports
+  const HEIGHT   = 60;      // minimap camera height
+  const HALF_EXT = 55;      // ortho half-extent (controls zoom)
+  const Y_FALLBK = 1.35;    // fallback Y if ground ray miss
+
+  function pickablePredicate(m){
+    // Prefer floor/ground/nav meshes; fallback to anything pickable.
+    if (m.isPickable === false) return false;
+    const n = (m.name||"").toLowerCase();
+    return n.includes("floor") || n.includes("ground") || n.includes("nav") || true;
+  }
+
+  function buildMiniMap(scene){
+    // ensure player body exists
+    const body = scene.__playerBody || scene.getMeshByName("player_capsule");
+    // top-down orthographic camera
+    const cam = new BABYLON.FreeCamera("MiniMapCam", new BABYLON.Vector3(0, HEIGHT, 0), scene);
+    cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+    cam.orthoLeft   = -HALF_EXT;  cam.orthoRight  =  HALF_EXT;
+    cam.orthoBottom = -HALF_EXT;  cam.orthoTop    =  HALF_EXT;
+    cam.rotation.x = Math.PI/2;   // look straight down
+    cam.minZ = 0.1; cam.maxZ = 10000;
+    cam.viewport = new BABYLON.Viewport(VIEWPORT.x, VIEWPORT.y, VIEWPORT.w, VIEWPORT.h);
+
+    // render main camera + minimap
+    scene.activeCameras = scene.activeCameras || [];
+    if (!scene.activeCameras.includes(scene.activeCamera)) scene.activeCameras.push(scene.activeCamera);
+    scene.activeCameras.push(cam);
+
+    // simple border using GUI
+    try {
+      const ui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("MinimapUI", true, scene);
+      const frame = new BABYLON.GUI.Rectangle();
+      frame.thickness = 2; frame.color = "#00FFFF"; frame.background = "rgba(0,0,0,0.15)";
+      frame.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+      frame.verticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+      // Convert Babylon viewport (bottom-left) to GUI (top-left) pixels
+      const W = scene.getEngine().getRenderWidth(), H = scene.getEngine().getRenderHeight();
+      function place(){
+        const x = VIEWPORT.x * W, y = (1 - VIEWPORT.y - VIEWPORT.h) * H;
+        frame.left = x + "px"; frame.top = y + "px";
+        frame.width = (VIEWPORT.w * W) + "px"; frame.height = (VIEWPORT.h * H) + "px";
+      }
+      place(); ui.addControl(frame);
+      scene.getEngine().onResizeObservable.add(()=>place());
+    } catch(_){}
+
+    // keep minimap centered on player (or origin if no body yet)
+    scene.onBeforeRenderObservable.add(()=>{
+      const b = scene.__playerBody || scene.getMeshByName("player_capsule");
+      if (b) { cam.position.x = b.position.x; cam.position.z = b.position.z; }
+      // keep ortho box sane if user changes zoom elsewhere
+      cam.orthoLeft=-HALF_EXT; cam.orthoRight=HALF_EXT; cam.orthoBottom=-HALF_EXT; cam.orthoTop=HALF_EXT;
+    });
+
+    // pointer handler: only if click inside the minimap viewport
+    scene.onPointerObservable.add((evt)=>{
+      if (evt.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+      const eng = scene.getEngine();
+      const x = scene.pointerX, y = scene.pointerY;
+      const nx = x/eng.getRenderWidth();        // normalized [0..1] left->right
+      const ny = 1 - y/eng.getRenderHeight();   // normalized [0..1] bottom->top
+      const v = cam.viewport;
+      if (nx < v.x || nx > v.x+v.width || ny < v.y || ny > v.y+v.height) return;
+
+      // Pick using the minimap camera
+      const hit = scene.pick(x, y, pickablePredicate, false, cam);
+      if (hit && hit.hit && hit.pickedPoint){
+        const p = hit.pickedPoint.clone();
+        // Snap Y to ground via a downward ray (safer than fixed y)
+        const groundRay = new BABYLON.Ray(new BABYLON.Vector3(p.x, p.y + 500, p.z), new BABYLON.Vector3(0,-1,0), 2000);
+        const g = scene.pickWithRay(groundRay, pickablePredicate);
+        const body2 = scene.__playerBody || scene.getMeshByName("player_capsule");
+        if (body2){
+          body2.position.x = p.x;
+          body2.position.z = p.z;
+          body2.position.y = g && g.hit ? g.pickedPoint.y + 0.9 : (scene.__spawnY || 1.35);
+        }
+      }
+    });
+  }
+
+  // hide any old "GLB Viewer" button if you had one
+  whenReady((s)=>{
+    try{ Array.from(document.querySelectorAll('a,div,button')).forEach(n=>{ if((n.textContent||'').trim().toLowerCase()==='glb viewer'){ n.style.display='none'; } }); }catch(_){}
+    buildMiniMap(s);
+  });
+})();
+</script>
+</body>
 </html>
