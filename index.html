@@ -2459,92 +2459,105 @@ window.CameraRig = window.CameraRig || { update: function(){ /* no-op */ } };
   tryPointerLock();
 
  
- // ------- Map definition loader & spawn enforcement
-  async function ensureMapDef(){
-    // If MAP_DEF exists, we're good
-    if (window.MAP_DEF && window.MAP_DEF.spawn) { return true; }
-    const candidates = [
-      "./assets/models/map/furnished_house.js",
-      "./assets/models/map/fully_furnished.config.js",
-      "./assets/models/map/Abandoned_House.js",
-      "./assets/models/map/abandoned_house.js",
-      "./assets/models/map/furnished_house.config.js"
-    ];
+ // ------- Map definition loader & spawn enforcement (patched)
+(function(){
+  // Simple logger fallback
+  function log(){ try{ console.log.apply(console, arguments); } catch(_){ } }
 
-    for (const path of candidates){
-      try {
-        await import(path);
-        if (window.MAP_DEF && window.MAP_DEF.spawn) {
+  // Script loader (works without ESM)
+  function loadScript(path){
+    return new Promise((resolve,reject)=>{
+      const s=document.createElement('script'); s.src=path; s.async=true;
+      s.onload=()=>resolve(true); s.onerror=()=>resolve(false);
+      document.head.appendChild(s);
+    });
+  }
+
+  async function ensureMapDef(){
+    try{
+      if (window.MAP_DEF && window.MAP_DEF.spawn) return true;
+      const candidates = [
+        "./assets/models/map/furnished_house.js",
+        "./assets/models/map/fully_furnished.config.js",
+        "./assets/models/map/Abandoned_House.js",
+        "./assets/models/map/abandoned_house.js",
+        "./assets/models/map/furnished_house.config.js"
+      ];
+      for (const path of candidates){
+        const ok = await loadScript(path);
+        if (ok && window.MAP_DEF && window.MAP_DEF.spawn){
           log("Loaded MAP_DEF from", path);
           return true;
         }
-      } catch(e){
-        // ignore 404s; try next
       }
-    }
-
-    // If still missing, toast loudly
-    showToast("Map configuration not found. Expected MAP_DEF with spawn/file. Check assets/models/map/ paths.");
+    }catch(e){}
+    try{
+      const t=document.getElementById('toast');
+      if(t){ t.textContent="Map configuration not found. Expected MAP_DEF with spawn/file."; t.style.display="block";
+             setTimeout(()=>t.style.display="none", 6500); }
+    }catch(_){}
     return false;
   }
 
-  function showToast(msg){
-    if (!toast) return;
-    toast.textContent = msg;
-    toast.style.display = "block";
-    clearTimeout(showToast._t);
-    showToast._t = setTimeout(()=> toast.style.display = "none", 6500);
-  }
-
-  // Hook Babylon if available to enforce spawn after scene load
-  function enforceSpawn(scene){
-    try {
+  function enforceSpawn(sc){
+    try{
       if (!(window.MAP_DEF && MAP_DEF.spawn)) return;
       const sp = MAP_DEF.spawn;
-      const cam = (scene && scene.activeCamera) || null;
-      if (cam) {
-        cam.position.x = sp.x ?? 0;
-        cam.position.y = sp.y ?? 1.8;
-        cam.position.z = sp.z ?? 0;
+      // Primary movement in this build uses the UniversalCamera
+      if (window.camera){
+        camera.position.x = Number.isFinite(sp.x) ? sp.x : 0;
+        camera.position.y = Number.isFinite(sp.y) ? sp.y : 1.8;
+        camera.position.z = Number.isFinite(sp.z) ? sp.z : 0;
       }
-      if (window.player && player.position){
-        player.position.set(sp.x ?? 0, sp.y ?? 1.8, sp.z ?? 0);
+      // If a capsule/body exists in other rigs, nudge it too.
+      const body = (sc && (sc.__playerBody || (sc.getMeshByName && sc.getMeshByName("player_capsule")))) || null;
+      if(body){
+        try{ body.position.set(sp.x||0, sp.y||1.35, sp.z||0); }
+        catch(_){ body.position = new BABYLON.Vector3(sp.x||0, sp.y||1.35, sp.z||0); }
       }
       log("Spawn enforced:", sp);
-    } catch(e){
-      log("Spawn enforcement error:", e);
-    }
+    }catch(e){ log("Spawn enforcement error:", e); }
   }
 
-  // Patch Babylon createScene if detectable
+  // Hook createScene or arm a first-render one-shot so we apply spawn
   (function hookScene(){
-    if (!window.BABYLON){ return; }
-
-    // If there's a global createScene, wrap it
+    if (!window.BABYLON) return;
     const g = window;
     const origCreate = g.createScene;
+
+    function armOnce(sc){
+      // Call once when either camera is ready or body exists
+      let done = false;
+      const sub = sc.onBeforeRenderObservable.add(()=>{
+        if (done) return;
+        if (!g.camera && !sc.__playerBody && !(sc.getMeshByName && sc.getMeshByName("player_capsule"))) return;
+        enforceSpawn(sc);
+        done = true;
+        try{ sc.onBeforeRenderObservable.remove(sub); }catch(_){}
+      });
+    }
+
     if (typeof origCreate === "function"){
       g.createScene = async function(){
         await ensureMapDef();
         const sc = await origCreate.apply(this, arguments);
-        try {
-          sc.executeWhenReady(()=> enforceSpawn(sc));
-        } catch{ enforceSpawn(sc); }
+        try{ sc.executeWhenReady(()=>armOnce(sc)); } catch(_){ armOnce(sc); }
+        log("Wrapped createScene with spawn enforcement");
         return sc;
       };
-      log("Wrapped createScene with spawn enforcement");
     } else {
-      // Fallback: try after load
       window.addEventListener("load", async ()=>{
         await ensureMapDef();
-        const engineScene = (g.scene || (g._scene && g._scene.scene));
-        if (engineScene) enforceSpawn(engineScene);
+        const sc = g.scene || (g._scene && g._scene.scene);
+        if (sc) armOnce(sc);
       });
     }
   })();
 
   // Expose for debugging
-  window.__TweakPatch = { ensureMapDef, enforceSpawn, showToast };
+  window.__TweakPatch = window.__TweakPatch || {};
+  window.__TweakPatch.ensureMapDef = ensureMapDef;
+  window.__TweakPatch.enforceSpawn = enforceSpawn;
 })();
 </script>
 
