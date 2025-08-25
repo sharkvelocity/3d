@@ -1,36 +1,30 @@
-// Abandoned_House.config.js — Map definition for Abandoned House
+// assets/models/map/Abandoned_House.config.js
 (function(){
-  if (window.MAP_DEF && MAP_DEF.file === "./assets/models/map/Abandoned_House.glb") return;
-
   window.MAP_DEF = {
     title: "Abandoned House",
     file: "./assets/models/map/Abandoned_House.glb",
-    scale: 1.0,
+    scale: 1,
     rotationY: 0,
-    offset: { x: 0, y: 0, z: 0 },
+    // Offset shifts the whole map so (23.54, -50.76) → (0,0)
+    offset: { x: -23.54, y: 0, z: 50.76 },
 
-    // Spawn points
-    spawn:    { x: -2.0, y: 1.8, z: 4.0 },   // Player start inside house
-    vanSpawn: { x: 0.0,  y: 1.8, z: 12.0 },  // Where van/outside loads
+    // Default player/van spawn relative to corrected origin
+    spawn:    { x: 0,   y: 1.8, z: 0 },
+    vanSpawn: { x: 0,   y: 1.8, z: -4 },
 
-    // Exterior polygon (rough bounding box around house)
+    // Treat the whole area outside the bounding box as exterior
     exteriorMode: "exterior",
     exterior: [
-      { x:-20, z:-25 },
-      { x: 20, z:-25 },
-      { x: 20, z: 25 },
-      { x:-20, z: 25 }
+      {x:-50,z:-60}, {x:50,z:-60},
+      {x:50,z:60},   {x:-50,z:60}
     ],
 
-    // Room polygons (adjust to real floor layout if needed)
     rooms: [
-      { name:"Living Room", poly:[ {x:-8,z:-6}, {x:8,z:-6}, {x:8,z:6}, {x:-8,z:6} ] },
-      { name:"Kitchen",     poly:[ {x:-8,z:6},  {x:8,z:6},  {x:8,z:12}, {x:-8,z:12} ] },
-      { name:"Bedroom 1",   poly:[ {x:-14,z:-6},{x:-8,z:-6},{x:-8,z:6},{x:-14,z:6} ] },
-      { name:"Bedroom 2",   poly:[ {x:8,z:-6},  {x:14,z:-6},{x:14,z:6},{x:8,z:6} ] },
-      { name:"Bathroom",    poly:[ {x:-14,z:6}, {x:-8,z:6}, {x:-8,z:12},{x:-14,z:12} ] },
+      { name:"Van", poly:[ {x:-4,z:18}, {x:4,z:18}, {x:4,z:24}, {x:-4,z:24} ] },
+      { name:"Living Room", poly:[ {x:-10,z:-5}, {x:10,z:-5}, {x:10,z:10}, {x:-10,z:10} ] },
+      { name:"Kitchen", poly:[ {x:12,z:-5}, {x:20,z:-5}, {x:20,z:10}, {x:12,z:10} ] },
+      { name:"Hallway", poly:[ {x:-5,z:-10}, {x:5,z:-10}, {x:5,z:-5}, {x:-5,z:-5} ] },
+      { name:"Bedroom", poly:[ {x:-15,z:-10}, {x:-5,z:-10}, {x:-5,z:0}, {x:-15,z:0} ] }
     ]
   };
-
-  console.log("[MapConfig] Abandoned House loaded:", window.MAP_DEF);
 })();
