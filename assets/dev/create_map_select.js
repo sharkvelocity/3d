@@ -1,56 +1,79 @@
-// create_map_select.js — populate the Map dropdown from maps.json
+// create_map_select.js — builds the dropdown + exposes selection helpers
 (function () {
-  const SEL_ID = "map-select";
-  const MANIFEST = "./assets/models/map/maps.json";
+  const MAP_DIR = "./assets/models/map/";
+
+  // Safe path resolver that NEVER double-prefixes
+  function resolvePath(p) {
+    if (!p) return null;
+    if (/^https?:\/\//i.test(p) || p.startsWith("/")) return p;  // absolute
+    if (p.startsWith("./") || p.startsWith("assets/")) return p; // already relative to site root
+    return MAP_DIR + p;                                          // filename only
+  }
+
+  function normalize(entry) {
+    if (!entry) return null;
+    // support both {file,def,title} and bare strings
+    if (typeof entry === "string") {
+      return {
+        title: entry.replace(/\.(glb|js|config\.js)$/i, "").replace(/[_-]/g, " "),
+        file: resolvePath(entry),
+        def:  null
+      };
+    }
+    return {
+      title: entry.title || entry.name || (entry.file || entry.def || "Map"),
+      file: resolvePath(entry.file),
+      def:  resolvePath(entry.def)
+    };
+  }
 
   async function loadManifest() {
     try {
-      const res = await fetch(MANIFEST, { cache: "no-store" });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
-      // Accept either array or {maps:[...]}
-      const list = Array.isArray(data) ? data : (data.maps || []);
-      return list.map(m => ({
-        title: m.title || m.name || m.file || "Map",
-        file:  m.file,
-        def:   m.def || m.config || null
-      }));
-    } catch (e) {
-      console.warn("[create_map_select] manifest failed:", e);
-      // Fallback to the two GLBs you have
-      return [
-        { title:"Abandoned House", file:"Abandoned_House.glb", def:"Abandoned_House.config.js" },
-        { title:"Furnished House", file:"furnished_house.glb",  def:"furnished_house.config.js" },
-        { title:"Jailhouse",       file:"jailhouse.glb",        def:"jailhouse.config.js" },
-      ];
+      const res = await fetch(MAP_DIR + "maps.json", { cache: "no-store" });
+      const raw = await res.json();
+      const list = Array.isArray(raw) ? raw : (raw.maps || raw || []);
+      const maps = list.map(normalize).filter(Boolean);
+      return maps.length ? maps : null;
+    } catch {
+      return null;
     }
   }
 
-  function getSel() { return document.getElementById(SEL_ID); }
-
-  async function populate() {
-    const sel = getSel();
+  function populateSelect(maps) {
+    const sel = document.getElementById("map-select");
     if (!sel) return;
-    const maps = await loadManifest();
-    if (!maps.length) {
-      sel.innerHTML = `<option value="-1">(no maps found)</option>`;
-      return;
-    }
-    sel.innerHTML = maps.map((m,i)=>`<option value="${i}">${m.title}</option>`).join("");
-    // Persist selection
-    const key = "pp_map_index";
-    const saved = localStorage.getItem(key);
-    if (saved !== null && maps[+saved]) sel.value = saved;
-    sel.addEventListener("change", () => localStorage.setItem(key, sel.value));
-    // Stash chosen on window for runtime
-    window.__PP_MAPS = maps;
-    window.__PP_getSelectedMap = () => maps[ Math.max(0, Math.min(maps.length-1, +(sel.value||0))) ];
+    sel.innerHTML = maps.map((m, i) =>
+      `<option value="${i}">${m.title || ("Map " + (i + 1))}</option>`
+    ).join("");
+    try {
+      const saved = localStorage.getItem("selectedMapIndex");
+      if (saved !== null && maps[+saved]) sel.value = saved;
+    } catch {}
+    sel.addEventListener("change", () => {
+      try { localStorage.setItem("selectedMapIndex", sel.value); } catch {}
+    });
   }
 
-  // Run once DOM is ready
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", populate, { once:true });
-  } else {
-    populate();
+  function currentSelection(maps) {
+    const sel = document.getElementById("map-select");
+    const idx = Math.max(0, Math.min(maps.length - 1, parseInt(sel?.value || "0", 10) || 0));
+    return maps[idx];
   }
+
+  (async function boot() {
+    const maps = (window.__PP_MAPS = await loadManifest()) || [{
+      title: "Abandoned House",
+      file: resolvePath("Abandoned_House.glb"),
+      def:  resolvePath("Abandoned_House.js"),
+    }, {
+      title: "Furnished House",
+      file: resolvePath("furnished_house.glb"),
+      def:  resolvePath("furnished_house.js"),
+    }];
+    populateSelect(maps);
+
+    // expose helpers for other modules
+    window.__PP_getSelectedMap = () => currentSelection(maps);
+    window.__PP_resolvePath = resolvePath;
+  })();
 })();
