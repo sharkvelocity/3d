@@ -1,243 +1,196 @@
-/* fp_tp_sync.js — keep first-person & third-person perfectly in sync
-   - Single rig: rigRoot -> yaw -> head
-   - Camera changes (by any legacy script) are mirrored back to the rig
-   - Toggle view with "V" (hold Shift+V to cycle distance)
+/* fp_tp_sync.js — single-rig FP/TP with no rubberbanding
+   - Camera inputs cleared; we own mouse look + WASD
+   - rigRoot -> yaw -> head ; camera attaches to head (FP) or trails (TP)
+   - Toggle view: V ; Shift+V cycles TP distance
 */
 (function(){
-  if (window.__FP_TP_SYNC_READY__) return; window.__FP_TP_SYNC_READY__ = true;
+  if (window.__FP_TP_SYNC_V2__) return; window.__FP_TP_SYNC_V2__ = true;
 
-  const log  = (...a)=>{ try{ console.log("[fp/tp]", ...a);}catch(_){} };
-  const warn = (...a)=>{ try{ console.warn("[fp/tp]", ...a);}catch(_){} };
+  const log  = (...a)=>{ try{ console.log("[fp/tp v2]", ...a);}catch(_){} };
+  const warn = (...a)=>{ try{ console.warn("[fp/tp v2]", ...a);}catch(_){} };
   const toRad = d => d * Math.PI / 180;
   const clamp = (v,min,max)=> Math.max(min, Math.min(max,v));
 
-  // Wait for scene/camera
-  function getScene(){ return window.scene || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene) || null; }
-  function getCam(){ const s=getScene(); return s && s.activeCamera; }
-
-  // Shared state
   const S = {
-    rigRoot:null, yaw:null, head:null,
-    mode: "fp",             // "fp" or "tp"
-    tpDistIdx: 1,           // 0..N-1
-    tpDists: [2.6, 3.6, 4.8, 6.0],
-    pitch: 0,               // up/down in radians
-    yawRad: 0,              // left/right in radians
-    lastCamPos: null,
-    lastCamRot: null,       // euler snapshot when detached
+    rigRoot:null, yaw:null, head:null, body:null,
+    mode:"fp",
+    tpIdx:1, tpDists:[2.6,3.6,4.8,6.0],
+    yaw:0, pitch:0,
+    keys:{}, speed:2.8, sprint:1.7, jump:0, velY:0,
+    gravity:-9.8, grounded:true,
     running:false
   };
 
-  function ensureRig(scene){
-    if (S.rigRoot && S.yaw && S.head) return;
+  function scene(){ return window.scene || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene) || null; }
+  function cam(){ const s=scene(); return s && s.activeCamera; }
 
-    const cam = scene.activeCamera;
-    const start = cam?.position?.clone?.() || new BABYLON.Vector3(0,1.8,0);
+  function ensureRig(s){
+    if (S.rigRoot) return;
+    const c = cam();
+    const start = (window.PP?.cfg?.spawnWS?.clone?.()) || (c?.position?.clone?.()) || new BABYLON.Vector3(0,1.8,0);
 
-    const rigRoot = new BABYLON.TransformNode("rigRoot", scene);
+    const rigRoot = new BABYLON.TransformNode("rigRoot", s);
     rigRoot.position.copyFrom(start);
 
-    const yaw = new BABYLON.TransformNode("rigYaw", scene);
+    const yaw = new BABYLON.TransformNode("rigYaw", s);
     yaw.parent = rigRoot;
 
-    const head = new BABYLON.TransformNode("rigHead", scene);
+    const head = new BABYLON.TransformNode("rigHead", s);
     head.parent = yaw;
-    head.position = new BABYLON.Vector3(0, 1.6, 0);
+    head.position.set(0, 1.6, 0);
 
-    // If you have a character mesh, parent it under yaw here:
-    // const body = scene.getMeshByName("player_capsule") || null;
-    // if (body) body.parent = yaw;
+    // Auto-attach player mesh if present
+    const body = s.getMeshByName("player_capsule") || s.getMeshByName("player") || null;
+    if (body) body.parent = yaw;
 
-    S.rigRoot = rigRoot; S.yaw = yaw; S.head = head;
+    S.rigRoot=rigRoot; S.yaw=yaw; S.head=head; S.body=body;
 
-    // Initialize yaw/pitch from current camera
-    if (cam && cam.rotation) {
-      S.pitch = cam.rotation.x || 0;
-      S.yawRad = (cam.rotation.y || 0);
+    // derive yaw/pitch from existing camera once
+    if (c?.rotation){
+      S.pitch = c.rotation.x||0;
+      S.yaw   = c.rotation.y||0;
     }
-    yaw.rotation = new BABYLON.Vector3(0, S.yawRad, 0);
-
-    log("Rig created at", start.toString());
+    yaw.rotation.y = S.yaw;
   }
 
-  function attachFirstPerson(scene){
-    const cam = scene.activeCamera;
-    if (!cam) return;
-    // Parent to head; camera local transform at (0,0,0)
-    cam.parent = S.head;
-    cam.position.set(0,0,0);
-    cam.rotation.set(S.pitch, 0, 0); // yaw lives on S.yaw
-    cam.fov = 0.9;
-    S.mode = "fp";
+  function clearCameraInputs(s){
+    const c = cam(); if (!c) return;
+    try{ c.inputs.clear(); }catch(_){}
+    c.checkCollisions = true;
+    c.applyGravity = false;   // we simulate on rig
+    c.inertia = 0;
+    c.parent = null; // we’ll set parent per mode
   }
 
-  function attachThirdPerson(scene){
-    const cam = scene.activeCamera;
-    if (!cam) return;
-    // Detach parent, place behind head, look at head
-    cam.parent = null;
+  function attachFP(s){
+    const c=cam(); if(!c) return;
+    c.parent = S.head;
+    c.position.set(0,0,0);
+    c.rotation.set(0,0,0);  // IMPORTANT: camera local rot is zero in FP
+    c.fov = 0.9;
+    S.mode="fp";
+  }
 
-    const dist = S.tpDists[S.tpDistIdx] || 3.6;
-    const off = new BABYLON.Vector3(0, 0.2, dist);
-
-    // Position camera in world behind head (relative to yaw)
-    const yaw = S.yawRad;
-    const cos = Math.cos(yaw), sin = Math.sin(yaw);
-    const back = new BABYLON.Vector3(
-      off.x * cos - off.z * sin,
-      off.y,
-      off.x * sin + off.z * cos
-    );
-
+  function attachTP(s){
+    const c=cam(); if(!c) return;
+    c.parent = null;
+    const d = S.tpDists[S.tpIdx]||3.6;
     const headWS = S.head.getAbsolutePosition();
-    const camPos = headWS.add(back.negate());
-    cam.position.copyFrom(camPos);
-    cam.setTarget(headWS);
-    cam.fov = 0.9;
-    S.mode = "tp";
+    const yaw=S.yaw, cos=Math.cos(yaw), sin=Math.sin(yaw);
+    const back = new BABYLON.Vector3(-sin*d, 0.25, -cos*d);
+    const pos = headWS.add(back);
+    c.position.copyFrom(pos);
+    c.setTarget(headWS);
+    c.fov=0.9;
+    S.mode="tp";
   }
 
-  function toggleView(scene, cycleOnly){
-    if (S.mode === "tp" && cycleOnly){
-      S.tpDistIdx = (S.tpDistIdx + 1) % S.tpDists.length;
-      attachThirdPerson(scene);
-      return;
-    }
-    if (S.mode === "fp") attachThirdPerson(scene);
-    else attachFirstPerson(scene);
+  function toggleView(s, cycleOnly){
+    if (S.mode==="tp" && cycleOnly){ S.tpIdx=(S.tpIdx+1)%S.tpDists.length; attachTP(s); return; }
+    if (S.mode==="fp") attachTP(s); else attachFP(s);
   }
 
-  // If any script moves the camera, we reflect that into the rig,
-  // then re-apply our camera placement from the rig, so they never diverge.
-  function reconcileCameraToRig(scene){
-    const cam = scene.activeCamera; if (!cam) return;
-    if (!S.lastCamPos) S.lastCamPos = cam.position.clone();
-    if (!S.lastCamRot) S.lastCamRot = cam.rotation ? cam.rotation.clone() : new BABYLON.Vector3();
-
-    // Did someone move the camera world position (legacy WASD)?
-    const moved = !cam.position.equals(S.lastCamPos);
-
-    // If FP and parented, world pos isn't directly comparable; we’ll check parented delta in TP only
-    if (S.mode === "tp" && moved){
-      const delta = cam.position.subtract(S.lastCamPos);
-      S.rigRoot.position.addInPlace(delta);
-    }
-
-    // Did someone rotate the camera?
-    if (cam.rotation && (cam.rotation.x !== S.lastCamRot.x || cam.rotation.y !== S.lastCamRot.y)) {
-      // Update pitch/yaw from camera euler
-      S.pitch = clamp(cam.rotation.x, -toRad(89), toRad(89));
-      S.yawRad = cam.rotation.y;
-      S.yaw.rotation.y = S.yawRad;
-    }
-
-    S.lastCamPos.copyFrom(cam.position);
-    if (cam.rotation) S.lastCamRot.copyFrom(cam.rotation);
-  }
-
-  // After we absorb deltas into the rig, place the camera *from* the rig
-  function placeCameraFromRig(scene){
-    const cam = scene.activeCamera; if (!cam) return;
-
-    if (S.mode === "fp"){
-      // Make sure we’re parented and aligned
-      if (cam.parent !== S.head) attachFirstPerson(scene);
-      S.yaw.rotation.y = S.yawRad;
-      cam.rotation.set(S.pitch, 0, 0);
-    } else {
-      if (cam.parent) cam.parent = null;
-      const dist = S.tpDists[S.tpDistIdx] || 3.6;
-      const headWS = S.head.getAbsolutePosition();
-      const yaw = S.yawRad;
-      const cos = Math.cos(yaw), sin = Math.sin(yaw);
-      const back = new BABYLON.Vector3(-sin * dist, 0.25, -cos * dist);
-      const desired = headWS.add(back);
-      cam.position.copyFrom(desired);
-      cam.setTarget(headWS);
-    }
-  }
-
-  function hookPointer(scene){
-    // Use existing camera inputs for mouse, but redirect yaw/pitch into our rig
-    const cam = scene.activeCamera; if (!cam) return;
-
-    // Normalize camera inputs
-    try{
-      cam.inputs.clear();
-      const mouse = new BABYLON.FreeCameraMouseInput();
-      const kbd   = new BABYLON.FreeCameraKeyboardMoveInput();
-      cam.inputs.add(mouse);
-      cam.inputs.add(kbd);
-    }catch(e){}
-
-    // Capture mousemove to update our pitch/yaw (don’t fight existing inputs; we *absorb* them)
-    scene.onPointerObservable.add((pointerInfo)=>{
-      if (document.pointerLockElement !== (scene.getEngine().getInputElement() || scene.getEngine().getRenderingCanvas())) return;
-      if (pointerInfo.type !== BABYLON.PointerEventTypes.POINTERMOVE) return;
-      const ev = pointerInfo.event;
-      const dx = ev.movementX || ev.mozMovementX || ev.webkitMovementX || 0;
-      const dy = ev.movementY || ev.mozMovementY || ev.webkitMovementY || 0;
-
+  function hookPointer(s){
+    const eng = s.getEngine();
+    const canvas = eng.getInputElement() || eng.getRenderingCanvas();
+    s.onPointerObservable.add((pi)=>{
+      if (pi.type !== BABYLON.PointerEventTypes.POINTERMOVE) return;
+      if (document.pointerLockElement !== canvas) return;
+      const ev = pi.event;
+      const dx = ev.movementX||0, dy = ev.movementY||0;
       const sensX = 0.0027, sensY = 0.0022;
-      S.yawRad += dx * sensX;
+      S.yaw   += dx * sensX;
       S.pitch  = clamp(S.pitch + dy * sensY, -toRad(89), toRad(89));
-      S.yaw.rotation.y = S.yawRad;
-
-      // Keep camera rotations in sync for any legacy readers
-      if (cam.rotation) cam.rotation.set(S.pitch, S.yawRad, 0);
-    }, BABYLON.PointerEventTypes.POINTERMOVE);
-  }
-
-  function hookKeys(scene){
-    window.addEventListener("keydown", (e)=>{
-      if (e.code === "KeyV"){
-        toggleView(scene, e.shiftKey);
-        e.preventDefault();
-      }
-    }, {passive:false});
-  }
-
-  function startLoop(scene){
-    if (S.running) return; S.running = true;
-    ensureRig(scene);
-    // Start in FP; you can change default to TP here
-    attachFirstPerson(scene);
-    hookPointer(scene);
-    hookKeys(scene);
-
-    // If PP.cfg.spawnWS exists, place rig there (from your bootstrap)
-    try{
-      const p = window.PP?.cfg?.spawnWS;
-      if (p) S.rigRoot.position.copyFrom(p);
-    }catch(_){}
-
-    // Keep HUD XYZ meaningful (rig position)
-    const hud = document.getElementById("hud-xyz");
-    scene.onBeforeRenderObservable.add(()=>{
-      try{
-        const cam = scene.activeCamera;
-        if (!cam) return;
-        // Absorb any external camera changes into the rig
-        reconcileCameraToRig(scene);
-        // Then place camera from rig
-        placeCameraFromRig(scene);
-
-        // HUD readout from camera world position (unchanged)
-        if (hud && hud.style.display !== "none"){
-          document.getElementById("hud-x").textContent = cam.position.x.toFixed(2);
-          document.getElementById("hud-y").textContent = cam.position.y.toFixed(2);
-          document.getElementById("hud-z").textContent = cam.position.z.toFixed(2);
-        }
-      }catch(e){ warn("loop err", e); }
+      S.yaw = (S.yaw + Math.PI*2)%(Math.PI*2);
     });
   }
 
-  // Boot once scene exists
-  function boot(){
-    const s = getScene();
-    if (!s || !s.activeCamera){ setTimeout(boot, 120); return; }
-    startLoop(s);
-    log("Sync online (mode:", S.mode, ")");
+  function hookKeys(s){
+    window.addEventListener("keydown",(e)=>{
+      const k=e.code;
+      if (k==="KeyV"){ toggleView(s, e.shiftKey); e.preventDefault(); return; }
+      if (k==="ShiftLeft"||k==="ShiftRight"){ S.keys.shift=true; }
+      S.keys[k]=true;
+    }, {passive:false});
+    window.addEventListener("keyup",(e)=>{
+      const k=e.code;
+      if (k==="ShiftLeft"||k==="ShiftRight"){ S.keys.shift=false; }
+      S.keys[k]=false;
+    }, {passive:true});
   }
-  boot();
+
+  function moveRig(dt){
+    // yaw-facing basis
+    const yaw=S.yaw, cos=Math.cos(yaw), sin=Math.sin(yaw);
+    const fwd = new BABYLON.Vector3(-sin, 0, -cos);
+    const right= new BABYLON.Vector3(cos, 0, -sin);
+
+    let x=0, z=0;
+    if (S.keys["KeyW"]) z += 1;
+    if (S.keys["KeyS"]) z -= 1;
+    if (S.keys["KeyD"]) x += 1;
+    if (S.keys["KeyA"]) x -= 1;
+
+    let spd = S.speed * (S.keys.shift ? S.sprint : 1);
+    const dir = new BABYLON.Vector3(0,0,0);
+    if (x) dir.addInPlace(right.scale(x));
+    if (z) dir.addInPlace(fwd.scale(z));
+    if (dir.lengthSquared()>0.0001) dir.normalize();
+
+    const move = dir.scale(spd*dt);
+    S.rigRoot.position.addInPlace(move);
+
+    // simple gravity
+    if (!S.grounded){
+      S.velY += S.gravity * dt;
+    }
+    S.rigRoot.position.y += S.velY * dt;
+    if (S.rigRoot.position.y <= 0.22){ // cheap ground clamp; adapt to map if you have a floor checker
+      S.rigRoot.position.y = 0.22;
+      S.velY = 0; S.grounded = true;
+    }
+  }
+
+  function applyRigToNodes(){
+    S.yawNodeDirty = true;
+    S.yaw.rotation.y = S.yaw;
+    // head carries pitch
+    S.head.rotation.x = S.pitch;
+
+    // Place camera from rig
+    const c=cam(); if(!c) return;
+    if (S.mode==="fp"){
+      if (c.parent !== S.head) attachFP(scene());
+      // keep local 0 rot; world view comes from head
+      c.rotation.set(0,0,0);
+      c.position.set(0,0,0);
+    } else {
+      if (c.parent) c.parent=null;
+      const d=S.tpDists[S.tpIdx]||3.6;
+      const headWS=S.head.getAbsolutePosition();
+      const yaw=S.yaw, cos=Math.cos(yaw), sin=Math.sin(yaw);
+      const back=new BABYLON.Vector3(-sin*d, 0.25, -cos*d);
+      const pos=headWS.add(back);
+      c.position.copyFrom(pos);
+      c.setTarget(headWS);
+    }
+  }
+
+  function loop(){
+    const s=scene(); if(!s||!cam()) { setTimeout(loop,120); return; }
+    if (!S.running){
+      S.running=true;
+      ensureRig(s);
+      clearCameraInputs(s);
+      hookPointer(s);
+      hookKeys(s);
+      attachFP(s); // default FP
+      log("online (FP default)");
+    }
+    const dt = Math.min(0.05, s.getEngine().getDeltaTime()/1000);
+    moveRig(dt);
+    applyRigToNodes();
+    requestAnimationFrame(loop);
+  }
+  loop();
 })();
