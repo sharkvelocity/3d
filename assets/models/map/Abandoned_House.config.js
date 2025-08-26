@@ -1,30 +1,16 @@
-// assets/models/map/Abandoned_House.config.js
-(function(){
+(function () {
   window.MAP_DEF = {
     title: "Abandoned House",
-    file: "./assets/models/map/Abandoned_House.glb",
-    scale: 1,
+    file: "Abandoned_House.glb",
+    scale: 1.0,
     rotationY: 0,
-    // Offset shifts the whole map so (23.54, -50.76) → (0,0)
-    offset: { x: -23.54, y: 0, z: 50.76 },
-
-    // Default player/van spawn relative to corrected origin
-    spawn:    { x: 0,   y: 1.8, z: 0 },
-    vanSpawn: { x: 0,   y: 1.8, z: -4 },
-
-    // Treat the whole area outside the bounding box as exterior
+    offset: { x: -23.23, y: 0, z: 50.76 },
+    spawn:    { x: 23.23, y: 1.8, z: -49.32 },
+    vanSpawn: { x: 23.23, y: 1.8, z: -49.32 },
+    vanZone: { center: { x: 23.23, y: 0, z: -49.32 }, radius: 8 },
     exteriorMode: "exterior",
     exterior: [
-      {x:-50,z:-60}, {x:50,z:-60},
-      {x:50,z:60},   {x:-50,z:60}
-    ],
-
-    rooms: [
-      { name:"Van", poly:[ {x:-4,z:18}, {x:4,z:18}, {x:4,z:24}, {x:-4,z:24} ] },
-      { name:"Living Room", poly:[ {x:-10,z:-5}, {x:10,z:-5}, {x:10,z:10}, {x:-10,z:10} ] },
-      { name:"Kitchen", poly:[ {x:12,z:-5}, {x:20,z:-5}, {x:20,z:10}, {x:12,z:10} ] },
-      { name:"Hallway", poly:[ {x:-5,z:-10}, {x:5,z:-10}, {x:5,z:-5}, {x:-5,z:-5} ] },
-      { name:"Bedroom", poly:[ {x:-15,z:-10}, {x:-5,z:-10}, {x:-5,z:0}, {x:-15,z:0} ] }
+      {x:-30,z:-40}, {x:40,z:-40}, {x:40,z:40}, {x:-30,z:40}
     ]
   };
 })();
