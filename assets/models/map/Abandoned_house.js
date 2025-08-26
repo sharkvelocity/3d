@@ -4,9 +4,11 @@
     file: "Abandoned_House.glb",
     scale: 1.0,
     rotationY: 0,
-    offset: { x: 0, y: 0, z: 0 }, // optional (kept for compatibility)
-    // This is the center that worked for you previously:
-    vanZone: { center: { x: 43.657, y: 2.0, z: -119.008 }, radius: 11 },
-    rooms: [] // (fill as needed)
+    offset: { x: 0, y: 0, z: 0 },
+
+    // ✅ updated vanZone spawn
+    vanZone: { center: { x: 23.23, y: 2.0, z: -49.32 }, radius: 11 },
+
+    rooms: []
   };
 })();
