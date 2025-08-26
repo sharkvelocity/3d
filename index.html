@@ -115,13 +115,11 @@
 
   <div id="toast"></div>
 
-  <!-- Player & world systems --><script src="./assets/dev/fp_tp_sync.js"></script>
-
+  <!-- Player & world systems -->
 <script src="./assets/dev/player_rig_controller_final.js"></script>
   <script src="./assets/dev/moon.js"></script>
   <script src="./assets/dev/minimap_northup_xyz.js"></script>
 
-  <!-- Teleport Helper: allow any system (minimap, console) to move the player -->
   <script>
     (function(){
       if (window.teleportToXYZ) return;
@@ -129,17 +127,14 @@
         try{
           const scene = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]);
           if (!scene) return false;
-          const body = scene.__playerBody || scene.getMeshByName && scene.getMeshByName("player_capsule");
+          const body = scene.__playerBody || (scene.getMeshByName && scene.getMeshByName("player_capsule"));
           if (!body) return false;
-          body.position.x = x;
-          body.position.z = z;
-          // Ground snap (optional)
+          body.position.x = x; body.position.z = z;
           if (!opts || opts.snapGround !== false){
             const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 9999, z), new BABYLON.Vector3(0,-1,0), 20000);
             const hit = scene.pickWithRay(ray, m => (m.isPickable !== false));
             body.position.y = hit && hit.hit ? (hit.pickedPoint.y + 0.9) : (y ?? body.position.y);
           } else if (typeof y === "number"){ body.position.y = y; }
-          // Nudge camera rig to follow immediately (if provided by player_rig_controller_final.js)
           if (scene.activeCamera && scene.activeCamera._lockedTarget){ scene.activeCamera._lockedTarget = body; }
           return true;
         }catch(e){ console.warn("[teleportToXYZ] failed", e); return false; }
@@ -150,6 +145,16 @@
   <script src="./assets/dev/sound_engine.js"></script>
   <script src="./assets/dev/devtools.js"></script>
   <script src="./assets/dev/merge_patch.js"></script>
+
+  <script>
+    (function(){
+      try {
+        const slots = (window.PP && PP.storage && PP.storage.loadInventory && PP.storage.loadInventory().slots) || ['emf','spirit','uv'];
+        if (typeof buildBelt === 'function') buildBelt(slots);
+      } catch(e){ console.warn("[belt-init] failed", e); }
+    })();
+  </script>
+
 
   <!-- Ghost data & logic -->
   <script src="./assets/dev/ghost_db.js"></script>
@@ -163,62 +168,63 @@
   <script src="./assets/dev/writing_book.js"></script>
 
   <!-- Condensed bootstrap (replaces spawn_fix + map_select + load_map_runtime + start_button_fix) -->
-  
-  <!-- Map Transform Patch: apply MAP_DEF scale/rotation/offset to imported GLBs -->
-  <script>
-  (function(){
-    if (window.__MapTransformPatched__) return; window.__MapTransformPatched__ = true;
-    function applyDefToWrapper(wrapper, def){
-      try{
-        const s = (def && def.scale != null) ? def.scale : 1;
-        const yaw = ((def && def.rotationY != null) ? def.rotationY : 0) * Math.PI/180;
-        const off = (def && def.offset) || {x:0,y:0,z:0};
-        wrapper.scaling = new BABYLON.Vector3(s,s,s);
-        wrapper.rotation = new BABYLON.Vector3(0,yaw,0);
-        wrapper.position = new BABYLON.Vector3(off.x||0, off.y||0, off.z||0);
-        wrapper.checkCollisions = true;
-      }catch(e){ console.warn("[map-transform] apply failed:", e); }
-    }
-    // Wrap ImportMeshAsync to parent imported roots under a wrapper and transform it
-    (function wrap(){
-      const SL = BABYLON.SceneLoader;
-      if (!SL || !SL.ImportMeshAsync) { setTimeout(wrap, 50); return; }
-      const orig = SL.ImportMeshAsync.bind(SL);
-      SL.ImportMeshAsync = async function(...args){
-        const res = await orig(...args);
-        try{
-          const scene = (res && res.meshes && res.meshes[0] && (res.meshes[0].getScene?.() || res.meshes[0]._scene)) || BABYLON.Engine?.LastCreatedScene;
-          if (!scene) return res;
-          const wrapper = new BABYLON.TransformNode("mapRootWrapper", scene);
-          // parent all root-level nodes to wrapper
-          (res.transformNodes||[]).forEach(tn=>{ if (!tn.parent) tn.parent = wrapper; });
-          (res.meshes||[]).forEach(m=>{ if (!m.parent) m.parent = wrapper; });
-          applyDefToWrapper(wrapper, window.MAP_DEF || {});
-        }catch(e){ console.warn("[map-transform] wrapper failed:", e); }
-        return res;
-      };
-    })();
-  })();
-  </script>
+  <script src="./assets/dev/game_bootstrap.js"></script>
 
-<script src="./assets/dev/game_bootstrap.js"></script>
-
-  <!-- Spawn Bridge: align player body to PP.cfg.spawnWS once available -->
   <script>
     (function(){
-      if (window.__SpawnBridgePatched__) return; window.__SpawnBridgePatched__ = true;
-      function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-      function tick(){
-        const s = S();
-        const ws = (window.PP && window.PP.cfg && window.PP.cfg.spawnWS) || null;
-        const body = s && (s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')));
-        if (s && body && ws){
-          try { body.position.copyFrom(ws); s.__spawnDone = true; } catch(e){}
-          return; // done
-        }
-        requestAnimationFrame(tick);
+      const c = document.getElementById('renderCanvas');
+      if (c) c.setAttribute('tabindex','0');
+      const btn = document.getElementById('start-button');
+      const title = document.getElementById('title-screen');
+      if (btn && title){
+        btn.addEventListener('click', ()=>{
+          setTimeout(()=>{ if (title) title.style.pointerEvents = 'none'; }, 50);
+          setTimeout(()=>{ try{ c && c.focus(); c && c.requestPointerLock && c.requestPointerLock(); }catch(_){} }, 250);
+        }, {passive:false});
       }
-      requestAnimationFrame(tick);
+    })();
+  </script>
+
+  <script src="./assets/dev/fp_tp_sync.js"></script>
+
+  <script>
+    (function(){
+      const tryInit = ()=>{
+        const s = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]);
+        if (!s) return setTimeout(tryInit, 50);
+        if (window.BABYLON && BABYLON.GUI && BABYLON.GUI.AdvancedDynamicTexture) return;
+        if (s.__minimapFallback) return;
+        s.__minimapFallback = true;
+        const mm = new BABYLON.FreeCamera("MM_Fallback", new BABYLON.Vector3(0, 60, 0), s);
+        mm.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+        mm.orthoLeft = -55; mm.orthoRight = 55; mm.orthoTop = 55; mm.orthoBottom = -55;
+        mm.minZ = 0; mm.maxZ = 5000;
+        mm.rotation.x = Math.PI/2;
+        mm.viewport = new BABYLON.Viewport(0.02, 0.73, 0.24, 0.24);
+        s.onBeforeRenderObservable.add(()=>{
+          const body = s.__playerBody || s.getMeshByName("player_capsule");
+          if (body){ mm.position.x = body.position.x; mm.position.z = body.position.z; }
+        });
+        s.activeCameras = s.activeCameras || [];
+        if (!s.activeCameras.includes(s.activeCamera)) s.activeCameras.push(s.activeCamera);
+        s.activeCameras.push(mm);
+        s.onPointerObservable.add((evt)=>{
+          if (evt.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+          const eng = s.getEngine && s.getEngine(); if (!eng) return;
+          const W = eng.getRenderWidth(), H = eng.getRenderHeight();
+          const x = s.pointerX, y = s.pointerY;
+          const nx = x/W, ny = 1 - y/H;
+          const v = mm.viewport;
+          if (nx < v.x || nx > v.x+v.width || ny < v.y || ny > v.y+v.height) return;
+          const hit = s.pick(x, y, m => (m.isPickable !== false), false, mm);
+          if (hit && hit.hit && hit.pickedPoint) {
+            const p = hit.pickedPoint;
+            if (window.teleportToXYZ) teleportToXYZ(p.x, p.y, p.z, {snapGround:true});
+          }
+        });
+        console.log("[minimap] Fallback active (no GUI).");
+      };
+      setTimeout(tryInit, 50);
     })();
   </script>
 
