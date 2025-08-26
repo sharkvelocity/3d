@@ -117,6 +117,44 @@
 
   <!-- Player & world systems -->
 <script src="./assets/dev/player_rig_controller_final.js"></script>
+
+  <script>
+    (function(){
+      const Keys = Object.create(null);
+      addEventListener('keydown', e=>{ Keys[e.code]=true; }, true);
+      addEventListener('keyup',   e=>{ Keys[e.code]=false; }, true);
+      function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+      function step(){
+        const s=S(); const cam=s && s.activeCamera;
+        const body = s && (s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')));
+        if (s && cam && body){
+          const pressing = Keys['KeyW']||Keys['ArrowUp']||Keys['KeyA']||Keys['KeyS']||Keys['KeyD']||Keys['ArrowLeft']||Keys['ArrowRight'];
+          if (pressing){
+            if (!body._lastPos) body._lastPos = body.position.clone();
+            const dist = BABYLON.Vector3.Distance(body.position, body._lastPos);
+            if (dist < 0.002){
+              // Stuck: nudge forward based on camera
+              const fw = cam.getDirection(BABYLON.Axis.Z); fw.y = 0; fw.normalize();
+              const rt = cam.getDirection(BABYLON.Axis.X); rt.y = 0; rt.normalize();
+              let v = new BABYLON.Vector3(0,0,0);
+              if(Keys['KeyW']||Keys['ArrowUp']) v.addInPlace(fw);
+              if(Keys['KeyS']||Keys['ArrowDown']) v.addInPlace(fw.scale(-1));
+              if(Keys['KeyD']||Keys['ArrowRight']) v.addInPlace(rt);
+              if(Keys['KeyA']||Keys['ArrowLeft']) v.addInPlace(rt.scale(-1));
+              if (v.length()>0.0001){
+                v.normalize(); v.scaleInPlace(0.06);
+                try{ body.moveWithCollisions ? body.moveWithCollisions(v) : body.position.addInPlace(v); }catch(_){ body.position.addInPlace(v); }
+              }
+            }
+            body._lastPos = body.position.clone();
+          }
+        }
+        requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    })();
+  </script>
+
   <script src="./assets/dev/moon.js"></script>
   <script src="./assets/dev/minimap_northup_xyz.js"></script>
 
@@ -192,7 +230,6 @@
       const tryInit = ()=>{
         const s = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]);
         if (!s) return setTimeout(tryInit, 50);
-        if (window.BABYLON && BABYLON.GUI && BABYLON.GUI.AdvancedDynamicTexture) return;
         if (s.__minimapFallback) return;
         s.__minimapFallback = true;
         const mm = new BABYLON.FreeCamera("MM_Fallback", new BABYLON.Vector3(0, 60, 0), s);
@@ -201,6 +238,7 @@
         mm.minZ = 0; mm.maxZ = 5000;
         mm.rotation.x = Math.PI/2;
         mm.viewport = new BABYLON.Viewport(0.02, 0.73, 0.24, 0.24);
+        mm.layerMask = 0x0FFFFFFF;
         s.onBeforeRenderObservable.add(()=>{
           const body = s.__playerBody || s.getMeshByName("player_capsule");
           if (body){ mm.position.x = body.position.x; mm.position.z = body.position.z; }
@@ -208,6 +246,7 @@
         s.activeCameras = s.activeCameras || [];
         if (!s.activeCameras.includes(s.activeCamera)) s.activeCameras.push(s.activeCamera);
         s.activeCameras.push(mm);
+        // Click-to-teleport inside viewport
         s.onPointerObservable.add((evt)=>{
           if (evt.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
           const eng = s.getEngine && s.getEngine(); if (!eng) return;
@@ -222,7 +261,12 @@
             if (window.teleportToXYZ) teleportToXYZ(p.x, p.y, p.z, {snapGround:true});
           }
         });
-        console.log("[minimap] Fallback active (no GUI).");
+        window.toggleMinimap = function(){
+          if (mm.__hidden){ mm.__hidden=false; mm.viewport = new BABYLON.Viewport(0.02, 0.73, 0.24, 0.24); }
+          else { mm.__hidden=true; mm.viewport = new BABYLON.Viewport(0,0,0,0); }
+        };
+        window.addEventListener('keydown', (e)=>{ if (e.key==='m' || e.code==='KeyM') toggleMinimap(); }, {passive:true});
+        console.log("[minimap] Fallback camera active (Key M toggles).");
       };
       setTimeout(tryInit, 50);
     })();
