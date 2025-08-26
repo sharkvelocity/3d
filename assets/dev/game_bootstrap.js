@@ -55,15 +55,17 @@
   }
 
   async function loadManifest() {
-    // Prefer real manifest; fallback to known local files that exist in your repo.
+    // Use your manifest if present; else fallback to the files we saw in your repo.
     const j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) MAP_FILES = j;
     else if (j && Array.isArray(j.maps)) MAP_FILES = j.maps;
+
     if (!MAP_FILES.length) {
       MAP_FILES = [
-        { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.js" },
-        { file: "furnished_house.glb", title: "Furnished House", def: "furnished_house.js" },
-        { file: "jailhouse.glb", title: "Jailhouse", def: "jailhouse.js" },
+        { file: "Abandoned_House.glb",      title: "Abandoned House", def: "Abandoned_House.config.js" },
+        { file: "furnished_house.glb",      title: "Furnished House", def: "furnished_house.js" },
+        { file: "apartment_floor_plan.glb", title: "Apartment",       def: "apartment_floor_plan.config.js" },
+        { file: "jailhouse.glb",            title: "Jailhouse",       def: "jailhouse.js" }
       ];
     }
     populateMapSelector();
@@ -119,7 +121,6 @@
     hemi.intensity = 0.35;
 
     camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 1.8, 0), scene);
-    camera.attachControl(canvas, true);
     camera.minZ = 0.1;
     camera.inertia = 0;
     camera.applyGravity = true;
@@ -127,10 +128,13 @@
     camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
     camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
 
-    // Make sure keyboard/mouse both work together
-    camera.inputs.clear(); // avoid double/legacy bindings
+    // Make sure keyboard/mouse both work together (no legacy dupes)
+    camera.inputs.clear();
     camera.inputs.addMouse();
     camera.inputs.addKeyboard();
+
+    // Attach after inputs are set
+    camera.attachControl(canvas, true);
 
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
@@ -148,21 +152,21 @@
 
   // ---------- map def loading ----------
   async function tryLoadMapDef(defNameOrNull, mapFile) {
-    // Try explicit def, then inferred names
     const baseNoExt = (mapFile || "").replace(/\.[^.]+$/, "");
     const candidates = [];
+
+    // Prefer explicit def from manifest
     if (defNameOrNull) candidates.push(`./assets/models/map/${defNameOrNull}`);
-    candidates.push(`./assets/models/map/${baseNoExt}.js`);
+
+    // Then conventional names
     candidates.push(`./assets/models/map/${baseNoExt}.config.js`);
-    // your known defs:
-    candidates.push("./assets/models/map/Abandoned_House.js");
-    candidates.push("./assets/models/map/furnished_house.js");
-    candidates.push("./assets/models/map/jailhouse.js");
+    candidates.push(`./assets/models/map/${baseNoExt}.js`);
 
     for (const c of candidates) {
       const ok = await loadScriptOnce(c);
       if (ok && window.MAP_DEF && MAP_DEF.spawn) { log("Loaded MAP_DEF from", c); return true; }
     }
+
     warn("No MAP_DEF found; synthesizing minimal fallback.");
     window.MAP_DEF = window.MAP_DEF || {};
     MAP_DEF.spawn = MAP_DEF.spawn || { x: 0, y: 1.8, z: 0 };
@@ -174,7 +178,6 @@
     const mapFile = chosen?.file || "Abandoned_House.glb";
     await tryLoadMapDef(chosen?.def, mapFile);
 
-    // Import meshes
     try {
       const res = await BABYLON.SceneLoader.ImportMeshAsync(
         "",
@@ -189,7 +192,8 @@
       log("Map imported:", mapFile);
     } catch (e) {
       warn("Map import failed, creating ground fallback", e);
-      BABYLON.MeshBuilder.CreateGround("fallback", { width: 180, height: 180 }, scene).checkCollisions = true;
+      const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 180, height: 180 }, scene);
+      g.checkCollisions = true;
     }
   }
 
@@ -203,13 +207,13 @@
   function enablePointerLock() {
     const canvas = document.getElementById("renderCanvas");
     if (!canvas || !canvas.requestPointerLock) return;
-    // On initial click lock, and on Escape show hint
+
     canvas.addEventListener("click", () => {
       if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch (_) {} }
     });
+
     document.addEventListener("pointerlockchange", () => {
       if (document.pointerLockElement !== canvas) {
-        // unlocked – show a quick toast hint if you have toast()
         try { (window.toast || ((m)=>console.log(m)))("Click the canvas to lock mouse"); } catch (_) {}
       }
     });
@@ -222,7 +226,6 @@
     if (started) return;
     started = true;
 
-    // Hide title
     const title = $("#title-screen"); if (title) title.style.display = "none";
 
     Loader.reset(); Loader.label("Initializing…"); Loader.show();
@@ -235,7 +238,6 @@
 
     await Loader.run();
 
-    // Focus canvas and try to lock pointer once
     const canvas = document.getElementById("renderCanvas");
     try { canvas?.focus?.(); } catch (_) {}
     try { canvas?.requestPointerLock?.(); } catch (_) {}
