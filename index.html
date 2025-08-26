@@ -115,10 +115,38 @@
 
   <div id="toast"></div>
 
-  <!-- Player & world systems -->
+  <!-- Player & world systems --><script src="./assets/dev/fp_tp_sync.js"></script>
+
 <script src="./assets/dev/player_rig_controller_final.js"></script>
   <script src="./assets/dev/moon.js"></script>
   <script src="./assets/dev/minimap_northup_xyz.js"></script>
+
+  <!-- Teleport Helper: allow any system (minimap, console) to move the player -->
+  <script>
+    (function(){
+      if (window.teleportToXYZ) return;
+      window.teleportToXYZ = function(x, y, z, opts){
+        try{
+          const scene = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]);
+          if (!scene) return false;
+          const body = scene.__playerBody || scene.getMeshByName && scene.getMeshByName("player_capsule");
+          if (!body) return false;
+          body.position.x = x;
+          body.position.z = z;
+          // Ground snap (optional)
+          if (!opts || opts.snapGround !== false){
+            const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 9999, z), new BABYLON.Vector3(0,-1,0), 20000);
+            const hit = scene.pickWithRay(ray, m => (m.isPickable !== false));
+            body.position.y = hit && hit.hit ? (hit.pickedPoint.y + 0.9) : (y ?? body.position.y);
+          } else if (typeof y === "number"){ body.position.y = y; }
+          // Nudge camera rig to follow immediately (if provided by player_rig_controller_final.js)
+          if (scene.activeCamera && scene.activeCamera._lockedTarget){ scene.activeCamera._lockedTarget = body; }
+          return true;
+        }catch(e){ console.warn("[teleportToXYZ] failed", e); return false; }
+      };
+    })();
+  </script>
+
   <script src="./assets/dev/sound_engine.js"></script>
   <script src="./assets/dev/devtools.js"></script>
   <script src="./assets/dev/merge_patch.js"></script>
