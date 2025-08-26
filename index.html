@@ -182,6 +182,45 @@
 
   <script src="./assets/dev/fp_tp_sync.js"></script>
 
+<!-- Anti-orbit patch: enforce a player-style camera and disable default orbit inputs -->
+<script>
+(function antiOrbitOnce(){
+  if (window.__antiOrbitApplied__) return; window.__antiOrbitApplied__ = true;
+  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+  function apply(){
+    const s = S(); if (!s) return setTimeout(apply, 50);
+    let c = s.activeCamera;
+    if (!c) return setTimeout(apply, 50);
+
+    // If ArcRotateCamera is active, replace with UniversalCamera so mouse won't orbit the world.
+    if (BABYLON.ArcRotateCamera && c instanceof BABYLON.ArcRotateCamera){
+      const u = new BABYLON.UniversalCamera("PlayerCam", c.position.clone(), s);
+      if (c.rotation) u.rotation.copyFrom(c.rotation);
+      s.activeCamera = u;
+      try { c.detachControl(); } catch(_){}
+      try { c.dispose(); } catch(_){}
+      c = u;
+    }
+    // Remove built-in camera inputs so fp_tp_sync / rig owns look controls.
+    if (c.inputs && c.inputs.clear) c.inputs.clear();
+    c.inertia = 0;
+    c.angularSensibility = 1e9; // effectively disables built-in mouse look
+
+    // Tether camera to player body when it appears
+    (function tether(){
+      const body = s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule'));
+      if (body && s.activeCamera){
+        try { s.activeCamera._lockedTarget = body; } catch(_){}
+        return;
+      }
+      setTimeout(tether, 50);
+    })();
+  }
+  apply();
+})();
+</script>
+
+
 <script>
 (function fixHudXYZ(){
   const label = document.getElementById('hud-xyz');
