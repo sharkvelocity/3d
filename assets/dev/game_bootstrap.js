@@ -1,9 +1,9 @@
-/* game_bootstrap.js — start flow + map select + map load + spawn + pointer lock */
+/* game_bootstrap.js — start flow + map select + map load + transforms + spawn + pointer lock + HUD glue */
 (function () {
   if (window.__GameBootstrapReady) return;
   window.__GameBootstrapReady = true;
 
-  // ---------- small helpers ----------
+  // ---------- helpers ----------
   const $ = (sel) => document.querySelector(sel);
   const log = (...a) => { try { console.log("[bootstrap]", ...a); } catch (_) {} };
   const warn = (...a) => { try { console.warn("[bootstrap]", ...a); } catch (_) {} };
@@ -46,16 +46,11 @@
     try {
       const saved = localStorage.getItem("selectedMapIndex");
       sel.value = saved && MAP_FILES[+saved] ? saved : "0";
-    } catch (_) {
-      sel.value = "0";
-    }
-    sel.onchange = () => {
-      try { localStorage.setItem("selectedMapIndex", sel.value); } catch (_) {}
-    };
+    } catch (_) { sel.value = "0"; }
+    sel.onchange = () => { try { localStorage.setItem("selectedMapIndex", sel.value); } catch (_) {} };
   }
 
   async function loadManifest() {
-    // Use your manifest if present; else fallback to the files we saw in your repo.
     const j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) MAP_FILES = j;
     else if (j && Array.isArray(j.maps)) MAP_FILES = j.maps;
@@ -86,11 +81,7 @@
     function show() { const b = box(); if (b) b.style.display = "flex"; }
     function hide() { const b = box(); if (b) b.style.display = "none"; }
     function label(s) { const t = text(); if (t) t.textContent = s || ""; }
-    function draw() {
-      const f = fill(); if (!f) return;
-      const pct = stepsTotal ? (stepsDone / stepsTotal) : 0;
-      f.style.width = (pct * 100).toFixed(1) + "%";
-    }
+    function draw() { const f = fill(); if (f) f.style.width = (stepsTotal ? (stepsDone/stepsTotal)*100 : 0).toFixed(1) + "%"; }
     const queue = [];
     function addStep(lbl, fn) { queue.push({ lbl, fn }); stepsTotal = queue.length; }
     async function run() {
@@ -128,13 +119,17 @@
     camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
     camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
 
-    // Make sure keyboard/mouse both work together (no legacy dupes)
+    // Clean inputs then add both
     camera.inputs.clear();
     camera.inputs.addMouse();
     camera.inputs.addKeyboard();
-
-    // Attach after inputs are set
     camera.attachControl(canvas, true);
+
+    // Expose globals for other systems
+    window.engine = engine;
+    window.scene  = scene;
+    window.SCENE  = scene;   // some scripts look for SCENE
+    window.camera = camera;
 
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
@@ -150,15 +145,11 @@
     });
   }
 
-  // ---------- map def loading ----------
+  // ---------- map def + load ----------
   async function tryLoadMapDef(defNameOrNull, mapFile) {
     const baseNoExt = (mapFile || "").replace(/\.[^.]+$/, "");
     const candidates = [];
-
-    // Prefer explicit def from manifest
     if (defNameOrNull) candidates.push(`./assets/models/map/${defNameOrNull}`);
-
-    // Then conventional names
     candidates.push(`./assets/models/map/${baseNoExt}.config.js`);
     candidates.push(`./assets/models/map/${baseNoExt}.js`);
 
@@ -166,30 +157,42 @@
       const ok = await loadScriptOnce(c);
       if (ok && window.MAP_DEF && MAP_DEF.spawn) { log("Loaded MAP_DEF from", c); return true; }
     }
-
     warn("No MAP_DEF found; synthesizing minimal fallback.");
     window.MAP_DEF = window.MAP_DEF || {};
+    MAP_DEF.title = MAP_DEF.title || (baseNoExt || "Unknown Map");
+    MAP_DEF.scale = MAP_DEF.scale ?? 1;
+    MAP_DEF.rotationY = MAP_DEF.rotationY ?? 0;
+    MAP_DEF.offset = MAP_DEF.offset || { x: 0, y: 0, z: 0 };
     MAP_DEF.spawn = MAP_DEF.spawn || { x: 0, y: 1.8, z: 0 };
     return true;
   }
 
   async function loadSelectedMap() {
-    const chosen = getSelectedMap();
+    const chosen  = getSelectedMap();
     const mapFile = chosen?.file || "Abandoned_House.glb";
     await tryLoadMapDef(chosen?.def, mapFile);
 
+    let root = null;
     try {
-      const res = await BABYLON.SceneLoader.ImportMeshAsync(
-        "",
-        "./assets/models/map/",
-        mapFile,
-        scene
-      );
-      const root = res.meshes[0] || null;
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
+      root = res.meshes[0] || null;
+
+      // Apply transforms from MAP_DEF to the imported root
       if (root) {
+        const s = (typeof MAP_DEF.scale === "number" && MAP_DEF.scale > 0) ? MAP_DEF.scale : 1;
+        root.scaling.set(s, s, s);
+
+        const ry = (MAP_DEF.rotationY || 0) * Math.PI / 180;
+        root.rotation.y = ry;
+
+        const off = MAP_DEF.offset || { x: 0, y: 0, z: 0 };
+        root.position.addInPlace(new BABYLON.Vector3(off.x || 0, off.y || 0, off.z || 0));
+
+        // collisions
         res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch (_) {} });
       }
-      log("Map imported:", mapFile);
+
+      log("Map imported:", mapFile, "scale=", MAP_DEF.scale, "rotY=", MAP_DEF.rotationY, "offset=", MAP_DEF.offset);
     } catch (e) {
       warn("Map import failed, creating ground fallback", e);
       const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 180, height: 180 }, scene);
@@ -207,16 +210,62 @@
   function enablePointerLock() {
     const canvas = document.getElementById("renderCanvas");
     if (!canvas || !canvas.requestPointerLock) return;
-
     canvas.addEventListener("click", () => {
       if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch (_) {} }
     });
-
     document.addEventListener("pointerlockchange", () => {
       if (document.pointerLockElement !== canvas) {
         try { (window.toast || ((m)=>console.log(m)))("Click the canvas to lock mouse"); } catch (_) {}
       }
     });
+  }
+
+  // ---------- HUD/minimap/belt glue ----------
+  function ensureHUDVisible() {
+    const hudBar = $("#hud-bar"); if (hudBar) hudBar.style.display = "flex";
+    const belt = $("#belt"); if (belt) belt.style.display = "flex";
+    const hudXYZ = $("#hud-xyz"); if (hudXYZ) hudXYZ.style.display = "block";
+  }
+
+  // If your belt isn’t populated by other scripts, create a minimal fallback so it’s not “just a dot”.
+  function ensureBeltFallback() {
+    const belt = $("#belt");
+    if (!belt) return;
+    if (belt.children.length > 0) return; // something else already built it
+
+    const items = [
+      { key: "EMF",      icon: "./assets/icons/emf.png" },
+      { key: "UV",       icon: "./assets/icons/uv.png" },
+      { key: "Spirit",   icon: "./assets/icons/spirit.png" },
+      { key: "DOTS",     icon: "./assets/icons/camera.png" },
+      { key: "Notebook", icon: "./assets/icons/notebook.png" },
+      { key: "Lighter",  icon: "./assets/icons/lighter.png" }
+    ];
+    items.forEach((it, i) => {
+      const slot = document.createElement("div");
+      slot.className = "slot" + (i===0 ? " active" : "");
+      const img = document.createElement("img");
+      img.alt = it.key;
+      img.src = it.icon;
+      img.style.maxWidth = "70%";
+      img.style.maxHeight = "70%";
+      const label = document.createElement("div");
+      label.className = "label";
+      label.textContent = it.key;
+      slot.appendChild(img);
+      slot.appendChild(label);
+      belt.appendChild(slot);
+    });
+  }
+
+  function announceSceneReady() {
+    try {
+      document.dispatchEvent(new CustomEvent("GameSceneReady", { detail: { engine, scene, camera, MAP_DEF } }));
+    } catch (_) {}
+    // a couple of optional hooks other scripts might expose
+    try { window.initMinimap && window.initMinimap(scene, camera); } catch (_) {}
+    try { window.initHUD && window.initHUD(); } catch (_) {}
+    try { window.initInventory && window.initInventory(scene, camera); } catch (_) {}
   }
 
   // ---------- start button flow ----------
@@ -230,17 +279,22 @@
 
     Loader.reset(); Loader.label("Initializing…"); Loader.show();
 
-    Loader.addStep("Loading map list…", async () => await loadManifest());
-    Loader.addStep("Preparing engine…", async () => await prepareEngineScene());
-    Loader.addStep("Loading selected map…", async () => await loadSelectedMap());
-    Loader.addStep("Enforcing spawn…", async () => enforceSpawn());
-    Loader.addStep("Pointer lock ready…", async () => enablePointerLock());
+    Loader.addStep("Loading map list…",    async () => await loadManifest());
+    Loader.addStep("Preparing engine…",    async () => await prepareEngineScene());
+    Loader.addStep("Loading map…",         async () => await loadSelectedMap());
+    Loader.addStep("Enforcing spawn…",     async () => enforceSpawn());
+    Loader.addStep("Pointer lock ready…",  async () => enablePointerLock());
+    Loader.addStep("Show HUD…",            async () => { ensureHUDVisible(); ensureBeltFallback(); });
 
     await Loader.run();
 
+    // Focus canvas and try to lock once
     const canvas = document.getElementById("renderCanvas");
     try { canvas?.focus?.(); } catch (_) {}
     try { canvas?.requestPointerLock?.(); } catch (_) {}
+
+    // Tell other scripts the scene is good to go
+    announceSceneReady();
   }
 
   // hook UI
@@ -251,7 +305,7 @@
       if (!started && (e.key === "Enter" || e.code === "Space")) { e.preventDefault(); safeStart(e); }
     }, { passive: false });
 
-    // Preload manifest early so the dropdown shows data on first paint
+    // Preload manifest so dropdown is filled on first paint
     window.addEventListener("DOMContentLoaded", () => { loadManifest().catch(()=>{}); });
   })();
 })();
