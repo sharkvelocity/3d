@@ -43,7 +43,7 @@
     const body = s.getMeshByName("player_capsule") || s.getMeshByName("player") || null;
     if (body) body.parent = yaw;
 
-    S.rigRoot=rigRoot; S.yaw=yaw; S.head=head; S.body=body;
+    S.rigRoot=rigRoot; S.yawNode=yaw; S.head=head; S.body=body;
 
     // derive yaw/pitch from existing camera once
     if (c?.rotation){
@@ -153,7 +153,7 @@
 
   function applyRigToNodes(){
     S.yawNodeDirty = true;
-    S.yaw.rotation.y = S.yaw;
+    S.yawNode.rotation.y = S.yaw;
     // head carries pitch
     S.head.rotation.x = S.pitch;
 
