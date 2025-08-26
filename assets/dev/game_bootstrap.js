@@ -131,7 +131,17 @@
     hemi.intensity = 0.35;
 
     // First person camera
-    camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 1.8, 0), scene);
+    camera = new BABYLON.UniversalCamera(
+// --- expose engine/scene/camera for other modules ---
+try {
+  if (typeof window !== 'undefined') {
+    window.ENGINE = window.ENGINE || (typeof engine!=='undefined' ? engine : (BABYLON.Engine && BABYLON.Engine.LastCreatedEngine));
+    window.SCENE  = window.SCENE  || (typeof scene!=='undefined'  ? scene  : (BABYLON.Engine && BABYLON.Engine.LastCreatedScene));
+    if (window.SCENE) window.camera = window.SCENE.activeCamera || (typeof camera!=='undefined' ? camera : window.camera);
+  }
+} catch(e) { console.warn('[bootstrap] export globals failed', e); }
+// --- end expose ---
+"playerCam", new BABYLON.Vector3(0, 1.8, 0), scene);
     camera.attachControl(canvas, true);
     camera.minZ = 0.1;
     camera.inertia = 0;

@@ -116,83 +116,34 @@
   <div id="toast"></div>
 
   <!-- Player & world systems -->
-<script src="./assets/dev/player_rig_controller_final.js"></script>
-
-  <script>
-    (function(){
-      const Keys = Object.create(null);
-      addEventListener('keydown', e=>{ Keys[e.code]=true; }, true);
-      addEventListener('keyup',   e=>{ Keys[e.code]=false; }, true);
-      function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-      function step(){
-        const s=S(); const cam=s && s.activeCamera;
-        const body = s && (s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')));
-        if (s && cam && body){
-          const pressing = Keys['KeyW']||Keys['ArrowUp']||Keys['KeyA']||Keys['KeyS']||Keys['KeyD']||Keys['ArrowLeft']||Keys['ArrowRight'];
-          if (pressing){
-            if (!body._lastPos) body._lastPos = body.position.clone();
-            const dist = BABYLON.Vector3.Distance(body.position, body._lastPos);
-            if (dist < 0.002){
-              // Stuck: nudge forward based on camera
-              const fw = cam.getDirection(BABYLON.Axis.Z); fw.y = 0; fw.normalize();
-              const rt = cam.getDirection(BABYLON.Axis.X); rt.y = 0; rt.normalize();
-              let v = new BABYLON.Vector3(0,0,0);
-              if(Keys['KeyW']||Keys['ArrowUp']) v.addInPlace(fw);
-              if(Keys['KeyS']||Keys['ArrowDown']) v.addInPlace(fw.scale(-1));
-              if(Keys['KeyD']||Keys['ArrowRight']) v.addInPlace(rt);
-              if(Keys['KeyA']||Keys['ArrowLeft']) v.addInPlace(rt.scale(-1));
-              if (v.length()>0.0001){
-                v.normalize(); v.scaleInPlace(0.06);
-                try{ body.moveWithCollisions ? body.moveWithCollisions(v) : body.position.addInPlace(v); }catch(_){ body.position.addInPlace(v); }
-              }
-            }
-            body._lastPos = body.position.clone();
-          }
-        }
-        requestAnimationFrame(step);
-      }
-      requestAnimationFrame(step);
-    })();
-  </script>
-
+  <script src="./assets/dev/movement_rig_clean.js"></script>
+  <script src="./assets/dev/player_rig_controller_final.js"></script>
   <script src="./assets/dev/moon.js"></script>
   <script src="./assets/dev/minimap_northup_xyz.js"></script>
 
-  <script>
-    (function(){
-      if (window.teleportToXYZ) return;
-      window.teleportToXYZ = function(x, y, z, opts){
-        try{
-          const scene = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]);
-          if (!scene) return false;
-          const body = scene.__playerBody || (scene.getMeshByName && scene.getMeshByName("player_capsule"));
-          if (!body) return false;
-          body.position.x = x; body.position.z = z;
-          if (!opts || opts.snapGround !== false){
-            const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 9999, z), new BABYLON.Vector3(0,-1,0), 20000);
-            const hit = scene.pickWithRay(ray, m => (m.isPickable !== false));
-            body.position.y = hit && hit.hit ? (hit.pickedPoint.y + 0.9) : (y ?? body.position.y);
-          } else if (typeof y === "number"){ body.position.y = y; }
-          if (scene.activeCamera && scene.activeCamera._lockedTarget){ scene.activeCamera._lockedTarget = body; }
-          return true;
-        }catch(e){ console.warn("[teleportToXYZ] failed", e); return false; }
-      };
-    })();
-  </script>
+<script>
+(function ensureMinimapCamera(){
+  function S(){ return window.SCENE; }
+  function getMiniCam(){
+    const s=S(); if (!s) return null;
+    return s && s.cameras && s.cameras.find(c => /mini|mm|map/i.test(c.name)) || null;
+  }
+  function tick(){
+    const s=S(), mm=getMiniCam();
+    if (s && mm) {
+      if (!s.activeCameras) s.activeCameras = [];
+      if (!s.activeCameras.includes(s.activeCamera)) s.activeCameras = [s.activeCamera];
+      if (!s.activeCameras.includes(mm)) s.activeCameras.push(mm);
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
 
   <script src="./assets/dev/sound_engine.js"></script>
   <script src="./assets/dev/devtools.js"></script>
   <script src="./assets/dev/merge_patch.js"></script>
-
-  <script>
-    (function(){
-      try {
-        const slots = (window.PP && PP.storage && PP.storage.loadInventory && PP.storage.loadInventory().slots) || ['emf','spirit','uv'];
-        if (typeof buildBelt === 'function') buildBelt(slots);
-      } catch(e){ console.warn("[belt-init] failed", e); }
-    })();
-  </script>
-
 
   <!-- Ghost data & logic -->
   <script src="./assets/dev/ghost_db.js"></script>
@@ -207,70 +158,27 @@
 
   <!-- Condensed bootstrap (replaces spawn_fix + map_select + load_map_runtime + start_button_fix) -->
   <script src="./assets/dev/game_bootstrap.js"></script>
-
-  <script>
-    (function(){
-      const c = document.getElementById('renderCanvas');
-      if (c) c.setAttribute('tabindex','0');
-      const btn = document.getElementById('start-button');
-      const title = document.getElementById('title-screen');
-      if (btn && title){
-        btn.addEventListener('click', ()=>{
-          setTimeout(()=>{ if (title) title.style.pointerEvents = 'none'; }, 50);
-          setTimeout(()=>{ try{ c && c.focus(); c && c.requestPointerLock && c.requestPointerLock(); }catch(_){} }, 250);
-        }, {passive:false});
-      }
-    })();
-  </script>
-
   <script src="./assets/dev/fp_tp_sync.js"></script>
 
-  <script>
-    (function(){
-      const tryInit = ()=>{
-        const s = window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]);
-        if (!s) return setTimeout(tryInit, 50);
-        if (s.__minimapFallback) return;
-        s.__minimapFallback = true;
-        const mm = new BABYLON.FreeCamera("MM_Fallback", new BABYLON.Vector3(0, 60, 0), s);
-        mm.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-        mm.orthoLeft = -55; mm.orthoRight = 55; mm.orthoTop = 55; mm.orthoBottom = -55;
-        mm.minZ = 0; mm.maxZ = 5000;
-        mm.rotation.x = Math.PI/2;
-        mm.viewport = new BABYLON.Viewport(0.02, 0.73, 0.24, 0.24);
-        mm.layerMask = 0x0FFFFFFF;
-        s.onBeforeRenderObservable.add(()=>{
-          const body = s.__playerBody || s.getMeshByName("player_capsule");
-          if (body){ mm.position.x = body.position.x; mm.position.z = body.position.z; }
-        });
-        s.activeCameras = s.activeCameras || [];
-        if (!s.activeCameras.includes(s.activeCamera)) s.activeCameras.push(s.activeCamera);
-        s.activeCameras.push(mm);
-        // Click-to-teleport inside viewport
-        s.onPointerObservable.add((evt)=>{
-          if (evt.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-          const eng = s.getEngine && s.getEngine(); if (!eng) return;
-          const W = eng.getRenderWidth(), H = eng.getRenderHeight();
-          const x = s.pointerX, y = s.pointerY;
-          const nx = x/W, ny = 1 - y/H;
-          const v = mm.viewport;
-          if (nx < v.x || nx > v.x+v.width || ny < v.y || ny > v.y+v.height) return;
-          const hit = s.pick(x, y, m => (m.isPickable !== false), false, mm);
-          if (hit && hit.hit && hit.pickedPoint) {
-            const p = hit.pickedPoint;
-            if (window.teleportToXYZ) teleportToXYZ(p.x, p.y, p.z, {snapGround:true});
-          }
-        });
-        window.toggleMinimap = function(){
-          if (mm.__hidden){ mm.__hidden=false; mm.viewport = new BABYLON.Viewport(0.02, 0.73, 0.24, 0.24); }
-          else { mm.__hidden=true; mm.viewport = new BABYLON.Viewport(0,0,0,0); }
-        };
-        window.addEventListener('keydown', (e)=>{ if (e.key==='m' || e.code==='KeyM') toggleMinimap(); }, {passive:true});
-        console.log("[minimap] Fallback camera active (Key M toggles).");
-      };
-      setTimeout(tryInit, 50);
-    })();
-  </script>
+<script>
+(function fixHudXYZ(){
+  const label = document.getElementById('hud-xyz');
+  if (!label) return;
+  function S(){ return window.SCENE; }
+  function src(){
+    const s=S(); if (!s) return null;
+    return s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')) || s.activeCamera || null;
+  }
+  function loop(){
+    const o = src();
+    if (o && o.position){
+      const p = o.position;
+      label.textContent = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
 
-</body>
-</html>
+</body></html>
