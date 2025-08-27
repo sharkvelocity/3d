@@ -1,4 +1,3 @@
-
 (function(){ 'use strict';
   if (window.__minimapInstalled_v2) return; window.__minimapInstalled_v2 = true;
   const S = ()=>window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null;
