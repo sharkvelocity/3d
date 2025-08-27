@@ -1,4 +1,3 @@
-
 (function(){ 'use strict';
   if (window.__rigFinal_v2) return; window.__rigFinal_v2 = true;
 
