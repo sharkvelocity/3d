@@ -115,150 +115,150 @@
 
   <div id="toast"></div>
 
-  <!-- Player & world systems -->
+  <!-- Player & world systems (paths fixed to match repo) -->
+  <script src="./assets/dev/util/modular_settings.js"></script>
+  <script src="./assets/dev/modular_bindings.js"></script>
+  <script src="./assets/dev/modular_audio.js"></script>
+  <script>
+  (function hookAudioStart(){
+    function attach(){
+      var btn = document.getElementById('start-button') || document.querySelector('[data-start]');
+      if (!btn){ return setTimeout(attach, 100); }
+      btn.addEventListener('click', function once(){
+        btn.removeEventListener('click', once);
+        try { PP && PP.audio && PP.audio.init(); } catch(e){ console.warn('[audio.init] failed', e); }
+      });
+    }
+    attach();
+  })();
+  </script>
 
-<script src="./assets/dev/modular_settings.js"></script>
+  <script src="./assets/dev/util/player_rig_controller_final.js"></script>
+  <script src="./assets/dev/util/moon.js"></script>
+  <script src="./assets/dev/util/minimap_northup_xyz.js"></script>
 
-<script src="./assets/dev/modular_bindings.js"></script>
-
-<script src="./assets/dev/modular_audio.js"></script>
-<script>
-(function hookAudioStart(){
-  function attach(){
-    var btn = document.getElementById('start-button') || document.querySelector('[data-start]');
-    if (!btn){ return setTimeout(attach, 100); }
-    btn.addEventListener('click', function once(){
-      btn.removeEventListener('click', once);
-      try { PP && PP.audio && PP.audio.init(); } catch(e){ console.warn('[audio.init] failed', e); }
-    });
-  }
-  attach();
-})();
-</script>
-
-<script src="./assets/dev/player_rig_controller_final.js"></script>
-  <script src="./assets/dev/moon.js"></script>
-  <script src="./assets/dev/minimap_northup_xyz.js"></script>
-
-<script>
-(function ensureMinimapCamera(){
-  function S(){ return window.SCENE; }
-  function getMiniCam(){
-    const s=S(); if (!s) return null;
-    return s && s.cameras && s.cameras.find(c => /mini|mm|map/i.test(c.name)) || null;
-  }
-  function tick(){
-    const s=S(), mm=getMiniCam();
-    if (s && mm) {
-      if (!s.activeCameras) s.activeCameras = [];
-      if (!s.activeCameras.includes(s.activeCamera)) s.activeCameras = [s.activeCamera];
-      if (!s.activeCameras.includes(mm)) s.activeCameras.push(mm);
+  <script>
+  (function ensureMinimapCamera(){
+    function S(){ return window.SCENE; }
+    function getMiniCam(){
+      const s=S(); if (!s) return null;
+      return s && s.cameras && s.cameras.find(c => /mini|mm|map/i.test(c.name)) || null;
+    }
+    function tick(){
+      const s=S(), mm=getMiniCam();
+      if (s && mm) {
+        if (!s.activeCameras) s.activeCameras = [];
+        if (!s.activeCameras.includes(s.activeCamera)) s.activeCameras = [s.activeCamera];
+        if (!s.activeCameras.includes(mm)) s.activeCameras.push(mm);
+      }
+      requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-})();
-</script>
-<script src="./assets/dev/util/pp_runtime.js"></script>
-  <script src="./assets/dev/sound_engine.js"></script>
-  <script src="./assets/dev/devtools.js"></script>
-  <script src="./assets/dev/merge_patch.js"></script>
+  })();
+  </script>
 
-  <!-- Ghost data & logic -->
-  <script src="./assets/dev/ghost_db.js"></script>
-  <script src="./assets/dev/ghost_logic.js"></script>
+  <!-- Master runtime -->
+  <script src="./assets/dev/util/pp_runtime.js"></script>
 
-  <!-- Evidence & interaction systems -->
-  <script src="./assets/dev/uv_prints.js"></script>
-  <script src="./assets/dev/salt_system.js"></script>
-  <script src="./assets/dev/spirit_box.js"></script>
-  <script src="./assets/dev/dots_system.js"></script>
-  <script src="./assets/dev/writing_book.js"></script>
+  <!-- Remaining util + dev helpers -->
+  <script src="./assets/dev/util/sound_engine.js"></script>
+  <script src="./assets/dev/util/devtools.js"></script>
 
-  <!-- Condensed bootstrap (replaces spawn_fix + map_select + load_map_runtime + start_button_fix) -->
+  <!-- Ghost data & logic (subfolder fixed) -->
+  <script src="./assets/dev/ghost/ghost_db.js"></script>
+  <script src="./assets/dev/ghost/ghost_logic.js"></script>
+
+  <!-- Evidence & interaction systems (tools subfolder fixed) -->
+  <script src="./assets/dev/tools/uv_prints.js"></script>
+  <script src="./assets/dev/tools/salt_system.js"></script>
+  <script src="./assets/dev/tools/spirit_box.js"></script>
+  <script src="./assets/dev/tools/dots_system.js"></script>
+  <script src="./assets/dev/tools/writing_book.js"></script>
+
+  <!-- Bootstrap + patches -->
   <script src="./assets/dev/game_bootstrap.js"></script>
+  <script src="./assets/dev/merge_patch.js"></script>
+  <script src="./assets/dev/glue_patch.js"></script>
 
-<script>
-// ensure ENGINE/SCENE/camera are globally available for modules
-(function ensureGlobals(){
-  function tryExport(){
-    try {
-      if (window.ENGINE && window.SCENE) { window.camera = window.SCENE.activeCamera || window.camera; return; }
-      var eng = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedEngine) || (BABYLON.Engine && BABYLON.Engine.LastCreatedEngine);
-      var scn = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedScene)  || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene);
-      if (eng && scn){
-        window.ENGINE = eng;
-        window.SCENE  = scn;
-        window.camera = scn.activeCamera || window.camera;
-        return;
-      }
-    } catch(e){ /* swallow & retry */ }
-    setTimeout(tryExport, 50);
-  }
-  tryExport();
-})();
-</script>
-
-  <script src="./assets/dev/fp_tp_sync.js"></script>
-
-<!-- Anti-orbit patch: enforce a player-style camera and disable default orbit inputs -->
-<script>
-(function antiOrbitOnce(){
-  if (window.__antiOrbitApplied__) return; window.__antiOrbitApplied__ = true;
-  function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-  function apply(){
-    const s = S(); if (!s) return setTimeout(apply, 50);
-    let c = s.activeCamera;
-    if (!c) return setTimeout(apply, 50);
-
-    // If ArcRotateCamera is active, replace with UniversalCamera so mouse won't orbit the world.
-    if (BABYLON.ArcRotateCamera && c instanceof BABYLON.ArcRotateCamera){
-      const u = new BABYLON.UniversalCamera("PlayerCam", c.position.clone(), s);
-      if (c.rotation) u.rotation.copyFrom(c.rotation);
-      s.activeCamera = u;
-      try { c.detachControl(); } catch(_){}
-      try { c.dispose(); } catch(_){}
-      c = u;
+  <!-- Globals exporter -->
+  <script>
+  (function ensureGlobals(){
+    function tryExport(){
+      try {
+        if (window.ENGINE && window.SCENE) { window.camera = window.SCENE.activeCamera || window.camera; return; }
+        var eng = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedEngine) || (BABYLON.Engine && BABYLON.Engine.LastCreatedEngine);
+        var scn = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedScene)  || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene);
+        if (eng && scn){
+          window.ENGINE = eng;
+          window.SCENE  = scn;
+          window.camera = scn.activeCamera || window.camera;
+          return;
+        }
+      } catch(e){ /* swallow & retry */ }
+      setTimeout(tryExport, 50);
     }
-    // Remove built-in camera inputs so fp_tp_sync / rig owns look controls.
-    if (c.inputs && c.inputs.clear) c.inputs.clear();
-    c.inertia = 0;
-    c.angularSensibility = 1e9; // effectively disables built-in mouse look
+    tryExport();
+  })();
+  </script>
 
-    // Tether camera to player body when it appears
-    (function tether(){
-      const body = s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule'));
-      if (body && s.activeCamera){
-        try { s.activeCamera._lockedTarget = body; } catch(_){}
-        return;
+  <!-- Sync & camera ownership -->
+  <script src="./assets/dev/util/fp_tp_sync.js"></script>
+
+  <!-- Anti-orbit patch -->
+  <script>
+  (function antiOrbitOnce(){
+    if (window.__antiOrbitApplied__) return; window.__antiOrbitApplied__ = true;
+    function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
+    function apply(){
+      const s = S(); if (!s) return setTimeout(apply, 50);
+      let c = s.activeCamera;
+      if (!c) return setTimeout(apply, 50);
+
+      if (BABYLON.ArcRotateCamera && c instanceof BABYLON.ArcRotateCamera){
+        const u = new BABYLON.UniversalCamera("PlayerCam", c.position.clone(), s);
+        if (c.rotation) u.rotation.copyFrom(c.rotation);
+        s.activeCamera = u;
+        try { c.detachControl(); } catch(_){}
+        try { c.dispose(); } catch(_){}
+        c = u;
       }
-      setTimeout(tether, 50);
-    })();
-  }
-  apply();
-})();
-</script>
+      if (c.inputs && c.inputs.clear) c.inputs.clear();
+      c.inertia = 0;
+      c.angularSensibility = 1e9;
 
+      (function tether(){
+        const body = s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule'));
+        if (body && s.activeCamera){
+          try { s.activeCamera._lockedTarget = body; } catch(_){}
+          return;
+        }
+        setTimeout(tether, 50);
+      })();
+    }
+    apply();
+  })();
+  </script>
 
-<script>
-(function fixHudXYZ(){
-  const label = document.getElementById('hud-xyz');
-  if (!label) return;
-  function S(){ return window.SCENE; }
-  function src(){
-    const s=S(); if (!s) return null;
-    return s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')) || s.activeCamera || null;
-  }
-  function loop(){
-    const o = src();
-    if (o && o.position){
-      const p = o.position;
-      label.textContent = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+  <!-- HUD XYZ updater -->
+  <script>
+  (function fixHudXYZ(){
+    const label = document.getElementById('hud-xyz');
+    if (!label) return;
+    function S(){ return window.SCENE; }
+    function src(){
+      const s=S(); if (!s) return null;
+      return s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')) || s.activeCamera || null;
+    }
+    function loop(){
+      const o = src();
+      if (o && o.position){
+        const p = o.position;
+        label.textContent = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+      }
+      requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
-})();
-</script>
+  })();
+  </script>
 
 </body></html>
