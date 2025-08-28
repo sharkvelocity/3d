@@ -2,7 +2,6 @@
 (function () {
   if (window.__Index3BootReady) return; window.__Index3BootReady = true;
 
-  // Shorthand
   const $ = (sel) => document.querySelector(sel);
   const log = (...a) => { try { console.log("[index3]", ...a); } catch(_){} };
   const warn = (...a) => { try { console.warn("[index3]", ...a); } catch(_){} };
@@ -40,7 +39,7 @@
       const r=await fetch(docResolve(url), {cache:"no-store"});
       if (!r.ok) throw new Error(r.status+" "+r.statusText);
       return await r.json();
-    }catch(e){ return null; }
+    }catch(e){ warn("fetchJSON fail:", url, e); return null; }
   }
 
   // Manifest
@@ -50,7 +49,7 @@
     if (Array.isArray(j)) MAPS = j;
     else if (j && Array.isArray(j.maps)) MAPS = j.maps;
     if (!MAPS.length && window.INDEX3?.MAPS_MANIFEST_FALLBACK) MAPS = INDEX3.MAPS_MANIFEST_FALLBACK.slice();
-    // Populate dropdown
+
     const sel = $("#map-select");
     if (sel){
       sel.innerHTML = MAPS.length ? MAPS.map((m,i)=>`<option value="${i}">${m.title || m.file}</option>`).join("") : `<option value="-1">(no maps)</option>`;
@@ -60,6 +59,7 @@
       }catch(_){ sel.value = "0"; }
       sel.onchange = ()=>{ try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_){} };
     }
+    log("Manifest:", MAPS);
   }
   function getSelected(){ const sel=$("#map-select"); const i = Math.max(0, Math.min(MAPS.length-1, parseInt(sel?.value||"0",10)||0)); return MAPS[i]; }
 
@@ -71,7 +71,7 @@
     scene.collisionsEnabled = true;
     scene.gravity = new BABYLON.Vector3(0, -0.35, 0);
 
-    // Camera (first-person style)
+    // Camera (first-person)
     camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0, 1.8, 0), scene);
     camera.minZ = 0.1;
     camera.applyGravity = true;
@@ -80,29 +80,27 @@
     camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
 
     camera.inputs.clear();
-    camera.inputs.addMouse();     // natural mouse (no inversion)
+    camera.inputs.addMouse();     // natural mouse
     camera.inputs.addKeyboard();  // WASD + arrows
-    camera.angularSensibility = 1200; // tweak feel
-    camera.speed = 0.6;           // walking speed
+    camera.angularSensibility = 1200;
+    camera.speed = 0.6;
 
     light = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
-    light.intensity = 0.35;
+    light.intensity = 0.45;
 
     engine.runRenderLoop(()=> scene.render());
     window.addEventListener("resize", ()=> engine.resize());
 
-    // XYZ hud
     if (window.INDEX3?.attachXYZHud) INDEX3.attachXYZHud(scene);
   }
 
-  // Map defs registry (populated by mapdefs_*.js)
+  // Map defs registry
   function getMapDefFor(defName){
     if (!defName) return null;
     return (window.MAP_DEFS && window.MAP_DEFS[defName]) ? window.MAP_DEFS[defName] : null;
   }
 
   async function loadMapDef(chosen){
-    // Priority: explicit def from manifest -> inferred name(s) -> installed mapdefs in registry
     const file = chosen?.file || "Abandoned_House.glb";
     const baseNoExt = file.replace(/\.[^.]+$/, "");
     const candidates = [];
@@ -112,14 +110,16 @@
 
     for (const c of candidates){
       const ok = await new Promise(res=>{
-        const s=document.createElement("script"); s.src=docResolve(c)+`?v=${Date.now()}`; s.async=true; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s);
+        const s=document.createElement("script");
+        s.src=docResolve(c)+`?v=${Date.now()}`;
+        s.async=true; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s);
       });
-      if (ok && window.MAP_DEF && MAP_DEF.spawn) { log("Loaded MAP_DEF from", c); return window.MAP_DEF; }
+      if (ok && window.MAP_DEF && MAP_DEF.spawn) { log("Loaded external MAP_DEF:", c, MAP_DEF); return window.MAP_DEF; }
     }
 
-    // Not present as a separate file—fall back to built-in registry (from mapdefs_*.js)
+    // Registered?
     const reg = getMapDefFor(chosen?.def);
-    if (reg) { window.MAP_DEF = reg; log("Using registered MAP_DEF:", chosen.def); return reg; }
+    if (reg) { window.MAP_DEF = reg; log("Using registered MAP_DEF:", chosen.def, reg); return reg; }
 
     // Synthesize minimal
     warn("No MAP_DEF found; synthesizing.");
@@ -131,11 +131,13 @@
     const file = chosen?.file || "Abandoned_House.glb";
     try{
       const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", file, scene);
-      const root = res.meshes[0] || null;
-      if (root){
-        res.meshes.forEach(m=>{ try{ m.checkCollisions = true; m.receiveShadows = true; }catch(_){} });
+      res.meshes.forEach(m=>{ try{ m.checkCollisions = true; m.receiveShadows = true; }catch(_){} });
+      log("Map imported:", file, "meshes:", res.meshes.length);
+      // If nothing renders, at least we keep a ground
+      if (!res.meshes.length) {
+        const g = BABYLON.MeshBuilder.CreateGround("fallback", {width:200, height:200}, scene);
+        g.checkCollisions = true;
       }
-      log("Map imported:", file);
     }catch(e){
       warn("Map import failed; creating fallback ground.", e);
       const g = BABYLON.MeshBuilder.CreateGround("fallback", {width:200, height:200}, scene);
@@ -175,7 +177,6 @@
     if (started) return;
     started = true;
 
-    // Hide title
     const title=$("#title-screen"); if (title) title.style.display="none";
 
     Loader.reset();
@@ -183,6 +184,7 @@
     Loader.add("Preparing engine…", prepareEngineScene);
     Loader.add("Loading selected map…", async ()=>{
       const chosen = getSelected();
+      log("Selected:", chosen);
       await loadMapDef(chosen);
       await importMapGLB(chosen);
     });
@@ -193,12 +195,10 @@
 
     await Loader.run();
 
-    // Optional: kick off ambient
     try{ INDEX3.Sound.playAmb(); }catch(_){}
     try{ document.getElementById("renderCanvas").focus(); }catch(_){}
   }
 
-  // Hook UI
   (function wire(){
     const btn=$("#start-button"); if (btn) btn.addEventListener("click", startGame, {passive:false});
     document.addEventListener("keydown",(e)=>{ if(!started && (e.key==="Enter"||e.code==="Space")){ e.preventDefault(); startGame(e); }},{passive:false});
