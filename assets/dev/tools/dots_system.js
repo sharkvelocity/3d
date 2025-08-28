@@ -157,3 +157,28 @@
     });
   })();
 })();
+
+/* ---- Storage registration (DOTS item) ---- */
+(function(){
+  if (!window.registerItem) return; // Storage bridge not loaded yet
+  registerItem({
+    id: "dots",
+    name: "DOTS",
+    icon: "./assets/icons/dots.png",
+    defaultCharges: Infinity,
+    onEquip(){ /* no-op; place with key below or via DevTools */ }
+  });
+
+  // Optional hotkey: V to place a DOTS projector when equipped
+  if (!window.__DOTS_keybound){
+    window.__DOTS_keybound = true;
+    window.addEventListener("keydown", (e)=>{
+      if ((e.key === "v" || e.key === "V") && window.inventory){
+        const slot = window.activeItemSlot || 1;
+        if (window.inventory.slots?.[slot] === "DOTS"){
+          try{ window.placeDotsProjector?.(); }catch(_){}
+        }
+      }
+    });
+  }
+})();

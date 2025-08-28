@@ -1,119 +1,150 @@
-// Core globals (preserve names/values) — from index3.html
-const canvas = document.getElementById('renderCanvas');
-let engine, scene, camera, skybox;
+// ./assets/index3/core.js
+// Shared globals, helpers, audio, inventory defaults, evidence helpers.
 
-let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat, cloudScroll = 0;
-let moonMesh = null, moonMat = null;
-let hemiLight = null;
+(function () {
+  "use strict";
 
-let houseLights = []; let housePower = true;
+  // ---------- tiny DOM helpers ----------
+  window.$  = (sel, root = document) => root.querySelector(sel);
+  window.$$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false };
-let controls = { forward:false, back:false, left:false, right:false };
-let allowFly = false;
+  // ---------- toast (UI) ----------
+  window.toast = function toast(msg, ms = 1200) {
+    const t = $('#toast'); if (!t) { console.log('[toast]', msg); return; }
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(toast._id);
+    toast._id = setTimeout(() => { t.style.display = 'none'; }, ms);
+  };
 
-let houseRoot = null;
-let doorMeshes = [];
-let ghost = {
-  mesh:null, target:null, speed:1.4, slowSpeed:0.9, fastSpeed:1.4, alive:true,
-  anims:{ idle:null, walk:null },
-  visible:false, hunting:false,
-  nextStep:0, stepInterval:0.55, footAudible:18,
-  isTwins:false, meshFast:null
-};
+  // ---------- world/game state ----------
+  window.controls = { forward:false, back:false, left:false, right:false };
+  window.player = {
+    sanity: 100,
+    speedWalk: 0.085,   // units / frame-second
+    speedRun:  0.16,
+    running:   false,
+    room: 'Van'
+  };
 
-// Cold breath FX
-const BREATH_RANGE = 5.0;
-let breath = { ps:null, anchor:null, pulse:0, cooldown:0 };
+  // ---------- inventory ----------
+  // Slots are 1..5 (we ignore index 0). 4=Lighter, 5=Notebook fixed by Storage.
+  window.inventory = {
+    slots:       Array(6).fill(null),
+    slotCharges: Array(6).fill(Infinity)
+  };
+  // sensible defaults so the belt isn't empty before opening Storage
+  inventory.slots[4] = 'Lighter';
+  inventory.slots[5] = 'Notebook';
 
-// Weather state + modifiers
-let weather = {
-  state:'Clear',
-  rainPS:null,
-  snowPS:null,
-  snowTex:null,
-  lightningTimer:0, nextStrike:0,
-  modSanityDrain:1.0,
-  modHuntChance:1.0,
-  modHuntPace:1.0
-};
+  // Default charges for some consumables (Storage UI will use this)
+  window.ITEM_DEFAULT_CHARGES = {
+    'Salt': 3,
+    'Writing Book': 1
+  };
+  // Optional: map of "Item Name" -> glTF mesh name (Dev Tools may fill this)
+  window.ITEM_MODEL_MAP = {};
 
-// Van zone spawn (from your original)
-let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
+  // Fallback general item list (Storage grid will prefer ./assets/dev/tools/manifest.json)
+  window.STORAGE_ITEMS = window.STORAGE_ITEMS || [
+    'Spirit Box', 'Writing Book', 'Salt', 'UV Prints', 'DOTS'
+  ];
 
-let storageOpen = false;
-let dev = { enabled:false, gateOpen:false, log:[] };
-let activeItemSlot = 1;
+  // ---------- house power / lights ----------
+  window.housePower = true;
+  // If you populate this with { light: <BABYLON.Light> } objects, Dev Tools switch linker will work
+  window.houseLights = window.houseLights || [];
 
-let inventory = {
-  slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'},
-  models:{}, icons:{},
-  slotCharges:{1:0,2:0,3:0,4:Infinity,5:Infinity}
-};
+  window.setHousePower = function setHousePower(on) {
+    window.housePower = !!on;
+    try {
+      houseLights.forEach(h => {
+        if (!h || !h.light) return;
+        h.light.intensity = on ? (h.light._savedIntensity || h.light.intensity || 0.8) : 0;
+      });
+      toast(on ? 'Main breaker: ON' : 'Main breaker: OFF', 900);
+    } catch (e) { /* ignore */ }
+  };
 
-const ITEM_DEFAULT_CHARGES = { 'Smudge':1, 'Salt':3 };
-const devBus = new EventTarget();
-let __devGhostLogTimer = 0;
+  // ---------- polygon+room helpers ----------
+  function pointInPolyXZ(p, poly /* [{x,z},...] */) {
+    if (!poly || poly.length < 3) return false;
+    let inside = false, x = p.x, z = p.z;
+    for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
+      const xi = poly[i].x, zi = poly[i].z;
+      const xj = poly[j].x, zj = poly[j].z;
+      const intersect = ((zi > z) !== (zj > z)) &&
+                        (x < (xj - xi) * (z - zi) / ((zj - zi) || 1e-7) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  window.inVanZone = function inVanZone(pos) {
+    try {
+      const van = (window.ROOMS || []).find(r => (r.name || '').toLowerCase() === 'van');
+      if (van && van.poly) return pointInPolyXZ(pos, van.poly);
+    } catch (_) {}
+    // fallback: rough bounding box near common van coords
+    return (pos.x > 34 && pos.x < 52 && pos.z > -125 && pos.z < -112);
+  };
 
-const STORAGE_ITEMS = ['Flashlight','UV Light','Camera','EMF','Spirit Box','Thermometer','Crucifix','Salt','Smudge','D.O.T.S','Ghost Writing Book','Motion Sensor'];
-const ITEM_MODEL_MAP = {
-  'EMF':'EMF_Detector_EMF_Detector_0',
-  'Spirit Box':'Cone.001_Spirit_Box_0',
-  'Thermometer':'Thermometer_Thermometer_0',
-  'Camera':'Photo_Camera_Photo_Camera_0',
-  'UV Light':'Flashlight_Flashlight_0',
-  'Flashlight':'Flashlight_Poquet_Flashlight_Poquet_0',
-  'Thermal Camera':'Thermal_Camera_Thermal_Camera_0',
-  'Voice Recorder':'Voice_Recorder_Voice_Recorder_0',
-  'Ghost Writing Book':'(book-placeholder)',
-  'D.O.T.S':'(dots-proj)',
-  'Motion Sensor':'(motion-placeholder)'
-};
-const EVIDENCE_TYPES = ["EMF Level 5","Spirit Box","Fingerprints","Ghost Writing","Freezing Temps","D.O.T.S","Orbs"];
-const GHOSTS = {
-  spirit:["Spirit Box","Ghost Writing","EMF Level 5"],
-  wraith:["Spirit Box","D.O.T.S","EMF Level 5"],
-  poltergeist:["Spirit Box","Ghost Writing","Fingerprints"],
-  banshee:["D.O.T.S","Fingerprints","Orbs"],
-  jinn:["EMF Level 5","Freezing Temps","Fingerprints"],
-  mare:["Spirit Box","Ghost Writing","Orbs"],
-  revenant:["Ghost Writing","Orbs","Freezing Temps"],
-  shade:["Ghost Writing","Freezing Temps","EMF Level 5"],
-  demon:["Freezing Temps","Ghost Writing","Fingerprints"],
-  yurei:["Freezing Temps","D.O.T.S","Orbs"],
-  oni:["EMF Level 5","Freezing Temps","D.O.T.S"],
-  yokai:["Spirit Box","D.O.T.S","Orbs"],
-  hantu:["Freezing Temps","Ghost Writing","Fingerprints"],
-  goryo:["EMF Level 5","D.O.T.S","Fingerprints"],
-  myling:["Ghost Writing","EMF Level 5","Fingerprints"],
-  onryo:["Freezing Temps","Spirit Box","Orbs"],
-  "the twins":["Spirit Box","Freezing Temps","EMF Level 5"],
-  raiju:["EMF Level 5","D.O.T.S","Orbs"],
-  obake:["EMF Level 5","Orbs","Fingerprints"],
-  "the mimic":["Spirit Box","Freezing Temps","Fingerprints"],
-  moroi:["Freezing Temps","Ghost Writing","Spirit Box"],
-  deogen:["Spirit Box","Ghost Writing","D.O.T.S"],
-  thaye:["Ghost Writing","Orbs","D.O.T.S"],
-  phantom:["Spirit Box","D.O.T.S","Fingerprints"],
-  succubus:["Ghost Writing","Orbs","Spirit Box"]
-};
-let discoveredEvidence = new Set();
-let currentGhostKey = null;
+  // ---------- simple audio helpers ----------
+  // HTMLAudio fallback (your Babylon.Sound versions will still work side-by-side)
+  function makeAudio(src, vol = 1.0) {
+    try { const a = new Audio(src); a.volume = vol; return a; } catch { return null; }
+  }
+  window.audio = window.audio || {};
+  audio.doorCreak1 = audio.doorCreak1 || makeAudio('./assets/audio/door_creak1.mp3', 0.6);
+  audio.doorCreak2 = audio.doorCreak2 || makeAudio('./assets/audio/door_creak2.mp3', 0.6);
+  audio.step1      = audio.step1      || makeAudio('./assets/audio/step1.mp3', 0.55);
+  audio.step2      = audio.step2      || makeAudio('./assets/audio/step2.mp3', 0.55);
+  audio.step3      = audio.step3      || makeAudio('./assets/audio/step3.mp3', 0.55);
+  // You said the spirit box file is named this:
+  audio.spiritbox  = audio.spiritbox  || makeAudio('./assets/audio/spiritbox.mp3', 0.6);
 
-let ghostPolygon = [
-  new BABYLON.Vector3(18.404, 0, -96.040),
-  new BABYLON.Vector3(57.205, 0, -94.031),
-  new BABYLON.Vector3(62.145, 0, -105.142),
-  new BABYLON.Vector3(61.872, 0, -149.928),
-  new BABYLON.Vector3(18.660, 0, -149.900)
-];
+  // footsteps used by ui_input.js
+  window.playStep = function playStep(vol = 0.5) {
+    try {
+      const s = Math.random();
+      const a = (s < 0.34) ? audio.step1 : (s < 0.67) ? audio.step2 : audio.step3;
+      if (a) { a.pause(); a.currentTime = 0; a.volume = vol; a.play().catch(()=>{}); }
+    } catch (_) {}
+  };
 
-// Placeables / rules
-const CRUCIFIX_BASE_RADIUS = 3.0;
-const CRUCIFIX_DEMON_RADIUS = 5.0;
-const TWINS_SEP_MIN = 10.0, TWINS_SEP_MAX = 12.0;
+  // ---------- ghost + evidence helpers ----------
+  // Minimal ghost DB for evidence checks. Expand as you like.
+  window.GHOSTS = window.GHOSTS || {
+    Spirit:     { evidence: ['spiritbox', 'writing', 'emf'] },
+    Wraith:     { evidence: ['dots', 'emf', 'uv'] },       // special: does NOT disturb salt (handled in salt_system.js)
+    Goryo:      { evidence: ['dots', 'emf', 'uv'], dotsCameraOnly: true },
+    Shade:      { evidence: ['writing', 'emf', 'freezing'] }
+  };
+  window.currentGhostKey = window.currentGhostKey || 'Spirit';
 
-const placeables = { motionSensors: [], crucifixes: [] };
+  // evidence lookup with a few synonyms
+  const EV_KEYS = {
+    uv: ['uv','fingerprints','prints','ultraviolet'],
+    dots: ['dots'],
+    writing: ['writing','writingbook','book'],
+    spiritbox: ['spiritbox','box','boxvoice'],
+    emf: ['emf'],
+    freezing: ['freezing','temps','temp']
+  };
+  function matchKey(key, target) {
+    const cand = (EV_KEYS[key] || [key]).map(s => s.toLowerCase());
+    return cand.includes((target || '').toLowerCase());
+  }
+  window.ghostHasEvidence = function ghostHasEvidence(needle) {
+    try {
+      const rec = window.GHOSTS[window.currentGhostKey];
+      if (!rec || !rec.evidence) return true; // permissive fallback
+      return rec.evidence.some(k => matchKey(needle, k));
+    } catch { return true; }
+  };
 
-// Simple shorthands
-function $(s){ return document.querySelector(s); }
+  // tiny stubs some tools call (safe to replace with your real ones)
+  window.beginHunt   = window.beginHunt   || (() => { $('#hud-hunt-state').textContent = 'HUNT';   toast('Hunt started'); });
+  window.endHunt     = window.endHunt     || (() => { $('#hud-hunt-state').textContent = 'Calm';   toast('Hunt ended');   });
+  window.flickerStart= window.flickerStart|| (() => toast('Lights flicker'));
+
+})();

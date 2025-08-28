@@ -1,201 +1,217 @@
-// Boot / Start
-let __started = false;
+// ./assets/index3/main.js
+// Scene bootstrapping, camera/lights, render loop, belt UI, and safeStart().
 
-async function safeStart(){
-  if(__started) return;
-  __started = true;
+(function () {
+  "use strict";
 
-  if(!window.BABYLON || !BABYLON.Engine){
-    toast("Engine not ready. Check Babylon includes.", 2200);
-    __started = false;
-    return;
+  // Babylon globals expected everywhere
+  window.engine = null;
+  window.scene  = null;
+  window.camera = null;
+
+  // player-held lights toggled by input (ui_input.js)
+  window.flashLight = null;
+  window.uvLight    = null;
+  window.irLight    = null;
+
+  // belt
+  window.activeItemSlot = 1;
+
+  // ---------- scene creation ----------
+  function createScene(canvas) {
+    const eng = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
+    const sc  = new BABYLON.Scene(eng);
+    sc.collisionsEnabled = true;
+    sc.gravity = new BABYLON.Vector3(0, -0.5, 0);
+
+    // camera
+    const cam = new BABYLON.FreeCamera("PlayerCam", new BABYLON.Vector3(44, 1.7, -119), sc);
+    cam.attachControl(canvas, true);
+    cam.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
+    cam.applyGravity = true;
+    cam.checkCollisions = true;
+    cam.keysUp = cam.keysDown = cam.keysLeft = cam.keysRight = []; // movement driven by our code
+    cam.minZ = 0.1;
+    sc.activeCamera = cam;
+
+    // basic ambient
+    const hemi = new BABYLON.HemisphericLight("hemilight", new BABYLON.Vector3(0.2, 1, 0.1), sc);
+    hemi.intensity = 0.4;
+
+    // handheld lights attached to camera
+    const fwd = new BABYLON.Vector3(0, 0, 1);
+    const fl = new BABYLON.SpotLight("flash", cam.position, fwd, Math.PI / 3.2, 14, sc);
+    fl.intensity = 0; // off by default
+    fl.parent = cam;
+    fl.diffuse = new BABYLON.Color3(1.0, 0.98, 0.9);
+
+    const uv = new BABYLON.SpotLight("uv", cam.position, fwd, Math.PI / 3.0, 12, sc);
+    uv.intensity = 0;
+    uv.parent = cam;
+    uv.diffuse = new BABYLON.Color3(0.4, 0.8, 1.0);
+
+    const ir = new BABYLON.SpotLight("ir", cam.position, fwd, Math.PI / 3.0, 12, sc);
+    ir.intensity = 0;
+    ir.parent = cam;
+    ir.diffuse = new BABYLON.Color3(0.8, 0.95, 1.0);
+
+    // store
+    window.engine = eng;
+    window.scene  = sc;
+    window.camera = cam;
+    window.flashLight = fl;
+    window.uvLight = uv;
+    window.irLight = ir;
+
+    // optional: simple ground to avoid falling through if your GLB loads late
+    const ground = BABYLON.MeshBuilder.CreateGround("tmp_ground", { width: 400, height: 400, subdivisions: 2 }, sc);
+    ground.checkCollisions = true;
+    const gm = new BABYLON.StandardMaterial("tmp_ground_mat", sc);
+    gm.diffuseColor = new BABYLON.Color3(0.05, 0.08, 0.08);
+    ground.material = gm;
+
+    // ghost placeholder so systems have a position
+    window.ghost = window.ghost || { type: window.currentGhostKey || 'Spirit', position: new BABYLON.Vector3(43, 0.1, -130), speed: 1.2 };
+    // keep a Vector3 always available
+    Object.defineProperty(window.ghost, 'position', {
+      get(){ return this._pos || (this._pos = new BABYLON.Vector3(43,0.1,-130)); },
+      set(v){ this._pos = v; }
+    });
+
+    return sc;
   }
 
-  const scr = document.getElementById('title-screen');
-  if (scr) scr.style.display = 'none';
+  // ---------- belt UI ----------
+  function slotLabel(n) { return String(n); }
 
-  try{
-    await boot();
-  }catch(err){
-    __started = false;
-    console.error(err);
-    toast("Startup failed: " + (err?.message||err), 2800);
-    if (scr) scr.style.display = 'flex';
-    return;
+  function slotIcon(itemName) {
+    // minimal text fallback; you can replace with <img> based on item name
+    const span = document.createElement('span');
+    span.textContent = itemName ? itemName.replace(/ .*/, '') : '—';
+    span.style.fontSize = '11px';
+    span.style.color = '#9ff';
+    return span;
   }
 
-  const r = Math.random();
-  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
-  setWeather(w);
+  window.rebuildBelt = function rebuildBelt() {
+    const host = $('#belt'); if (!host) return;
+    host.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'slot' + (i === window.activeItemSlot ? ' active' : '');
+      const key = document.createElement('div');
+      key.className = 'key';
+      key.textContent = slotLabel(i);
 
-  const keys = Object.keys(GHOSTS);
-  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
-  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; }
+      const item = inventory.slots[i];
+      const inner = document.createElement('div');
+      inner.style.display = 'flex';
+      inner.style.flexDirection = 'column';
+      inner.style.alignItems = 'center';
+      inner.style.gap = '2px';
 
-  toast(`Investigation started. Weather: ${w}.`, 1600);
-}
+      inner.appendChild(slotIcon(item || ''));
 
-(function bindStart(){
-  const btn = document.getElementById('start-button');
-  const screen = document.getElementById('title-screen');
-  if (btn){
-    btn.onclick = safeStart;
-    btn.onkeydown = e=>{ if(e.key==='Enter'||e.code==='Space'){ e.preventDefault(); safeStart(); } };
-  }
-  if (screen){
-    screen.addEventListener('click', e=>{ if(e.target===screen) safeStart(); });
-  }
-  window.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.code==='Space') safeStart(); });
-})();
-
-async function boot(){
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
-  try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
-  scene = new BABYLON.Scene(engine);
-  scene.environmentTexture = null;
-  const oldSky = scene.getMeshByName("BackgroundSkybox"); if (oldSky) oldSky.dispose();
-  scene.collisionsEnabled = true;
-  scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
-
-  // Camera
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(43.657, 3, -119.008), scene);
-  camera.attachControl(canvas, true);
-  camera.applyGravity = true;
-  camera.checkCollisions = true;
-  camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
-  camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
-  camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
-  camera.minZ = 0.1; camera.inertia = 0;
-  camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
-
-  // Atmosphere / lights
-  setupNightAtmosphere();
-
-  // Hemi fill
-  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-  hemiLight.intensity = 0.06;
-
-  // Map + items + ghost + moon
-  await loadMap().catch(()=>{});
-  afterMapLoadedForShadows();
-  if (!adoptExistingGltfLights()) buildHouseLights();
-  await loadItems().catch(()=>{});
-  await loadGhost().catch(()=>{});
-  await loadMoon().catch(()=>{});
-
-  // Breath stub (hook if you had particle FX inlined)
-  function setupBreathFX(){ /* reserved for your breath particle impl */ }
-  setupBreathFX();
-
-  if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
-  if (ghost.meshFast){ moonShadows.addShadowCaster(ghost.meshFast, true); flashShadows.addShadowCaster(ghost.meshFast, true); }
-
-  // UI/inputs
-  initUI();
-  bindInputs();
-  updateHUD();
-
-  // Render loop + tickers
-  scene.onBeforeRenderObservable.add(()=>{
-    const dt = engine.getDeltaTime()/1000;
-    handleMovement(dt);
-    updatePlayerFootsteps(dt);
-    sanityTick(dt);
-
-    if (weather.state==='Rain' && weather.rainPS){
-      weather.rainPS.emitRate = inVanZone(camera.position) ? 0 : 1800;
-    }
-
-    if(weather.state==='Rain'){
-      weather.lightningTimer += dt;
-      if(weather.lightningTimer > weather.nextStrike){ lightningStrike(); scheduleNextLightning(); }
-    }
-
-    if (ghost.hunting && flickerOn){
-      flickerTimer += dt;
-      if (flickerTimer > 0.08){
-        flickerTimer = 0;
-        houseLights.forEach(h=>{
-          if (!housePower) return;
-          h.light.intensity = (Math.random()<0.65) ? 0.2 + Math.random()*0.9 : 0.0;
-        });
+      // charges
+      const ch = inventory.slotCharges[i];
+      if (isFinite(ch)) {
+        const c = document.createElement('div');
+        c.style.fontSize = '11px';
+        c.style.color = '#cff';
+        c.textContent = String(ch);
+        inner.appendChild(c);
       }
+
+      slot.appendChild(key);
+      slot.appendChild(inner);
+      slot.onclick = () => selectSlot(i);
+      host.appendChild(slot);
     }
+  };
+
+  window.selectSlot = function selectSlot(n) {
+    window.activeItemSlot = n;
+    rebuildBelt();
+
+    // notify item scripts (Storage bridge handles if available)
+    const item = inventory.slots[n];
+    if (item && window.ItemRegistry && typeof window.ItemRegistry.onEquip === 'function') {
+      window.ItemRegistry.onEquip(item, n);
+    }
+  };
+
+  // ---------- game loop ----------
+  function startLoops() {
+    let last = performance.now();
+
+    engine.runRenderLoop(() => {
+      if (!scene || scene.isDisposed) return;
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+
+      try {
+        if (typeof handleMovement === 'function') handleMovement(dt);
+        if (typeof updatePlayerFootsteps === 'function') updatePlayerFootsteps(dt);
+      } catch (e) { /* ignore */ }
+
+      scene.render();
+    });
+
+    window.addEventListener('resize', () => engine?.resize());
+  }
+
+  // ---------- UI gates ----------
+  function hideTitle() { const t = $('#title-screen'); if (t) t.style.display = 'none'; }
+  function showHUD() { const h = $('#hud'); if (h) h.style.display = 'flex'; }
+
+  function showLoading(on, pct = 0, msg = 'initializing…') {
+    const o = $('#loading-overlay'); const bar = $('#loading-bar'); const tx = $('#loading-text'); const ti = $('#loading-title');
+    if (!o) return;
+    o.style.display = on ? 'flex' : 'none';
+    if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    if (tx)  tx.textContent = `${Math.round(pct)}%`;
+    if (ti)  ti.textContent = msg;
+  }
+
+  // ---------- public safeStart (used by the Start button & ui_input.js) ----------
+  let _started = false;
+  window.safeStart = async function safeStart() {
+    if (_started) return;
+    _started = true;
+
+    showLoading(true, 8, 'creating scene');
+    const canvas = $('#renderCanvas');
+    if (!canvas) throw new Error('No #renderCanvas');
+
+    createScene(canvas);
+
+    // basic belt draw
+    rebuildBelt();
+    selectSlot(1);
+
+    // allow devtools to find things
+    setTimeout(() => { const btn = $('#devtools-toggle'); if (btn) btn.style.display = 'block'; }, 50);
+
+    // fake a quick progress bar (your asset loaders can update these too)
+    let pct = 8;
+    const id = setInterval(() => { pct = Math.min(100, pct + 12); showLoading(true, pct); if (pct >= 100) { clearInterval(id); showLoading(false); showHUD(); } }, 80);
+
+    hideTitle();
+    startLoops();
+  };
+
+  // If someone presses Enter on the title screen, start
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && $('#title-screen')?.style.display !== 'none') safeStart();
   });
 
-  engine.runRenderLoop(()=> scene.render());
-  window.addEventListener('resize', ()=> engine.resize());
-
-  document.getElementById("hud").style.display="block";
-  rebuildBelt();
-
-  if (!houseRoot) ensureDebugCube();
-
-  toast("Atmosphere ready. F=Flash, U=UV, I=IR, L=nearest light, P=power.", 3000);
-
-  canvas.addEventListener("webglcontextlost", (e)=>{ e.preventDefault(); toast("WebGL context lost. Restoring…", 1800); });
-  canvas.addEventListener("webglcontextrestored", ()=>{ toast("WebGL restored.", 1200); });
-}
-
-// ===== UI pieces pulled from your original (minimal to keep size) =====
-let notebookOpen = false;
-function labelForSlot(i){
-  const item = inventory.slots[i] || '-';
-  if (item==='Smudge' || item==='Salt'){
-    const left = inventory.slotCharges[i] ?? 0;
-    return `${item} (${left})`;
+  // Initialize UI bindings immediately (initUI is defined in ui_input.js)
+  if (typeof initUI === 'function') {
+    try { initUI(); } catch (e) { /* ignore */ }
+  } else {
+    // If ui_input.js binds later, no harm.
+    document.addEventListener('DOMContentLoaded', () => { try { initUI?.(); } catch {} });
   }
-  return item;
-}
-function rebuildBelt(){
-  const belt = document.getElementById('belt'); if (!belt) return;
-  belt.innerHTML='';
-  for(let i=1;i<=5;i++){
-    const slotDiv = document.createElement('div');
-    slotDiv.className = 'slot' + (i===activeItemSlot?' active':''); slotDiv.dataset.slot = i;
-    const key = document.createElement('div'); key.className='key'; key.textContent=i; slotDiv.appendChild(key);
-    const span = document.createElement('div'); span.style.fontSize='11px'; span.style.color='#8ff'; span.style.textAlign='center'; span.textContent=labelForSlot(i);
-    slotDiv.appendChild(span);
-    slotDiv.onclick = (ev)=>{ ev.stopPropagation(); selectSlot(i); };
-    belt.appendChild(slotDiv);
-  }
-  refreshHandPreview(); refreshCameraOverlay();
-}
-function selectSlot(n){
-  activeItemSlot = n;
-  if (notebookOpen && inventory.slots[n] !== 'Notebook') {/* closeNotebook();*/ }
-  rebuildBelt();
-  // syncHeldLights(); // if you had this
-}
-function refreshHandPreview(){
-  const wrap = document.getElementById('hand-preview'); if (!wrap) return;
-  wrap.innerHTML = '';
-  const item = inventory.slots[activeItemSlot];
-  if(!item || !itemsGlb){ wrap.style.display='none'; return; }
-  const c = document.createElement('canvas'); c.width=180; c.height=140; c.style.width='100%'; c.style.height='100%'; wrap.appendChild(c);
 
-  const pv = new BABYLON.Engine(c, true);
-  const pvScene = new BABYLON.Scene(pv);
-  const pvCam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), pvScene);
-  pvCam.attachControl(c, false); pvCam.panningSensibility=0; pvCam.wheelPrecision=50;
-  pvScene.clearColor = new BABYLON.Color4(0,0,0,0);
-  const hem = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), pvScene); hem.intensity=1.2;
-
-  const meshName = ITEM_MODEL_MAP[item]; const src = meshName && inventory.models[meshName];
-  if(!src){ wrap.style.display='none'; pv.dispose(); return; }
-  const clone = src.clone("pv-"+meshName, null, true); pvScene.addMesh(clone);
-  clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0); clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
-  wrap.style.display='block'; pv.runRenderLoop(()=>pvScene.render()); window.addEventListener('resize', ()=> pv.resize());
-}
-function refreshCameraOverlay(){
-  const item = inventory.slots[activeItemSlot];
-  const show = (item==='Camera');
-  document.getElementById('camera-overlay').style.display = show ? 'block' : 'none';
-  // document.getElementById('camera-ir').style.display = (show && irOn) ? 'block' : 'none';
-}
-
-// Basic UI hooks (Notebook/Storage toggles etc.) trimmed; keep your originals as needed
-function initUI(){
-  const startBtn = document.getElementById('start-button');
-  if (startBtn) startBtn.addEventListener('click', safeStart);
-}
+})();

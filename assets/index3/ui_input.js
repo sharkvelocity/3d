@@ -1,17 +1,13 @@
 // ./assets/index3/ui_input.js
 // UI + Input glue for PhasmaPhoney (index3 split)
 
-//
 // ---------- HUD ----------
-//
 function updateHUD() {
   $('#hud-sanity').textContent = `${player.sanity | 0}%`;
   $('#hud-room').textContent = player.room;
 }
 
-//
 // ---------- INPUT BINDINGS ----------
-//
 let keysDown = {};
 
 function bindInputs() {
@@ -59,9 +55,7 @@ function bindInputs() {
   });
 }
 
-//
 // ---------- MOVEMENT ----------
-//
 function handleMovement(dt) {
   const speed = player.running ? player.speedRun : player.speedWalk;
   let move = new BABYLON.Vector3(0, 0, 0);
@@ -97,9 +91,7 @@ function handleMovement(dt) {
   updateHUD();
 }
 
-//
 // ---------- INTERACT: NEAR DOOR ----------
-//
 function openDoorNearby() {
   const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, BABYLON.Matrix.Identity(), camera);
   const pick = scene.pickWithRay(ray, (m) => /door/i.test(m.name || ''));
@@ -111,7 +103,7 @@ function openDoorNearby() {
       const baseRot = door.metadata && door.metadata.baseRot !== undefined ? door.metadata.baseRot : door.rotation.y;
 
       if (open) {
-        // swing 90 degrees by default (can be changed via Dev Tools → Doors)
+        // swing by default hinge angle (can be edited in Dev Tools → Doors)
         const angle = (door.metadata && door.metadata.hingeDeg !== undefined ? door.metadata.hingeDeg : 90) * Math.PI / 180;
         door.rotation = new BABYLON.Vector3(door.rotation.x, baseRot + angle, door.rotation.z);
         door.checkCollisions = false;
@@ -125,9 +117,7 @@ function openDoorNearby() {
   }
 }
 
-//
 // ---------- PLAYER FOOTSTEPS ----------
-//
 const stepState = { lastPos: null, acc: 0, strideWalk: 1.2, strideRun: 0.8 };
 
 function updatePlayerFootsteps(dt) {
@@ -148,42 +138,135 @@ function updatePlayerFootsteps(dt) {
   }
 }
 
-//
 // ---------- UI INIT (called from main.js → initUI()) ----------
-//
 function initUI() {
-  // Title “Start” is already wired in main.js, but guard just in case:
+  // Title “Start”
   const startBtn = document.getElementById('start-button');
-  if (startBtn) {
-    startBtn.addEventListener('click', safeStart);
-  }
+  if (startBtn) startBtn.addEventListener('click', safeStart);
 
   // Storage modal wiring
-  if (typeof initStorageUI === 'function') {
-    initStorageUI();
-  }
+  if (typeof initStorageUI === 'function') initStorageUI();
 
   // HUD initial paint
   updateHUD();
+
+  // Bind inputs (once)
+  if (!initUI._bound) { bindInputs(); initUI._bound = true; }
 }
 
-//
-// ---------- STORAGE UI (pick 3 items for slots 1–3) ----------
+/* ======== Dev-Tools Items Bridge (./assets/dev/tools/*) ======== */
+
+// Global registry
+window.ItemRegistry = window.ItemRegistry || (function () {
+  const items = new Map();
+
+  function idFor(def) { return def.id || def.name; }
+  function findByName(name) {
+    for (const it of items.values()) if (it.name === name || it.id === name) return it;
+    return null;
+  }
+
+  return {
+    register(def) {
+      const id = idFor(def);
+      if (!id) { console.warn("[ItemRegistry] Ignored item with no id/name", def); return; }
+      def.name = def.name || id;
+      def.defaultCharges = (def.defaultCharges == null) ? Infinity : def.defaultCharges;
+      items.set(id, def);
+      // feed model map if provided
+      if (def.modelMeshName && typeof ITEM_MODEL_MAP !== "undefined") {
+        ITEM_MODEL_MAP[def.name] = def.modelMeshName;
+      }
+      // expose a global registerItem(name) API for convenience
+      window.registerItem = window.registerItem || ((d) => window.ItemRegistry.register(d));
+    },
+    list() { return Array.from(items.values()); },
+    find: findByName,
+    onEquip(name, slot) {
+      const def = findByName(name);
+      if (def && typeof def.onEquip === "function") {
+        try { def.onEquip({ slot, name, camera, scene, inventory }); } catch (e) { console.warn(e); }
+      }
+    }
+  };
+})();
+
+// Helper to load <script> files (no module build required)
+function __loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = () => resolve(src);
+    s.onerror = () => reject(new Error("Failed to load " + src));
+    document.head.appendChild(s);
+  });
+}
+
+// Load manifest + scripts
+async function loadToolItems(manifestUrl = "./assets/dev/tools/manifest.json") {
+  try {
+    const res = await fetch(manifestUrl, { cache: "no-store" });
+    if (!res.ok) throw new Error("manifest not found");
+    const list = await res.json(); // ["emf.js","spiritbox.js"] or [{src:"emf.js"}]
+    for (const entry of list) {
+      const path = (typeof entry === "string") ? entry : (entry.src || entry.path);
+      if (path) await __loadScript(`./assets/dev/tools/${path}`);
+    }
+    console.log("[ItemRegistry] Loaded dev tool items.");
+  } catch (e) {
+    console.warn("[ItemRegistry] No manifest or load failed:", e.message);
+  }
+}
+
+// Prefer registry items; fall back to core lists
+function __getStorageItemsList() {
+  const reg = (window.ItemRegistry && window.ItemRegistry.list && window.ItemRegistry.list()) || [];
+  if (reg.length) return reg.map(i => i.name);
+  if (typeof STORAGE_ITEMS !== "undefined" && Array.isArray(STORAGE_ITEMS)) return STORAGE_ITEMS;
+  if (Array.isArray(window.STORAGE_ITEMS)) return window.STORAGE_ITEMS;
+  return [];
+}
+
+// Optional icon from registered item
+function __getItemIcon(name) {
+  const def = window.ItemRegistry?.find?.(name);
+  return def?.icon || null;
+}
+
+// Per-item default charges
+function __getItemDefaultCharges(name) {
+  const def = window.ItemRegistry?.find?.(name);
+  if (def && def.defaultCharges != null) return def.defaultCharges;
+  if (name in (window.ITEM_DEFAULT_CHARGES || {})) return ITEM_DEFAULT_CHARGES[name];
+  return Infinity;
+}
+
+/* ============ STORAGE UI (pick 3 items) ============ */
 (function () {
   let selection = new Set();
+  window.storageOpen = window.storageOpen || false;
 
+  // build item card
   function makeItemCard(name) {
     const el = document.createElement('div');
     el.className = 'storage-item';
-    el.style.cssText =
-      'border:1px solid #044;padding:8px;border-radius:8px;cursor:pointer;background:#0008;color:#9ff;display:flex;justify-content:space-between;align-items:center;';
+    el.style.cssText = 'border:1px solid #044;padding:8px;border-radius:8px;cursor:pointer;background:#0008;color:#9ff;display:flex;justify-content:space-between;align-items:center;';
     const label = document.createElement('div');
     label.textContent = name;
     const check = document.createElement('div');
     check.textContent = '✚';
     check.style.opacity = '0.6';
-    el.appendChild(label);
-    el.appendChild(check);
+    el.appendChild(label); el.appendChild(check);
+
+    // optional icon
+    const icon = __getItemIcon(name);
+    if (icon) {
+      const img = document.createElement('img');
+      img.src = icon; img.alt = name;
+      img.style.cssText = 'max-width:24px;max-height:24px;margin-right:8px;filter:drop-shadow(0 0 6px rgba(0,255,255,0.3))';
+      el.insertBefore(img, label);
+    }
 
     function refresh() {
       const picked = selection.has(name);
@@ -192,22 +275,14 @@ function initUI() {
       check.textContent = picked ? '✓' : '✚';
       check.style.opacity = picked ? '1' : '0.6';
     }
-
-    el.onclick = () => {
-      if (selection.has(name)) {
-        selection.delete(name);
-      } else {
-        if (selection.size >= 3) {
-          toast('Pick exactly 3 items (slots 1–3).', 1000);
-          return;
-        }
+    el.onclick = ()=>{
+      if(selection.has(name)){ selection.delete(name); }
+      else {
+        if(selection.size >= 3) { toast('Pick exactly 3 items (slots 1–3).', 1000); return; }
         selection.add(name);
       }
-      refresh();
-      updateInfo();
-      refreshConfirmState();
+      refresh(); updateInfo(); refreshConfirmState();
     };
-
     refresh();
     return el;
   }
@@ -217,19 +292,19 @@ function initUI() {
     if (!grid) return;
     grid.innerHTML = '';
 
-    // Show all selectable items except the fixed ones
-    (window.STORAGE_ITEMS || []).forEach((name) => {
-      if (name === 'Lighter' || name === 'Notebook') return; // fixed to slots 4 & 5
+    const items = __getStorageItemsList();
+    items.forEach((name)=>{
+      if (name === 'Lighter' || name === 'Notebook') return; // fixed
       grid.appendChild(makeItemCard(name));
     });
   }
 
-  function updateInfo() {
+  function updateInfo(){
     const info = document.getElementById('storage-info');
     if (info) info.textContent = `Selected: ${selection.size}/3`;
   }
 
-  function refreshConfirmState() {
+  function refreshConfirmState(){
     const btn = document.getElementById('storage-confirm');
     if (!btn) return;
     btn.disabled = selection.size !== 3;
@@ -237,61 +312,53 @@ function initUI() {
     btn.style.pointerEvents = btn.disabled ? 'none' : 'auto';
   }
 
-  function applyChargesForSlot(slotIdx, itemName) {
-    if (!itemName) {
-      inventory.slotCharges[slotIdx] = 0;
-      return;
-    }
-    if (itemName in (window.ITEM_DEFAULT_CHARGES || {})) {
-      inventory.slotCharges[slotIdx] = ITEM_DEFAULT_CHARGES[itemName];
-    } else {
-      inventory.slotCharges[slotIdx] = Infinity;
-    }
+  function applyChargesForSlot(slotIdx, itemName){
+    inventory.slotCharges[slotIdx] = itemName ? __getItemDefaultCharges(itemName) : 0;
   }
 
-  function writeSlotsFromSelection() {
+  function writeSlotsFromSelection(){
     const picks = Array.from(selection);
-
-    // Fill slots 1–3
+    // Fill slots 1–3 with chosen items
     inventory.slots[1] = picks[0] || null;
     inventory.slots[2] = picks[1] || null;
     inventory.slots[3] = picks[2] || null;
 
-    // Charges for 1–3
+    // Charges
     applyChargesForSlot(1, inventory.slots[1]);
     applyChargesForSlot(2, inventory.slots[2]);
     applyChargesForSlot(3, inventory.slots[3]);
 
-    // Fixed slots 4–5
+    // Fixed slots
     inventory.slots[4] = 'Lighter';
     inventory.slotCharges[4] = Infinity;
     inventory.slots[5] = 'Notebook';
     inventory.slotCharges[5] = Infinity;
   }
 
-  function openStorage() {
-    if (player.room !== 'Van') {
-      toast('Storage only available in the Van.', 1200);
-      return;
+  async function openStorage(){
+    if (player.room !== 'Van') { toast('Storage only available in the Van.', 1200); return; }
+
+    // lazy-load dev items if none registered yet
+    if (!(window.ItemRegistry?.list?.() || []).length) {
+      await loadToolItems().catch(()=>{});
     }
-    selection = new Set(); // reset each open
+
+    selection = new Set(); // reset each time you open
     storageOpen = true;
 
     populateGrid();
     updateInfo();
     refreshConfirmState();
 
-    const modal = document.getElementById('storage-modal');
-    if (modal) modal.style.display = 'flex';
+    document.getElementById('storage-modal').style.display = 'flex';
   }
 
-  function closeStorage() {
+  function closeStorage(){
     storageOpen = false;
-    const modal = document.getElementById('storage-modal');
-    if (modal) modal.style.display = 'none';
+    document.getElementById('storage-modal').style.display = 'none';
   }
 
-  function bindButtons() {
+  function bindButtons(){
     const btnOpen = document.getElementById('storage-button');
     const btnClose = document.getElementById('storage-close');
     const btnConfirm = document.getElementById('storage-confirm');
@@ -300,70 +367,53 @@ function initUI() {
     if (btnClose) btnClose.onclick = closeStorage;
 
     if (btnConfirm) {
-      btnConfirm.onclick = () => {
+      btnConfirm.onclick = ()=>{
         if (selection.size !== 3) {
           toast('Pick exactly 3 items for slots 1–3.', 1200);
           return;
         }
         writeSlotsFromSelection();
         rebuildBelt();
+        // notify onEquip hooks
+        [1,2,3,4,5].forEach(slot=>{
+          const it = inventory.slots[slot];
+          if (it && window.ItemRegistry?.onEquip) window.ItemRegistry.onEquip(it, slot);
+        });
         closeStorage();
         toast('Loadout updated.', 1000);
       };
+      // esc to close
+      window.addEventListener('keydown', (e)=>{
+        if (e.key === 'Escape' && storageOpen) closeStorage();
+      });
       // subtle disabled animation
       btnConfirm.style.transition = 'opacity 140ms ease-out';
     }
-
-    // ESC to close
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && storageOpen) {
-        closeStorage();
-      }
-    });
   }
 
-  // Expose initializer called by initUI()
-  window.initStorageUI = function initStorageUI() {
+  // call this from initUI()
+  window.initStorageUI = function initStorageUI(){
     bindButtons();
   };
 })();
-/* --- harden init for Storage + DevTools --- */
+
+/* --- harden init for Storage + DevTools toggle --- */
 (function () {
   function ready(fn) {
     if (document.readyState !== 'loading') fn();
     else document.addEventListener('DOMContentLoaded', fn);
   }
-
   ready(function () {
-    // Ensure UI + Storage bind regardless of engine state.
     try { if (typeof initUI === 'function') initUI(); } catch (e) { console.warn(e); }
-    try { if (typeof initStorageUI === 'function') initStorageUI(); } catch (e) { console.warn(e); }
 
-    // Dev Tools toggle fallback: show button + open/close panel even if devtools.js hasn't inited yet.
+    // Dev Tools toggle fallback
     const t = document.getElementById('devtools-toggle');
     const p = document.getElementById('devtools-panel');
     if (t && p) {
       t.style.display = 'block';
       if (!t._wired) {
         t._wired = true;
-        t.onclick = () => {
-          p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
-        };
-      }
-    }
-
-    // Storage open/close fallback (the full selection logic still comes from ui_input.js).
-    const sBtn = document.getElementById('storage-button');
-    const sModal = document.getElementById('storage-modal');
-    const sClose = document.getElementById('storage-close');
-    if (sBtn && sModal) {
-      if (!sBtn._wired) {
-        sBtn._wired = true;
-        sBtn.onclick = () => { sModal.style.display = 'flex'; };
-      }
-      if (sClose && !sClose._wired) {
-        sClose._wired = true;
-        sClose.onclick = () => { sModal.style.display = 'none'; };
+        t.onclick = () => { p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none'; };
       }
     }
   });

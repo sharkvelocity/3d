@@ -12,9 +12,13 @@
   function ensure(){
     const s=SCENE(); if (!s) return;
     try{
-      staticSnd = staticSnd || new BABYLON.Sound('sbox_static','./assets/audio/spiritbox_static.mp3', s, null, { loop:true, autoplay:false, volume:0.35 });
-      speakSnd  = speakSnd  || new BABYLON.Sound('sbox_voice','./assets/audio/spiritbox_voice.mp3',  s, null, { loop:false, autoplay:false, volume:0.9 });
+      // Your originals:
+      staticSnd = staticSnd || new BABYLON.Sound('sbox_static','./assets/audio/spiritbox.mp3', s, null, { loop:true, autoplay:false, volume:0.35 });
+      speakSnd  = speakSnd  || new BABYLON.Sound('sbox_voice','./assets/audio/whisper.mp3',  s, null, { loop:false, autoplay:false, volume:0.9 });
     }catch(_){}
+    // Fallback to a single file spiritbox.mp3 if those aren’t present
+    try{ if (!staticSnd) staticSnd = new BABYLON.Sound('sbox_static','./assets/audio/spiritbox.mp3', s, null, { loop:true, autoplay:false, volume:0.35 }); }catch(_){}
+    try{ if (!speakSnd)  speakSnd  = new BABYLON.Sound('sbox_voice','./assets/audio/spiritbox.mp3',  s, null, { loop:false, autoplay:false, volume:0.9  }); }catch(_){}
   }
 
   const API = {};
@@ -38,4 +42,29 @@
       btn.addEventListener('click', ()=> ask(btn.textContent?.trim()||'Question'));
     });
   }, 0);
+})();
+
+/* ---- Storage registration (Spirit Box item) ---- */
+(function(){
+  if (!window.registerItem) return;
+  registerItem({
+    id: "spirit_box",
+    name: "Spirit Box",
+    icon: "./assets/icons/spirit_box.png",
+    defaultCharges: Infinity,
+    onEquip(){ try{ window.SpiritBoxAudio?.on(); }catch(_){} }
+  });
+
+  // Optional hotkey: R to “ask” when equipped
+  if (!window.__SBOX_keybound){
+    window.__SBOX_keybound = true;
+    window.addEventListener("keydown", (e)=>{
+      if ((e.key === "r" || e.key === "R") && window.inventory){
+        const slot = window.activeItemSlot || 1;
+        if (window.inventory.slots?.[slot] === "Spirit Box"){
+          try{ window.SpiritBoxAudio?.speak(); }catch(_){}
+        }
+      }
+    });
+  }
 })();

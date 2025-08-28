@@ -83,3 +83,34 @@
     });
   })();
 })();
+
+/* ---- Storage registration (Writing Book item) ---- */
+(function(){
+  if (!window.registerItem) return;
+  registerItem({
+    id: "writing_book",
+    name: "Writing Book",
+    icon: "./assets/icons/writing_book.png",
+    defaultCharges: 1,
+    onEquip(){ try{ toast?.("Place the book where activity is high."); }catch(_){ } }
+  });
+
+  // Optional: X to drop the book when equipped
+  if (!window.__WB_keybound){
+    window.__WB_keybound = true;
+    window.addEventListener("keydown", (e)=>{
+      if ((e.key === "x" || e.key === "X") && window.inventory){
+        const slot = window.activeItemSlot || 1;
+        if (window.inventory.slots?.[slot] === "Writing Book"){
+          try{ window.dropWritingBook?.(); }catch(_){}
+          // decrement single charge on belt
+          try{
+            const ch = window.inventory.slotCharges?.[slot];
+            if (isFinite(ch)) window.inventory.slotCharges[slot] = Math.max(0, (ch||1) - 1);
+            window.rebuildBelt?.();
+          }catch(_){}
+        }
+      }
+    });
+  }
+})();

@@ -97,3 +97,21 @@
 
   window.UVPrints = API;
 })();
+
+/* ---- Storage registration (UV Prints item) ---- */
+(function(){
+  if (!window.registerItem) return;
+  registerItem({
+    id: "uv_prints",
+    name: "UV Prints",
+    icon: "./assets/icons/uv_prints.png",
+    defaultCharges: Infinity,
+    onEquip(){
+      try{
+        if (window.uvLight){ uvLight.intensity = 1.2; }
+        const badge = document.getElementById("camera-ir");
+        if (badge) badge.style.display = "block";
+      }catch(_){}
+    }
+  });
+})();
