@@ -63,12 +63,16 @@
     window.uvLight = uv;
     window.irLight = ir;
 
-    // optional: simple ground to avoid falling through if your GLB loads late
+    // Temporary ground to prevent falling before the map loads.
+    // We'll dispose this right after loadMap() completes.
     const ground = BABYLON.MeshBuilder.CreateGround("tmp_ground", { width: 400, height: 400, subdivisions: 2 }, sc);
     ground.checkCollisions = true;
+    ground.position.y = -0.05; // sit slightly below to reduce visual clipping while loading
     const gm = new BABYLON.StandardMaterial("tmp_ground_mat", sc);
     gm.diffuseColor = new BABYLON.Color3(0.05, 0.08, 0.08);
     ground.material = gm;
+    // Keep a handle so we can nuke it later
+    window.tmpGround = ground;
 
     // ghost placeholder object remains for compatibility; real model is managed by GhostAPI
     window.ghost = window.ghost || { type: window.currentGhostKey || 'Spirit', position: new BABYLON.Vector3(43, 0.1, -130), speed: 1.2 };
@@ -152,7 +156,7 @@
       try {
         if (typeof handleMovement === 'function') handleMovement(dt);
         if (typeof updatePlayerFootsteps === 'function') updatePlayerFootsteps(dt);
-        if (typeof updateGhost === 'function') updateGhost(dt); // keep ghost idle-bob ticking
+        if (typeof updateGhost === 'function') updateGhost(dt); // idle-bob for visible ghosts
       } catch (e) { /* ignore */ }
 
       scene.render();
@@ -173,7 +177,7 @@
     if (tx)  tx.textContent = `${Math.round(pct)}%`;
     if (ti)  ti.textContent = msg;
   }
-  window.showLoading = showLoading; // allow ghost/map loaders to pipe progress
+  window.showLoading = showLoading; // allow loaders to pipe progress
 
   // ---------- public safeStart (used by the Start button & ui_input.js) ----------
   let _started = false;
@@ -191,9 +195,19 @@
     showLoading(true, 12, 'loading house');
     try {
       if (typeof loadMap === 'function') {
-        await loadMap();                 // from map.js
+        await loadMap();                 // from map.js:contentReference[oaicite:2]{index=2}
         showLoading(true, 72, 'finalizing scene');
         if (typeof afterMapLoadedForShadows === 'function') afterMapLoadedForShadows();
+
+        // Remove the temporary visible ground so it doesn't block movement
+        if (window.tmpGround && !window.tmpGround.isDisposed()) {
+          try {
+            window.tmpGround.checkCollisions = false;
+            window.tmpGround.isVisible = false;
+            window.tmpGround.dispose();
+          } catch {}
+          window.tmpGround = null;
+        }
       } else {
         console.warn('loadMap() was not found. Did map.js load?');
       }
@@ -205,7 +219,7 @@
     try {
       if (window.GhostAPI && typeof window.GhostAPI.loadGhost === 'function') {
         await window.GhostAPI.loadGhost(window.currentGhostKey || 'Spirit');
-        // optional: showLoading(true, 94, 'ghost ready'); // ghost.js also updates this
+        // showLoading(true, 94, 'ghost ready'); // ghost.js may also update this
       }
     } catch (e) {
       console.error('Ghost load failed', e);
