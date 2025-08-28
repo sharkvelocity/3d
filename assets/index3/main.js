@@ -70,9 +70,8 @@
     gm.diffuseColor = new BABYLON.Color3(0.05, 0.08, 0.08);
     ground.material = gm;
 
-    // ghost placeholder so systems have a position
+    // ghost placeholder object remains for compatibility; real model is managed by GhostAPI
     window.ghost = window.ghost || { type: window.currentGhostKey || 'Spirit', position: new BABYLON.Vector3(43, 0.1, -130), speed: 1.2 };
-    // keep a Vector3 always available
     Object.defineProperty(window.ghost, 'position', {
       get(){ return this._pos || (this._pos = new BABYLON.Vector3(43,0.1,-130)); },
       set(v){ this._pos = v; }
@@ -85,7 +84,7 @@
   function slotLabel(n) { return String(n); }
 
   function slotIcon(itemName) {
-    // minimal text fallback; you can replace with <img> based on item name
+    // minimal text fallback; swap to <img> icons when ready
     const span = document.createElement('span');
     span.textContent = itemName ? itemName.replace(/ .*/, '') : '—';
     span.style.fontSize = '11px';
@@ -153,6 +152,7 @@
       try {
         if (typeof handleMovement === 'function') handleMovement(dt);
         if (typeof updatePlayerFootsteps === 'function') updatePlayerFootsteps(dt);
+        if (typeof updateGhost === 'function') updateGhost(dt); // keep ghost idle-bob ticking
       } catch (e) { /* ignore */ }
 
       scene.render();
@@ -173,6 +173,7 @@
     if (tx)  tx.textContent = `${Math.round(pct)}%`;
     if (ti)  ti.textContent = msg;
   }
+  window.showLoading = showLoading; // allow ghost/map loaders to pipe progress
 
   // ---------- public safeStart (used by the Start button & ui_input.js) ----------
   let _started = false;
@@ -186,6 +187,30 @@
 
     createScene(canvas);
 
+    // Load the house GLB via map.js, then apply shadow flags
+    showLoading(true, 12, 'loading house');
+    try {
+      if (typeof loadMap === 'function') {
+        await loadMap();                 // from map.js
+        showLoading(true, 72, 'finalizing scene');
+        if (typeof afterMapLoadedForShadows === 'function') afterMapLoadedForShadows();
+      } else {
+        console.warn('loadMap() was not found. Did map.js load?');
+      }
+    } catch (e) {
+      console.error('Map failed', e);
+    }
+
+    // Load the real ghost (invisible by default; GhostAPI manages visibility)
+    try {
+      if (window.GhostAPI && typeof window.GhostAPI.loadGhost === 'function') {
+        await window.GhostAPI.loadGhost(window.currentGhostKey || 'Spirit');
+        // optional: showLoading(true, 94, 'ghost ready'); // ghost.js also updates this
+      }
+    } catch (e) {
+      console.error('Ghost load failed', e);
+    }
+
     // basic belt draw
     rebuildBelt();
     selectSlot(1);
@@ -193,9 +218,17 @@
     // allow devtools to find things
     setTimeout(() => { const btn = $('#devtools-toggle'); if (btn) btn.style.display = 'block'; }, 50);
 
-    // fake a quick progress bar (your asset loaders can update these too)
-    let pct = 8;
-    const id = setInterval(() => { pct = Math.min(100, pct + 12); showLoading(true, pct); if (pct >= 100) { clearInterval(id); showLoading(false); showHUD(); } }, 80);
+    // quick progress finish + HUD reveal
+    let pct = 72;
+    const id = setInterval(() => {
+      pct = Math.min(100, pct + 7);
+      showLoading(true, pct);
+      if (pct >= 100) {
+        clearInterval(id);
+        showLoading(false);
+        showHUD();
+      }
+    }, 80);
 
     hideTitle();
     startLoops();

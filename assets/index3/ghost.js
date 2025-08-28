@@ -1,112 +1,157 @@
-function setGhostVisible(v){
-  ghost.visible = !!v;
-  if (!ghost.mesh) return;
-  ghost.mesh.getChildMeshes(false).concat([ghost.mesh]).forEach(m=>{ m.isVisible = v; m.visibility = v ? 1 : 0; });
-  if (ghost.meshFast){ ghost.meshFast.getChildMeshes(false).concat([ghost.meshFast]).forEach(m=>{ m.isVisible = v; m.visibility = v?1:0; }); }
-}
+// ./assets/index3/ghost.js
+// Real ghost loader + minimal control surface (visibility, position, simple update)
 
-async function loadGhost(){
-  try{
-    const list = ["ghost1.glb","ghost2.glb","ghost3.glb","ghost4.glb","ghost5.glb"];
-    const pick = list[Math.floor(Math.random()*list.length)];
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/ghosts/", pick, scene);
-    ghost.mesh = r.meshes[0] || r.meshes.find(m=>m.name==="__root__");
-    ghost.mesh.checkCollisions = false; ghost.mesh.isPickable = false;
+(function () {
+  "use strict";
 
-    const bb = ghost.mesh.getHierarchyBoundingVectors(true);
-    const height = bb.max.y - bb.min.y;
-    const scale = (1.9 / (height || 1));
-    ghost.mesh.scaling = new BABYLON.Vector3(scale, scale, scale);
-    ghost.mesh.rotation = new BABYLON.Vector3(0,0,0);
+  // === Config ===============================================================
+  // Point these at your real models. You can add more and map by type below.
+  const GHOST_MODELS = [
+    { key: "ghost1", file: "ghost1.glb" },
+    { key: "ghost2", file: "ghost2.glb" },
+    { key: "ghost3", file: "ghost3.glb" },
+  ];
 
-    r.animationGroups.forEach(ag=>{ if(/idle/i.test(ag.name)) ghost.anims.idle = ag; if(/walk|run/i.test(ag.name)) ghost.anims.walk = ag; });
-    if(ghost.anims.idle) ghost.anims.idle.start(true);
+  const MODEL_DIR = "./assets/models/ghosts/"; // adjust if needed
 
-    const p = randomPointInPolygonXZ(ghostPolygon);
-    const gy = pickGroundHeightAt(p.x, p.z);
-    ghost.mesh.position = new BABYLON.Vector3(p.x, gy, p.z);
-    ghost.target = randomPointInPolygonXZ(ghostPolygon);
-
-    setGhostVisible(false);
-
-    // Twins
-    ghost.isTwins = (currentGhostKey || "").toLowerCase() === "the twins";
-    if (ghost.isTwins) {
-      ghost.meshFast = ghost.mesh.clone("ghostFast", null, true);
-      ghost.meshFast.isPickable = false;
-      ghost.meshFast.checkCollisions = false;
-      ghost.meshFast.visibility = ghost.visible ? 1 : 0;
-
-      const sep = TWINS_SEP_MIN + Math.random() * (TWINS_SEP_MAX - TWINS_SEP_MIN);
-      const dir = new BABYLON.Vector3(1, 0, 0).rotateByQuaternionToRef(
-        BABYLON.Quaternion.FromEulerAngles(0, Math.random()*Math.PI*2, 0),
-        new BABYLON.Vector3()
-      );
-      const basePos = ghost.mesh.position.clone();
-      const fp = basePos.add(dir.scale(sep));
-      fp.y = pickGroundHeightAt(fp.x, fp.z);
-      ghost.meshFast.position.copyFrom(fp);
-
-      try {
-        moonShadows.addShadowCaster(ghost.meshFast, true);
-        flashShadows.addShadowCaster(ghost.meshFast, true);
-      } catch {}
-    }
-  }catch(e){ console.warn("Ghost load failed:", e); }
-}
-
-let flickerTimer=0, flickerOn=false;
-function flickerStart(){ flickerTimer = 0; flickerOn = true; }
-function flickerStop(){ flickerOn = false;
-  houseLights.forEach(h=>{
-    if (!housePower) { h.light.intensity = 0; return; }
-    if (h.light.intensity>0) h.light.intensity = 0.8;
-  });
-}
-
-let huntCooldown = 22 + Math.random()*18;
-let huntClock = 0;
-function beginHunt(){
-  if (!ghost.mesh || ghost.hunting) return;
-
-  if (tryBlockHuntByCrucifix()){
-    huntClock = 0; huntCooldown = 14 + Math.random()*16;
-    return;
+  // Map ghost "type" -> preferred model key (fallback to random)
+  function chooseModelKeyFor(type) {
+    // You can customize assignments here per ghost type
+    // e.g., if (type === "Revenant") return "ghost2";
+    return null; // null -> random from GHOST_MODELS
   }
 
-  ghost.hunting = true;
-  $('#hud-hunt-state').textContent = 'HUNTING';
-  setGhostVisible(true);
-  ghost.speed = 1.4;
-  ghost.stepInterval = 0.48;
-  flickerStart();
-  toast('⚠️ Hunt started!', 1200);
-}
-function endHunt(){
-  if (!ghost.hunting) return;
-  ghost.hunting = false;
-  $('#hud-hunt-state').textContent = 'Calm';
-  setGhostVisible(false);
-  ghost.speed = 1.4;
-  ghost.stepInterval = 0.55;
-  flickerStop();
-  toast('Hunt ended.', 900);
-}
-function sanityTick(dt){
-  const nearGhost = ghost.mesh ? BABYLON.Vector3.Distance(ghost.mesh.position, camera.position) < 7 : false;
-  const base = 0.6/60;
-  const add = nearGhost ? 1.2/60 : 0;
-  const drain = (base+add) * (storageOpen?0.2:1) * (inVanZone(camera.position)?0.4:1) * (weather.modSanityDrain||1);
-  player.sanity = Math.max(0, player.sanity - drain);
-  $('#hud-sanity').textContent = `${player.sanity|0}%`;
+  // === State ================================================================
+  const state = {
+    type: null,
+    root: null,        // TransformNode (parent)
+    meshes: [],        // Loaded meshes
+    loaded: false,
+    visible: false,
+    speed: 1.2,
+  };
 
-  if (!ghost.hunting && !inVanZone(camera.position) && player.sanity <= 65){
-    huntClock += dt * (weather.modHuntPace||1);
-    if (huntClock >= huntCooldown){
-      huntClock = 0; huntCooldown = 22 + Math.random()*18;
-      const baseChance = (player.sanity<40 ? 0.85 : 0.55);
-      if (Math.random() < baseChance * (weather.modHuntChance||1)) beginHunt();
+  // Expose a shared ghost object on window for other systems to inspect
+  window.ghost = window.ghost || state;
+
+  function setVisible(on) {
+    state.visible = !!on;
+    state.meshes.forEach(m => { m.isVisible = !!on; });
+  }
+
+  function setPosition(vec3) {
+    if (!state.root) return;
+    state.root.position.copyFrom(vec3);
+  }
+
+  function getPosition() {
+    if (!state.root) return BABYLON.Vector3.Zero();
+    return state.root.position.clone();
+  }
+
+  // Simple idle “float” so you can tell it exists when visible
+  let t = 0;
+  function updateGhost(dt) {
+    if (!state.root || !state.visible) return;
+    t += dt;
+    state.root.position.y += Math.sin(t * 1.5) * 0.002; // subtle bob
+  }
+  window.updateGhost = updateGhost;
+
+  // === Loading ==============================================================
+  async function _importModel(filename, onProgress) {
+    const res = await BABYLON.SceneLoader.ImportMeshAsync(
+      "", MODEL_DIR, filename, scene,
+      onProgress
+    );
+    return res;
+  }
+
+  function pickModelFile(type) {
+    const pref = chooseModelKeyFor(type);
+    if (pref) {
+      const m = GHOST_MODELS.find(x => x.key === pref);
+      if (m) return m.file;
+    }
+    // otherwise random
+    const i = Math.floor(Math.random() * GHOST_MODELS.length);
+    return GHOST_MODELS[Math.max(0, Math.min(i, GHOST_MODELS.length - 1))].file;
+  }
+
+  // Optional progress hook into your loading overlay
+  function pipeProgressToOverlay(evt) {
+    if (!evt || !evt.lengthComputable) return;
+    const pct = Math.min(100, Math.max(0, (evt.loaded / evt.total) * 20 + 72)); // 72–92% range
+    if (typeof window.showLoading === "function") {
+      window.showLoading(true, pct, "loading ghost");
     }
   }
-  if (ghost.hunting && (inVanZone(camera.position) || Math.random()<0.0015)) endHunt();
-}
+
+  async function loadGhost(typeIn) {
+    if (!window.scene) throw new Error("Scene not ready");
+    const type = typeIn || window.currentGhostKey || "Spirit";
+    state.type = type;
+
+    // clear previous
+    if (state.root) { try { state.root.dispose(); } catch {} }
+    state.root = new BABYLON.TransformNode("GhostRoot", scene);
+    state.meshes = [];
+    state.loaded = false;
+
+    const file = pickModelFile(type);
+    try {
+      const result = await _importModel(file, pipeProgressToOverlay);
+      result.meshes.forEach(m => {
+        if (!m || !m.getClassName) return;
+        if (m.getClassName() === "AbstractMesh") {
+          // Ghost visuals & physics expectations
+          m.checkCollisions = false;    // ghosts pass through
+          m.isPickable = false;
+          m.parent = state.root;
+          state.meshes.push(m);
+
+          // Slightly ethereal look (non-destructive if PBR exists)
+          try {
+            if (!m.material) {
+              const mat = new BABYLON.StandardMaterial(`${m.name}_ghostMat`, scene);
+              mat.emissiveColor = new BABYLON.Color3(0.85, 0.95, 1.0);
+              mat.alpha = 0.18;
+              m.material = mat;
+            } else if ("alpha" in m.material) {
+              m.material.alpha = Math.min(m.material.alpha ?? 1.0, 0.5);
+            }
+          } catch {}
+        }
+      });
+
+      // Default pose/position—put it near the typical house origin
+      state.root.position.copyFrom(new BABYLON.Vector3(43, 0.1, -130));
+      setVisible(false);    // universal rule: invisible by default
+
+      state.loaded = true;
+      if (typeof window.showLoading === "function") {
+        window.showLoading(true, 94, "ghost ready");
+      }
+      return state;
+    } catch (err) {
+      console.error("[ghost] failed to load model", file, err);
+      // Safe fallback: invisible sphere (keeps systems alive)
+      const fallback = BABYLON.MeshBuilder.CreateSphere("ghost_fallback", { diameter: 0.6 }, scene);
+      fallback.parent = state.root;
+      fallback.isVisible = false;
+      state.meshes = [fallback];
+      state.loaded = true;
+      return state;
+    }
+  }
+
+  // Visibility API (events/hunts can call these)
+  window.GhostAPI = {
+    loadGhost,
+    setVisible,
+    setPosition,
+    getPosition,
+    state,
+  };
+
+})();
