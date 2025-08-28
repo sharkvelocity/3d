@@ -327,3 +327,44 @@ function initUI() {
     bindButtons();
   };
 })();
+/* --- harden init for Storage + DevTools --- */
+(function () {
+  function ready(fn) {
+    if (document.readyState !== 'loading') fn();
+    else document.addEventListener('DOMContentLoaded', fn);
+  }
+
+  ready(function () {
+    // Ensure UI + Storage bind regardless of engine state.
+    try { if (typeof initUI === 'function') initUI(); } catch (e) { console.warn(e); }
+    try { if (typeof initStorageUI === 'function') initStorageUI(); } catch (e) { console.warn(e); }
+
+    // Dev Tools toggle fallback: show button + open/close panel even if devtools.js hasn't inited yet.
+    const t = document.getElementById('devtools-toggle');
+    const p = document.getElementById('devtools-panel');
+    if (t && p) {
+      t.style.display = 'block';
+      if (!t._wired) {
+        t._wired = true;
+        t.onclick = () => {
+          p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
+        };
+      }
+    }
+
+    // Storage open/close fallback (the full selection logic still comes from ui_input.js).
+    const sBtn = document.getElementById('storage-button');
+    const sModal = document.getElementById('storage-modal');
+    const sClose = document.getElementById('storage-close');
+    if (sBtn && sModal) {
+      if (!sBtn._wired) {
+        sBtn._wired = true;
+        sBtn.onclick = () => { sModal.style.display = 'flex'; };
+      }
+      if (sClose && !sClose._wired) {
+        sClose._wired = true;
+        sClose.onclick = () => { sModal.style.display = 'none'; };
+      }
+    }
+  });
+})();
