@@ -7,6 +7,9 @@
   // Tiny $, used throughout
   window.$ = window.$ || (sel => document.querySelector(sel));
 
+  // Toggle: use Babylon built-in movement (default) vs custom mover in ui_input.js
+  window.USE_CUSTOM_MOVEMENT = false; // set true to switch back to custom
+
   // Babylon globals expected everywhere
   window.engine = null;
   window.scene  = null;
@@ -55,7 +58,14 @@
     cam.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
     cam.applyGravity = true;
     cam.checkCollisions = true;
-    cam.keysUp = cam.keysDown = cam.keysLeft = cam.keysRight = []; // movement via our code
+
+    // ✅ Enable Babylon's built-in keyboard movement (WASD + Arrows)
+    cam.keysUp    = [87, 38]; // W, Up
+    cam.keysDown  = [83, 40]; // S, Down
+    cam.keysLeft  = [65, 37]; // A, Left
+    cam.keysRight = [68, 39]; // D, Right
+    cam.speed = 0.45;         // tune as you like
+
     cam.minZ = 0.1;
     sc.activeCamera = cam;
 
@@ -103,6 +113,15 @@
       get(){ return this._pos || (this._pos = new BABYLON.Vector3(43,0.1,-130)); },
       set(v){ this._pos = v; }
     });
+
+    // 🔧 Noclip toggle + unstick helper
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'n' || e.key === 'N') {
+        camera.checkCollisions = !camera.checkCollisions;
+        console.log('[noclip]', camera.checkCollisions ? 'OFF (colliding)' : 'ON (no collisions)');
+      }
+    });
+    window.unstick = () => { camera.position.y += 1.0; };
 
     return sc;
   }
@@ -249,7 +268,9 @@
       last = now;
 
       try {
-        if (typeof handleMovement === 'function') handleMovement(dt);
+        // Use custom mover only if explicitly enabled; otherwise Babylon built-in keys drive movement
+        if (window.USE_CUSTOM_MOVEMENT && typeof handleMovement === 'function') handleMovement(dt);
+
         if (typeof updatePlayerFootsteps === 'function') updatePlayerFootsteps(dt);
         if (typeof updateGhost === 'function') updateGhost(dt);
         if (window.Weather && typeof window.Weather.update === 'function') Weather.update(dt);
