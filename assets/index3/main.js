@@ -1,5 +1,5 @@
 // ./assets/index3/main.js
-// Scene bootstrapping, camera/lights, render loop, belt UI, and safeStart().
+// Scene bootstrapping, camera/lights, render loop, belt UI, interact/use, and safeStart().
 
 (function () {
   "use strict";
@@ -30,7 +30,7 @@
     cam.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
     cam.applyGravity = true;
     cam.checkCollisions = true;
-    cam.keysUp = cam.keysDown = cam.keysLeft = cam.keysRight = []; // movement driven by our code
+    cam.keysUp = cam.keysDown = cam.keysLeft = cam.keysRight = []; // movement via our code
     cam.minZ = 0.1;
     sc.activeCamera = cam;
 
@@ -63,15 +63,13 @@
     window.uvLight = uv;
     window.irLight = ir;
 
-    // Temporary ground to prevent falling before the map loads.
-    // We'll dispose this right after loadMap() completes.
+    // Temporary ground to prevent falling before the map loads; remove after loadMap()
     const ground = BABYLON.MeshBuilder.CreateGround("tmp_ground", { width: 400, height: 400, subdivisions: 2 }, sc);
     ground.checkCollisions = true;
-    ground.position.y = -0.05; // sit slightly below to reduce visual clipping while loading
+    ground.position.y = -0.05;
     const gm = new BABYLON.StandardMaterial("tmp_ground_mat", sc);
     gm.diffuseColor = new BABYLON.Color3(0.05, 0.08, 0.08);
     ground.material = gm;
-    // Keep a handle so we can nuke it later
     window.tmpGround = ground;
 
     // ghost placeholder object remains for compatibility; real model is managed by GhostAPI
@@ -86,7 +84,6 @@
 
   // ---------- belt UI ----------
   function slotLabel(n) { return String(n); }
-
   function slotIcon(itemName) {
     // minimal text fallback; swap to <img> icons when ready
     const span = document.createElement('span');
@@ -115,7 +112,6 @@
 
       inner.appendChild(slotIcon(item || ''));
 
-      // charges
       const ch = inventory.slotCharges[i];
       if (isFinite(ch)) {
         const c = document.createElement('div');
@@ -136,12 +132,94 @@
     window.activeItemSlot = n;
     rebuildBelt();
 
-    // notify item scripts (Storage bridge handles if available)
     const item = inventory.slots[n];
     if (item && window.ItemRegistry && typeof window.ItemRegistry.onEquip === 'function') {
       window.ItemRegistry.onEquip(item, n);
     }
   };
+
+  // ---------- Interact / Use (RETICLE → WORLD → HELD) ----------
+  // Raycast directly from camera forward
+  function raycast(dist=3.0, pickPredicate) {
+    if (!scene || !camera) return null;
+    const origin = camera.position.clone();
+    const forward = camera.getForwardRay(dist);
+    const ray = new BABYLON.Ray(origin, forward.direction, dist);
+    const hit = scene.pickWithRay(ray, pickPredicate || (m => !!m && m.isPickable !== false));
+    return (hit && hit.hit) ? hit : null;
+  }
+
+  // Door toggle helper (rotation around center if no hinge/pivot supplied)
+  function toggleDoor(mesh) {
+    if (!mesh) return false;
+    const node = mesh.parent || mesh; // prefer parent as the pivot if present
+    node.metadata = node.metadata || {};
+    const meta = node.metadata;
+    meta.__doorOpen = !meta.__doorOpen;
+
+    // Compute pivot at current bounding-box center
+    try {
+      const bb = node.getBoundingInfo().boundingBox;
+      const center = bb.centerWorld.clone();
+      const axis = BABYLON.Axis.Y;
+      const angle = meta.__doorOpen ? (Math.PI * 0.6) : (-Math.PI * 0.6); // ~108°
+      // rotate slightly; if opening, rotate positive; if closing, rotate back negative
+      node.rotateAround(center, axis, angle);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Try world object first; if not handled, fallback to held item use
+  function tryWorldInteract() {
+    const hit = raycast(3.0);
+    if (!hit || !hit.pickedMesh) return false;
+    const m = hit.pickedMesh;
+
+    // 1) Mesh-provided handler
+    if (m.metadata && typeof m.metadata.onInteract === 'function') {
+      try { m.metadata.onInteract({hit, scene, camera}); return true; } catch {}
+    }
+
+    // 2) Door heuristic (by name or in doorMeshes)
+    const name = (m.name || '').toLowerCase();
+    if (name.includes('door') || (Array.isArray(window.doorMeshes) && window.doorMeshes.includes(m))) {
+      return toggleDoor(m);
+    }
+    if (m.parent && (m.parent.name || '').toLowerCase().includes('door')) {
+      return toggleDoor(m.parent);
+    }
+
+    return false;
+  }
+
+  function tryHeldItemUse() {
+    // Calls into your items system
+    const item = inventory.slots[window.activeItemSlot];
+    if (!item) return false;
+    if (window.ItemRegistry && typeof window.ItemRegistry.onUse === 'function') {
+      try {
+        window.ItemRegistry.onUse(item, window.activeItemSlot);
+        return true;
+      } catch {}
+    }
+    return false;
+  }
+
+  // Public use entry (touch Use button and keyboard 'E' bind to this)
+  window.onUse = function onUse() {
+    // Priority: looked-at world mesh first, else held item
+    if (tryWorldInteract()) return;
+    tryHeldItemUse();
+  };
+
+  // Bind 'E' for interact
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'e' || e.key === 'E') {
+      try { window.onUse(); } catch {}
+    }
+  });
 
   // ---------- game loop ----------
   function startLoops() {
@@ -156,7 +234,8 @@
       try {
         if (typeof handleMovement === 'function') handleMovement(dt);
         if (typeof updatePlayerFootsteps === 'function') updatePlayerFootsteps(dt);
-        if (typeof updateGhost === 'function') updateGhost(dt); // idle-bob for visible ghosts
+        if (typeof updateGhost === 'function') updateGhost(dt);
+        if (window.Weather && typeof window.Weather.update === 'function') Weather.update(dt);
       } catch (e) { /* ignore */ }
 
       scene.render();
@@ -185,6 +264,9 @@
     if (_started) return;
     _started = true;
 
+    // Unlock audio on user gesture (required by browsers)
+    window.audioUnlocked = true;
+
     showLoading(true, 8, 'creating scene');
     const canvas = $('#renderCanvas');
     if (!canvas) throw new Error('No #renderCanvas');
@@ -195,7 +277,7 @@
     showLoading(true, 12, 'loading house');
     try {
       if (typeof loadMap === 'function') {
-        await loadMap();                 // from map.js:contentReference[oaicite:2]{index=2}
+        await loadMap();                 // from map.js
         showLoading(true, 72, 'finalizing scene');
         if (typeof afterMapLoadedForShadows === 'function') afterMapLoadedForShadows();
 
@@ -219,10 +301,19 @@
     try {
       if (window.GhostAPI && typeof window.GhostAPI.loadGhost === 'function') {
         await window.GhostAPI.loadGhost(window.currentGhostKey || 'Spirit');
-        // showLoading(true, 94, 'ghost ready'); // ghost.js may also update this
       }
     } catch (e) {
       console.error('Ghost load failed', e);
+    }
+
+    // Initialize Weather + default state (after audio unlocked)
+    try {
+      if (window.Weather && typeof window.Weather.init === 'function') {
+        Weather.init();
+        Weather.set("Clear"); // change to "Rainstorm" to test
+      }
+    } catch (e) {
+      console.warn("Weather init failed:", e);
     }
 
     // basic belt draw
@@ -257,7 +348,6 @@
   if (typeof initUI === 'function') {
     try { initUI(); } catch (e) { /* ignore */ }
   } else {
-    // If ui_input.js binds later, no harm.
     document.addEventListener('DOMContentLoaded', () => { try { initUI?.(); } catch {} });
   }
 

@@ -1,40 +1,64 @@
-async function loadMoon(){
-  try{
-    const r = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/sky/", "moon.glb", scene);
-    moonMesh = r.meshes.find(m=>m.name && m.name!=="__root__") || r.meshes[0];
-    if (!moonMesh) throw new Error("moon.glb had no meshes");
+// ./assets/index3/moon.js
+// Static moon: Babylon sphere + unlit texture. No orbit, no rotation required.
 
-    moonMesh.isPickable=false; moonMesh.checkCollisions=false; moonMesh.applyFog=false;
-    moonMesh.renderingGroupId = 1;
+(function () {
+  "use strict";
 
-    const bb = moonMesh.getHierarchyBoundingVectors(true);
-    const size = bb.max.subtract(bb.min).length();
-    if (size < 5) moonMesh.scaling = new BABYLON.Vector3(30,30,30);
+  const TEX_PATH = "./assets/textures/moon.jpg"; // your path
+  const MOON_NAME = "pp_moon_sphere";
 
-    moonMat = moonMesh.material || new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    moonMat.emissiveColor = new BABYLON.Color3(1,1,1);
-    moonMesh.material = moonMat;
-
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    applyMoonTintForWeather();
-
-    scene.onBeforeRenderObservable.add(()=>{
-      const t = performance.now()*0.00002;
-      moonMesh.position.x = Math.cos(t)*380;
-      moonMesh.position.z = Math.sin(t)*380;
-      moonMesh.position.y = 340 + Math.sin(t*1.7)*10;
-    });
-  }catch(e){
-    console.warn("loadMoon failed, using sphere:", e);
-    moonMesh = BABYLON.MeshBuilder.CreateSphere("moon", {diameter:60, segments:18}, scene);
-    moonMesh.isPickable=false; moonMesh.applyFog=false; moonMesh.renderingGroupId=1;
-    moonMat = new BABYLON.StandardMaterial("moonMat", scene);
-    moonMat.disableLighting = true;
-    try{ moonMat.emissiveTexture = new BABYLON.Texture("./assets/images/sky/moon.jpg", scene); }
-    catch{ moonMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9); }
-    moonMesh.material = moonMat;
-    moonMesh.position = new BABYLON.Vector3(0, 350, 380);
-    applyMoonTintForWeather();
+  function ensureScene() {
+    if (!window.scene) throw new Error("[moon] scene not ready yet");
+    return window.scene;
   }
-}
+
+  function alreadyExists(sc) {
+    return sc.getMeshByName(MOON_NAME);
+  }
+
+  function makeMoon(sc) {
+    // Large sphere far above the map
+    const moon = BABYLON.MeshBuilder.CreateSphere(MOON_NAME, { diameter: 60, segments: 32 }, sc);
+    moon.position = new BABYLON.Vector3(0, 120, -200); // tweak if you want it elsewhere
+    moon.isPickable = false;
+    moon.checkCollisions = false;
+    moon.receiveShadows = false;
+
+    // Unlit material with the moon texture
+    const mat = new BABYLON.StandardMaterial("pp_moon_mat", sc);
+    mat.diffuseTexture = new BABYLON.Texture(TEX_PATH, sc, true, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+    mat.specularColor = new BABYLON.Color3(0, 0, 0);
+    mat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+    mat.disableLighting = true; // make it appear self-lit
+    mat.backFaceCulling = true; // we view the outside of the sphere
+    moon.material = mat;
+
+    // Optional: slight tilt so it’s not perfectly “front-on”
+    moon.rotation.y = Math.PI * 0.12;
+
+    // Keep it simple: no per-frame updates (no orbit)
+    return moon;
+  }
+
+  // Public API (in case you want to reposition later)
+  window.Moon = {
+    create: function () {
+      const sc = ensureScene();
+      const exist = alreadyExists(sc);
+      return exist || makeMoon(sc);
+    },
+    setPosition: function (v3) {
+      const sc = ensureScene();
+      const m = sc.getMeshByName(MOON_NAME) || this.create();
+      m.position.copyFrom(v3);
+    },
+    getMesh: function () {
+      const sc = ensureScene();
+      return sc.getMeshByName(MOON_NAME);
+    }
+  };
+
+  // If scene is already up by the time this file loads, create immediately.
+  try { if (window.scene) Moon.create(); } catch {}
+
+})();
