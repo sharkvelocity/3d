@@ -1,75 +1,58 @@
 // ./assets/index3/weather.js
-// Weather system + ambient audio using BABYLON.Sound (Clear/Rainstorm)
-
+// Weather system + ambient/rain audio using BABYLON.Sound
 (function(){
   "use strict";
 
   const S = {
     state: "Clear",          // "Clear" | "Rainstorm"
     ready: false,
-    sounds: {
-      ambient: null,
-      clear:   null,         // optional separate clear loop if you want
-      rain:    null
-    },
+    sounds: { ambient: null, clear: null, rain: null },
     volumes: {
-      ambient: 0.35,
+      ambient: 0.7,          // bumped louder
       clear:   0.0,
-      rain:    0.55
+      rain:    0.6
     }
   };
 
-  // Create sounds once we have a scene and audio is unlocked
   function ensureSounds(){
     if (S.ready || !window.scene || !window.audioUnlocked) return;
-
     try {
       S.sounds.ambient = new BABYLON.Sound("amb", "./assets/audio/ambient.mp3", scene, null,
         { loop:true, autoplay:false, volume:S.volumes.ambient, spatialSound:false }
       );
-      // Optional "clear" separate bed (disabled by default)
       S.sounds.clear   = new BABYLON.Sound("clear", "./assets/audio/clearWeather.mp3", scene, null,
         { loop:true, autoplay:false, volume:S.volumes.clear, spatialSound:false }
       );
       S.sounds.rain    = new BABYLON.Sound("rain", "./assets/audio/rainstorm.mp3", scene, null,
         { loop:true, autoplay:false, volume:S.volumes.rain, spatialSound:false }
       );
-
       S.ready = true;
     } catch (e) {
       console.warn("[weather] sound init failed", e);
     }
   }
 
-  function playIf(snd){
-    try { if (snd && !snd.isPlaying) snd.play(); } catch {}
-  }
-  function stopIf(snd){
-    try { if (snd && snd.isPlaying) snd.stop(); } catch {}
-  }
-
   function applyState(){
     if (!S.ready) return;
 
-    // Always keep ambient on softly
-    playIf(S.sounds.ambient);
+    // Apply volumes (live-tweakable)
+    try { S.sounds.ambient?.setVolume(S.volumes.ambient); } catch {}
+    try { S.sounds.clear?.setVolume(S.volumes.clear); } catch {}
+    try { S.sounds.rain?.setVolume(S.volumes.rain); } catch {}
+
+    // Ambient always on
+    try { if (S.sounds.ambient && !S.sounds.ambient.isPlaying) S.sounds.ambient.play(); } catch {}
 
     if (S.state === "Clear"){
-      stopIf(S.sounds.rain);
-      // you can also fade volumes if you prefer
-      try { S.sounds.clear?.setVolume(S.volumes.clear); } catch {}
+      try { S.sounds.rain?.stop(); } catch {}
     } else if (S.state === "Rainstorm"){
-      playIf(S.sounds.rain);
+      try { if (S.sounds.rain && !S.sounds.rain.isPlaying) S.sounds.rain.play(); } catch {}
     }
 
-    // Update HUD label if present
-    try {
-      const hw = document.getElementById('hud-weather');
-      if (hw) hw.textContent = S.state;
-    } catch {}
+    const hw = document.getElementById('hud-weather');
+    if (hw) hw.textContent = S.state;
   }
 
-  // Public API
   window.Weather = {
     set(state){
       if (state !== "Clear" && state !== "Rainstorm") return;
@@ -80,10 +63,7 @@
       ensureSounds();
       applyState();
     },
-    update(dt){
-      // hook for future effects (wind gusts, lightning)
-    }
+    update(dt){ /* reserved for future effects */ }
   };
 
-  // Let main call Weather.init() after audio unlocked
 })();

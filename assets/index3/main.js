@@ -4,6 +4,9 @@
 (function () {
   "use strict";
 
+  // Tiny $, used throughout
+  window.$ = window.$ || (sel => document.querySelector(sel));
+
   // Babylon globals expected everywhere
   window.engine = null;
   window.scene  = null;
@@ -16,6 +19,28 @@
 
   // belt
   window.activeItemSlot = 1;
+
+  // --- door creak (lazy pool with safe fallback) ---
+  let __doorCreakPool = null;
+  function getDoorCreakSound(){
+    if (!window.audioUnlocked || !window.scene) return null;
+    if (__doorCreakPool) return __doorCreakPool[Math.floor(Math.random()*__doorCreakPool.length)];
+    __doorCreakPool = [];
+    const candidates = [
+      "./assets/audio/door_creak.mp3",
+      "./assets/audio/doorCreak1.mp3",
+      "./assets/audio/door-creak.mp3"
+    ];
+    candidates.forEach((p, i) => {
+      try {
+        const s = new BABYLON.Sound(`doorCreak${i}`, p, scene, null, {
+          loop:false, autoplay:false, volume:0.7, spatialSound:false
+        });
+        __doorCreakPool.push(s);
+      } catch {}
+    });
+    return __doorCreakPool[0] || null;
+  }
 
   // ---------- scene creation ----------
   function createScene(canvas) {
@@ -72,7 +97,7 @@
     ground.material = gm;
     window.tmpGround = ground;
 
-    // ghost placeholder object remains for compatibility; real model is managed by GhostAPI
+    // ghost placeholder (real model handled by GhostAPI)
     window.ghost = window.ghost || { type: window.currentGhostKey || 'Spirit', position: new BABYLON.Vector3(43, 0.1, -130), speed: 1.2 };
     Object.defineProperty(window.ghost, 'position', {
       get(){ return this._pos || (this._pos = new BABYLON.Vector3(43,0.1,-130)); },
@@ -139,7 +164,6 @@
   };
 
   // ---------- Interact / Use (RETICLE → WORLD → HELD) ----------
-  // Raycast directly from camera forward
   function raycast(dist=3.0, pickPredicate) {
     if (!scene || !camera) return null;
     const origin = camera.position.clone();
@@ -149,7 +173,6 @@
     return (hit && hit.hit) ? hit : null;
   }
 
-  // Door toggle helper (rotation around center if no hinge/pivot supplied)
   function toggleDoor(mesh) {
     if (!mesh) return false;
     const node = mesh.parent || mesh; // prefer parent as the pivot if present
@@ -163,26 +186,26 @@
       const center = bb.centerWorld.clone();
       const axis = BABYLON.Axis.Y;
       const angle = meta.__doorOpen ? (Math.PI * 0.6) : (-Math.PI * 0.6); // ~108°
-      // rotate slightly; if opening, rotate positive; if closing, rotate back negative
       node.rotateAround(center, axis, angle);
+      // creak (safe)
+      try { getDoorCreakSound()?.play(); } catch {}
       return true;
     } catch {
       return false;
     }
   }
 
-  // Try world object first; if not handled, fallback to held item use
   function tryWorldInteract() {
     const hit = raycast(3.0);
     if (!hit || !hit.pickedMesh) return false;
     const m = hit.pickedMesh;
 
-    // 1) Mesh-provided handler
+    // Mesh-provided handler
     if (m.metadata && typeof m.metadata.onInteract === 'function') {
       try { m.metadata.onInteract({hit, scene, camera}); return true; } catch {}
     }
 
-    // 2) Door heuristic (by name or in doorMeshes)
+    // Door heuristic
     const name = (m.name || '').toLowerCase();
     if (name.includes('door') || (Array.isArray(window.doorMeshes) && window.doorMeshes.includes(m))) {
       return toggleDoor(m);
@@ -195,21 +218,15 @@
   }
 
   function tryHeldItemUse() {
-    // Calls into your items system
     const item = inventory.slots[window.activeItemSlot];
     if (!item) return false;
     if (window.ItemRegistry && typeof window.ItemRegistry.onUse === 'function') {
-      try {
-        window.ItemRegistry.onUse(item, window.activeItemSlot);
-        return true;
-      } catch {}
+      try { window.ItemRegistry.onUse(item, window.activeItemSlot); return true; } catch {}
     }
     return false;
   }
 
-  // Public use entry (touch Use button and keyboard 'E' bind to this)
   window.onUse = function onUse() {
-    // Priority: looked-at world mesh first, else held item
     if (tryWorldInteract()) return;
     tryHeldItemUse();
   };
@@ -344,11 +361,48 @@
     if (e.key === 'Enter' && $('#title-screen')?.style.display !== 'none') safeStart();
   });
 
-  // Initialize UI bindings immediately (initUI is defined in ui_input.js)
+  // --- robust Start button binding (so “Start Investigation” works even if id/class changes) ---
+  function bindStartButtons() {
+    const ts = document.getElementById('title-screen');
+    if (!ts) return;
+
+    const explicit = [
+      '#start-button',
+      '[data-action="start"]',
+      'button.start',
+      'a.start'
+    ].map(sel => ts.querySelector(sel)).filter(Boolean);
+
+    const textMatches = Array.from(ts.querySelectorAll('button, a, [role="button"], .button'))
+      .filter(el => (el.textContent || '').toLowerCase().includes('start'));
+
+    const candidates = [...new Set([...explicit, ...textMatches])];
+
+    if (candidates.length === 0) {
+      ts.addEventListener('click', (e) => {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        try { window.safeStart?.(); } catch {}
+      }, { once: true });
+      return;
+    }
+
+    candidates.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        try { window.safeStart?.(); } catch {}
+      }, { once: true });
+    });
+  }
+
+  // Initialize UI bindings immediately (initUI is defined in ui_input.js) + bind start buttons
   if (typeof initUI === 'function') {
     try { initUI(); } catch (e) { /* ignore */ }
   } else {
     document.addEventListener('DOMContentLoaded', () => { try { initUI?.(); } catch {} });
   }
+  if (document.readyState !== "loading") bindStartButtons();
+  else document.addEventListener('DOMContentLoaded', bindStartButtons);
 
 })();

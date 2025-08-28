@@ -1,6 +1,5 @@
 // ./assets/index3/ui_input.js
-// Input bindings + movement + minimal footsteps (uses BABYLON camera collisions)
-// Hardened against events with missing e.key; ignores inputs/contenteditable.
+// Input bindings + movement + randomized footsteps (uses BABYLON camera collisions)
 
 (function(){
   "use strict";
@@ -28,10 +27,8 @@
   }
 
   function keyNameSafe(e){
-    // Return lowercased key string or "" if unavailable
     if (!e) return "";
     if (typeof e.key === "string" && e.key.length) return e.key.toLowerCase();
-    // Fallback for older browsers
     if (typeof e.code === "string" && e.code.length) return e.code.toLowerCase();
     return "";
   }
@@ -46,7 +43,7 @@
 
   function debounceToggle(){
     const now = performance.now();
-    if (now - state.lastToggleAt < 120) return false; // 120ms guard
+    if (now - state.lastToggleAt < 120) return false;
     state.lastToggleAt = now;
     return true;
   }
@@ -67,7 +64,6 @@
       if (debounceToggle()) state.crouch = !state.crouch;
       return;
     }
-
     state.keys.add(k);
   }
 
@@ -132,22 +128,37 @@
     } catch {}
   };
 
-  // === Simple footsteps (rate-limited) ===
-  let footSound = null;
-  function ensureFootSound(){
-    if (footSound || !window.scene || !window.audioUnlocked) return;
-    try {
-      footSound = new BABYLON.Sound("footstep",
-        "./assets/audio/footstep_wood_2.mp3", // swap for your preferred default
-        scene,
-        null,
-        { loop:false, autoplay:false, volume:0.35, spatialSound:false }
-      );
-    } catch {}
+  // === Randomized footsteps using known-good files ===
+  let footPool = [];
+  let lastFootIdx = -1;
+
+  function ensureFootSounds(){
+    if (footPool.length || !window.scene || !window.audioUnlocked) return;
+    const files = [
+      "./assets/audio/step1.mp3",
+      "./assets/audio/step2.mp3",
+      "./assets/audio/step3.mp3"
+    ];
+    files.forEach((p, i) => {
+      try {
+        footPool[i] = new BABYLON.Sound(`step${i+1}`, p, scene, null, {
+          loop:false, autoplay:false, volume:0.5, spatialSound:false
+        });
+      } catch {}
+    });
+  }
+
+  function playFoot(){
+    ensureFootSounds();
+    if (!footPool.length) return;
+    let idx = Math.floor(Math.random() * footPool.length);
+    if (idx === lastFootIdx && footPool.length > 1) idx = (idx + 1) % footPool.length;
+    lastFootIdx = idx;
+    try { footPool[idx]?.play(); } catch {}
   }
 
   window.updatePlayerFootsteps = function updatePlayerFootsteps(dt){
-    ensureFootSound();
+    ensureFootSounds();
 
     const moving = state.keys.has('w') || state.keys.has('a') ||
                    state.keys.has('s') || state.keys.has('d') ||
@@ -160,11 +171,11 @@
     state.footTimer += dt;
     if (state.footTimer >= state.footInterval){
       state.footTimer = 0;
-      try { footSound?.play(); } catch {}
+      playFoot();
     }
   };
 
-  // Public toggle hooks (optional)
+  // Public toggles
   window.toggleRun    = ()=>{ state.running = !state.running; };
   window.toggleCrouch = ()=>{ state.crouch  = !state.crouch; };
 
@@ -173,12 +184,10 @@
     window.addEventListener('keydown', onKeyDown, {capture:false});
     window.addEventListener('keyup', onKeyUp, {capture:false});
 
-    // Show touch controls only on touch devices
     const touch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
     const tc = $('#touch-controls'); if (tc) tc.style.display = touch ? 'grid' : 'none';
   };
 
-  // Auto-init
   try {
     if (document.readyState !== "loading") initUI();
     else document.addEventListener('DOMContentLoaded', initUI);
