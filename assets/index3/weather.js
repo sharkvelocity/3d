@@ -12,7 +12,7 @@ const audio = {
   rain: new Audio("./assets/audio/rainstorm.mp3"),
   clear: new Audio("./assets/audio/clearWeather.mp3"),
   spiritbox: new Audio("./assets/audio/spiritbox.mp3"),
-  spiritStatic: new Audio("./assets/audio/spiritBoxStatic.mp3"),
+  spiritStatic: new Audio("./assets/audio/radio.mp3"),
   whisper: new Audio("./assets/audio/whisper.mp3"),
   doorCreak1: new Audio("./assets/audio/doorCreak1.mp3"),
   doorCreak2: new Audio("./assets/audio/doorCreak2.mp3"),
