@@ -1,196 +1,226 @@
 // ./assets/index3/ui_input.js
-// Input bindings + movement + randomized footsteps (uses BABYLON camera collisions)
+// Input, action bar wiring (Use/Drop/Throw), basic movement + common hotkeys.
 
 (function(){
   "use strict";
 
-  const state = {
-    keys: new Set(),
-    speedWalk: 1.6,   // m/s
-    speedRun: 3.0,    // m/s
-    crouch: false,
-    running: false,   // toggle by Shift
-    footTimer: 0,
-    footInterval: 0.42, // seconds between footfalls while moving
-    lastToggleAt: 0
-  };
+  const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
+  const CAM    = ()=> window.camera;
 
-  function $(sel) { return document.querySelector(sel); }
-  function on(el, ev, fn, opts) { el && el.addEventListener(ev, fn, opts); }
+  // ---- Movement state ----
+  const keys = { w:false, a:false, s:false, d:false, shift:false };
+  let footTimer = 0;
 
-  function isTypingTarget(el){
-    if (!el) return false;
-    const tag = (el.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea") return true;
-    if (el.isContentEditable) return true;
-    return false;
+  // ---- Helpers ----
+  const toast = (...a)=> window.toast ? window.toast(...a) : console.log('[toast]', ...a);
+  function activeItemName(){
+    try{ return (window.inventory?.slots?.[window.activeItemSlot] || null); }catch(_){ return null; }
+  }
+  function normalizeName(n){ return (n||'').toLowerCase().replace(/\s+/g,''); }
+
+  // ---- ACTIONS: Use / Drop / Throw ----
+  function useActive(){
+    const name = activeItemName();
+    if (!name) return toast('No item selected');
+    const n = normalizeName(name);
+
+    // Preferred: bridge to a registry, if you have one
+    if (window.ItemRegistry?.use) {
+      try{ window.ItemRegistry.use(name); return; }catch(_){}
+    }
+
+    // Fallback: direct mappings
+    try{
+      if (n==='salt') { window.placeSalt?.(); return; }
+      if (n==='writingbook' || n==='book') { window.dropWritingBook?.(); return; }
+      if (n==='dots') { window.placeDotsProjector?.(); return; }
+      if (n==='spiritbox') { window.SpiritBoxAudio?.speak?.(); return; }
+      if (n==='uvprints' || n==='uv' || n==='uvlight') {
+        if (window.uvLight){ window.uvLight.intensity = window.uvLight.intensity>0 ? 0 : 1.2; }
+        const badge = document.getElementById("camera-ir");
+        if (badge) badge.style.display = window.uvLight?.intensity>0 ? 'block' : 'none';
+        return;
+      }
+      // default
+      toast('No use action for '+name);
+    }catch(e){ console.warn('[useActive]', e); }
   }
 
-  function keyNameSafe(e){
-    if (!e) return "";
-    if (typeof e.key === "string" && e.key.length) return e.key.toLowerCase();
-    if (typeof e.code === "string" && e.code.length) return e.code.toLowerCase();
-    return "";
+  function dropActive(){
+    const name = activeItemName();
+    if (!name) return toast('No item selected');
+    const n = normalizeName(name);
+
+    // If your registry exposes drop(), prefer that:
+    if (window.ItemRegistry?.drop){
+      try{ window.ItemRegistry.drop(name); return; }catch(_){}
+    }
+
+    try{
+      if (n==='salt') { window.placeSalt?.(); return; }
+      if (n==='writingbook' || n==='book') { window.dropWritingBook?.(); return; }
+      if (n==='dots') { window.placeDotsProjector?.(); return; }
+      // Spirit box / UV aren't "droppable" by default
+      toast('No drop behavior for '+name);
+    }catch(e){ console.warn('[dropActive]', e); }
   }
 
-  function preventIfMovementKey(k, e){
-    if (!e) return;
-    if (k === "w" || k === "a" || k === "s" || k === "d" ||
-        k === "arrowup" || k === "arrowdown" || k === "arrowleft" || k === "arrowright"){
-      e.preventDefault?.();
+  function throwActive(){
+    const name = activeItemName();
+    if (!name) return toast('No item selected');
+    const n = normalizeName(name);
+
+    // If your registry exposes throw(), prefer that:
+    if (window.ItemRegistry?.throw){
+      try{ window.ItemRegistry.throw(name); return; }catch(_){}
+    }
+
+    // Lightweight "toss forward" helper for placeable items:
+    try{
+      if (n==='salt'){ window.placeSalt?.(); return; }
+      if (n==='dots'){ window.placeDotsProjector?.(); return; }
+      if (n==='writingbook' || n==='book'){
+        // play the toss sound if the writing system provided it (best effort)
+        try{
+          const p = CAM()?.position?.add(CAM().getForwardRay().direction.scale(1.2)) || null;
+          // writing_book.js already plays a toss sound when the ghost tosses; we emulate a drop here:
+          window.dropWritingBook?.();
+          toast('Book thrown (simulated)');
+        }catch(_){}
+        return;
+      }
+      toast('No throw behavior for '+name);
+    }catch(e){ console.warn('[throwActive]', e); }
+  }
+
+  // Expose for other scripts / action bar buttons:
+  window.useActive   = useActive;
+  window.dropActive  = dropActive;
+  window.throwActive = throwActive;
+
+  // ---- On-screen Action Bar wiring (buttons provided by devmode.js) ----
+  function wireActionBar(){
+    const u = document.getElementById('ab-use');
+    const d = document.getElementById('ab-drop');
+    const g = document.getElementById('ab-throw');
+    if (u && !u.__wired){ u.__wired = true; u.onclick = useActive; }
+    if (d && !d.__wired){ d.__wired = true; d.onclick = dropActive; }
+    if (g && !g.__wired){ g.__wired = true; g.onclick = throwActive; }
+  }
+
+  // ---- Keyboard ----
+  function onKey(e, down){
+    const k = e.key;
+    if (k==='w' || k==='W') keys.w = down;
+    if (k==='a' || k==='A') keys.a = down;
+    if (k==='s' || k==='S') keys.s = down;
+    if (k==='d' || k==='D') keys.d = down;
+    if (k==='Shift') keys.shift = down;
+
+    if (!down) return; // the rest are "on press"
+
+    // Item actions
+    if (k==='e' || k==='E') useActive();   // Use
+    if (k==='x' || k==='X') dropActive();  // Drop / place
+    if (k==='g' || k==='G') throwActive(); // Throw
+
+    // Lights
+    if (k==='f' || k==='F'){ try{ window.flashLight.intensity = window.flashLight.intensity>0?0:1.2; }catch(_){}
+    }
+    if (k==='u' || k==='U'){ try{
+      window.uvLight.intensity = window.uvLight.intensity>0?0:1.2;
+      const badge = document.getElementById("camera-ir");
+      if (badge) badge.style.display = window.uvLight.intensity>0 ? 'block' : 'none';
+    }catch(_){}
+    }
+    if (k==='i' || k==='I'){ try{ window.irLight.intensity = window.irLight.intensity>0?0:1.0; }catch(_){}
+    }
+
+    // Notebook
+    if (k==='n' || k==='N') document.getElementById('notebook-modal')?.style?.setProperty('display','flex');
+
+    // Storage
+    if (k==='b' || k==='B') document.getElementById('storage-button')?.click();
+
+    // Dev Tools panel toggle (separate from DEV mode switch)
+    if (k==='t' || k==='T'){
+      const p = document.getElementById('devtools-panel');
+      if (p){ p.style.display = (p.style.display==='none'?'block':'none'); }
+    }
+
+    // DEV mode master toggle (extra shortcut)
+    if (k==='`'){ try{ window.setDevMode?.(!window.DEV_MODE); }catch(_){}
     }
   }
 
-  function debounceToggle(){
-    const now = performance.now();
-    if (now - state.lastToggleAt < 120) return false;
-    state.lastToggleAt = now;
-    return true;
-  }
+  window.addEventListener('keydown', e=> onKey(e,true));
+  window.addEventListener('keyup',   e=> onKey(e,false));
 
-  // === Keyboard ===
-  function onKeyDown(e) {
-    if (isTypingTarget(document.activeElement)) return;
-    const k = keyNameSafe(e);
-    if (!k) return;
-
-    preventIfMovementKey(k, e);
-
-    if (k === "shift"){
-      if (debounceToggle()) state.running = !state.running;
-      return;
-    }
-    if (k === "control"){
-      if (debounceToggle()) state.crouch = !state.crouch;
-      return;
-    }
-    state.keys.add(k);
-  }
-
-  function onKeyUp(e) {
-    if (isTypingTarget(document.activeElement)) return;
-    const k = keyNameSafe(e);
-    if (!k) return;
-    state.keys.delete(k);
-  }
-
-  // === Touch controls (already in your HTML) ===
-  let touchDir = {x:0, y:0};
-  on($('#t-up'),    'touchstart', ()=>{ touchDir.y =  1; }, {passive:true});
-  on($('#t-left'),  'touchstart', ()=>{ touchDir.x = -1; }, {passive:true});
-  on($('#t-right'), 'touchstart', ()=>{ touchDir.x =  1; }, {passive:true});
-  on($('#t-use'),   'touchstart', ()=>{ try { window.onUse?.(); } catch{} }, {passive:true});
-
-  ['t-up','t-left','t-right'].forEach(id=>{
-    on($('#'+id),'touchend', ()=>{ touchDir = {x:0,y:0}; }, {passive:true});
-    on($('#'+id),'touchcancel', ()=>{ touchDir = {x:0,y:0}; }, {passive:true});
-  });
-
-  // === Movement integrator (called from main.js) ===
+  // ---- Movement + footsteps (lightweight) ----
   window.handleMovement = function handleMovement(dt){
-    if (!window.scene || !window.camera) return;
-
-    // Determine intent
-    let fwd = 0, str = 0;
-    if (state.keys.has('w') || state.keys.has('arrowup'))    fwd += 1;
-    if (state.keys.has('s') || state.keys.has('arrowdown'))  fwd -= 1;
-    if (state.keys.has('a') || state.keys.has('arrowleft'))  str -= 1;
-    if (state.keys.has('d') || state.keys.has('arrowright')) str += 1;
-
-    // Merge touch
-    fwd += touchDir.y;
-    str += touchDir.x;
-
-    if (fwd === 0 && str === 0) return; // no movement
-
-    // Normalize
-    const len = Math.hypot(fwd, str) || 1;
-    fwd /= len; str /= len;
-
-    // Speed
-    const base = state.running ? state.speedRun : state.speedWalk;
-    const speed = state.crouch ? base * 0.55 : base;
-
-    // Direction in world space based on camera yaw
-    const yaw = window.camera.rotation.y;
-    const cos = Math.cos(yaw), sin = Math.sin(yaw);
-    const dx = ( str * cos + fwd * sin) * speed * dt;
-    const dz = (-str * sin + fwd * cos) * speed * dt;
-
-    // Move with collisions
-    const move = new BABYLON.Vector3(dx, 0, dz);
-    try { window.camera.moveWithCollisions(move); } catch {}
-
-    // Slight head bob while walking (optional)
-    try {
-      const bob = state.crouch ? 0.005 : 0.01;
-      window.camera.position.y += Math.sin(performance.now()*0.02) * bob * dt;
-    } catch {}
-  };
-
-  // === Randomized footsteps using known-good files ===
-  let footPool = [];
-  let lastFootIdx = -1;
-
-  function ensureFootSounds(){
-    if (footPool.length || !window.scene || !window.audioUnlocked) return;
-    const files = [
-      "./assets/audio/step1.mp3",
-      "./assets/audio/step2.mp3",
-      "./assets/audio/step3.mp3"
-    ];
-    files.forEach((p, i) => {
-      try {
-        footPool[i] = new BABYLON.Sound(`step${i+1}`, p, scene, null, {
-          loop:false, autoplay:false, volume:0.5, spatialSound:false
-        });
-      } catch {}
-    });
-  }
-
-  function playFoot(){
-    ensureFootSounds();
-    if (!footPool.length) return;
-    let idx = Math.floor(Math.random() * footPool.length);
-    if (idx === lastFootIdx && footPool.length > 1) idx = (idx + 1) % footPool.length;
-    lastFootIdx = idx;
-    try { footPool[idx]?.play(); } catch {}
-  }
-
-  window.updatePlayerFootsteps = function updatePlayerFootsteps(dt){
-    ensureFootSounds();
-
-    const moving = state.keys.has('w') || state.keys.has('a') ||
-                   state.keys.has('s') || state.keys.has('d') ||
-                   state.keys.has('arrowup') || state.keys.has('arrowdown') ||
-                   state.keys.has('arrowleft') || state.keys.has('arrowright') ||
-                   Math.abs(touchDir.x)+Math.abs(touchDir.y) > 0;
-
-    if (!moving) { state.footTimer = 0; return; }
-
-    state.footTimer += dt;
-    if (state.footTimer >= state.footInterval){
-      state.footTimer = 0;
-      playFoot();
+    const cam = CAM(); if (!cam) return;
+    const spd = (keys.shift ? window.player?.speedRun : window.player?.speedWalk) || 0.1;
+    const fwd = cam.getForwardRay().direction; fwd.y = 0; fwd.normalize();
+    const right = BABYLON.Vector3.Cross(fwd, BABYLON.Axis.Y).scale(-1);
+    let v = new BABYLON.Vector3(0,0,0);
+    if (keys.w) v = v.add(fwd);
+    if (keys.s) v = v.subtract(fwd);
+    if (keys.a) v = v.subtract(right);
+    if (keys.d) v = v.add(right);
+    if (v.lengthSquared()>0){
+      v = v.normalize().scale(spd / Math.max(0.0001, (1/60))); // scale approx per frame
+      cam.cameraDirection = cam.cameraDirection ? cam.cameraDirection.add(v) : v.clone();
     }
   };
 
-  // Public toggles
-  window.toggleRun    = ()=>{ state.running = !state.running; };
-  window.toggleCrouch = ()=>{ state.crouch  = !state.crouch; };
-
-  // === Init ===
-  window.initUI = function initUI(){
-    window.addEventListener('keydown', onKeyDown, {capture:false});
-    window.addEventListener('keyup', onKeyUp, {capture:false});
-
-    const touch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    const tc = $('#touch-controls'); if (tc) tc.style.display = touch ? 'grid' : 'none';
+  // Optional footstep player (HTMLAudio fallback in core.js)
+  window.updatePlayerFootsteps = function updatePlayerFootsteps(dt){
+    try{
+      const moving = keys.w || keys.a || keys.s || keys.d;
+      if (!moving) { footTimer = 0; return; }
+      footTimer += dt;
+      const period = (keys.shift? 0.33 : 0.5);
+      if (footTimer >= period){
+        footTimer = 0;
+        window.playStep?.(0.5);
+      }
+    }catch(_){}
   };
 
-  try {
-    if (document.readyState !== "loading") initUI();
-    else document.addEventListener('DOMContentLoaded', initUI);
-  } catch {}
+  // ---- UI init ----
+  window.initUI = function initUI(){
+    // Start button
+    const start = document.getElementById('start-button');
+    if (start && !start.__wired){
+      start.__wired = true;
+      start.onclick = ()=> window.safeStart?.();
+    }
 
+    // Storage open button (show while in Van; this can be refined by your movement loop)
+    const sb = document.getElementById('storage-button');
+    if (sb && !sb.__wired){
+      sb.__wired = true;
+      sb.onclick = ()=>{
+        const m = document.getElementById('storage-modal');
+        if (m) m.style.display = 'flex';
+      };
+    }
+
+    // Notebook close
+    const nbClose = document.getElementById('notebook-close');
+    if (nbClose && !nbClose.__wired){
+      nbClose.__wired = true;
+      nbClose.onclick = ()=> document.getElementById('notebook-modal').style.display='none';
+    }
+
+    // Wire action bar buttons (created by devmode.js)
+    wireActionBar();
+  };
+
+  // Kick it if DOM is ready
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=> window.initUI?.());
+  } else {
+    window.initUI?.();
+  }
 })();

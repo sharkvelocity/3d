@@ -129,13 +129,25 @@
   // ---------- belt UI ----------
   function slotLabel(n) { return String(n); }
   function slotIcon(itemName) {
-    // minimal text fallback; swap to <img> icons when ready
+  if (!itemName) {
     const span = document.createElement('span');
-    span.textContent = itemName ? itemName.replace(/ .*/, '') : '—';
+    span.textContent = '—';
     span.style.fontSize = '11px';
     span.style.color = '#9ff';
     return span;
   }
+  if (window.createItemIconEl) {
+    const img = window.createItemIconEl(itemName, 60);
+    if (img) return img;
+  }
+  // Fallback: text label
+  const span = document.createElement('span');
+  span.textContent = itemName.replace(/ .*/, '');
+  span.style.fontSize = '11px';
+  span.style.color = '#9ff';
+  return span;
+}
+
 
   window.rebuildBelt = function rebuildBelt() {
     const host = $('#belt'); if (!host) return;
