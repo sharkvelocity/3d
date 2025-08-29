@@ -1,10 +1,12 @@
-// ./assets/index3/ghost_movement.js — v1.5
-// Adds DEV force-visible override (window.GHOST_DEV_FORCE_VISIBLE), so the ghost
-// stays visible while you're testing, regardless of blink/hunt logic.
+// ./assets/index3/ghost_movement.js — v1.6
+// - Ghost is NOT an obstacle when invisible (collisions off)
+// - Ghost never kills unless mode === 'hunt' (events/roam/cooldown are safe)
+// - Collisions only on when hunting AND visible
+// - Keeps DEV force-visible flag (window.GHOST_DEV_FORCE_VISIBLE) from v1.5
 
 (function(){
   "use strict";
-  if (window.ghostCtrl && window.ghostCtrl.__v === '1.5') return;
+  if (window.ghostCtrl && window.ghostCtrl.__v === '1.6') return;
 
   const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
   const CAMERA = ()=> window.camera || SCENE()?.activeCamera;
@@ -22,7 +24,8 @@
     minHuntCooldown: 35, maxHuntCooldown: 75, huntSanityThreshold: 50,
     barrierLookahead: 1.6, steerAngles: [15,-15,30,-30,45,-45,60,-60,90,-90,120,-120,150,-150,180],
     lightFlickerRadius: 10, lightFlickerFactor: 0.35,
-    randomSpawnDist: 8
+    randomSpawnDist: 8,
+    killRadius: 1.25 // meters (2D) – only during hunt
   };
 
   const ST = {
@@ -32,16 +35,18 @@
     target:null, mode:'idle',
     lastEventT:0, nextHuntReadyT:0,
     sanity:100, lastUpdateT:performance.now()/1000,
-    lightCache:[]
+    lightCache:[],
+    isVisible:false // runtime flag
   };
 
   const API = {
-    __v:'1.5',
+    __v:'1.6',
     init, startInvestigation, randomizeGhost,
     beginHunt, endHunt, triggerEvent,
     teleportGhostToLook, setGhostScale,
     getState: ()=>({ mode:ST.mode, type:ST.ghostTypeKey, model:ST.modelName,
-      sanity:ST.sanity, pos: ST.ghostRoot?.position && {x:+ST.ghostRoot.position.x.toFixed(2), y:+ST.ghostRoot.position.y.toFixed(2), z:+ST.ghostRoot.position.z.toFixed(2)} })
+      visible: ST.isVisible, sanity:ST.sanity,
+      pos: ST.ghostRoot?.position && {x:+ST.ghostRoot.position.x.toFixed(2), y:+ST.ghostRoot.position.y.toFixed(2), z:+ST.ghostRoot.position.z.toFixed(2)} })
   };
   window.ghostCtrl = API;
   window.beginHunt = beginHunt; window.endHunt = endHunt;
@@ -66,8 +71,7 @@
     pickRandomGhostType();
     pickRandomGhostModelOrFallback();
     placeGhostAheadOfCamera(CFG.randomSpawnDist);
-    // honor forced visibility
-    setGhostVisible(!devForce() ? false : true);
+    setGhostVisible(devForce()); // if dev forced, show; else invisible by default
   }
 
   function pickRandomGhostType(){
@@ -130,7 +134,7 @@
     ST.ghostRoot.position.copyFrom(p);
   }
 
-  // TELEPORT
+  // ---- TELEPORT ----
   function teleportGhostToLook(distance){
     const d = isFinite(+distance) ? +distance : 2.8;
     ST.s = SCENE(); ST.c = CAMERA();
@@ -160,19 +164,32 @@
 
     root.position.copyFrom(target);
     try{ root.rotationQuaternion = null; root.rotation.y = Math.atan2(fRay.direction.x, fRay.direction.z); }catch{}
-
-    // keep visible if forced
     if (devForce()) setGhostVisible(true);
-
     toast(`Ghost teleported → ${target.x.toFixed(2)}, ${target.y.toFixed(2)}, ${target.z.toFixed(2)}`);
   }
   window.teleportGhostToLook = teleportGhostToLook;
   window.teleportGhost       = teleportGhostToLook;
   window.teleportGhostAhead  = (d)=> placeGhostAheadOfCamera(d || CFG.randomSpawnDist);
 
-  // VISIBILITY (respects force-visible)
+  // ---- VISIBILITY + COLLISION CONTROL ----
+  function setCollisionsEnabled(enabled){
+    // enable collisions only on hunt+visible; otherwise off
+    const want = !!enabled && ST.mode==='hunt';
+    const r = ST.ghostRoot; if (!r) return;
+    const stack=[r];
+    while (stack.length){
+      const n=stack.pop();
+      try{
+        if ('checkCollisions' in n) n.checkCollisions = want;
+      }catch{}
+      n.getChildren?.().forEach(ch=> stack.push(ch));
+    }
+  }
+
   function setGhostVisible(on){
-    if (devForce()) on = true;  // override: never allow hiding when forced
+    if (devForce()) on = true; // dev override: always show
+    ST.isVisible = !!on;
+
     const setNode=(node,vis)=>{
       if (!node) return;
       if (node.material && typeof node.material.alpha === 'number') node.material.alpha = vis ? 1 : 0.0;
@@ -183,16 +200,20 @@
       const stack=[ST.ghostRoot];
       while (stack.length){ const n=stack.pop(); setNode(n,on); n.getChildren?.().forEach(ch=> stack.push(ch)); }
     }
+    // collisions reflect new visibility (only blocking when hunting + visible)
+    setCollisionsEnabled(ST.isVisible);
   }
 
-  // BLINK (skip entirely when forced visible)
+  // BLINK (skip when forced visible)
   function blinkManifest(timeSec){
-    if (devForce()) return; // don’t flicker when you asked to see it
+    if (devForce()) return;
     const dur = timeSec || (CFG.blinkMin + Math.random()*(CFG.blinkMax-CFG.blinkMin));
-    setGhostVisible(true); setTimeout(()=> setGhostVisible(false), dur*1000);
+    setGhostVisible(true);
+    setTimeout(()=> setGhostVisible(false), dur*1000);
     tryLightFlickerNear(ST.ghostRoot.position, dur);
   }
 
+  // ---- SANITY / EVENTS ----
   function updateSanity(dt){
     ST.sanity -= (CFG.sanityDrainPerMin/60)*dt;
     const g=ST.ghostRoot?.position, p=ST.c?.position;
@@ -231,24 +252,50 @@
     setTimeout(()=>{ clearInterval(id); saved.forEach(x=> x.L.intensity=x.intensity); }, durSec*1000);
   }
 
+  // ---- HUNTS / KILL LOGIC ----
   function beginHunt(){
     if (!ST.ghostRoot) return;
     const now=performance.now()/1000; if (now < ST.nextHuntReadyT) return;
-    setMode('hunt'); blinkManifest(0.4 + Math.random()*0.4);
+    setMode('hunt');
+    // visible or not? it can flicker during hunt; we don't force here
+    blinkManifest(0.4 + Math.random()*0.4); // pop-in briefly
+    // collisions reflect current vis (if dev forced invisibility off, still only block when visible)
+    setCollisionsEnabled(ST.isVisible);
   }
   function endHunt(){
     if (!ST.ghostRoot) return;
     setMode('cooldown');
-    setGhostVisible(false); // harmless if devForce() is true
+    setGhostVisible(false); // harmless if devForce()==true (we’ll show, but collisions still off)
     const now=performance.now()/1000;
     ST.nextHuntReadyT = now + (CFG.minHuntCooldown + Math.random()*(CFG.maxHuntCooldown-CFG.minHuntCooldown));
   }
+
   function setMode(m){
     ST.mode=m;
     const el=document.getElementById('hud-hunt-state');
     if (el) el.textContent = (m==='hunt'?'HUNTING':(m==='cooldown'?'Cooling':'Calm'));
+    // whenever mode changes, recompute collisions (only hunt+visible blocks)
+    setCollisionsEnabled(ST.isVisible);
   }
 
+  function canKillPlayer(){
+    // Only during hunt; never during roam/events/cooldown
+    if (ST.mode !== 'hunt') return false;
+    const g = ST.ghostRoot?.position, p = ST.c?.position; if (!g || !p) return false;
+    const dx=g.x-p.x, dz=g.z-p.z, dist=Math.sqrt(dx*dx+dz*dz);
+    if (dist > CFG.killRadius) return false;
+    // respect ghost barriers: if blocked -> no kill
+    if (isSegmentBlocked(g, p)) return false;
+    return true;
+  }
+  function performKill(){
+    try{ window.onPlayerKilled?.(); }catch{}
+    playOneOf(['gameKilled']);
+    toast('You died.', 1800);
+    endHunt();
+  }
+
+  // ---- MOVEMENT / BARRIERS ----
   function isSegmentBlocked(a,b){
     try{
       if (typeof window.ghostDev_isBlockedRay === 'function') return !!window.ghostDev_isBlockedRay(a,b);
@@ -286,6 +333,7 @@
   }
   function pursuePlayerTarget(){ const p=ST.c?.position; return p ? p.clone() : (ST.ghostRoot?.position.clone()||null); }
 
+  // ---- TICK ----
   function _tick(){
     const now=performance.now()/1000, dt=Math.min(0.1, Math.max(0, now-ST.lastUpdateT)); ST.lastUpdateT=now;
     if (!ST.ghostRoot) return;
@@ -307,6 +355,8 @@
     } else if (ST.mode==='hunt'){
       const t=pursuePlayerTarget(); if (t) moveToward(t, CFG.huntSpeed, dt);
       if (!devForce() && Math.random()<0.03) blinkManifest(0.12+Math.random()*0.18);
+      // kill check (HUNT ONLY)
+      if (canKillPlayer()) performKill();
       if (ST.sanity<=0) endHunt();
     } else if (ST.mode==='cooldown'){
       if (!ST.target || BABYLON.Vector3.Distance(ST.ghostRoot.position,ST.target)<=CFG.roamTargetRadius){ ST.target=pickRoamTarget(); }
