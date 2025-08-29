@@ -1,30 +1,42 @@
-// ./assets/index3/ghost_movement.js — v1.1
-// Ghost AI + Events + Sanity + Hunt + Barrier-aware movement
+// ./assets/index3/ghost_movement.js — v1.3
+// Ghost AI + Events + Sanity + Hunt + Barrier-aware movement + robust teleport
 //
 // Integrations:
-//  - Prefers ghost GLB chosen via ./assets/index3/ghost_dev.js (PREFERRED_GHOST_ROOT / NAME / SCALE).
-//  - Uses ghost barriers from ghost_dev.js (metadata.isGhostBlocker or window.ghostDev_isBlockedRay).
+//  - Prefers ghost GLB chosen via ./assets/index3/ghost_dev.js
+//      • window.PREFERRED_GHOST_ROOT (TransformNode/mesh root)
+//      • window.PREFERRED_GHOST_MODEL_NAME (string)
+//      • window.PREFERRED_GHOST_SCALE (number)
+//  - Uses barriers drawn in ghost_dev.js via window.ghostDev_isBlockedRay(a,b)
+//    or meshes with metadata.isGhostBlocker === true.
 //  - Random ghost TYPE from window.GHOSTS at investigation start.
-//  - Fallback: pick a plausible scene mesh or a lightweight generated ghost.
-//  - Blink/manifest events + soft light flicker.
-//  - Hunt: pursue player, steer around barrier segments.
-//  - Sanity system with HUD updates (#hud-sanity, #hud-hunt-state).
-//  - Public API: window.ghostCtrl.{init,startInvestigation,randomizeGhost,beginHunt,endHunt,triggerEvent,teleportGhostToLook,setGhostScale}
+//  - Fallback ghost model if none present.
+//  - Blink/manifest events + soft light flicker, sanity drain, hunt behavior.
+//  - HUD updates (#hud-sanity, #hud-hunt-state).
 //
-// Safe to include multiple times; guards itself.
+// Public API (window.ghostCtrl):
+//   init(), startInvestigation(), randomizeGhost(),
+//   beginHunt(), endHunt(), triggerEvent(type),
+//   teleportGhostToLook(distance?), setGhostScale(scale),
+//   getState()
+//
+// Global aliases (for devtools/buttons/console):
+//   window.beginHunt(), window.endHunt()
+//   window.teleportGhostToLook(distance?), window.teleportGhost(distance?)
+//   window.teleportGhostAhead(distance?)
+//
+// Safe re-include guard.
 
 (function(){
   "use strict";
 
-  if (window.ghostCtrl && window.ghostCtrl.__v === '1.1') return;
+  if (window.ghostCtrl && window.ghostCtrl.__v === '1.3') return;
 
-  // -------- scene refs + small helpers --------
+  // -------- scene refs + helpers --------
   const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
   const CAMERA = ()=> window.camera || SCENE()?.activeCamera;
   const toast  = (m,ms=900)=> (window.toast? window.toast(m,ms) : console.log('[ghost]', m));
   const clamp  = (v,min,max)=> Math.max(min, Math.min(max, v));
   const v3     = (x,y,z)=> new BABYLON.Vector3(x,y,z);
-  const xyz    = (v)=>({x:+v.x.toFixed(4), y:+v.y.toFixed(4), z:+v.z.toFixed(4)});
 
   // -------- config --------
   const CFG = {
@@ -46,31 +58,31 @@
     steerAngles: [15,-15,30,-30,45,-45,60,-60,90,-90,120,-120,150,-150,180],
     lightFlickerRadius: 10,
     lightFlickerFactor: 0.35,
-    randomSpawnDist: 8,
+    randomSpawnDist: 8,     // initial spawn distance in front of camera
   };
 
-  // -------- internal state --------
+  // -------- state --------
   const ST = {
     ready:false,
     s:null, c:null,
-    ghost:null,                 // mesh or transform node (alias of ghostRoot)
-    ghostRoot:null,             // transform node we move/rotate
-    ghostTypeKey:null,          // from window.GHOSTS
-    modelName:null,             // chosen model name
+    ghost:null,                 // alias of ghostRoot
+    ghostRoot:null,             // TransformNode parent we move/rotate
+    ghostTypeKey:null,          // window.GHOSTS key
+    modelName:null,
     defaultVisibility:0,
     scale:1,
     target:null,                // roam target
     mode:'idle',                // idle | roam | hunt | cooldown
     lastEventT:0,
     nextHuntReadyT:0,
-    sanity: 100,
+    sanity:100,
     lastUpdateT:performance.now()/1000,
     lightCache: [],
   };
 
   // ===== PUBLIC API =====
   const API = {
-    __v: '1.1',
+    __v: '1.3',
     init,
     startInvestigation,
     randomizeGhost,
@@ -78,10 +90,20 @@
     triggerEvent,
     teleportGhostToLook,
     setGhostScale,
-    getState: ()=>({ mode: ST.mode, type: ST.ghostTypeKey, model: ST.modelName, sanity: ST.sanity, pos: ST.ghostRoot?.position && xyz(ST.ghostRoot.position) }),
+    getState: ()=>({
+      mode: ST.mode,
+      type: ST.ghostTypeKey,
+      model: ST.modelName,
+      sanity: ST.sanity,
+      pos: ST.ghostRoot?.position && { x:+ST.ghostRoot.position.x.toFixed(3),
+                                       y:+ST.ghostRoot.position.y.toFixed(3),
+                                       z:+ST.ghostRoot.position.z.toFixed(3) }
+    }),
   };
 
+  // expose controller
   window.ghostCtrl = API;
+  // convenience aliases for devtools/console
   window.beginHunt = beginHunt;
   window.endHunt   = endHunt;
 
@@ -91,8 +113,10 @@
     ST.s = SCENE(); ST.c = CAMERA();
     if (!ST.s || !ST.c) return;
 
+    // per-frame
     ST.s.onBeforeRenderObservable.add(_tick);
 
+    // wire Start button if present
     const btn = document.getElementById('start-button');
     if (btn) btn.addEventListener('click', ()=> startInvestigation());
 
@@ -110,9 +134,9 @@
 
   function randomizeGhost(){
     pickRandomGhostType();
-    pickRandomGhostModelOrFallback();      // now prefers dev-selected GLB
+    pickRandomGhostModelOrFallback();  // respects dev-selected ghost
     placeGhostAheadOfCamera(CFG.randomSpawnDist);
-    setGhostVisible(false);                // default hidden unless dev-visible
+    setGhostVisible(false);            // default hidden unless dev-visible
   }
 
   function pickRandomGhostType(){
@@ -123,7 +147,7 @@
     }catch{ ST.ghostTypeKey = 'Spirit'; }
   }
 
-  // -------- model selection (UPDATED to prefer ghost_dev.js) --------
+  // -------- model selection (prefers dev-selected) --------
   function pickRandomGhostModelOrFallback(){
     // 1) Prefer the model loaded by ghost_dev.js
     if (window.PREFERRED_GHOST_ROOT && !window.PREFERRED_GHOST_ROOT.isDisposed?.()){
@@ -136,9 +160,9 @@
       return;
     }
 
-    // 2) If a preferred mesh name was given, adopt it under a new root
+    // 2) Specific name hint
     if (window.PREFERRED_GHOST_MODEL_NAME){
-      const m = ST.s.getMeshByName(window.PREFERRED_GHOST_MODEL_NAME) || ST.s.getNodeByName(window.PREFERRED_GHOST_MODEL_NAME);
+      const m = getByName(window.PREFERRED_GHOST_MODEL_NAME);
       if (m){
         const root = new BABYLON.TransformNode('GhostRoot_'+(Date.now().toString(36)), ST.s);
         m.parent = root;
@@ -150,44 +174,46 @@
       }
     }
 
-    // 3) Heuristic: pick a plausible scene mesh
+    // 3) Heuristic: pick plausible scene mesh
+    const candidates = rankedSceneNames();
+    for (let i=0;i<candidates.length;i++){
+      const name=candidates[(Math.random()*candidates.length)|0];
+      const m=getByName(name);
+      if (!m) continue;
+      if (badSceneName(name)) continue;
+      const root = new BABYLON.TransformNode('GhostRoot_'+(Date.now().toString(36)), ST.s);
+      m.parent = root;
+      ST.ghostRoot = root; ST.ghost = root; ST.modelName = name;
+      ST.defaultVisibility = 0.0; ST.scale = 1;
+      return;
+    }
+
+    // 4) Minimal fallback ghost
+    const r=new BABYLON.TransformNode('GhostRoot', ST.s);
+    const body=BABYLON.MeshBuilder.CreateSphere('GhostBall',{diameter:0.45,segments:16}, ST.s);
+    const tail=BABYLON.MeshBuilder.CreateCylinder('GhostTail',{diameterTop:0.18,diameterBottom:0.4,height:0.8,tessellation:16}, ST.s);
+    body.parent=r; tail.parent=r; tail.position.y=-0.6;
+    const mat=new BABYLON.StandardMaterial('GhostMat', ST.s);
+    mat.diffuseColor=new BABYLON.Color3(0.85,0.95,1.0);
+    mat.emissiveColor=new BABYLON.Color3(0.2,0.4,0.5);
+    mat.alpha=0.35; body.material=mat; tail.material=mat;
+    ST.ghostRoot=r; ST.ghost=r; ST.modelName='fallback_ghost';
+    ST.defaultVisibility=0.0; ST.scale=1;
+  }
+
+  function rankedSceneNames(){
     const names = ST.s.meshes.map(m=>m.name).filter(Boolean);
-    const pri=[], rest=[];
+    const pri = [], rest=[];
     names.forEach(n=>{
       if (/ghost|spirit|entity|phantom|demon|thaye|deogen|revenant|shade|oni|yurei|wraith|mimic|poltergeist|apparition|model|armature/i.test(n)) pri.push(n);
       else rest.push(n);
     });
-    const list = [...new Set([...pri, ...rest])];
-    let chosen=null, mesh=null;
-    for (let i=0;i<list.length;i++){
-      const name=list[(Math.random()*list.length)|0];
-      const m=ST.s.getMeshByName(name) || ST.s.getNodeByName(name);
-      if (!m) continue;
-      if (/ground|floor|terrain|room|house|wall|plane|door|window|light|lamp|roof|stairs/i.test(name)) continue;
-      chosen=name; mesh=m; break;
-    }
-    if (!mesh){
-      // 4) Minimal generated fallback ghost
-      const r=new BABYLON.TransformNode('GhostRoot', ST.s);
-      const body=BABYLON.MeshBuilder.CreateSphere('GhostBall',{diameter:0.45,segments:16}, ST.s);
-      const tail=BABYLON.MeshBuilder.CreateCylinder('GhostTail',{diameterTop:0.18,diameterBottom:0.4,height:0.8,tessellation:16}, ST.s);
-      body.parent=r; tail.parent=r; tail.position.y=-0.6;
-      const mat=new BABYLON.StandardMaterial('GhostMat', ST.s);
-      mat.diffuseColor=new BABYLON.Color3(0.85,0.95,1.0);
-      mat.emissiveColor=new BABYLON.Color3(0.2,0.4,0.5);
-      mat.alpha=0.35; body.material=mat; tail.material=mat;
-      ST.ghostRoot=r; ST.ghost=r; ST.modelName='fallback_ghost';
-      ST.defaultVisibility=0.0; ST.scale=1;
-      return;
-    }
-    const root=new BABYLON.TransformNode('GhostRoot_'+(Date.now().toString(36)), ST.s);
-    mesh.setEnabled(true);
-    mesh.parent=root;
-    ST.ghostRoot=root; ST.ghost=root; ST.modelName=chosen;
-    ST.defaultVisibility=0.0; ST.scale=1;
+    return [...new Set([...pri, ...rest])];
   }
+  function getByName(n){ return ST.s.getMeshByName(n) || ST.s.getNodeByName(n); }
+  function badSceneName(n){ return /ground|floor|terrain|room|house|wall|plane|door|window|light|lamp|roof|stairs|sky|skybox/i.test(n); }
 
-  // -------- position / scale / teleport --------
+  // -------- scale / position --------
   function setGhostScale(sc){
     ST.scale = clamp(+sc||1, 0.1, 5);
     if (ST.ghostRoot) ST.ghostRoot.scaling.set(ST.scale, ST.scale, ST.scale);
@@ -195,39 +221,78 @@
   }
 
   function placeGhostAheadOfCamera(dist){
-    const c = ST.c, s = ST.s; if (!c || !s || !ST.ghostRoot) return;
+    const c = CAMERA(), s = SCENE(); if (!c || !s){ return; }
+    if (!ST.ghostRoot) randomizeGhost();
+    if (!ST.ghostRoot) return;
     const ray = c.getForwardRay(50);
     let p = c.position.add(ray.direction.scale(dist||CFG.randomSpawnDist));
-    const down = new BABYLON.Ray(p.add(v3(0,5,0)), v3(0,-1,0), 30);
-    const hit  = s.pickWithRay(down, m=> m && m.isPickable!==false);
+    const down = new BABYLON.Ray(p.add(v3(0,6,0)), v3(0,-1,0), 60);
+    const hit  = s.pickWithRay(down, m=> m && m.isPickable !== false);
     if (hit?.hit) p = hit.pickedPoint;
     ST.ghostRoot.position.copyFrom(p);
   }
 
+  // -------- teleport (robust) --------
   function teleportGhostToLook(distance){
-    const d = isFinite(+distance) ? +distance : 2.5;
-    const c = ST.c, s = ST.s; if (!c || !s || !ST.ghostRoot) return;
-    const ray = c.getForwardRay(50);
-    const hit = s.pickWithRay(ray, m=> m && m.isPickable!==false);
-    let target;
-    if (hit?.hit){
-      const back = ray.direction.scale(0.25);
-      target = hit.pickedPoint.subtract(back);
-    } else {
-      target = c.position.add(ray.direction.scale(d));
-      const down = new BABYLON.Ray(target.add(v3(0,5,0)), v3(0,-1,0), 30);
-      const ghit = s.pickWithRay(down, m=> m && m.isPickable!==false);
-      if (ghit?.hit) target = ghit.pickedPoint;
+    const d = isFinite(+distance) ? +distance : 2.8;
+
+    // ensure up-to-date scene/camera
+    ST.s = SCENE(); ST.c = CAMERA();
+    const s = ST.s, c = ST.c;
+    if (!s || !c) { toast('teleport: scene/camera not ready'); return; }
+
+    // ensure a ghost exists
+    if (!ST.ghostRoot) {
+      randomizeGhost();
+      if (!ST.ghostRoot) { toast('teleport: no ghost'); return; }
     }
-    ST.ghostRoot.position.copyFrom(target);
+
+    const root = ST.ghostRoot;
+    const fRay = c.getForwardRay(60);
+
+    // filter: ignore skybox, the ghost itself, and non-pickables
+    const pickable = (m)=>{
+      if (!m) return false;
+      if (m === root || m.isDescendantOf?.(root)) return false;
+      const name = m.name || "";
+      if (/sky|skybox/i.test(name)) return false;
+      return m.isPickable !== false;
+    };
+
+    // try to place in front of what we’re looking at; else ahead
+    let target = null;
+    const hit = s.pickWithRay(fRay, pickable, false);
+    if (hit?.hit && hit.pickedPoint) {
+      target = hit.pickedPoint.subtract(fRay.direction.scale(0.35));
+    } else {
+      target = c.position.add(fRay.direction.scale(d));
+    }
+
+    // drop to ground
+    const down = new BABYLON.Ray(target.add(v3(0,6,0)), v3(0,-1,0), 60);
+    const gHit = s.pickWithRay(down, pickable, false);
+    if (gHit?.hit && gHit.pickedPoint) target = gHit.pickedPoint;
+
+    root.position.copyFrom(target);
+    try{
+      root.rotationQuaternion = null;
+      root.rotation.y = Math.atan2(fRay.direction.x, fRay.direction.z);
+    }catch{}
+
+    toast(`Ghost teleported → ${target.x.toFixed(2)}, ${target.y.toFixed(2)}, ${target.z.toFixed(2)}`);
   }
+
+  // expose global teleport helpers
+  window.teleportGhostToLook = teleportGhostToLook;
+  window.teleportGhost       = teleportGhostToLook;
+  window.teleportGhostAhead  = (d)=> placeGhostAheadOfCamera(d || CFG.randomSpawnDist);
 
   // -------- visibility / blink --------
   function setGhostVisible(on){
-    // If Ghost Dev is open & set to dev-visible, we'll respect that UI separately
+    // if ghost dev is open & managing visibility, we won't fight it for steady state
     try{
       if (window.GHOST_DEV && document.querySelector('#ghostdev-panel')?.style.display !== 'none'){
-        // let dev tools control persistent visibility, we only handle temporary blinks
+        // allow its UI to control persistent visibility; our blinks still work
       }
     }catch{}
     const setNode = (node, vis)=>{
@@ -279,7 +344,7 @@
     const el = document.getElementById('hud-sanity');
     if (el) el.textContent = `${Math.round(ST.sanity)}%`;
     const huntEl = document.getElementById('hud-hunt-state');
-    if (huntEl) huntEl.textContent = ST.mode==='hunt' ? 'HUNTING' : 'Calm';
+    if (huntEl) huntEl.textContent = ST.mode==='hunt' ? 'HUNTING' : (ST.mode==='cooldown' ? 'Cooling' : 'Calm');
   }
 
   // -------- events / audio --------
@@ -299,6 +364,7 @@
   function playOneOf(keys){
     try{
       if (window.playSfx){ return window.playSfx(keys[(Math.random()*keys.length)|0]); }
+      // fallback: try audio elements by id
       for (let i=0;i<keys.length;i++){
         const a = document.getElementById(keys[i]);
         if (a){ a.currentTime=0; a.play().catch(()=>{}); return; }
@@ -306,7 +372,7 @@
     }catch{}
   }
 
-  // -------- lights --------
+  // -------- lights (soft flicker nearby) --------
   function tryLightFlickerNear(pos, durSec){
     if (!pos || !ST.s) return;
     if (!ST.lightCache.length){
@@ -321,7 +387,9 @@
     });
     if (!lights.length) return;
     const saved = lights.map(L=>({L, intensity:L.intensity}));
-    const tick = ()=>{ lights.forEach(L=> L.intensity = saved.find(x=>x.L===L).intensity * (0.85 + Math.random()*CFG.lightFlickerFactor)); };
+    const tick = ()=>{
+      lights.forEach(L=> L.intensity = saved.find(x=>x.L===L).intensity * (0.85 + Math.random()*CFG.lightFlickerFactor));
+    };
     const id = setInterval(tick, 40);
     setTimeout(()=>{
       clearInterval(id);
@@ -333,7 +401,7 @@
   function beginHunt(){
     if (!ST.ghostRoot) return;
     const now = performance.now()/1000;
-    if (now < ST.nextHuntReadyT) return;
+    if (now < ST.nextHuntReadyT) return; // cooling down
     setMode('hunt');
     blinkManifest(0.4 + Math.random()*0.4);
   }
@@ -346,13 +414,13 @@
     ST.nextHuntReadyT = now + (CFG.minHuntCooldown + Math.random()*(CFG.maxHuntCooldown-CFG.minHuntCooldown));
   }
 
-  // -------- movement (barrier-aware) --------
   function setMode(m){
     ST.mode = m;
     const huntEl = document.getElementById('hud-hunt-state');
     if (huntEl) huntEl.textContent = (m==='hunt'?'HUNTING':(m==='cooldown'?'Cooling':'Calm'));
   }
 
+  // -------- movement (barrier-aware) --------
   function isSegmentBlocked(a, b){
     try{
       if (typeof window.ghostDev_isBlockedRay === 'function') return !!window.ghostDev_isBlockedRay(a,b);
@@ -400,6 +468,7 @@
   }
 
   function pickRoamTarget(){
+    // pick within scene extents
     let min = new BABYLON.Vector3(+Infinity,+Infinity,+Infinity);
     let max = new BABYLON.Vector3(-Infinity,-Infinity,-Infinity);
     ST.s.meshes.forEach(m=>{
@@ -428,7 +497,7 @@
     return player.clone();
   }
 
-  // -------- per-frame --------
+  // -------- frame tick --------
   function _tick(){
     const now = performance.now()/1000;
     const dt  = Math.min(0.1, Math.max(0, now - ST.lastUpdateT));
@@ -436,14 +505,14 @@
 
     if (!ST.ghostRoot) return;
 
-    // sanity & events
+    // sanity & ambient events
     updateSanity(dt);
     if (now - ST.lastEventT > CFG.eventCooldown){
       ST.lastEventT = now;
       if (Math.random() < CFG.eventChance) triggerEvent(['blink','flicker','whisper'][(Math.random()*3)|0]);
     }
 
-    // hunt trigger
+    // auto-enter hunts at low sanity, off cooldown
     if (ST.mode!=='hunt' && ST.sanity <= CFG.huntSanityThreshold && now >= ST.nextHuntReadyT){
       if (Math.random() < 0.12) beginHunt();
     }
@@ -469,8 +538,5 @@
       if (now >= ST.nextHuntReadyT - CFG.minHuntCooldown*0.5) setMode('roam');
     }
   }
-
-  // -------- tiny DOM helper --------
-  function $(sel, root=document){ return root.querySelector(sel); }
 
 })();
