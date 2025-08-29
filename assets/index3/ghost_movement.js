@@ -1,13 +1,11 @@
-// ./assets/index3/ghost_movement.js — v1.8
-// + Ground follow (raycast snap), step-up/down smoothing
-// + Faster roam + acceleration so movement is immediate
-// + Auto-start roaming even if Start button not clicked
-// + 45s hunt grace right after spawn
-// + Keeps: dev force-visible, barriers, non-blocking when invisible, hunt-only kills
+// ./assets/index3/ghost_movement.js — v1.9
+// + Jailhouse map support: treats `jailhouse.w.*` meshes as ground
+// + Auto ground tagging via registerGroundRoots([/^jailhouse\.w\./i]) after scene loads
+// + Keeps v1.8 features: ground follow, acceleration, auto-roam, hunt grace, barriers, non-blocking when invisible
 
 (function(){
   "use strict";
-  if (window.ghostCtrl && window.ghostCtrl.__v === '1.8') return;
+  if (window.ghostCtrl && window.ghostCtrl.__v === '1.9') return;
 
   const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
   const CAMERA = ()=> window.camera || SCENE()?.activeCamera;
@@ -20,7 +18,7 @@
     // movement
     roamSpeed: 1.5,
     huntSpeed: 2.6,
-    accelRate: 6.0,          // m/s^2 toward target speed
+    accelRate: 6.0,
     steerAngles: [15,-15,30,-30,45,-45,60,-60,90,-90,120,-120,150,-150,180],
     barrierLookahead: 1.6,
 
@@ -45,7 +43,7 @@
   };
 
   const ST = {
-    __v:'1.8',
+    __v:'1.9',
     ready:false, s:null, c:null,
     ghostRoot:null, modelName:null, ghostTypeKey:null,
     defaultVisibility:0, scale:1,
@@ -56,11 +54,11 @@
     isVisible:false,
     curSpeed:0,
     lastPosY:null,
-    autoStarted:false      // NEW: will auto-enter roam once ghost exists
+    autoStarted:false
   };
 
   const API = {
-    __v:'1.8',
+    __v:'1.9',
     init, startInvestigation, randomizeGhost,
     beginHunt, endHunt, triggerEvent,
     teleportGhostToLook, setGhostScale,
@@ -78,14 +76,24 @@
     const btn = document.getElementById('start-button');
     if (btn) btn.addEventListener('click', ()=> startInvestigation());
     window.addEventListener('keydown',(e)=>{ if(e.altKey && (e.code==='KeyG'||e.key==='g'||e.key==='G')) teleportGhostToLook(2.8); });
+    tryAutoGroundTagging();
     ST.ready = true; toast('Ghost ctrl ready');
   }
   const boot = setInterval(()=>{ try{ if (SCENE() && CAMERA()){ clearInterval(boot); init(); } }catch{} }, 150);
 
+  // ---- Auto ground tagging for jailhouse ----
+  function tryAutoGroundTagging(){
+    try{
+      if (typeof window.registerGroundRoots === 'function'){
+        window.registerGroundRoots([/^jailhouse\.w\./i]);
+      }
+    }catch{}
+  }
+
   function startInvestigation(){
     if (!ST.ghostRoot) randomizeGhost();
     setMode('roam'); ST.target = pickRoamTarget();
-    ST.autoStarted = true; // ensure roaming
+    ST.autoStarted = true;
   }
 
   function randomizeGhost(){
@@ -93,7 +101,6 @@
     pickRandomGhostModelOrFallback();
     placeGhostAheadOfCamera(CFG.randomSpawnDist);
     setGhostVisible(devForce());
-    // 45s grace before hunts can start
     ST.nextHuntReadyT = (performance.now()/1000) + 45;
   }
   function pickRandomGhostType(){
@@ -165,11 +172,7 @@
         const stack=[node];
         while (stack.length){
           const n=stack.pop();
-          try {
-            n.metadata = n.metadata || {};
-            n.metadata.isGround = true;
-            n.isPickable = (n.isPickable !== false);
-          } catch {}
+          try { n.metadata = n.metadata || {}; n.metadata.isGround = true; if (n.isPickable !== false) n.isPickable = true; } catch {}
           n.getChildren?.().forEach(ch=> stack.push(ch));
         }
       }
@@ -180,15 +183,16 @@
     if (!m) return false;
     if (m === ST.ghostRoot || m.isDescendantOf?.(ST.ghostRoot)) return false;
     if (m.metadata?.isGround === true) return true;
-    const hitName = (x)=> /(^|\/|_)Madera4\.001/i.test(x || "") || /^Madera/i.test(x || "");
-    if (hitName(m.name) || hitName(m.id)) return true;
-    let p = m.parent;
-    while (p){
-      if (hitName(p.name) || hitName(p.id)) return true;
-      p = p.parent;
-    }
-    const n = (m.name||'') + ' ' + (m.id||'');
-    if (/(^|[^a-z])(floor|ground|terrain|tile|carpet|stairs?|step|hall|room)([^a-z]|$)/i.test(n)) return true;
+
+    // PRIMARY: jailhouse map floor/walls collection
+    const name = (m.name||""); const id = (m.id||"");
+    const jailhouse = /(^|\/|_)jailhouse\.w\./i.test(name) || /(^|\/|_)jailhouse\.w\./i.test(id);
+    if (jailhouse) return true;
+
+    // Secondary: generic floor-like names
+    const n = name + " " + id;
+    if (/(^|[^a-z])(floor|ground|tile|concrete|yard|hall|corridor|cell|block|lobby|entrance|stairs?)([^a-z]|$)/i.test(n)) return true;
+
     return m.isPickable !== false;
   }
   function groundYAtXZ(x, z, approxY){
@@ -288,7 +292,7 @@
     const dur = timeSec || (CFG.blinkMin + Math.random()*(CFG.blinkMax-CFG.blinkMin));
     setGhostVisible(true);
     setTimeout(()=> setGhostVisible(false), dur*1000);
-    tryLightFlickerNear(ST.ghostRoot.position, dur);
+    tryLightFlickerNear(ST.ghostRoot?.position, dur);
   }
 
   function updateSanity(dt){
@@ -305,9 +309,9 @@
   }
   function triggerEvent(type){
     const t=type||'blink';
-    if (t==='blink'){ blinkManifest(); /* play sfx if available */ }
-    else if (t==='flicker'){ tryLightFlickerNear(ST.ghostRoot.position, 0.6 + Math.random()*0.6); }
-    else if (t==='whisper'){ /* optional */ }
+    if (t==='blink'){ blinkManifest(); }
+    else if (t==='flicker'){ tryLightFlickerNear(ST.ghostRoot?.position, 0.6 + Math.random()*0.6); }
+    else if (t==='whisper'){ /* optional sfx */ }
   }
   function tryLightFlickerNear(pos, durSec){
     if (!pos || !ST.s) return;
@@ -408,7 +412,7 @@
     const now=performance.now()/1000, dt=Math.min(0.1, Math.max(0, now-ST.lastUpdateT)); ST.lastUpdateT=now;
     if (!ST.ghostRoot) return;
 
-    // NEW: auto-start roaming once ghost exists if still idle
+    // Auto-start roaming once ghost exists if still idle
     if (!ST.autoStarted && ST.mode === 'idle') {
       setMode('roam');
       ST.target = pickRoamTarget();
