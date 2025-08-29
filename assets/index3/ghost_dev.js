@@ -162,30 +162,29 @@
   function togglePanel(){ (ST.open?closePanel:openPanel)(); }
 
   // ---------- Dev-visible ----------
-  function setDevVisible(on){
-    ST.devVisible = !!on;
-    try{
-      // keep ghost visible while the dev panel is open
-      const root = window.ghostCtrl?.getState?.() && window.ghostCtrl.__v ? window.ghostCtrl : null;
-      if (root){ /* visibility is handled internally in ghost_movement via our panel check */ }
-      // but ensure immediate feedback: reveal all meshes under chosen root
-      const r = window.PREFERRED_GHOST_ROOT;
-      if (r){
-        const stack=[r];
-        while (stack.length){
-          const n=stack.pop();
-          try{
-            if (n.material && typeof n.material.alpha==='number') n.material.alpha = ST.devVisible ? 1 : 0;
-            if ('visibility' in n) n.visibility = ST.devVisible ? 1 : 0;
-            if ('isVisible' in n)  n.isVisible  = !!ST.devVisible;
-          }catch{}
-          n.getChildren?.().forEach(ch=> stack.push(ch));
-        }
+// Replace your setDevVisible() with this:
+function setDevVisible(on){
+  ST.devVisible = !!on;
+  // global override that ghost_movement.js v1.5 honors
+  window.GHOST_DEV_FORCE_VISIBLE = ST.devVisible;
+
+  // immediate visual feedback on the chosen root
+  try{
+    const r = window.PREFERRED_GHOST_ROOT;
+    if (r){
+      const stack=[r];
+      while (stack.length){
+        const n=stack.pop();
+        if (n.material && typeof n.material.alpha==='number') n.material.alpha = ST.devVisible ? 1 : 0;
+        if ('visibility' in n) n.visibility = ST.devVisible ? 1 : 0;
+        if ('isVisible' in n)  n.isVisible  = !!ST.devVisible;
+        n.getChildren?.().forEach(ch=> stack.push(ch));
       }
-    }catch{}
-    ST.visBtn && (ST.visBtn.textContent = ST.devVisible ? 'Visible ✓' : 'Visible');
-  }
-  function toggleDevVisible(){ setDevVisible(!ST.devVisible); }
+    }
+  }catch{}
+  ST.visBtn && (ST.visBtn.textContent = ST.devVisible ? 'Visible ✓' : 'Visible');
+}
+
 
   // ---------- Scale ----------
   function onScaleInput(){

@@ -1,14 +1,17 @@
-// ./assets/index3/ghost_movement.js — v1.4
-// Ghost AI + Events + Sanity + Hunt + Barrier-aware movement + robust teleport + Alt+G hotkey
+// ./assets/index3/ghost_movement.js — v1.5
+// Adds DEV force-visible override (window.GHOST_DEV_FORCE_VISIBLE), so the ghost
+// stays visible while you're testing, regardless of blink/hunt logic.
+
 (function(){
   "use strict";
-  if (window.ghostCtrl && window.ghostCtrl.__v === '1.4') return;
+  if (window.ghostCtrl && window.ghostCtrl.__v === '1.5') return;
 
   const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
   const CAMERA = ()=> window.camera || SCENE()?.activeCamera;
   const toast  = (m,ms=900)=> (window.toast? window.toast(m,ms) : console.log('[ghost]', m));
   const clamp  = (v,min,max)=> Math.max(min, Math.min(max, v));
   const v3     = (x,y,z)=> new BABYLON.Vector3(x,y,z);
+  const devForce = ()=> !!window.GHOST_DEV_FORCE_VISIBLE;
 
   const CFG = {
     roamSpeed: 0.9, huntSpeed: 2.2,
@@ -33,7 +36,7 @@
   };
 
   const API = {
-    __v:'1.4',
+    __v:'1.5',
     init, startInvestigation, randomizeGhost,
     beginHunt, endHunt, triggerEvent,
     teleportGhostToLook, setGhostScale,
@@ -49,12 +52,7 @@
     ST.s.onBeforeRenderObservable.add(_tick);
     const btn = document.getElementById('start-button');
     if (btn) btn.addEventListener('click', ()=> startInvestigation());
-    // Hotkey: Alt+G teleports 2.8m ahead of look
-    window.addEventListener('keydown', (e)=>{
-      if (e.altKey && (e.code==='KeyG' || e.key==='g' || e.key==='G')){
-        teleportGhostToLook(2.8);
-      }
-    });
+    window.addEventListener('keydown',(e)=>{ if(e.altKey && (e.code==='KeyG'||e.key==='g'||e.key==='G')) teleportGhostToLook(2.8); });
     ST.ready = true; toast('Ghost ctrl ready');
   }
   const boot = setInterval(()=>{ try{ if (SCENE() && CAMERA()){ clearInterval(boot); init(); } }catch{} }, 150);
@@ -68,7 +66,8 @@
     pickRandomGhostType();
     pickRandomGhostModelOrFallback();
     placeGhostAheadOfCamera(CFG.randomSpawnDist);
-    setGhostVisible(false);
+    // honor forced visibility
+    setGhostVisible(!devForce() ? false : true);
   }
 
   function pickRandomGhostType(){
@@ -131,7 +130,7 @@
     ST.ghostRoot.position.copyFrom(p);
   }
 
-  // -------- TELEPORT (robust) --------
+  // TELEPORT
   function teleportGhostToLook(distance){
     const d = isFinite(+distance) ? +distance : 2.8;
     ST.s = SCENE(); ST.c = CAMERA();
@@ -148,7 +147,6 @@
       if (/sky|skybox/i.test(name)) return false;
       return m.isPickable !== false;
     };
-
     let target = null;
     const hit = s.pickWithRay(fRay, pickable, false);
     if (hit?.hit && hit.pickedPoint){
@@ -156,7 +154,6 @@
     } else {
       target = c.position.add(fRay.direction.scale(d));
     }
-
     const down = new BABYLON.Ray(target.add(v3(0,6,0)), v3(0,-1,0), 60);
     const gHit = s.pickWithRay(down, pickable, false);
     if (gHit?.hit && gHit.pickedPoint) target = gHit.pickedPoint;
@@ -164,18 +161,18 @@
     root.position.copyFrom(target);
     try{ root.rotationQuaternion = null; root.rotation.y = Math.atan2(fRay.direction.x, fRay.direction.z); }catch{}
 
+    // keep visible if forced
+    if (devForce()) setGhostVisible(true);
+
     toast(`Ghost teleported → ${target.x.toFixed(2)}, ${target.y.toFixed(2)}, ${target.z.toFixed(2)}`);
   }
-  // global aliases for buttons/console
   window.teleportGhostToLook = teleportGhostToLook;
   window.teleportGhost       = teleportGhostToLook;
   window.teleportGhostAhead  = (d)=> placeGhostAheadOfCamera(d || CFG.randomSpawnDist);
 
-  // -------- visibility / blink / events / sanity / hunt (unchanged from v1.3) --------
+  // VISIBILITY (respects force-visible)
   function setGhostVisible(on){
-    try{
-      if (window.GHOST_DEV && document.querySelector('#ghostdev-panel')?.style.display !== 'none'){ /* let dev tool manage */ }
-    }catch{}
+    if (devForce()) on = true;  // override: never allow hiding when forced
     const setNode=(node,vis)=>{
       if (!node) return;
       if (node.material && typeof node.material.alpha === 'number') node.material.alpha = vis ? 1 : 0.0;
@@ -187,11 +184,15 @@
       while (stack.length){ const n=stack.pop(); setNode(n,on); n.getChildren?.().forEach(ch=> stack.push(ch)); }
     }
   }
+
+  // BLINK (skip entirely when forced visible)
   function blinkManifest(timeSec){
+    if (devForce()) return; // don’t flicker when you asked to see it
     const dur = timeSec || (CFG.blinkMin + Math.random()*(CFG.blinkMax-CFG.blinkMin));
     setGhostVisible(true); setTimeout(()=> setGhostVisible(false), dur*1000);
     tryLightFlickerNear(ST.ghostRoot.position, dur);
   }
+
   function updateSanity(dt){
     ST.sanity -= (CFG.sanityDrainPerMin/60)*dt;
     const g=ST.ghostRoot?.position, p=ST.c?.position;
@@ -204,6 +205,7 @@
     const el = document.getElementById('hud-sanity'); if (el) el.textContent = `${Math.round(ST.sanity)}%`;
     const huntEl = document.getElementById('hud-hunt-state'); if (huntEl) huntEl.textContent = ST.mode==='hunt' ? 'HUNTING' : (ST.mode==='cooldown'?'Cooling':'Calm');
   }
+
   function triggerEvent(type){
     const t=type||'blink';
     if (t==='blink'){ blinkManifest(); playOneOf(['spook1','spook2','whisper1','whisper2']); }
@@ -216,6 +218,7 @@
       for (let i=0;i<keys.length;i++){ const a=document.getElementById(keys[i]); if (a){ a.currentTime=0; a.play().catch(()=>{}); return; } }
     }catch{}
   }
+
   function tryLightFlickerNear(pos, durSec){
     if (!pos || !ST.s) return;
     if (!ST.lightCache.length) ST.lightCache = (ST.s.lights||[]).slice();
@@ -227,6 +230,7 @@
     const id = setInterval(()=>{ lights.forEach(L=> L.intensity = saved.find(x=>x.L===L).intensity*(0.85+Math.random()*CFG.lightFlickerFactor)); },40);
     setTimeout(()=>{ clearInterval(id); saved.forEach(x=> x.L.intensity=x.intensity); }, durSec*1000);
   }
+
   function beginHunt(){
     if (!ST.ghostRoot) return;
     const now=performance.now()/1000; if (now < ST.nextHuntReadyT) return;
@@ -234,7 +238,8 @@
   }
   function endHunt(){
     if (!ST.ghostRoot) return;
-    setMode('cooldown'); setGhostVisible(false);
+    setMode('cooldown');
+    setGhostVisible(false); // harmless if devForce() is true
     const now=performance.now()/1000;
     ST.nextHuntReadyT = now + (CFG.minHuntCooldown + Math.random()*(CFG.maxHuntCooldown-CFG.minHuntCooldown));
   }
@@ -243,6 +248,7 @@
     const el=document.getElementById('hud-hunt-state');
     if (el) el.textContent = (m==='hunt'?'HUNTING':(m==='cooldown'?'Cooling':'Calm'));
   }
+
   function isSegmentBlocked(a,b){
     try{
       if (typeof window.ghostDev_isBlockedRay === 'function') return !!window.ghostDev_isBlockedRay(a,b);
@@ -279,14 +285,33 @@
     return ST.ghostRoot?.position.clone()||v3(0,0,0);
   }
   function pursuePlayerTarget(){ const p=ST.c?.position; return p ? p.clone() : (ST.ghostRoot?.position.clone()||null); }
+
   function _tick(){
     const now=performance.now()/1000, dt=Math.min(0.1, Math.max(0, now-ST.lastUpdateT)); ST.lastUpdateT=now;
     if (!ST.ghostRoot) return;
+
     updateSanity(dt);
-    if (now-ST.lastEventT>CFG.eventCooldown){ ST.lastEventT=now; if (Math.random()<CFG.eventChance) triggerEvent(['blink','flicker','whisper'][(Math.random()*3)|0]); }
-    if (ST.mode!=='hunt' && ST.sanity<=CFG.huntSanityThreshold && now>=ST.nextHuntReadyT){ if (Math.random()<0.12) beginHunt(); }
-    if (ST.mode==='roam'){ if (!ST.target || BABYLON.Vector3.Distance(ST.ghostRoot.position,ST.target)<=CFG.roamTargetRadius){ ST.target=pickRoamTarget(); } moveToward(ST.target, CFG.roamSpeed, dt); }
-    else if (ST.mode==='hunt'){ const t=pursuePlayerTarget(); if (t) moveToward(t, CFG.huntSpeed, dt); if (Math.random()<0.03) blinkManifest(0.12+Math.random()*0.18); if (ST.sanity<=0) endHunt(); }
-    else if (ST.mode==='cooldown'){ if (!ST.target || BABYLON.Vector3.Distance(ST.ghostRoot.position,ST.target)<=CFG.roamTargetRadius){ ST.target=pickRoamTarget(); } moveToward(ST.target, CFG.roamSpeed*0.6, dt); if (now>=ST.nextHuntReadyT - CFG.minHuntCooldown*0.5) setMode('roam'); }
+
+    if (now-ST.lastEventT>CFG.eventCooldown){
+      ST.lastEventT=now;
+      if (Math.random()<CFG.eventChance) triggerEvent(['blink','flicker','whisper'][(Math.random()*3)|0]);
+    }
+
+    if (ST.mode!=='hunt' && ST.sanity<=CFG.huntSanityThreshold && now>=ST.nextHuntReadyT){
+      if (Math.random()<0.12) beginHunt();
+    }
+
+    if (ST.mode==='roam'){
+      if (!ST.target || BABYLON.Vector3.Distance(ST.ghostRoot.position,ST.target)<=CFG.roamTargetRadius){ ST.target=pickRoamTarget(); }
+      moveToward(ST.target, CFG.roamSpeed, dt);
+    } else if (ST.mode==='hunt'){
+      const t=pursuePlayerTarget(); if (t) moveToward(t, CFG.huntSpeed, dt);
+      if (!devForce() && Math.random()<0.03) blinkManifest(0.12+Math.random()*0.18);
+      if (ST.sanity<=0) endHunt();
+    } else if (ST.mode==='cooldown'){
+      if (!ST.target || BABYLON.Vector3.Distance(ST.ghostRoot.position,ST.target)<=CFG.roamTargetRadius){ ST.target=pickRoamTarget(); }
+      moveToward(ST.target, CFG.roamSpeed*0.6, dt);
+      if (now>=ST.nextHuntReadyT - CFG.minHuntCooldown*0.5) setMode('roam');
+    }
   }
 })();
