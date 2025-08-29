@@ -8,7 +8,7 @@
   <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
   <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
 
-  <!-- Babylon core + loaders -->
+  <!-- Babylon core + loaders (local to repo) -->
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
@@ -16,10 +16,8 @@
   <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
- 
-  <script src="./assets/index3/doors.js"></script>
 
-  <!-- Optional: room names -->
+  <!-- Optional: room names (unchanged) -->
   <script src="./rooms.js"></script>
 
   <style>
@@ -86,6 +84,7 @@
 
     /* Belt */
     #belt{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+
     .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
     .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
     .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
@@ -98,6 +97,15 @@
 
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+    /* Thermometer HUD (left edge, shown only when holding) */
+    #thermo-hud{
+      position:fixed; left:10px; top:50%; transform:translateY(-50%);
+      display:none; z-index:6500; padding:8px 10px; border:1px solid #066; border-radius:8px;
+      background:rgba(0,0,0,0.55); color:#9ff; min-width:120px;
+    }
+    #thermo-hud .t-row{ display:flex; align-items:center; gap:8px; }
+    #thermo-icon{ width:20px; height:20px; object-fit:contain; image-rendering:crisp-edges; }
   </style>
 </head>
 
@@ -114,9 +122,8 @@
   <div id="title-screen">
     <div id="title-content">
       <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-      <div style="margin:8px 0 16px; color:#9ff;">“Hello, welcome to my rendition of phasmaphobia, <font color="blue">'not complete'</font>”</div>
-     <button id="start-button" type="button" onclick="safeStart()">Start Investigation</button>
-
+      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <button id="start-button">Start Investigation</button>
     </div>
   </div>
 
@@ -137,8 +144,16 @@
     <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
   </div>
 
+  <!-- Thermometer HUD (only visible when holding the thermometer) -->
+  <div id="thermo-hud">
+    <div class="t-row">
+      <img id="thermo-icon" src="./assets/icons/thermometer.png" alt="">
+      <div><span id="thermo-value">--.-</span>°C</div>
+    </div>
+  </div>
+
   <!-- Storage -->
-  <button id="storage-button">Van</button>
+  <button id="storage-button">STORAGE</button>
   <div id="storage-modal">
     <div id="storage-card">
       <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -190,8 +205,7 @@
 
   <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
   <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:480px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
-    <!-- (Dev tools body preserved; the JS wiring lives in devtools.js) -->
-    <!-- Keeping inner markup unchanged -->
+    <!-- Dev tools body preserved; JS wiring lives in devtools.js -->
   </div>
 
   <div id="hand-preview"></div>
@@ -204,54 +218,131 @@
   </div>
   <div id="toast"></div>
 
-<!-- Ordered scripts (non-module to keep your original globals/flow) -->
-<script src="./assets/index3/core.js"></script>
-<script src="./assets/index3/utils.js"></script>
+  <!-- Ordered scripts (non-module to keep your original globals/flow) -->
+  <script src="./assets/index3/core.js"></script>
+  <script src="./assets/index3/utils.js"></script>
 
-<!-- Reticle -->
-<script>
-  window.RETICLE_OPTS = { style: "circle-dot", size: 22, color: "#9ff", hitColor: "#0f0" };
-</script>
-<script src="./assets/index3/reticle.js?v=1"></script>
+  <!-- Reticle -->
+  <script>
+    window.RETICLE_OPTS = { style: "circle-dot", size: 22, color: "#9ff", hitColor: "#0f0" };
+  </script>
+  <script src="./assets/index3/reticle.js?v=1"></script>
 
-<!-- Input & UI -->
-<script src="./assets/index3/ui_input.js?v=1"></script>
+  <!-- Input & UI -->
+  <script src="./assets/index3/ui_input.js?v=1"></script>
 
-<!-- ❌ REMOVE the legacy ghost runtime -->
-<!-- <script src="./assets/index3/ghost.js?v=1"></script> -->
+  <!-- icons + items -->
+  <script src="./assets/index3/icons.js?v=1"></script>
+  <script src="./assets/index3/video_feed.js?v=1.0"></script>
+  <script src="./assets/index3/items_models_exploration.js?v=1.0"></script>
+  <script src="./assets/index3/items.js?v=2.0"></script>
 
-<!-- Keep your registry/glue (they’ll bind to window.ghostCtrl from ghost_movement) -->
-<script src="./assets/index3/ghost_glue.js?v=1"></script>
-<script src="./assets/index3/ghost_data.js?v=1"></script>
+  <!-- atmosphere / world -->
+  <script src="./assets/index3/atmosphere.js?v=1"></script>
 
-<!-- icons + items -->
-<script src="./assets/index3/icons.js?v=1"></script>
-<script src="./assets/index3/items.js?v=1"></script>
+  <!-- Weather config FIRST, then weather engine -->
+  <script>
+    // Map SFX names used by the weather engine
+    // ambient.mp3 is only for Clear; Rainstorm/Snow use their own files
+    window.WEATHER_AUDIO_MAP = {
+      thunder: ['thunder.mp3'] // ./assets/audio/thunder.mp3
+      // If you named your weather files differently, you can also add:
+      // rain: ['rainstorm.mp3'],
+      // snow: ['snow.mp3']
+    };
+  </script>
+  <script src="./assets/index3/weather.js?v=1"></script>
 
-<!-- atmosphere / world -->
-<script src="./assets/index3/atmosphere.js?v=1"></script>
-<script>
-  // Force thunder to use your file
-  window.WEATHER_AUDIO_MAP = { thunder: ['thunder.mp3'] };
-</script>
-<script src="./assets/index3/weather.js?v=1"></script>
-<script src="./assets/index3/temperature.js?v=1"></script>
-<script src="./assets/index3/moon.js?v=1"></script>
-<script src="./assets/index3/lights.js?v=1"></script>
-<script src="./assets/index3/map.js?v=1"></script>
+  <script src="./assets/index3/temperature.js?v=1"></script>
+  <script src="./assets/index3/moon.js?v=1"></script>
+  <script src="./assets/index3/lights.js?v=1"></script>
+  <script src="./assets/index3/map.js?v=1"></script>
 
-<!-- devtools before ghost_movement so dev-picked model is respected -->
-<script src="./assets/index3/devtools.js?v=7.4.0"></script>
-<script src="./assets/index3/ghost_dev.js?v=1.4"></script>
+  <!-- DevTools (prevent auto-open unless Alt+T or ?dev=1) -->
+  <script>window.DEVTOOLS_AUTO_OPEN = false;</script>
+  <script src="./assets/index3/devtools.js?v=7.4.0"></script>
+  <!-- Hard guard against auto-open -->
+  <script>
+    (function(){
+      const css = document.createElement('style');
+      css.id = 'devtools-startup-hide';
+      css.textContent = `#dev-gate, #devtools-panel { display:none !important; visibility:hidden !important; }`;
+      document.head.appendChild(css);
+      const hide = ()=> {
+        const a=document.getElementById('dev-gate'), b=document.getElementById('devtools-panel');
+        if (a){ a.style.display='none'; a.style.visibility='hidden'; }
+        if (b){ b.style.display='none'; b.style.visibility='hidden'; }
+      };
+      const sweep = setInterval(hide, 60); setTimeout(()=>clearInterval(sweep), 2000);
+      const allow=()=>{ const s=document.getElementById('devtools-startup-hide'); if (s) s.remove(); };
+      const btn=document.getElementById('devtools-toggle'); if (btn) btn.addEventListener('click', allow, {capture:true, once:true});
+      window.addEventListener('keydown', (e)=>{ if (e.altKey && (e.code==='KeyT'||e.key==='t'||e.key==='T')) allow(); }, {capture:true});
+      if (/[?#](dev|devtools)=1/i.test(location.href)) allow();
+      const mo=new MutationObserver(()=>{ if (document.getElementById('devtools-startup-hide')) hide(); else mo.disconnect(); });
+      mo.observe(document.documentElement, { attributes:true, childList:true, subtree:true });
+    })();
+  </script>
 
-<!-- The only ghost runtime -->
-<script src="./assets/index3/ghost_movement.js?v=1.5"></script>
+  <!-- Ghost Dev panel -->
+  <script src="./assets/index3/ghost_dev.js?v=1.4"></script>
 
-<!-- Optional: ghost cam reads ghostCtrl after movement is up -->
-<script src="./assets/index3/ghost_cam.js?v=1.0"></script>
+  <!-- The only ghost runtime -->
+  <script src="./assets/index3/ghost_movement.js?v=1.7"></script>
 
-<!-- main last -->
-<script src="./assets/index3/main.js?v=1"></script>
+  <!-- Keep your registry/glue AFTER the runtime so they bind immediately -->
+  <script src="./assets/index3/ghost_glue.js?v=1"></script>
+  <script src="./assets/index3/ghost_data.js?v=1"></script>
 
+  <!-- Ghost camera (PIP) -->
+  <script src="./assets/index3/ghost_cam.js?v=1.0"></script>
+
+  <!-- Post-load helpers -->
+  <script>
+    // Attach live video feed to the board mesh once available
+    (function spawnFeedOnPizarra(){
+      const id = setInterval(()=>{
+        const s = window.scene;
+        if (!s || !window.VideoFeed) return;
+        const m = s.getMeshByName('Pizarra_Pizarra_0');
+        if (!m) return; // wait for GLB
+        clearInterval(id);
+
+        VideoFeed.setActive(true);
+        VideoFeed.setLight(true, 0.8); // small camera light
+
+        let mat = m.material;
+        const isPBR = mat && mat.getClassName && /PBR/i.test(mat.getClassName());
+        const tex = VideoFeed.getTexture();
+
+        if (isPBR){
+          mat.emissiveTexture = tex;
+          mat.emissiveColor = new BABYLON.Color3(1,1,1);
+          try { mat.unlit = true; } catch {}
+        } else {
+          if (!(mat instanceof BABYLON.StandardMaterial)) {
+            mat = new BABYLON.StandardMaterial('PizarraVideoMat', s);
+            m.material = mat;
+          }
+          mat.disableLighting = true;
+          mat.emissiveTexture = tex;
+          mat.emissiveColor = new BABYLON.Color3(1,1,1);
+          mat.backFaceCulling = false;
+        }
+      }, 120);
+    })();
+
+    // Tag floors related to “Madera4.001” as ground so the ghost hugs them
+    (function tagMaderaFloors(){
+      const id = setInterval(()=>{
+        if (window.registerGroundRoots && window.scene && scene.meshes?.length){
+          clearInterval(id);
+          registerGroundRoots(['Madera4.001', /^Madera/i]);
+        }
+      }, 200);
+    })();
+  </script>
+
+  <!-- main last -->
+  <script src="./assets/index3/main.js?v=1"></script>
 </body>
 </html>
