@@ -1,9 +1,9 @@
 git add .
 
 REM === Commit the restructuring ===
-git commit -m "Restructure project into organized folders: assets, scripts, models, audio"
+git commit -m "getting ready to push"
 
 echo Done. Push with: git push origin main
 pause
-git push origin main
+git push origin main:3d
 pause
