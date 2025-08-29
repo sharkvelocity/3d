@@ -1,12 +1,13 @@
-// ./assets/index3/ghost_movement.js — v1.6
-// - Ghost is NOT an obstacle when invisible (collisions off)
-// - Ghost never kills unless mode === 'hunt' (events/roam/cooldown are safe)
-// - Collisions only on when hunting AND visible
-// - Keeps DEV force-visible flag (window.GHOST_DEV_FORCE_VISIBLE) from v1.5
+// ./assets/index3/ghost_movement.js — v1.8
+// + Ground follow (raycast snap), step-up/down smoothing
+// + Faster roam + acceleration so movement is immediate
+// + Auto-start roaming even if Start button not clicked
+// + 45s hunt grace right after spawn
+// + Keeps: dev force-visible, barriers, non-blocking when invisible, hunt-only kills
 
 (function(){
   "use strict";
-  if (window.ghostCtrl && window.ghostCtrl.__v === '1.6') return;
+  if (window.ghostCtrl && window.ghostCtrl.__v === '1.8') return;
 
   const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
   const CAMERA = ()=> window.camera || SCENE()?.activeCamera;
@@ -16,19 +17,35 @@
   const devForce = ()=> !!window.GHOST_DEV_FORCE_VISIBLE;
 
   const CFG = {
-    roamSpeed: 0.9, huntSpeed: 2.2,
+    // movement
+    roamSpeed: 1.5,
+    huntSpeed: 2.6,
+    accelRate: 6.0,          // m/s^2 toward target speed
+    steerAngles: [15,-15,30,-30,45,-45,60,-60,90,-90,120,-120,150,-150,180],
+    barrierLookahead: 1.6,
+
+    // visibility / events / sanity
     blinkMin: 0.10, blinkMax: 0.28,
     eventCooldown: 7.5, eventChance: 0.35,
     roamTargetRadius: 6.0, playerScareRadius: 6.5,
     sanityDrainPerMin: 2.5, sanityDrainProximity: 9, sanityDrainHunt: 22,
     minHuntCooldown: 35, maxHuntCooldown: 75, huntSanityThreshold: 50,
-    barrierLookahead: 1.6, steerAngles: [15,-15,30,-30,45,-45,60,-60,90,-90,120,-120,150,-150,180],
     lightFlickerRadius: 10, lightFlickerFactor: 0.35,
     randomSpawnDist: 8,
-    killRadius: 1.25 // meters (2D) – only during hunt
+    killRadius: 1.25,
+
+    // ground follow
+    groundFollow: true,
+    groundRayUp: 3.0,
+    groundRayDown: 8.0,
+    footOffset: 0.02,
+    maxStepUp: 0.60,
+    maxStepDown: 0.80,
+    groundSnapLerp: 14.0
   };
 
   const ST = {
+    __v:'1.8',
     ready:false, s:null, c:null,
     ghostRoot:null, modelName:null, ghostTypeKey:null,
     defaultVisibility:0, scale:1,
@@ -36,11 +53,14 @@
     lastEventT:0, nextHuntReadyT:0,
     sanity:100, lastUpdateT:performance.now()/1000,
     lightCache:[],
-    isVisible:false // runtime flag
+    isVisible:false,
+    curSpeed:0,
+    lastPosY:null,
+    autoStarted:false      // NEW: will auto-enter roam once ghost exists
   };
 
   const API = {
-    __v:'1.6',
+    __v:'1.8',
     init, startInvestigation, randomizeGhost,
     beginHunt, endHunt, triggerEvent,
     teleportGhostToLook, setGhostScale,
@@ -65,15 +85,17 @@
   function startInvestigation(){
     if (!ST.ghostRoot) randomizeGhost();
     setMode('roam'); ST.target = pickRoamTarget();
+    ST.autoStarted = true; // ensure roaming
   }
 
   function randomizeGhost(){
     pickRandomGhostType();
     pickRandomGhostModelOrFallback();
     placeGhostAheadOfCamera(CFG.randomSpawnDist);
-    setGhostVisible(devForce()); // if dev forced, show; else invisible by default
+    setGhostVisible(devForce());
+    // 45s grace before hunts can start
+    ST.nextHuntReadyT = (performance.now()/1000) + 45;
   }
-
   function pickRandomGhostType(){
     try{
       const keys = Object.keys(window.GHOSTS||{});
@@ -81,7 +103,6 @@
       window.currentGhostKey = ST.ghostTypeKey;
     }catch{ ST.ghostTypeKey = 'Spirit'; }
   }
-
   function pickRandomGhostModelOrFallback(){
     if (window.PREFERRED_GHOST_ROOT && !window.PREFERRED_GHOST_ROOT.isDisposed?.()){
       ST.ghostRoot = window.PREFERRED_GHOST_ROOT;
@@ -123,32 +144,101 @@
     if (ST.ghostRoot) ST.ghostRoot.scaling.set(ST.scale, ST.scale, ST.scale);
     try{ ST.ghostRoot.metadata = ST.ghostRoot.metadata||{}; ST.ghostRoot.metadata.ghostScale = ST.scale; }catch{}
   }
-  function placeGhostAheadOfCamera(dist){
-    const c = CAMERA(), s = SCENE(); if (!c || !s){ return; }
-    if (!ST.ghostRoot) randomizeGhost(); if (!ST.ghostRoot) return;
-    const ray = c.getForwardRay(50);
-    let p = c.position.add(ray.direction.scale(dist||CFG.randomSpawnDist));
-    const down = new BABYLON.Ray(p.add(v3(0,6,0)), v3(0,-1,0), 60);
-    const hit  = s.pickWithRay(down, m=> m && m.isPickable !== false);
-    if (hit?.hit) p = hit.pickedPoint;
-    ST.ghostRoot.position.copyFrom(p);
+
+  // ---- Ground tagging helpers ----
+  (function(){
+    window.registerGroundRoots = window.registerGroundRoots || function registerGroundRoots(namesOrRegex){
+      const s = window.scene; if (!s) return;
+      const list = Array.isArray(namesOrRegex) ? namesOrRegex : [namesOrRegex];
+      const isHit = (m)=> list.some(p=>{
+        if (p instanceof RegExp) return p.test(m.name || "");
+        return (m.name||"") === String(p) || (m.name||"").startsWith(String(p));
+      });
+      s.meshes.forEach(m=>{
+        if (isHit(m)){ tagTree(m); }
+        else {
+          let p=m.parent;
+          while (p){ if (isHit(p)){ tagTree(m); break; } p=p.parent; }
+        }
+      });
+      function tagTree(node){
+        const stack=[node];
+        while (stack.length){
+          const n=stack.pop();
+          try {
+            n.metadata = n.metadata || {};
+            n.metadata.isGround = true;
+            n.isPickable = (n.isPickable !== false);
+          } catch {}
+          n.getChildren?.().forEach(ch=> stack.push(ch));
+        }
+      }
+    };
+  })();
+
+  function isGroundMesh(m){
+    if (!m) return false;
+    if (m === ST.ghostRoot || m.isDescendantOf?.(ST.ghostRoot)) return false;
+    if (m.metadata?.isGround === true) return true;
+    const hitName = (x)=> /(^|\/|_)Madera4\.001/i.test(x || "") || /^Madera/i.test(x || "");
+    if (hitName(m.name) || hitName(m.id)) return true;
+    let p = m.parent;
+    while (p){
+      if (hitName(p.name) || hitName(p.id)) return true;
+      p = p.parent;
+    }
+    const n = (m.name||'') + ' ' + (m.id||'');
+    if (/(^|[^a-z])(floor|ground|terrain|tile|carpet|stairs?|step|hall|room)([^a-z]|$)/i.test(n)) return true;
+    return m.isPickable !== false;
+  }
+  function groundYAtXZ(x, z, approxY){
+    const s = ST.s || SCENE(); if (!s) return null;
+    const from = new BABYLON.Vector3(x, (approxY ?? 2) + CFG.groundRayUp, z);
+    const ray  = new BABYLON.Ray(from, v3(0,-1,0), CFG.groundRayUp + CFG.groundRayDown);
+    const hit  = s.pickWithRay(ray, isGroundMesh, false);
+    return (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.y : null;
+  }
+  function snapY(pos, dt){
+    if (!CFG.groundFollow) return;
+    const gy = groundYAtXZ(pos.x, pos.z, ST.lastPosY ?? pos.y);
+    if (gy == null) return;
+    const targetY = gy + CFG.footOffset;
+    const maxUp   = CFG.maxStepUp;
+    const maxDown = CFG.maxStepDown;
+    let y = ST.lastPosY ?? pos.y;
+    const dy = targetY - y;
+    const maxStepPerFrameUp   = maxUp   * dt * 8;
+    const maxStepPerFrameDown = maxDown * dt * 8;
+    if (dy > 0)      y += Math.min(dy, maxStepPerFrameUp);
+    else if (dy < 0) y += Math.max(dy, -maxStepPerFrameDown);
+    const k = clamp(dt * CFG.groundSnapLerp, 0, 1);
+    y = y + (targetY - y) * k;
+    pos.y = y;
+    ST.lastPosY = y;
   }
 
-  // ---- TELEPORT ----
+  function placeGhostAheadOfCamera(dist){
+    const c = CAMERA(), s = SCENE(); if (!c || !s){ return; }
+    if (!ST.ghostRoot) pickRandomGhostModelOrFallback();
+    if (!ST.ghostRoot) return;
+    const ray = c.getForwardRay(50);
+    let p = c.position.add(ray.direction.scale(dist||CFG.randomSpawnDist));
+    const gy = groundYAtXZ(p.x, p.z, p.y);
+    p.y = (gy != null ? gy + CFG.footOffset : p.y);
+    ST.ghostRoot.position.copyFrom(p);
+  }
   function teleportGhostToLook(distance){
     const d = isFinite(+distance) ? +distance : 2.8;
     ST.s = SCENE(); ST.c = CAMERA();
     const s = ST.s, c = ST.c;
-    if (!s || !c) { toast('teleport: scene/camera not ready'); return; }
-    if (!ST.ghostRoot){ randomizeGhost(); if (!ST.ghostRoot){ toast('teleport: no ghost'); return; } }
-
+    if (!s || !c) { console.log('teleport: scene/camera not ready'); return; }
+    if (!ST.ghostRoot){ randomizeGhost(); if (!ST.ghostRoot){ console.log('teleport: no ghost'); return; } }
     const root = ST.ghostRoot;
     const fRay = c.getForwardRay(60);
     const pickable = (m)=>{
       if (!m) return false;
       if (m === root || m.isDescendantOf?.(root)) return false;
-      const name = m.name || "";
-      if (/sky|skybox/i.test(name)) return false;
+      if (/sky|skybox/i.test(m.name||"")) return false;
       return m.isPickable !== false;
     };
     let target = null;
@@ -158,38 +248,29 @@
     } else {
       target = c.position.add(fRay.direction.scale(d));
     }
-    const down = new BABYLON.Ray(target.add(v3(0,6,0)), v3(0,-1,0), 60);
-    const gHit = s.pickWithRay(down, pickable, false);
-    if (gHit?.hit && gHit.pickedPoint) target = gHit.pickedPoint;
-
+    const gy = groundYAtXZ(target.x, target.z, target.y);
+    if (gy != null) target.y = gy + CFG.footOffset;
     root.position.copyFrom(target);
     try{ root.rotationQuaternion = null; root.rotation.y = Math.atan2(fRay.direction.x, fRay.direction.z); }catch{}
     if (devForce()) setGhostVisible(true);
-    toast(`Ghost teleported → ${target.x.toFixed(2)}, ${target.y.toFixed(2)}, ${target.z.toFixed(2)}`);
   }
   window.teleportGhostToLook = teleportGhostToLook;
   window.teleportGhost       = teleportGhostToLook;
   window.teleportGhostAhead  = (d)=> placeGhostAheadOfCamera(d || CFG.randomSpawnDist);
 
-  // ---- VISIBILITY + COLLISION CONTROL ----
   function setCollisionsEnabled(enabled){
-    // enable collisions only on hunt+visible; otherwise off
     const want = !!enabled && ST.mode==='hunt';
     const r = ST.ghostRoot; if (!r) return;
     const stack=[r];
     while (stack.length){
       const n=stack.pop();
-      try{
-        if ('checkCollisions' in n) n.checkCollisions = want;
-      }catch{}
+      try{ if ('checkCollisions' in n) n.checkCollisions = want; }catch{}
       n.getChildren?.().forEach(ch=> stack.push(ch));
     }
   }
-
   function setGhostVisible(on){
-    if (devForce()) on = true; // dev override: always show
+    if (devForce()) on = true;
     ST.isVisible = !!on;
-
     const setNode=(node,vis)=>{
       if (!node) return;
       if (node.material && typeof node.material.alpha === 'number') node.material.alpha = vis ? 1 : 0.0;
@@ -200,11 +281,8 @@
       const stack=[ST.ghostRoot];
       while (stack.length){ const n=stack.pop(); setNode(n,on); n.getChildren?.().forEach(ch=> stack.push(ch)); }
     }
-    // collisions reflect new visibility (only blocking when hunting + visible)
     setCollisionsEnabled(ST.isVisible);
   }
-
-  // BLINK (skip when forced visible)
   function blinkManifest(timeSec){
     if (devForce()) return;
     const dur = timeSec || (CFG.blinkMin + Math.random()*(CFG.blinkMax-CFG.blinkMin));
@@ -213,7 +291,6 @@
     tryLightFlickerNear(ST.ghostRoot.position, dur);
   }
 
-  // ---- SANITY / EVENTS ----
   function updateSanity(dt){
     ST.sanity -= (CFG.sanityDrainPerMin/60)*dt;
     const g=ST.ghostRoot?.position, p=ST.c?.position;
@@ -223,23 +300,15 @@
     }
     if (ST.mode==='hunt') ST.sanity -= (CFG.sanityDrainHunt/60)*dt;
     ST.sanity = clamp(ST.sanity,0,100);
-    const el = document.getElementById('hud-sanity'); if (el) el.textContent = `${Math.round(ST.sanity)}%`;
+    const el = document.getElementById('hud-sanity'); if (el) el.textContent = `${Math.round(ST.sanity)}%`
     const huntEl = document.getElementById('hud-hunt-state'); if (huntEl) huntEl.textContent = ST.mode==='hunt' ? 'HUNTING' : (ST.mode==='cooldown'?'Cooling':'Calm');
   }
-
   function triggerEvent(type){
     const t=type||'blink';
-    if (t==='blink'){ blinkManifest(); playOneOf(['spook1','spook2','whisper1','whisper2']); }
-    else if (t==='flicker'){ tryLightFlickerNear(ST.ghostRoot.position, 0.6 + Math.random()*0.6); playOneOf(['lightbuzz1','lightbuzz2']); }
-    else if (t==='whisper'){ playOneOf(['whisper1','whisper2','breath1']); }
+    if (t==='blink'){ blinkManifest(); /* play sfx if available */ }
+    else if (t==='flicker'){ tryLightFlickerNear(ST.ghostRoot.position, 0.6 + Math.random()*0.6); }
+    else if (t==='whisper'){ /* optional */ }
   }
-  function playOneOf(keys){
-    try{
-      if (window.playSfx){ return window.playSfx(keys[(Math.random()*keys.length)|0]); }
-      for (let i=0;i<keys.length;i++){ const a=document.getElementById(keys[i]); if (a){ a.currentTime=0; a.play().catch(()=>{}); return; } }
-    }catch{}
-  }
-
   function tryLightFlickerNear(pos, durSec){
     if (!pos || !ST.s) return;
     if (!ST.lightCache.length) ST.lightCache = (ST.s.lights||[]).slice();
@@ -252,50 +321,40 @@
     setTimeout(()=>{ clearInterval(id); saved.forEach(x=> x.L.intensity=x.intensity); }, durSec*1000);
   }
 
-  // ---- HUNTS / KILL LOGIC ----
   function beginHunt(){
     if (!ST.ghostRoot) return;
     const now=performance.now()/1000; if (now < ST.nextHuntReadyT) return;
     setMode('hunt');
-    // visible or not? it can flicker during hunt; we don't force here
-    blinkManifest(0.4 + Math.random()*0.4); // pop-in briefly
-    // collisions reflect current vis (if dev forced invisibility off, still only block when visible)
+    blinkManifest(0.4 + Math.random()*0.4);
     setCollisionsEnabled(ST.isVisible);
   }
   function endHunt(){
     if (!ST.ghostRoot) return;
     setMode('cooldown');
-    setGhostVisible(false); // harmless if devForce()==true (we’ll show, but collisions still off)
+    setGhostVisible(false);
     const now=performance.now()/1000;
     ST.nextHuntReadyT = now + (CFG.minHuntCooldown + Math.random()*(CFG.maxHuntCooldown-CFG.minHuntCooldown));
   }
-
   function setMode(m){
     ST.mode=m;
     const el=document.getElementById('hud-hunt-state');
     if (el) el.textContent = (m==='hunt'?'HUNTING':(m==='cooldown'?'Cooling':'Calm'));
-    // whenever mode changes, recompute collisions (only hunt+visible blocks)
     setCollisionsEnabled(ST.isVisible);
   }
-
   function canKillPlayer(){
-    // Only during hunt; never during roam/events/cooldown
     if (ST.mode !== 'hunt') return false;
     const g = ST.ghostRoot?.position, p = ST.c?.position; if (!g || !p) return false;
     const dx=g.x-p.x, dz=g.z-p.z, dist=Math.sqrt(dx*dx+dz*dz);
     if (dist > CFG.killRadius) return false;
-    // respect ghost barriers: if blocked -> no kill
     if (isSegmentBlocked(g, p)) return false;
     return true;
   }
   function performKill(){
     try{ window.onPlayerKilled?.(); }catch{}
-    playOneOf(['gameKilled']);
-    toast('You died.', 1800);
+    console.log('You died.');
     endHunt();
   }
 
-  // ---- MOVEMENT / BARRIERS ----
   function isSegmentBlocked(a,b){
     try{
       if (typeof window.ghostDev_isBlockedRay === 'function') return !!window.ghostDev_isBlockedRay(a,b);
@@ -305,11 +364,19 @@
       return !!(hit && hit.hit);
     }catch{ return false; }
   }
-  function moveToward(target, speed, dt){
+
+  function moveToward(target, targetSpeed, dt){
     const g=ST.ghostRoot; if (!g) return;
-    const cur=g.position, to=target.subtract(cur), dist=to.length(); if (dist<0.001) return;
-    let dir=to.scale(1/dist);
-    const aheadA=cur, aheadB=cur.add(dir.scale(CFG.barrierLookahead));
+    const cur=g.position;
+    const to=target.subtract(cur);
+    let dist=to.length();
+    if (dist < 1e-4) { ST.curSpeed = 0; return; }
+    const desired = targetSpeed;
+    if (ST.curSpeed < desired) ST.curSpeed = Math.min(desired, ST.curSpeed + CFG.accelRate*dt);
+    else if (ST.curSpeed > desired) ST.curSpeed = Math.max(desired, ST.curSpeed - CFG.accelRate*dt);
+    let dir = to.scale(1/dist);
+    const aheadA=cur;
+    const aheadB=cur.add(dir.scale(CFG.barrierLookahead));
     if (isSegmentBlocked(aheadA,aheadB)){
       const yaw=Math.atan2(dir.x,dir.z); let steered=null;
       for (const deg of CFG.steerAngles){
@@ -317,11 +384,15 @@
         const b=cur.add(tryDir.scale(CFG.barrierLookahead));
         if (!isSegmentBlocked(cur,b)){ steered=tryDir; break; }
       }
-      if (steered) dir=steered; else return;
+      if (steered) dir=steered; else { ST.curSpeed = 0; return; }
     }
-    const delta=dir.scale(speed*dt); g.position.addInPlace(delta);
+    const step = ST.curSpeed * dt;
+    const next = cur.add(dir.scale(step));
+    snapY(next, dt);
+    g.position.copyFrom(next);
     try{ g.rotationQuaternion=null; g.rotation.y=Math.atan2(dir.x,dir.z); }catch{}
   }
+
   function pickRoamTarget(){
     let min=new BABYLON.Vector3(+Infinity,+Infinity,+Infinity), max=new BABYLON.Vector3(-Infinity,-Infinity,-Infinity);
     ST.s.meshes.forEach(m=>{ try{ const bb=m.getBoundingInfo?.().boundingBox; if (bb){ min=BABYLON.Vector3.Minimize(min,bb.minimumWorld); max=BABYLON.Vector3.Maximize(max,bb.maximumWorld); } }catch{} });
@@ -333,10 +404,16 @@
   }
   function pursuePlayerTarget(){ const p=ST.c?.position; return p ? p.clone() : (ST.ghostRoot?.position.clone()||null); }
 
-  // ---- TICK ----
   function _tick(){
     const now=performance.now()/1000, dt=Math.min(0.1, Math.max(0, now-ST.lastUpdateT)); ST.lastUpdateT=now;
     if (!ST.ghostRoot) return;
+
+    // NEW: auto-start roaming once ghost exists if still idle
+    if (!ST.autoStarted && ST.mode === 'idle') {
+      setMode('roam');
+      ST.target = pickRoamTarget();
+      ST.autoStarted = true;
+    }
 
     updateSanity(dt);
 
@@ -355,7 +432,6 @@
     } else if (ST.mode==='hunt'){
       const t=pursuePlayerTarget(); if (t) moveToward(t, CFG.huntSpeed, dt);
       if (!devForce() && Math.random()<0.03) blinkManifest(0.12+Math.random()*0.18);
-      // kill check (HUNT ONLY)
       if (canKillPlayer()) performKill();
       if (ST.sanity<=0) endHunt();
     } else if (ST.mode==='cooldown'){
