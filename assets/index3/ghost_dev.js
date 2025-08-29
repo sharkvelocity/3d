@@ -1,389 +1,304 @@
-// ./assets/index3/ghost_dev.js — v1.0
-// Standalone Ghost Dev Tools for PhasmaPhoney (Babylon.js)
+// ./assets/index3/ghost_dev.js — v1.2 (GLB picker ready)
+// - Pick & load ghost GLB (ghost1..ghost5 or custom URL)
+// - Exposes window.PREFERRED_GHOST_ROOT / _MODEL_NAME / _SCALE for AI to use
+// - Teleport ahead, Scale, Dev Visible, Barrier editor, Export/Import JSON
 //
-// Features:
-//  - Pick ghost mesh (dropdown + pick under crosshair)
-//  - Teleport ghost ahead of camera (look ray)
-//  - Resize ghost
-//  - Dev Visible toggle (auto-restore visibility when dev mode off)
-//  - Ghost Barrier editor: click to place points, auto-connect segments, grid snap option,
-//    no-clip while editing, export/import JSON (size + barriers)
-//  - Alt+G hotkey opens/closes panel (ignored while typing in inputs)
-//
-// Globals exposed:
-//   window.GHOST_DEV = {
-//     getConfig(), applyConfig(cfg),
-//     setGhostByName(name), setGhostVisibleDev(on),
-//     teleportAhead(dist?),
-//     startBarrierEdit(), finishBarrierEdit(), cancelBarrierEdit(), clearBarriers(),
-//     exportConfigJSON(), importConfigJSONFile(file)
-//   }
-//   window.ghostDev_isBlockedRay(fromVec3, toVec3)  // rough blocker check against barrier meshes
-//
-// Requires: BABYLON, scene, camera
+// Requires: BABYLON, window.scene, window.camera
 
 (function(){
   "use strict";
 
-  // ------------- small DOM helpers -------------
-  const $ = (sel, root=document)=> root.querySelector(sel);
-  const el = (tag, attrs={}, kids=[])=>{
-    const n=document.createElement(tag);
-    for (const k in attrs){
-      if (k==="style") Object.assign(n.style, attrs[k]);
-      else if (k in n) n[k]=attrs[k];
-      else n.setAttribute(k, attrs[k]);
-    }
-    for (const k of kids) n.appendChild(typeof k==="string"?document.createTextNode(k):k);
+  // ----------- Config (you can override BEFORE this file loads) -----------
+  const BASE_URL = (window.GHOST_BASE_URL || "./assets/models/ghosts/");
+  const DEFAULT_LIST = (window.GHOST_MODEL_LIST || [
+    "ghost1.glb",
+    "ghost2.glb",
+    "ghost3.glb",
+    "ghost4.glb",
+    "ghost5.glb",
+  ]);
+
+  // ----------- tiny DOM -----------
+  const $ = (s,r=document)=>r.querySelector(s);
+  const el=(t,a={},k=[])=>{const n=document.createElement(t);
+    for(const p in a){ if(p==="style")Object.assign(n.style,a[p]); else if(p in n)n[p]=a[p]; else n.setAttribute(p,a[p]); }
+    for(const c of k) n.appendChild(typeof c==="string"?document.createTextNode(c):c);
     return n;
   };
-  const btn = (label, onclick)=>{ const b=el('button',{className:'hud-btn'},[label]); if(onclick) b.onclick=onclick; return b; };
-  const input = (type,id,val,attrs={})=>{
-    return el('input',Object.assign({type,id,value:val,style:{padding:'4px',background:'#000',color:'#0ff',border:'1px solid #066',borderRadius:'6px'}},attrs),[]);
-  };
-  const lab = (t)=> el('span',{style:{color:'#9ff',minWidth:'60px',display:'inline-block'}},[t]);
-  const sel = (id, opts)=>{ const s=el('select',{id,style:{padding:'4px',background:'#000',color:'#0ff',border:'1px solid #066',borderRadius:'6px'}},[]);
-    (opts||[]).forEach(([v,t])=> s.appendChild(el('option',{value:v},[t]))); return s; };
+  const btn=(txt,fn)=>{const b=el("button",{className:"hud-btn"},[txt]); if(fn)b.onclick=fn; return b;};
+  const lab=(t)=>el("span",{style:{color:"#9ff",minWidth:"70px",display:"inline-block"}},[t]);
+  const input=(type,id,val,extra={})=>el("input",Object.assign({type,id,value:val,style:{padding:"4px",background:"#000",color:"#0ff",border:"1px solid #066",borderRadius:"6px"}},extra),[]);
+  const sel=(id,opts)=>{const s=el("select",{id,style:{padding:"4px",background:"#000",color:"#0ff",border:"1px solid #066",borderRadius:"6px"}},[]); (opts||[]).forEach(([v,t])=>s.appendChild(el("option",{value:v},[t]))); return s;};
 
-  // ------------- scene refs / utils -------------
-  const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
-  const CAMERA = ()=> window.camera || SCENE()?.activeCamera;
-  const toast  = (m,ms=950)=> (window.toast? window.toast(m,ms): console.log('[ghost-dev]',m));
-  const xyz    = (v)=>({x:+v.x.toFixed(6), y:+v.y.toFixed(6), z:+v.z.toFixed(6)});
-  const v3     = (x,y,z)=> new BABYLON.Vector3(x,y,z);
+  // ----------- scene refs -----------
+  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
+  const CAMERA= ()=> window.camera || SCENE()?.activeCamera;
+  const toast = (m,ms=900)=> (window.toast? window.toast(m,ms):console.log("[ghost-dev]",m));
+  const v3=(x,y,z)=> new BABYLON.Vector3(x,y,z);
+  const xyz=(v)=>({x:+v.x.toFixed(6), y:+v.y.toFixed(6), z:+v.z.toFixed(6)});
 
-  // ------------- state -------------
-  const STATE = {
-    ready: false,
-    ghost: null,                // current ghost mesh/root
-    ghostOrig: { wasVisible: null, visibility: 1 },
-    devVisible: false,
-    scale: 1,
+  // ----------- state -----------
+  const ST = {
+    panel:null, ready:false,
+    ghostRoot:null,     // TransformNode that owns the imported ghost meshes
+    imported:[],        // imported meshes/nodes for cleanup
+    devVisible:false,
+    scale:1,
     // barriers
-    barrierRoot: null,
-    segments: [],               // {start:{x,y,z}, end:{x,y,z}, height, thickness}
-    editing: null,              // { startPoint: Vector3, snapGrid, h, t, prevCamCollide, prevCamGravity }
-    // UI
-    listNames: [],
-    panel: null,
+    barrierRoot:null, segments:[], editing:null
   };
 
-  // ------------- helpers -------------
-  function mapMeshes(){ return SCENE()?.meshes || []; }
-  function buildGhostList(){
-    const names = mapMeshes().map(m=>m.name).filter(Boolean);
-    // Prefer names that look like ghost-ish first
-    const pri = [], rest = [];
-    names.forEach(n=>{
-      if (/ghost|spirit|entity|phantom|demon|thaye|deogen|revenant|shade|oni|yurei|wraith|mimic|poltergeist/i.test(n)) pri.push(n);
-      else rest.push(n);
+  // ----------- helpers -----------
+  function ensurePanel(){
+    if (ST.panel && document.body.contains(ST.panel)) return ST.panel;
+    if (!$('#ghostdev-styles')){
+      document.head.appendChild(el('style',{id:'ghostdev-styles'},[`
+#ghostdev-toggle{ position:fixed; right:12px; bottom:82px; z-index:9001; padding:8px 12px; border:1px solid #066; background:#111; color:#0ff; border-radius:8px; cursor:pointer; }
+#ghostdev-panel{ position:fixed; right:12px; bottom:12px; width:460px; max-height:80vh; overflow:auto; background:#0b0b0b; border:1px solid #033; border-radius:10px; padding:10px; color:#cfe; font:12px/1.4 monospace; display:none; z-index:9002; }
+#ghostdev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+`]));
+    }
+    let toggle = $('#ghostdev-toggle');
+    if (!toggle){ toggle = el('button',{id:'ghostdev-toggle',className:'hud-btn'},['Ghost Tools']); document.body.appendChild(toggle); }
+    let panel = $('#ghostdev-panel');
+    if (!panel){ panel = el('div',{id:'ghostdev-panel'},[]); document.body.appendChild(panel); }
+    toggle.onclick = ()=> panel.style.display = (panel.style.display==='none'?'block':'none');
+    window.addEventListener('keydown',(e)=>{
+      if(e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (e.key==='g'||e.key==='G')){
+        const ae=document.activeElement; const typing = ae && (/input|textarea|select/i.test(ae.tagName));
+        if(!typing){ e.preventDefault(); toggle.click(); }
+      }
     });
-    STATE.listNames = [...new Set([...pri, ...rest])].slice(0,800);
+    ST.panel = panel;
+    return panel;
   }
-  function setGhostByName(name){
-    const s=SCENE(); if(!s) return null;
-    const m = s.getMeshByName(name) || s.getNodeByName(name);
-    if (!m){ toast('Mesh not found: '+name); return null; }
-    STATE.ghost = m;
-    // If scale stored in metadata, keep it
-    const sc = (m.metadata && m.metadata.ghostScale) ? m.metadata.ghostScale : (STATE.scale || 1);
-    applyScale(sc);
-    // memorize original vis only once
-    if (STATE.ghostOrig.wasVisible===null){
-      STATE.ghostOrig.wasVisible = (m.isVisible!==false && (m.visibility ?? 1) > 0);
-      STATE.ghostOrig.visibility = (typeof m.visibility==='number') ? m.visibility : (STATE.ghostOrig.wasVisible?1:0);
+
+  function setDevVisible(on){
+    ST.devVisible = !!on;
+    if (!ST.ghostRoot) return;
+    const stack=[ST.ghostRoot];
+    while(stack.length){
+      const n=stack.pop();
+      if('isVisible' in n) n.isVisible = on;
+      if('visibility' in n) n.visibility = on?1:0;
+      if(n.getChildren) n.getChildren().forEach(ch=>stack.push(ch));
     }
-    $('#gd-ghost').value = name;
-    $('#gd-selected').textContent = name;
-    refreshDevVisible();
-    toast('Ghost set: '+name);
-    return m;
   }
-  function pickUnderCrosshair(){
-    const s=SCENE(), c=CAMERA(); if(!s||!c) return null;
-    const ray = c.getForwardRay(50);
-    return s.pickWithRay(ray, m=> m && m.isPickable!==false);
-  }
-  function teleportAhead(dist){
-    const s=SCENE(), c=CAMERA(), g=STATE.ghost; if(!s||!c||!g) return;
-    const ray = c.getForwardRay(50);
-    const hit = s.pickWithRay(ray, m=> m && m.isPickable!==false);
-    let target;
-    if (hit?.hit){
-      // a little offset back toward the camera to avoid clipping
-      const back = ray.direction.scale(0.25);
-      target = hit.pickedPoint.subtract(back);
-    } else {
-      const d = (isFinite(+dist)? +dist : 2.5);
-      target = c.position.add(ray.direction.scale(d));
-      // drop to ground
-      const down = new BABYLON.Ray(target.add(v3(0,5,0)), v3(0,-1,0), 30);
-      const ghit = s.pickWithRay(down, m=> m && m.isPickable!==false);
-      if (ghit?.hit) target = ghit.pickedPoint;
-    }
-    const yOff = (g.getBoundingInfo?.().boundingBox?.centerWorld?.y || g.position.y) - g.position.y;
-    g.position.copyFrom(target.add(v3(0, Math.max(0,yOff), 0)));
-    // face the camera (optional)
-    try{
-      const dir = c.position.subtract(g.position).normalize();
-      g.rotationQuaternion = null;
-      g.rotation.y = Math.atan2(dir.x, dir.z);
-    }catch{}
-    toast('Ghost teleported');
-  }
+
   function applyScale(sc){
-    const g=STATE.ghost; if(!g) return;
-    STATE.scale = Math.max(0.1, Math.min(5, +sc || 1));
-    g.scaling.set(STATE.scale, STATE.scale, STATE.scale);
-    g.metadata = g.metadata||{}; g.metadata.ghostScale = STATE.scale;
-    const ui = $('#gd-scale'); if (ui) ui.value = String(STATE.scale);
+    ST.scale = Math.max(0.1, Math.min(5, +sc || 1));
+    if (ST.ghostRoot) ST.ghostRoot.scaling.set(ST.scale, ST.scale, ST.scale);
+    window.PREFERRED_GHOST_SCALE = ST.scale; // expose to AI
+    const ui=$('#gd-scale'); if(ui) ui.value=String(ST.scale);
   }
-  function refreshDevVisible(){
-    const g=STATE.ghost; if(!g) return;
-    if (STATE.devVisible){
-      g.isVisible = true;
-      if (typeof g.visibility === 'number') g.visibility = 1;
+
+  function teleportAhead(dist){
+    const s=SCENE(), c=CAMERA(); if(!s||!c||!ST.ghostRoot) return;
+    const ray=c.getForwardRay(50);
+    const hit=s.pickWithRay(ray,m=>m && m.isPickable!==false);
+    let p;
+    if (hit?.hit){
+      p=hit.pickedPoint.subtract(ray.direction.scale(0.25));
     } else {
-      // restore original
-      g.isVisible = !!STATE.ghostOrig.wasVisible;
-      if (typeof g.visibility === 'number') g.visibility = STATE.ghostOrig.visibility;
+      p=c.position.add(ray.direction.scale(isFinite(+dist)?+dist:2.5));
+      const down=new BABYLON.Ray(p.add(v3(0,5,0)), v3(0,-1,0), 30);
+      const h2=s.pickWithRay(down,m=>m && m.isPickable!==false);
+      if (h2?.hit) p=h2.pickedPoint;
+    }
+    ST.ghostRoot.position.copyFrom(p);
+  }
+
+  // ----------- GLB loading -----------
+  function clearGhost(){
+    try{ ST.imported.forEach(n=> n.dispose?.()); }catch{}
+    ST.imported.length=0;
+    try{ ST.ghostRoot?.dispose?.(); }catch{}
+    ST.ghostRoot=null;
+  }
+
+  async function loadGhostGLB(url){
+    const s=SCENE(); if(!s) return toast('Scene not ready');
+    if (!url) return toast('No GLB url');
+
+    const i=url.lastIndexOf('/');
+    const root = i>=0 ? url.slice(0,i+1) : '';
+    const file = i>=0 ? url.slice(i+1) : url;
+
+    clearGhost();
+
+    // Create a stable root we control
+    const GR = new BABYLON.TransformNode('GhostRoot_Dev', s);
+    ST.ghostRoot = GR;
+
+    try{
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", root, file, s);
+      const meshes = (res.meshes||[]).filter(m=>m && m.name!=='__root__');
+      const nodes  = (res.transformNodes||[]);
+      // parent everything to GR
+      meshes.forEach(m=>{ m.setEnabled(true); m.parent = GR; ST.imported.push(m); });
+      nodes.forEach(n=>{ if(n!==GR){ n.parent = GR; ST.imported.push(n);} });
+
+      // basic material tweak: make visible but allow dev toggle to hide
+      const stack=[GR];
+      while(stack.length){
+        const n=stack.pop();
+        if(n.material && typeof n.material.alpha==='number'){ /* keep author alpha */ }
+        if('isVisible' in n) n.isVisible = false; // invisible by default
+        if('visibility' in n) n.visibility = 0;
+        n.getChildren?.().forEach(ch=>stack.push(ch));
+      }
+
+      // expose to AI (ghost_movement.js will prefer these if present)
+      window.PREFERRED_GHOST_ROOT = GR;
+      window.PREFERRED_GHOST_MODEL_NAME = meshes[0]?.name || 'GhostRoot_Dev';
+
+      // keep current scale/pos expectations
+      applyScale(ST.scale);
+      teleportAhead(2.5);
+
+      toast('Ghost GLB loaded');
+    }catch(e){
+      toast('Failed to load ghost GLB'); console.error(e);
+      clearGhost();
     }
   }
 
-  // ---- Watch main DevTools panel; when it hides, restore invisibility
-  function hookDevtoolsVisibility(){
-    const panel = $('#devtools-panel');
-    if (!panel) return;
-    const obs = new MutationObserver(()=>{
-      const shown = panel.style.display !== 'none';
-      // if panel closed and devVisible came from us, restore invis
-      if (!shown && STATE.devVisible){ STATE.devVisible=false; refreshDevVisible(); $('#gd-devvis').checked=false; }
-    });
-    obs.observe(panel, { attributes:true, attributeFilter:['style'] });
-  }
-
-  // ------------- Barrier editor -------------
+  // ----------- Barrier editor (unchanged behavior) -----------
   function ensureBarrierRoot(){
-    const s=SCENE(); if (!s) return null;
-    if (STATE.barrierRoot && !STATE.barrierRoot.isDisposed?.()) return STATE.barrierRoot;
-    STATE.barrierRoot = new BABYLON.TransformNode('GhostBarrierRoot', s);
-    return STATE.barrierRoot;
-  }
-  function makeSegmentMesh(p0, p1, h, t){
     const s=SCENE(); if(!s) return null;
-    const mid = p0.add(p1).scale(0.5);
-    const dir = p1.subtract(p0);
-    const L = Math.max(0.05, dir.length());
-    const yaw = Math.atan2(dir.x, dir.z);
-    const m = BABYLON.MeshBuilder.CreateBox('GhostBarrier_'+Date.now().toString(36), { width: L, height: h, depth: t }, s);
-    m.position.copyFrom(mid); m.rotation.set(0, yaw, 0);
-    m.position.y += h/2; // rise so bottom sits on ground
-    m.parent = ensureBarrierRoot();
-    m.isPickable = false;
-    m.checkCollisions = true;  // if your ghost uses physics/collision checks
-    m.visibility = 0.12;       // faintly visible while in dev
-    m.metadata = Object.assign(m.metadata||{}, { isGhostBlocker:true });
-    // receive/cast helps for editors with lights
-    m.receiveShadows = true;
+    if (ST.barrierRoot && !ST.barrierRoot.isDisposed?.()) return ST.barrierRoot;
+    ST.barrierRoot = new BABYLON.TransformNode('GhostBarrierRoot', s);
+    return ST.barrierRoot;
+  }
+  function makeSeg(p0,p1,h,t){
+    const s=SCENE(); if(!s) return null;
+    const mid=p0.add(p1).scale(0.5);
+    const dir=p1.subtract(p0), L=Math.max(0.05,dir.length());
+    const yaw=Math.atan2(dir.x,dir.z);
+    const m=BABYLON.MeshBuilder.CreateBox('GhostBarrier_'+Date.now().toString(36),{width:L,height:h,depth:t},s);
+    m.position.copyFrom(mid); m.rotation.set(0,yaw,0); m.position.y += h/2;
+    m.parent=ensureBarrierRoot(); m.isPickable=false; m.checkCollisions=true; m.visibility=0.12;
+    m.receiveShadows=true; m.metadata=Object.assign(m.metadata||{}, {isGhostBlocker:true});
     return m;
   }
-  function startBarrierEdit(){
+  const ED={active:false,start:null,snap:0.25,h:2.2,t:0.18,obs:null,prevCol:null,prevGrav:null};
+  function startBarrier(){
     const s=SCENE(), c=CAMERA(); if(!s||!c) return;
-    if (STATE.editing) return;
-    const snapGrid = +($('#gd-grid').value||0) || 0;
-    const h = +($('#gd-h').value||2.2) || 2.2;
-    const t = +($('#gd-t').value||0.18) || 0.18;
-    STATE.editing = {
-      startPoint: null, snapGrid: snapGrid, h, t,
-      prevCamCollide: c.checkCollisions, prevCamGravity: c.applyGravity
+    if (ED.active) return;
+    ED.active=true; ED.start=null;
+    ED.snap=+($('#gd-grid').value||0.25)||0.25;
+    ED.h=+($('#gd-h').value||2.2)||2.2;
+    ED.t=+($('#gd-t').value||0.18)||0.18;
+    ED.prevCol=c.checkCollisions; ED.prevGrav=c.applyGravity; c.checkCollisions=false; c.applyGravity=false;
+    ED.obs=(pi)=>{
+      if (pi.type!==BABYLON.PointerEventTypes.POINTERDOWN) return;
+      if (pi.event.button!==0) return;
+      const hit=s.pick(s.pointerX,s.pointerY,m=>m && m.isPickable!==false);
+      let p=hit?.hit? hit.pickedPoint.clone() : c.position.add(c.getForwardRay().direction.scale(2.5));
+      const snap=v=>Math.round(v/ED.snap)*ED.snap;
+      p.x=snap(p.x); p.z=snap(p.z); if(ED.start) p.y=ED.start.y;
+      if (ED.start){
+        makeSeg(ED.start,p,ED.h,ED.t);
+        ST.segments.push({start:xyz(ED.start), end:xyz(p), height:ED.h, thickness:ED.t});
+      }
+      ED.start=p;
     };
-    c.checkCollisions = false; c.applyGravity = false;
-    s.onPointerObservable.add(_pointerObs);
-    window.addEventListener('keydown', _barrierKeys);
-    toast('Ghost Barrier: click to add points, Esc to cancel, Enter to finish');
+    s.onPointerObservable.add(ED.obs);
+    const key=(e)=>{ if(e.key==='Escape') finishBarrier(true); if(e.key==='Enter') finishBarrier(false); };
+    window.addEventListener('keydown', key, {once:false});
+    ED._key=key;
+    toast('Barrier edit: click to add segments, Enter=finish, Esc=cancel');
   }
-  function finishBarrierEdit(){
-    const s=SCENE(), c=CAMERA(); if(!s||!c) return;
-    if (!STATE.editing) return;
-    s.onPointerObservable.removeCallback(_pointerObs);
-    window.removeEventListener('keydown', _barrierKeys);
-    c.checkCollisions = !!STATE.editing.prevCamCollide;
-    c.applyGravity    = !!STATE.editing.prevCamGravity;
-    STATE.editing = null;
-    toast('Barrier editing finished');
-  }
-  function cancelBarrierEdit(){
-    finishBarrierEdit();
+  function finishBarrier(cancel){
+    const s=SCENE(), c=CAMERA(); if(!s||!c||!ED.active) return;
+    s.onPointerObservable.removeCallback(ED.obs); ED.obs=null;
+    window.removeEventListener('keydown', ED._key); ED._key=null;
+    c.checkCollisions=!!ED.prevCol; c.applyGravity=!!ED.prevGrav;
+    ED.active=false; if (cancel) toast('Barrier cancelled'); else toast('Barrier finished');
   }
   function clearBarriers(){
-    const root = ensureBarrierRoot();
-    root.getChildren().slice().forEach(ch=> ch.dispose?.());
-    STATE.segments.length = 0;
-    toast('All ghost barriers cleared');
-  }
-  function _barrierKeys(e){
-    if (e.key === 'Escape') cancelBarrierEdit();
-    if (e.key === 'Enter')  finishBarrierEdit();
-  }
-  function _snapTo(v, g){
-    if (!g || g<=0) return v;
-    return Math.round(v/g)*g;
-  }
-  function _pointerObs(pi){
-    if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-    const s=SCENE(), c=CAMERA(); if(!s||!c) return;
-    if (pi.event.button!==0) return; // left only
-    // Pick on geometry or ground fallback
-    let hit = s.pick(s.pointerX, s.pointerY, m=> m && m.isPickable!==false);
-    let p;
-    if (hit?.hit) p = hit.pickedPoint.clone();
-    else {
-      const ray = c.getForwardRay(50);
-      hit = s.pickWithRay(ray, m=> m && m.isPickable!==false);
-      p = hit?.hit? hit.pickedPoint.clone() : c.position.add(ray.direction.scale(2.5));
-    }
-    const gsz = STATE.editing.snapGrid;
-    p.x = _snapTo(p.x, gsz); p.z = _snapTo(p.z, gsz); // keep y auto
-    // stitch to last point’s y (ground difference can be noisy)
-    if (STATE.editing.startPoint){
-      p.y = STATE.editing.startPoint.y; // snap same height
-      const seg = makeSegmentMesh(STATE.editing.startPoint, p, STATE.editing.h, STATE.editing.t);
-      STATE.segments.push({ start: xyz(STATE.editing.startPoint), end: xyz(p), height: STATE.editing.h, thickness: STATE.editing.t });
-    }
-    STATE.editing.startPoint = p;
+    const r=ensureBarrierRoot(); r.getChildren().slice().forEach(ch=>ch.dispose?.()); ST.segments.length=0; toast('Barriers cleared');
   }
 
-  // rough blocker test for ghost scripts if you want to use it
-  window.ghostDev_isBlockedRay = function(from, to){
-    try{
-      const s=SCENE(); if(!s) return false;
-      const dir = to.subtract(from); const len = dir.length();
-      if (len<=0.001) return false;
-      const ray = new BABYLON.Ray(from, dir.normalize(), len);
-      const pick = s.pickWithRay(ray, m=> m && m.metadata?.isGhostBlocker===true);
-      return !!(pick && pick.hit);
-    }catch{ return false; }
-  };
-
-  // ------------- config save/load -------------
+  // ----------- Save/Load -----------
   function getConfig(){
     return {
-      ghostName: STATE.ghost?.name || null,
-      ghostScale: STATE.scale || 1,
-      devVisible: !!STATE.devVisible,
-      barriers: STATE.segments.slice()
+      modelUrl: window.PREFERRED_GHOST_MODEL_URL || null,
+      ghostScale: ST.scale,
+      devVisible: ST.devVisible,
+      barriers: ST.segments.slice()
     };
   }
   function applyConfig(cfg){
     if (!cfg) return;
-    if (cfg.ghostName) setGhostByName(cfg.ghostName);
+    if (cfg.modelUrl) loadGhostGLB(cfg.modelUrl);
     if (isFinite(cfg.ghostScale)) applyScale(cfg.ghostScale);
     if (Array.isArray(cfg.barriers)){
       clearBarriers();
       cfg.barriers.forEach(seg=>{
-        const p0=v3(seg.start.x, seg.start.y, seg.start.z);
-        const p1=v3(seg.end.x,   seg.end.y,   seg.end.z);
-        makeSegmentMesh(p0,p1, seg.height||2, seg.thickness||0.18);
-        STATE.segments.push({ start: xyz(p0), end: xyz(p1), height: seg.height||2, thickness: seg.thickness||0.18 });
+        const p0=v3(seg.start.x,seg.start.y,seg.start.z);
+        const p1=v3(seg.end.x,seg.end.y,seg.end.z);
+        makeSeg(p0,p1, seg.height||2, seg.thickness||0.18);
+        ST.segments.push({start:xyz(p0), end:xyz(p1), height:seg.height||2, thickness:seg.thickness||0.18});
       });
     }
-    STATE.devVisible = !!cfg.devVisible;
-    refreshDevVisible();
+    ST.devVisible=!!cfg.devVisible; setDevVisible(ST.devVisible);
   }
-  function exportConfigJSON(){
-    const blob=new Blob([JSON.stringify(getConfig(),null,2)],{type:'application/json'});
-    const a=el('a',{download:'ghost_config.json'}); a.href=URL.createObjectURL(blob); a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),0);
+  function exportJSON(){
+    const blob=new Blob([JSON.stringify(getConfig(),null,2)],{type:"application/json"});
+    const a=el("a",{download:"ghost_config.json"}); a.href=URL.createObjectURL(blob); a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),0);
   }
-  function importConfigJSONFile(file){
+  function importJSONFile(f){
     const fr=new FileReader();
-    fr.onload = ()=> {
-      try{ const cfg=JSON.parse(fr.result); applyConfig(cfg); toast('Ghost config loaded'); }
-      catch(e){ toast('Invalid JSON'); }
-    };
-    fr.readAsText(file);
+    fr.onload=()=>{ try{ applyConfig(JSON.parse(fr.result)); toast('Ghost config loaded'); }catch{ toast('Invalid JSON'); } };
+    fr.readAsText(f);
   }
 
-  // ------------- UI -------------
-  function ensurePanel(){
-    if (STATE.panel && document.body.contains(STATE.panel)) return STATE.panel;
-    // styles
-    if (!$('#ghostdev-styles')){
-      const style = el('style',{id:'ghostdev-styles'},[`
-#ghostdev-toggle{ position:fixed; right:12px; bottom:82px; z-index:9001; padding:8px 12px; border:1px solid #066; background:#111; color:#0ff; border-radius:8px; cursor:pointer; }
-#ghostdev-panel{ position:fixed; right:12px; bottom:12px; width:420px; max-height:80vh; overflow:auto; background:#0b0b0b; border:1px solid #033; border-radius:10px; padding:10px; color:#cfe; font:12px/1.4 monospace; display:none; z-index:9002; }
-#ghostdev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
-`]);
-      document.head.appendChild(style);
-    }
-    // toggle
-    let toggle = $('#ghostdev-toggle');
-    if (!toggle){
-      toggle = el('button',{id:'ghostdev-toggle',className:'hud-btn'},['Ghost Tools']);
-      document.body.appendChild(toggle);
-    }
-    let panel = $('#ghostdev-panel');
-    if (!panel){
-      panel = el('div',{id:'ghostdev-panel'},[]);
-      document.body.appendChild(panel);
-    }
-    toggle.onclick = ()=>{ panel.style.display = (panel.style.display==='none'?'block':'none'); };
-    // Alt+G hotkey
-    window.addEventListener('keydown', (e)=>{
-      if (e.altKey && (e.key==='g' || e.key==='G') && !e.ctrlKey && !e.metaKey && !e.shiftKey){
-        const ae=document.activeElement; const typing = ae && (/input|textarea|select/i.test(ae.tagName));
-        if (!typing){ e.preventDefault(); toggle.click(); }
-      }
-    });
-
-    STATE.panel = panel;
-    return panel;
-  }
-
+  // ----------- UI -----------
   function buildUI(){
     const s=SCENE(); if(!s) return;
-    const panel = ensurePanel(); panel.innerHTML="";
-    buildGhostList();
-
-    // header
+    const panel=ensurePanel(); panel.innerHTML="";
     panel.appendChild(el('div',{className:'row'},[
-      el('div',{style:{color:'#9ff',fontWeight:'bold'}},['Ghost Dev Tools']),
-      el('div',{style:{marginLeft:'auto',opacity:0.8}},['Alt+G'])
+      el('div',{style:{color:'#9ff',fontWeight:'bold'}},['Ghost Dev (GLB)']),
+      el('div',{style:{marginLeft:'auto',opacity:.8}},['Alt+G'])
     ]));
 
-    // ghost pick
-    const select = sel('gd-ghost', STATE.listNames.map(n=>[n,n]));
-    const refreshBtn = btn('Refresh', ()=>{ buildGhostList(); buildUI(); });
-    const pickBtn = btn('Pick Under Crosshair', ()=>{
-      const hit = pickUnderCrosshair();
-      if (hit?.hit && hit.pickedMesh){ setGhostByName(hit.pickedMesh.name); }
-      else toast('Nothing under crosshair');
+    // GLB picker
+    const listSel = sel('gd-list', DEFAULT_LIST.map(n=>[BASE_URL+n, n]));
+    const urlIn   = input('text','gd-url', BASE_URL+DEFAULT_LIST[0], {style:{width:'260px'}});
+    const loadBtn = btn('Load GLB', ()=>{
+      const url=( $('#gd-url').value || $('#gd-list').value ).trim();
+      window.PREFERRED_GHOST_MODEL_URL = url; // expose for saving
+      loadGhostGLB(url);
     });
-    const selBtn  = btn('Use Selected', ()=>{ const name=$('#gd-ghost').value; setGhostByName(name); });
-    const selected = el('b',{id:'gd-selected',style:{color:'#aff'}},[STATE.ghost?.name||'(none)']);
-    panel.appendChild(el('div',{className:'row'},[ lab('Ghost'), select, refreshBtn, pickBtn, selBtn ]));
-    panel.appendChild(el('div',{className:'row'},[ lab('Selected'), selected ]));
+    listSel.onchange = ()=>{ urlIn.value = listSel.value; };
 
-    // teleport/scale/visibility
+    panel.appendChild(el('div',{className:'row'},[ lab('Ghost GLB'), listSel ]));
+    panel.appendChild(el('div',{className:'row'},[ lab('URL'), urlIn, loadBtn ]));
+
+    // Controls
     const dist = input('number','gd-dist','2.5',{step:'0.1',style:{width:'84px'}});
     const tp   = btn('Teleport Ahead', ()=> teleportAhead(+$('#gd-dist').value||2.5));
-    const scale= input('number','gd-scale', String(STATE.scale||1), {step:'0.05',style:{width:'84px'}});
+    const scale= input('number','gd-scale', String(ST.scale||1), {step:'0.05',style:{width:'84px'}});
     const setSc= btn('Apply Scale', ()=> applyScale(+$('#gd-scale').value||1));
     const devVis = el('label',{style:{display:'inline-flex',gap:'6px',alignItems:'center'}},[
-      el('input',{id:'gd-devvis',type:'checkbox',checked:STATE.devVisible}),
+      el('input',{id:'gd-vis',type:'checkbox',checked:ST.devVisible}),
       el('span',{},['Dev Visible'])
     ]);
-    setTimeout(()=> $('#gd-devvis').addEventListener('change',(e)=>{ STATE.devVisible = e.target.checked; refreshDevVisible(); }),0);
+    setTimeout(()=> $('#gd-vis').addEventListener('change',(e)=> setDevVisible(e.target.checked)),0);
 
-    panel.appendChild(el('div',{className:'row'},[ lab('Ahead'), dist, tp, lab('Scale'), scale, setSc, devVis ]));
+    panel.appendChild(el('div',{className:'row',style:{marginTop:'4px'}},[
+      lab('Ahead'), dist, tp, lab('Scale'), scale, setSc, devVis
+    ]));
 
-    // barrier editor
-    const grid  = input('number','gd-grid','0.25',{step:'0.05',style:{width:'84px'}});
-    const h     = input('number','gd-h','2.2',{step:'0.05',style:{width:'84px'}});
-    const t     = input('number','gd-t','0.18',{step:'0.01',style:{width:'84px'}});
-    const bStart= btn('Start Barrier', startBarrierEdit);
-    const bFin  = btn('Finish', finishBarrierEdit);
-    const bCan  = btn('Cancel', cancelBarrierEdit);
-    const bClr  = btn('Clear All', clearBarriers);
+    // Barrier
+    const grid=input('number','gd-grid','0.25',{step:'0.05',style:{width:'84px'}});
+    const h   =input('number','gd-h','2.2',{step:'0.05',style:{width:'84px'}});
+    const t   =input('number','gd-t','0.18',{step:'0.01',style:{width:'84px'}});
+    const bStart=btn('Start Barrier', startBarrier);
+    const bFin  =btn('Finish', ()=>finishBarrier(false));
+    const bCan  =btn('Cancel', ()=>finishBarrier(true));
+    const bClr  =btn('Clear All', clearBarriers);
 
     panel.appendChild(el('div',{className:'row',style:{marginTop:'6px'}},[
       el('div',{style:{color:'#9ad',fontWeight:'bold'}},['Ghost Barrier'])
@@ -391,44 +306,33 @@
     panel.appendChild(el('div',{className:'row'},[
       lab('Grid'), grid, lab('H'), h, lab('T'), t, bStart, bFin, bCan, bClr
     ]));
-    panel.appendChild(el('div',{style:{color:'#8ff',opacity:0.9,marginTop:'2px'}},[
-      'Click to place points: each new point creates a segment from the last point. Esc = cancel, Enter = finish.'
-    ]));
+    panel.appendChild(el('div',{style:{color:'#8ff',opacity:.9}},['Click to lay segments along walls. Enter=finish, Esc=cancel.']));
 
-    // save/load
-    const save = btn('Export JSON', exportConfigJSON);
-    const load = btn('Import JSON', ()=>{
-      const fi = el('input',{type:'file',accept:'.json',style:{display:'none'}},[]);
-      fi.onchange = ()=>{ const f=fi.files?.[0]; if (f) importConfigJSONFile(f); };
-      fi.click();
+    // Save/Load
+    const save=btn('Export JSON', exportJSON);
+    const load=btn('Import JSON', ()=>{
+      const fi=input('file','__fi','',{accept:'.json',style:{display:'none'}});
+      fi.onchange=()=>{ const f=fi.files?.[0]; if(f) importJSONFile(f); };
+      document.body.appendChild(fi); fi.click(); setTimeout(()=>fi.remove(),0);
     });
     panel.appendChild(el('div',{className:'row',style:{marginTop:'6px'}},[ save, load ]));
-
-    // initial selections reflect state
-    if (STATE.ghost) $('#gd-ghost').value = STATE.ghost.name;
   }
 
-  // ------------- boot -------------
+  // ----------- Boot -----------
   function init(){
-    if (STATE.ready) return;
+    if (ST.ready) return;
     if (!SCENE() || !CAMERA()) return;
-    ensurePanel();
-    buildUI();
-    hookDevtoolsVisibility();
-    STATE.ready = true;
-    toast('Ghost Dev ready', 900);
+    ensurePanel(); buildUI();
+    ST.ready = true;
+    toast('Ghost Dev (GLB) ready');
   }
   const boot = setInterval(()=>{ try{ if (SCENE() && CAMERA()){ clearInterval(boot); init(); } }catch{} }, 200);
 
-  // ------------- public API -------------
+  // ----------- Public API -----------
   window.GHOST_DEV = {
-    getConfig,
-    applyConfig,
-    setGhostByName,
-    setGhostVisibleDev(on){ STATE.devVisible=!!on; refreshDevVisible(); const c=$('#gd-devvis'); if(c) c.checked=!!on; },
-    teleportAhead,
-    startBarrierEdit, finishBarrierEdit, cancelBarrierEdit, clearBarriers,
-    exportConfigJSON, importConfigJSONFile
+    loadGhostGLB, setDevVisible, applyScale, teleportAhead,
+    startBarrier, finishBarrier, clearBarriers,
+    getConfig, applyConfig
   };
 
 })();
