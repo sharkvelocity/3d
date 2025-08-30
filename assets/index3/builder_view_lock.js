@@ -1,29 +1,27 @@
-// ./assets/index3/builder_view_lock.js — v1.3
+// ./assets/index3/builder_view_lock.js — v1.4
 // Builder helpers:
-//  • Aerial Lock: strict top-down view (no tilt/rotate/pan), zoom only (wheel / pinch)
-//  • Player Control: first-person preview from a Spawn Pad
-//  • Spawn Pad: auto-create if missing, draggable in aerial view, persisted in export
+//  • Aerial Lock: strict top-down view (zoom-only; no tilt/rotate/pan)
+//  • Player Control: FPS preview from a Spawn Pad
+//  • Spawn Pad: auto-create if missing, draggable, yaw rotatable (Alt/Ctrl+Wheel)
+//  • Save/Export: injects { spawn:{pos,yaw,name} } into exported JSON
+//  • Load/Import: restores spawn from JSON on import / open / load
 //
-// Export integration:
-//  - If Builder.exportToJSON() exists, we wrap it to include { spawn: {pos,yaw,name} }.
-//  - If not, we expose window.BuilderSpawn.serialize() and set window.__SPAWN_EXPORT_PATCH
-//    right before clicks on common "save/export" buttons so your exporter can merge it.
+// UI: Aerial Lock, Player Control, and a Spawn Tool button (toolbar or floating pill)
 //
-// UI: two toggles (Aerial Lock, Player Control) + a “Spawn Tool” button to enable drag.
-//
-// Keys in Player Control: WASD/Arrows to move, Shift sprint, Z crouch toggle, mouse to look.
+// Keys in Player Control: WASD/Arrows, Shift sprint, Z crouch toggle, mouse look.
 
 (function(){
   "use strict";
-  if (window.BuilderViewLock?.__v === '1.3') return;
+  if (window.BuilderViewLock?.__v === '1.4') return;
 
   const API = {
-    __v:'1.3',
+    __v:'1.4',
     setAerial, isAerialLocked,
     setPlayerControl, isPlayerControl,
     ensureUI,
     // spawn API
-    ensureSpawnPad, serializeSpawn
+    ensureSpawnPad, serializeSpawn,
+    applySpawnFromJSON
   };
   window.BuilderViewLock = API;
 
@@ -36,17 +34,15 @@
     playerYStanding:1.7, playerYCrouch:1.1, isCrouch:false,
     playerSpeed:3.0, playerSprint:5.0, pressed:Object.create(null), moveObs:null,
     // Spawn
-    spawn:null,              // mesh
-    spawnDrag:false,
-    spawnDragPlaneY:0,
-    spawnYaw:0,              // degrees
+    spawn:null, spawnDrag:false, spawnDragPlaneY:0, spawnYaw:0,
+    // boot flags
+    _dragHandlersAttached:false, _importWrapped:false, _eventsHooked:false
   };
 
   const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
   const CANVAS = ()=> ST.s?.getEngine?.().getRenderingCanvas();
   const v3 = (x,y,z)=> new BABYLON.Vector3(x,y,z);
   const clamp = (v,a,b)=> Math.max(a, Math.min(b,v));
-  const deg = r=> r*180/Math.PI;
   const rad = d=> d*Math.PI/180;
 
   // ---------------- AERIAL CAMERA ----------------
@@ -136,11 +132,9 @@
   // ---------------- SPAWN PAD ----------------
   function ensureSpawnPad(){
     const s = SCENE(); if (!s) return null;
-    // prefer existing names
     const names = ['StartPad_Wood','StartPad','Spawn','SpawnPad','Start'];
     for (const n of names){ const m = s.getMeshByName(n); if (m){ ST.spawn=m; decorateSpawn(m); return m; } }
 
-    // create new
     const size = 1.2;
     const pad = BABYLON.MeshBuilder.CreateGround('StartPad_Wood',{width:size, height:size, subdivisions:2}, s);
     pad.position.set(0, 0.01, 0);
@@ -159,7 +153,6 @@
     mesh.metadata = mesh.metadata || {};
     mesh.metadata.builder = Object.assign({}, mesh.metadata.builder, { type:'spawn' });
 
-    // arrow / facing
     if (!mesh._spawnArrow){
       const s = SCENE();
       const arrow = BABYLON.MeshBuilder.CreateCylinder('SpawnArrow', {diameterTop:0, diameterBottom:0.25, height:0.35, tessellation:12}, s);
@@ -170,19 +163,11 @@
       mesh._spawnArrow = arrow;
     }
 
-    // label
     if (!mesh._spawnLabel){
       const s = SCENE();
       const plane = BABYLON.MeshBuilder.CreatePlane('SpawnLabel',{size:0.7}, s);
       plane.parent = mesh; plane.position.y = 0.55; plane.rotation.y = Math.PI;
       const mat = new BABYLON.StandardMaterial('Mat_SpawnLabel', s);
-      mat.diffuseColor = new BABYLON.Color3(0.9, 0.95, 1);
-      mat.emissiveColor= new BABYLON.Color3(0.4,0.8,1);
-      mat.alpha = 0.85;
-      plane.material = mat;
-      mesh._spawnLabel = plane;
-
-      // quick dynamic texture saying "SPAWN"
       const dt = new BABYLON.DynamicTexture('DT_Spawn', {width:256,height:128}, s, false);
       const ctx = dt.getContext();
       ctx.fillStyle = '#09222a'; ctx.fillRect(0,0,256,128);
@@ -190,18 +175,18 @@
       ctx.textAlign='center'; ctx.textBaseline='middle';
       ctx.fillText('SPAWN', 128, 64);
       dt.update();
-      mat.diffuseTexture = dt;
-      mat.emissiveTexture = dt;
+      mat.diffuseTexture = dt; mat.emissiveTexture = dt;
+      mat.diffuseColor = new BABYLON.Color3(0.9, 0.95, 1);
+      mat.emissiveColor= new BABYLON.Color3(0.4,0.8,1);
+      mat.alpha = 0.85;
+      plane.material = mat;
+      mesh._spawnLabel = plane;
     }
-
-    // ensure rotation/yaw storage
-    ST.spawnYaw = ST.spawnYaw || 0;
   }
 
   function startSpawnDrag(){
     if (!ST.spawn) return;
     ST.spawnDrag = true;
-    // lock to current Y plane
     const bb = ST.spawn.getBoundingInfo().boundingBox;
     ST.spawnDragPlaneY = bb.minimumWorld.y + 0.01;
   }
@@ -209,7 +194,6 @@
 
   function pointerToGround(p){
     const s = SCENE(); if (!s) return null;
-    // Create a ground plane at spawnDragPlaneY and intersect the screen ray
     const ray = s.createPickingRay(p.x, p.y, BABYLON.Matrix.Identity(), ST.cTop || s.activeCamera, false);
     const plane = new BABYLON.Plane(0,1,0,-ST.spawnDragPlaneY); // y = spawnY
     const dist = ray.intersectsPlane(plane);
@@ -235,13 +219,12 @@
       }
       if (type === BABYLON.PointerEventTypes.POINTERMOVE){
         if (ST.spawnDrag && ST.spawn && isAerialLocked()){
-          const p = pi.event; // MouseEvent / PointerEvent
+          const p = pi.event;
           const canvas = CANVAS();
           const rect = canvas.getBoundingClientRect();
           const pt = { x: (p.clientX-rect.left), y:(p.clientY-rect.top) };
           const hit = pointerToGround(pt);
           if (hit){
-            // optional grid snap if your Builder has grid size
             const snap = (window.Builder?.gridSize) || 0;
             if (snap>0){
               hit.x = Math.round(hit.x/snap)*snap;
@@ -253,7 +236,6 @@
         }
       }
       if (type === BABYLON.PointerEventTypes.POINTERWHEEL){
-        // Use Alt+wheel or Ctrl+wheel to rotate the spawn yaw
         const ev = pi.event;
         if (ev && (ev.altKey || ev.ctrlKey) && ST.spawn){
           ev.preventDefault();
@@ -273,7 +255,6 @@
       const y = bb ? bb.maximumWorld.y + 0.05 : (ST.spawn.position.y + 0.05);
       return new BABYLON.Vector3(ST.spawn.position.x, y, ST.spawn.position.z);
     }
-    // fallback near origin (ray down)
     let p = v3(0,5,0);
     const hit = SCENE().pickWithRay(new BABYLON.Ray(p, v3(0,-1,0), 10), m=> m && m.isPickable!==false);
     if (hit?.hit) p = hit.pickedPoint.addInPlace(v3(0,0.05,0));
@@ -310,7 +291,6 @@
 
   function onKey(e, down){
     const k = (e.code || e.key || '').toLowerCase();
-    // crouch toggle on keydown
     if (down && k==='keyz') ST.isCrouch = !ST.isCrouch;
     ST.pressed[k] = down;
   }
@@ -324,7 +304,6 @@
     });
     return hit?.hit ? hit.pickedPoint : null;
   }
-
   function collidesAhead(cur, dir, step){
     const s = SCENE();
     const ray = new BABYLON.Ray(cur, dir, step+0.25);
@@ -373,7 +352,6 @@
     ST.playerRoot.rotation.y = rad(ST.spawnYaw);
     ST.playerRoot.setEnabled(true);
 
-    // active camera
     ST.s.activeCamera = ST.playerCam;
     ST.s.cameraToUseForPointers = ST.playerCam;
 
@@ -409,6 +387,8 @@
   function serializeSpawn(){
     ensureSpawnPad();
     if (!ST.spawn) return null;
+    // capture current yaw from mesh.rotation.y (source of truth)
+    ST.spawnYaw = ((ST.spawn.rotation?.y || 0) * 180/Math.PI + 360) % 360;
     return {
       name: ST.spawn.name || 'StartPad_Wood',
       pos: { x:+ST.spawn.position.x.toFixed(4), y:+ST.spawn.position.y.toFixed(4), z:+ST.spawn.position.z.toFixed(4) },
@@ -425,7 +405,6 @@
 
   function wrapExportIfPresent(){
     if (!window.Builder) return;
-    // Prefer wrapping a canonical exporter if provided
     const B = window.Builder;
     if (typeof B.exportToJSON === 'function' && !B.exportToJSON.__wrappedWithSpawn){
       const orig = B.exportToJSON.bind(B);
@@ -437,18 +416,105 @@
       B.exportToJSON.__wrappedWithSpawn = true;
     }
   }
-
   function tagSaveButtons(){
     const ids = ['proj-download','proj-export','btn-export','proj-save'];
     ids.forEach(id=>{
       const el = document.getElementById(id);
       if (!el || el.__spawnHooked) return;
       el.addEventListener('click', ()=> {
-        // place patch globally so any exporter can merge it
         window.__SPAWN_EXPORT_PATCH = serializeSpawn();
       }, true);
       el.__spawnHooked = true;
     });
+  }
+
+  // ---------------- LOAD / IMPORT ----------------
+  function parseNum(n, d=0){ const v = (typeof n==='number')? n: parseFloat(n); return isFinite(v)? v: d; }
+
+  function applySpawnFromJSON(json){
+    try{
+      const data = (json && json.spawn) ? json.spawn : json;
+      if (!data) return false;
+      const p = data.pos || {};
+      const yaw = parseNum(data.yaw, 0);
+      ensureSpawnPad();
+      if (!ST.spawn) return false;
+      if (isFinite(p.x)) ST.spawn.position.x = parseNum(p.x, ST.spawn.position.x);
+      if (isFinite(p.y)) ST.spawn.position.y = parseNum(p.y, ST.spawn.position.y);
+      if (isFinite(p.z)) ST.spawn.position.z = parseNum(p.z, ST.spawn.position.z);
+      ST.spawn.rotation.y = rad(yaw);
+      ST.spawnYaw = ((yaw%360)+360)%360;
+      // if player preview is active, move it too
+      if (ST.playerOn && ST.playerRoot){
+        const pos = findSpawnPosition();
+        ST.playerRoot.position.copyFrom(pos);
+        ST.playerRoot.rotation.y = rad(ST.spawnYaw);
+      }
+      return true;
+    }catch(e){ console.warn('[BuilderViewLock] applySpawnFromJSON failed:', e); return false; }
+  }
+  // public helper
+  window.BuilderSpawn = Object.assign(window.BuilderSpawn||{}, {
+    serialize: serializeSpawn,
+    apply: applySpawnFromJSON
+  });
+
+  function wrapImportsIfPresent(){
+    if (ST._importWrapped) return;
+    if (!window.Builder) return;
+    const B = window.Builder;
+
+    const wrap = (obj, key)=>{
+      if (typeof obj[key] !== 'function' || obj[key].__wrappedWithSpawn) return;
+      const orig = obj[key].bind(obj);
+      obj[key] = function(...args){
+        // Try to find JSON-like arg
+        let payload = null;
+        for (const a of args){ if (a && typeof a==='object'){ payload = a; break; } }
+        const rv = orig(...args);
+        // Apply immediately (most builders finish sync), else try a small defer
+        if (!applySpawnFromJSON(payload)){
+          setTimeout(()=> applySpawnFromJSON(payload), 0);
+          setTimeout(()=> applySpawnFromJSON(payload), 50);
+        }
+        return rv;
+      };
+      obj[key].__wrappedWithSpawn = true;
+    };
+
+    ['importFromJSON','loadFromJSON','loadProject','setProject','openProject'].forEach(k=> wrap(B, k));
+    ST._importWrapped = true;
+  }
+
+  function hookProjectLoadedEvents(){
+    if (ST._eventsHooked) return;
+    ST._eventsHooked = true;
+    const tryApply = e=>{
+      const detail = (e && e.detail) || e || null;
+      if (!applySpawnFromJSON(detail)){
+        // maybe global project object
+        if (window.Builder?.project) applySpawnFromJSON(window.Builder.project);
+      }
+    };
+    ['builder:loaded','builder:project:loaded','project:loaded','builder:imported'].forEach(evt=>{
+      window.addEventListener(evt, tryApply, true);
+      document.addEventListener(evt, tryApply, true);
+    });
+
+    // Also watch a common file input (if used)
+    const fileEl = document.getElementById('proj-file');
+    if (fileEl && !fileEl.__spawnHooked){
+      fileEl.addEventListener('change', async ()=>{
+        const f = fileEl.files && fileEl.files[0];
+        if (!f) return;
+        try{
+          const txt = await f.text();
+          const json = JSON.parse(txt);
+          setTimeout(()=> applySpawnFromJSON(json), 0);
+        }catch{}
+      });
+      fileEl.__spawnHooked = true;
+    }
   }
 
   // ---------------- UI ----------------
@@ -483,18 +549,20 @@
       if (!document.getElementById('spawn-tool-btn'))
         toolbar.appendChild(mkBtn('spawn-tool-btn','Spawn Tool','Drag to move spawn (Alt/Ctrl + Wheel to rotate)', ()=>{
           ensureSpawnPad();
-          // flash/select
           if (ST.spawn){
-            const mat = ST.spawn.material;
+            const mat = ST.spawn.material, orig = mat?.emissiveColor?.clone?.();
             try{
-              const orig = mat.emissiveColor?.clone?.();
               mat.emissiveColor = new BABYLON.Color3(0.2,1,0.6);
               setTimeout(()=> { try{ mat.emissiveColor = orig || new BABYLON.Color3(0,0,0); }catch{} }, 450);
             }catch{}
           }
         }));
+      if (!document.getElementById('spawn-snap-btn'))
+        toolbar.appendChild(mkBtn('spawn-snap-btn','Snap Cam to Spawn','Center aerial cam on spawn', ()=>{
+          ensureSpawnPad(); if (!ST.spawn || !ST.cTop) return;
+          ST.cTop.setTarget(ST.spawn.position);
+        }));
     } else {
-      // Fallback floating pill
       if (document.getElementById('builder-view-pill')) return;
       const pill = document.createElement('div');
       pill.id='builder-view-pill';
@@ -505,6 +573,10 @@
       pill.appendChild(mkSwitch('aerial-lock-cb','Aerial Lock', true, setAerial));
       pill.appendChild(mkSwitch('player-control-cb','Player Control', false, setPlayerControl));
       pill.appendChild(mkBtn('spawn-tool-btn','Spawn Tool','Drag to move spawn (Alt/Ctrl + Wheel to rotate)', ()=> ensureSpawnPad()));
+      pill.appendChild(mkBtn('spawn-snap-btn','Snap Cam to Spawn','Center aerial cam on spawn', ()=>{
+        ensureSpawnPad(); if (!ST.spawn || !ST.cTop) return;
+        ST.cTop.setTarget(ST.spawn.position);
+      }));
       document.body.appendChild(pill);
     }
   }
@@ -519,22 +591,12 @@
       attachSpawnDragHandlers();
       wrapExportIfPresent();
       tagSaveButtons();
+      wrapImportsIfPresent();
+      hookProjectLoadedEvents();
+      // If a preloaded project exists in memory, apply its spawn
+      if (window.Builder?.project) applySpawnFromJSON(window.Builder.project);
       clearInterval(boot);
     }catch{}
   }, 150);
 
-  // Expose spawn serializer for external exporters
-  function serializeSpawn(){ return API.serializeSpawn = serializeSpawnInner(); }
-  function serializeSpawnInner(){
-    const s = serializeSpawn._impl || (serializeSpawn._impl = ()=> {
-      ensureSpawnPad();
-      if (!ST.spawn) return null;
-      return {
-        name: ST.spawn.name || 'StartPad_Wood',
-        pos: { x:+ST.spawn.position.x.toFixed(4), y:+ST.spawn.position.y.toFixed(4), z:+ST.spawn.position.z.toFixed(4) },
-        yaw: +(+ST.spawnYaw).toFixed(2)
-      };
-    });
-    return s();
-  }
 })();
