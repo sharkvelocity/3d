@@ -7,7 +7,7 @@
   <meta name="author" content="Shark-Blades" />
   <meta name="description" content="Top-down Sims-style map builder for PhasmaPhoney using Babylon.js" />
 
-  <!-- Babylon core (same CDNs/locals as index3) -->
+  <!-- Babylon core -->
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
@@ -16,35 +16,25 @@
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
     #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
 
-    #hint {
-      position:fixed; left:12px; bottom:12px; z-index:10;
-      background:rgba(0,0,0,0.75); border:1px solid #066; border-radius:8px;
-      padding:8px 10px; color:#9ff; font:12px/1.4 monospace;
-    }
-
-    /* Repositioned so it doesn't overlap the Builder's own toolbar (which sits at top-left) */
+    /* Always bottom-centered so it won't collide with the top builder toolbar */
     #project-bar {
-      position:fixed; top:10px; left:240px;  /* <-- offset from left tool palette */
+      position:fixed; bottom:10px; left:50%; transform:translateX(-50%);
       z-index:12002; background:rgba(0,0,0,0.85);
       border:1px solid #066; border-radius:10px; padding:8px 10px; color:#9ff;
       display:flex; gap:6px; align-items:center; font:12px monospace;
       flex-wrap:wrap; pointer-events:auto;
+      max-width: min(1200px, 96vw);
+      justify-content:center;
+      box-shadow:0 0 18px rgba(0,255,255,0.08);
     }
     .btn { border:1px solid #066; background:#111; color:#9ff; padding:4px 8px; border-radius:8px; cursor:pointer; }
     .btn:active{ transform:translateY(1px); }
-    input, select {
-      background:#000; color:#0ff; border:1px solid #066; border-radius:6px; padding:3px 6px;
-    }
+    input, select { background:#000; color:#0ff; border:1px solid #066; border-radius:6px; padding:3px 6px; }
 
     #tool-legend {
       position:fixed; right:12px; top:12px; z-index:10;
       background:rgba(0,0,0,0.75); border:1px solid #066; border-radius:10px; padding:8px 10px;
       color:#9ff; font:12px/1.4 monospace; max-width:280px;
-    }
-
-    /* On very small widths, dock the project bar to bottom-left to avoid overlaps */
-    @media (max-width: 1100px) {
-      #project-bar { top:auto; left:12px; bottom:12px; right:auto; }
     }
   </style>
 </head>
@@ -52,7 +42,7 @@
 <body>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Project / Grid / Export bar -->
+  <!-- Project / Grid / Export bar (bottom-centered) -->
   <div id="project-bar">
     <b style="color:#0ff">Projects</b>
     <label>Name <input id="proj-name" type="text" placeholder="MyLayout" style="width:160px"></label>
@@ -62,11 +52,11 @@
     <button id="proj-load" class="btn" title="Load selected project">Load</button>
     <button id="proj-del" class="btn" title="Delete selected project" style="color:#faa;border-color:#933;">Delete</button>
     <button id="proj-new" class="btn" title="Clear scene">New</button>
-    <span style="margin-left:10px;border-left:1px solid #044;height:18px"></span>
+    <span style="margin:0 6px;border-left:1px solid #044;height:18px"></span>
     <label>Grid <input id="grid-snap" type="checkbox" checked></label>
     <label>Step <input id="grid-step" type="number" value="0.5" min="0.1" max="5" step="0.1" style="width:60px"></label>
     <label>Van <input id="van-toggle" type="checkbox" checked title="Include side storage room"></label>
-    <span style="margin-left:10px;border-left:1px solid #044;height:18px"></span>
+    <span style="margin:0 6px;border-left:1px solid #044;height:18px"></span>
     <button id="proj-download" class="btn" title="Download Project JSON">Download</button>
     <label class="btn" style="padding:4px 8px; cursor:pointer;">
       Upload <input id="proj-upload" type="file" accept="application/json" style="display:none">
@@ -78,10 +68,10 @@
     <div><b>BUILDER</b> is always ON (origin at 0,0,0)</div>
     <div>S / W / R / F / P = Select / Wall / Room / Floor / Place</div>
     <div>Q/E rotate · Del delete · C copy · Ctrl+Z undo</div>
-    <div>Top‑down view is locked; Mouse‑wheel = zoom, WASD/Arrows = pan</div>
+    <div>Top-down view is locked; Mouse-wheel = zoom, WASD/Arrows = pan</div>
   </div>
 
-  <!-- Minimal boot: engine + scene -->
+  <!-- Minimal boot: engine + scene (locked orthographic top-down) -->
   <script>
     (function(){
       const canvas = document.getElementById('renderCanvas');
@@ -90,18 +80,17 @@
       window.engine = engine;
       window.scene  = scene;
 
-      // Locked top-down orthographic ArcRotate camera
       const cam = new BABYLON.ArcRotateCamera('TopDownCam', 0, 0.0001, 50, new BABYLON.Vector3(0,0,0), scene);
       cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
       cam.lowerAlphaLimit = cam.upperAlphaLimit = 0;
       cam.lowerBetaLimit  = cam.upperBetaLimit  = 0.0001;
       cam.useAutoRotationBehavior = false;
-      cam.inputs.clear();           // remove default rotate behavior
-      cam.panningSensibility = 0;   // we'll handle WASD/Arrows for panning
+      cam.inputs.clear();
+      cam.panningSensibility = 0;
       cam.attachControl(canvas, true);
       window.camera = cam;
 
-      let orthoScale = 30; // higher => larger view (zoomed out)
+      let orthoScale = 30;
       function updateOrtho(){
         const ratio = engine.getRenderWidth() / engine.getRenderHeight();
         cam.orthoLeft   = -orthoScale * ratio;
@@ -111,7 +100,6 @@
       }
       updateOrtho();
 
-      // Mouse wheel zoom
       canvas.addEventListener('wheel', (e)=>{
         e.preventDefault();
         const delta = Math.sign(e.deltaY) * 2.0;
@@ -119,7 +107,6 @@
         updateOrtho();
       }, { passive:false });
 
-      // WASD / Arrows pan the camera target
       const pan = { x:0, z:0 };
       window.addEventListener('keydown', (e)=>{
         if (e.repeat) return;
@@ -137,12 +124,11 @@
 
       scene.onBeforeRenderObservable.add(()=>{
         if (pan.x || pan.z){
-          const speed = orthoScale * 0.02; // pan scales with zoom
+          const speed = orthoScale * 0.02;
           cam.target.addInPlace(new BABYLON.Vector3(pan.x*speed, 0, pan.z*speed));
         }
       });
 
-      // Lights
       const hemi = new BABYLON.HemisphericLight('boot_hemi', new BABYLON.Vector3(0,1,0), scene);
       hemi.intensity = 0.8;
 
@@ -151,7 +137,7 @@
     })();
   </script>
 
-  <!-- World: Procedural base plate (no GLBs) -->
+  <!-- World base (no GLBs) -->
   <script src="./assets/index3/map.js?v=3.0"></script>
 
   <!-- Builder Tool (Sims-like) -->
@@ -172,8 +158,7 @@
         const size = 8;
         const pad  = BABYLON.MeshBuilder.CreateGround('StartPad_Wood', { width:size, height:size, subdivisions: 2 }, scene);
         pad.position = v3(0, 0.01, 0);
-        pad.isPickable = true;
-        pad.checkCollisions = true;
+        pad.isPickable = true; pad.checkCollisions = true;
         const mat = new BABYLON.StandardMaterial('Mat_StartPad_Wood', scene);
         mat.diffuseColor  = new C3(0.55, 0.42, 0.2);
         mat.specularColor = new C3(0.1, 0.1, 0.1);
@@ -309,7 +294,6 @@
         }
       }
 
-      // Export map manifest (drop-in ready)
       function exportMapManifest(){
         const s = window.scene;
         const out = {
