@@ -1,152 +1,200 @@
-// ./assets/index3/map.js — v2.1
-// Loads the Jailhouse map (jailhouse.glb) and applies basic ground tagging.
-// Progress UI hooks the #loading-overlay bar if present.
-// If window.MAP_URL is set before this file loads, it will use that URL instead.
+// ./assets/index3/map.js — v3.0 (procedural)
+// No GLB loading. Builds a collision-enabled base ground + optional boundary walls.
+// Works with:
+//  - Builder Tool (floors/walls you draw get collisions automatically)
+//  - Ghost movement (registers ground names)
+//  - Player gravity/collisions (camera ellipsoid set here)
 
 (function(){
   "use strict";
-  if (window.MapLoader && window.MapLoader.__v === "2.1") return;
 
-  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
-
-  const UI = {
-    overlay: null, bar:null, txt:null, title:null,
-    ensure(){
-      if (this.overlay) return;
-      this.overlay = document.getElementById('loading-overlay');
-      this.bar     = document.getElementById('loading-bar');
-      this.txt     = document.getElementById('loading-text');
-      this.title   = document.getElementById('loading-title');
-    },
-    show(on){
-      this.ensure();
-      if (!this.overlay) return;
-      this.overlay.style.display = on ? 'flex' : 'none';
-    },
-    setTitle(t){
-      this.ensure(); if (this.title) this.title.textContent = t;
-    },
-    setProgress(ratio){
-      this.ensure();
-      const r = Math.max(0, Math.min(1, ratio||0));
-      if (this.bar) this.bar.style.width = (r*100).toFixed(0) + '%';
-      if (this.txt) this.txt.textContent = (r*100).toFixed(0) + '%';
+  const S = {
+    ready:false,
+    ground:null,
+    walls:[],
+    options:{
+      size: 80,            // meters (square)
+      grid: true,          // draw a subtle grid on ground
+      addPerimeterWalls: true,
+      wallHeight: 3.0,
+      wallThickness: 0.3,
+      groundName: "Ground_Main",
+      wallName: "Boundary",
+      groundFriction: 0.8,
+      groundRestitution: 0.0,
+      groundColor: new BABYLON.Color3(0.12,0.14,0.15)
     }
   };
 
-  const ST = { __v:"2.1", url:null, loaded:false };
+  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
+  const v3    = (x,y,z)=> new BABYLON.Vector3(x,y,z);
 
-  function tryPaths(paths, idx=0){
-    const s = SCENE();
-    if (!s){ setTimeout(()=> tryPaths(paths, idx), 150); return; }
-    if (idx >= paths.length){
-      console.warn('[map] failed to load any candidate', paths);
-      UI.show(false);
-      return;
-    }
-    const url = paths[idx];
-    ST.url = url;
-    UI.setTitle('loading map…');
-    UI.show(true);
-    UI.setProgress(0);
-
-    // Use Append with full relative path
-    BABYLON.SceneLoader.Append('', url, s,
-      ()=> onSuccess(s, url),
-      (evt)=> onProgress(evt),
-      (_scene, msg, ex)=>{
-        console.warn('[map] load failed', url, msg || ex);
-        // try next candidate
-        tryPaths(paths, idx+1);
-      }
-    );
-  }
-
-  function onProgress(evt){
-    if (!evt) return;
-    if (evt.lengthComputable){
-      const r = evt.loaded / (evt.total || evt.loaded || 1);
-      UI.setProgress(r);
-    } else {
-      // heuristics
-      const cur = parseFloat((UI.txt?.textContent||'0').replace('%',''))/100 || 0;
-      UI.setProgress(Math.min(0.98, cur + 0.02));
-    }
-  }
-
-  function onSuccess(scene, url){
-    ST.loaded = true;
-    UI.setProgress(1);
-    setTimeout(()=> UI.show(false), 200);
-    window.CURRENT_MAP_NAME = 'jailhouse.glb';
-    window.CURRENT_MAP_URL  = url;
-
-    // Make things pickable by default, preserve explicit false
-    scene.meshes.forEach(m=>{
-      try {
-        if (m.isPickable === undefined) m.isPickable = true;
-      } catch {}
-    });
-
-    // Basic ground tagging now, plus integration with registerGroundRoots later
-    applyGroundTags(scene);
-
-    // Notify hooks
-    try { window.onMapLoaded && window.onMapLoaded(url); } catch {}
-  }
-
-  function applyGroundTags(scene){
-    const likely = [/floor/i, /ground/i, /hall/i, /cell/i, /yard/i, /concrete/i, /^Floor/i, /^Ground/i];
-    const tagMesh = (mesh)=>{
-      try{
-        mesh.metadata = mesh.metadata || {};
-        mesh.metadata.isGround = true;
-        if (mesh.isPickable !== false) mesh.isPickable = true;
-      }catch{}
+  // Provide a register function if the rest of your stack expects it
+  function ensureRegisterGroundRoots(){
+    if (typeof window.registerGroundRoots === "function") return;
+    window.registerGroundRoots = function(nameHints){
+      // Minimal shim: just stash hints for other systems
+      window.GROUND_NAME_HINTS = nameHints;
     };
-    scene.meshes.forEach(m=>{
-      if (!m || !m.name) return;
-      if (likely.some(re=> re.test(m.name))) {
-        tagMesh(m);
-        m.getChildMeshes?.().forEach(tagMesh);
-      }
-    });
+  }
 
-    // If the ghost_movement registerGroundRoots is available later, call it too
-    const callReg = ()=>{
-      if (typeof window.registerGroundRoots === 'function'){
-        window.registerGroundRoots([/floor/i, /ground/i, /hall/i, /cell/i, /yard/i, /concrete/i]);
-        return true;
+  function createGround(){
+    const scene = SCENE(); if (!scene) return null;
+
+    // Scene collisions + gravity
+    scene.collisionsEnabled = true;
+    scene.gravity = new BABYLON.Vector3(0, -0.6, 0); // gentle gravity; adjust as you like
+
+    // Camera collision setup (keeps your crouch code working)
+    const cam = scene.activeCamera || window.camera;
+    if (cam){
+      cam.checkCollisions = true;
+      cam.applyGravity = true;
+      // Ellipsoid roughly human-size; crouch script will change Y camera height only
+      cam.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+      cam.ellipsoidOffset = new BABYLON.Vector3(0, 0.9, 0);
+    }
+
+    // Base ground
+    const g = BABYLON.MeshBuilder.CreateGround(
+      S.options.groundName,
+      { width:S.options.size, height:S.options.size, subdivisions: 2 },
+      scene
+    );
+    g.position.y = 0;
+    g.checkCollisions = true;
+    g.isPickable = true;
+
+    // Simple standard material with optional grid
+    const m = new BABYLON.StandardMaterial("Mat_"+S.options.groundName, scene);
+    m.diffuseColor  = S.options.groundColor.clone();
+    m.specularColor = new BABYLON.Color3(0.02,0.02,0.02);
+    if (S.options.grid){
+      const tex = new BABYLON.DynamicTexture('GroundGridTex', {width:1024, height:1024}, scene, false);
+      const ctx = tex.getContext();
+      ctx.fillStyle = 'rgb(15,18,20)'; ctx.fillRect(0,0,1024,1024);
+      const step = 64; // grid spacing on texture
+      for (let x=0; x<=1024; x+=step){
+        const major = (x%(step*4)===0);
+        ctx.fillStyle = major ? 'rgba(0,255,255,0.24)' : 'rgba(0,255,255,0.10)';
+        ctx.fillRect(x, 0, 1, 1024);
+        ctx.fillRect(0, x, 1024, 1);
       }
-      return false;
-    };
-    if (!callReg()){
-      let tries=0;
-      const id=setInterval(()=>{ tries++; if (callReg() || tries>40) clearInterval(id); }, 250);
+      tex.update();
+      m.diffuseTexture = tex;
+      m.diffuseTexture.uScale = S.options.size/10;
+      m.diffuseTexture.vScale = S.options.size/10;
+    }
+    g.material = m;
+
+    // Physics-like friction/rest (for if you later enable a physics engine)
+    try{ g.physicsImpostor = new BABYLON.PhysicsImpostor(g, BABYLON.PhysicsImpostor.BoxImpostor, { mass:0, friction:S.options.groundFriction, restitution:S.options.groundRestitution }, scene); }catch{}
+
+    // Register ground name hints for other systems (ghost drop, etc.)
+    ensureRegisterGroundRoots();
+    window.registerGroundRoots([ new RegExp("^"+S.options.groundName+"$") ]);
+
+    return g;
+  }
+
+  function createPerimeterWalls(){
+    const scene = SCENE(); if (!scene) return [];
+    const half = S.options.size/2;
+    const h    = S.options.wallHeight;
+    const t    = S.options.wallThickness;
+    const walls = [];
+
+    function make(name, w, d, pos, rotY){
+      const wall = BABYLON.MeshBuilder.CreateBox(name, { width:w, depth:d, height:h }, scene);
+      wall.position.copyFrom(pos);
+      if (rotY) wall.rotation.y = rotY;
+      wall.checkCollisions = true;
+      wall.isPickable = true;
+
+      const mat = new BABYLON.StandardMaterial("Mat_"+name, scene);
+      mat.diffuseColor  = new BABYLON.Color3(0.7,0.72,0.75);
+      mat.specularColor = new BABYLON.Color3(0.05,0.05,0.05);
+      wall.material = mat;
+
+      // Ghost pathing blocker
+      wall.metadata = wall.metadata || {};
+      wall.metadata.isGhostBlocker = true;
+      wall.metadata.builder = { type:'wall', floorIndex: 0 };
+
+      walls.push(wall);
+      return wall;
+    }
+
+    // North (top)
+    make(S.options.wallName+"_N", S.options.size, t,   v3(0, h/2, -half), 0);
+    // South (bottom)
+    make(S.options.wallName+"_S", S.options.size, t,   v3(0, h/2,  half), 0);
+    // West (left)
+    make(S.options.wallName+"_W", t,   S.options.size, v3(-half, h/2, 0), 0);
+    // East (right)
+    make(S.options.wallName+"_E", t,   S.options.size, v3( half, h/2, 0), 0);
+
+    return walls;
+  }
+
+  function lightIfMissing(){
+    const scene = SCENE(); if (!scene) return;
+    if (!scene.lights || scene.lights.length===0){
+      const hemi = new BABYLON.HemisphericLight("Base_Hemi", new BABYLON.Vector3(0.2,1,0.2), scene);
+      hemi.intensity = 0.8;
     }
   }
 
-  function loadJailhouse(){
-    const candidates = [];
-    if (window.MAP_URL) candidates.push(window.MAP_URL);
-    // common locations
-    candidates.push(
-      './assets/models/maps/jailhouse.glb',
-      './assets/models/jailhouse.glb',
-      './jailhouse.glb'
-    );
-    tryPaths(candidates);
+  function setup(){
+    if (S.ready) return;
+    const scene = SCENE(); if (!scene) return;
+
+    lightIfMissing();
+    S.ground = createGround();
+    S.walls  = S.options.addPerimeterWalls ? createPerimeterWalls() : [];
+
+    // Place the player roughly centered + slightly above ground to settle
+    const cam = scene.activeCamera || window.camera;
+    if (cam){
+      cam.setTarget(v3(0,0,0));
+      if (cam.position.y < 0.1) cam.position.y = 1.6;
+      cam.position.x = 0; cam.position.z = S.options.size*0.35;
+    }
+
+    S.ready = true;
+
+    // Expose small API for quick edits
+    window.World = {
+      get ground(){ return S.ground; },
+      get walls(){ return S.walls.slice(); },
+      resize(newSize){
+        const s = Math.max(10, +newSize||S.options.size);
+        S.options.size = s;
+        // Rebuild ground + walls
+        if (S.ground){ S.ground.dispose(false,true); S.ground=null; }
+        S.walls.forEach(w=> w.dispose(false,true));
+        S.walls.length = 0;
+        S.ground = createGround();
+        if (S.options.addPerimeterWalls) S.walls = createPerimeterWalls();
+      },
+      setWalls(on){
+        S.options.addPerimeterWalls = !!on;
+        S.walls.forEach(w=> w.dispose(false,true)); S.walls.length = 0;
+        if (S.options.addPerimeterWalls) S.walls = createPerimeterWalls();
+      },
+      center(){ return v3(0,0,0); },
+      size(){ return S.options.size; }
+    };
   }
 
-  window.MapLoader = { __v:"2.1", loadJailhouse };
-
-  // Auto-load when scene exists
+  // Boot when scene exists
   const boot = setInterval(()=>{
     try{
       if (SCENE()){
         clearInterval(boot);
-        loadJailhouse();
+        setup();
       }
     }catch{}
-  }, 150);
+  }, 120);
+
 })();
