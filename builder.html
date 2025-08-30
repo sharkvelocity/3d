@@ -15,27 +15,36 @@
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
     #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
+
     #hint {
       position:fixed; left:12px; bottom:12px; z-index:10;
       background:rgba(0,0,0,0.75); border:1px solid #066; border-radius:8px;
       padding:8px 10px; color:#9ff; font:12px/1.4 monospace;
     }
+
+    /* Repositioned so it doesn't overlap the Builder's own toolbar (which sits at top-left) */
     #project-bar {
-      position:fixed; top:10px; left:50%; transform:translateX(-50%);
+      position:fixed; top:10px; left:240px;  /* <-- offset from left tool palette */
       z-index:12002; background:rgba(0,0,0,0.85);
       border:1px solid #066; border-radius:10px; padding:8px 10px; color:#9ff;
       display:flex; gap:6px; align-items:center; font:12px monospace;
-      flex-wrap:wrap;
+      flex-wrap:wrap; pointer-events:auto;
     }
     .btn { border:1px solid #066; background:#111; color:#9ff; padding:4px 8px; border-radius:8px; cursor:pointer; }
     .btn:active{ transform:translateY(1px); }
     input, select {
       background:#000; color:#0ff; border:1px solid #066; border-radius:6px; padding:3px 6px;
     }
+
     #tool-legend {
       position:fixed; right:12px; top:12px; z-index:10;
       background:rgba(0,0,0,0.75); border:1px solid #066; border-radius:10px; padding:8px 10px;
       color:#9ff; font:12px/1.4 monospace; max-width:280px;
+    }
+
+    /* On very small widths, dock the project bar to bottom-left to avoid overlaps */
+    @media (max-width: 1100px) {
+      #project-bar { top:auto; left:12px; bottom:12px; right:auto; }
     }
   </style>
 </head>
@@ -69,7 +78,7 @@
     <div><b>BUILDER</b> is always ON (origin at 0,0,0)</div>
     <div>S / W / R / F / P = Select / Wall / Room / Floor / Place</div>
     <div>Q/E rotate · Del delete · C copy · Ctrl+Z undo</div>
-    <div>Grid snap & step can be changed above</div>
+    <div>Top‑down view is locked; Mouse‑wheel = zoom, WASD/Arrows = pan</div>
   </div>
 
   <!-- Minimal boot: engine + scene -->
@@ -81,16 +90,64 @@
       window.engine = engine;
       window.scene  = scene;
 
-      // Start centered at origin with a simple camera; Builder will manage top view
-      const camera = new BABYLON.ArcRotateCamera('PlayerCam', Math.PI * 1.25, Math.PI * 0.45, 35, new BABYLON.Vector3(0,0,0), scene);
-      camera.attachControl(canvas, true);
-      window.camera = camera;
+      // Locked top-down orthographic ArcRotate camera
+      const cam = new BABYLON.ArcRotateCamera('TopDownCam', 0, 0.0001, 50, new BABYLON.Vector3(0,0,0), scene);
+      cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+      cam.lowerAlphaLimit = cam.upperAlphaLimit = 0;
+      cam.lowerBetaLimit  = cam.upperBetaLimit  = 0.0001;
+      cam.useAutoRotationBehavior = false;
+      cam.inputs.clear();           // remove default rotate behavior
+      cam.panningSensibility = 0;   // we'll handle WASD/Arrows for panning
+      cam.attachControl(canvas, true);
+      window.camera = cam;
 
+      let orthoScale = 30; // higher => larger view (zoomed out)
+      function updateOrtho(){
+        const ratio = engine.getRenderWidth() / engine.getRenderHeight();
+        cam.orthoLeft   = -orthoScale * ratio;
+        cam.orthoRight  =  orthoScale * ratio;
+        cam.orthoTop    =  orthoScale;
+        cam.orthoBottom = -orthoScale;
+      }
+      updateOrtho();
+
+      // Mouse wheel zoom
+      canvas.addEventListener('wheel', (e)=>{
+        e.preventDefault();
+        const delta = Math.sign(e.deltaY) * 2.0;
+        orthoScale = Math.max(5, Math.min(150, orthoScale + delta));
+        updateOrtho();
+      }, { passive:false });
+
+      // WASD / Arrows pan the camera target
+      const pan = { x:0, z:0 };
+      window.addEventListener('keydown', (e)=>{
+        if (e.repeat) return;
+        if (e.key==='a' || e.key==='ArrowLeft')  pan.x = -1;
+        if (e.key==='d' || e.key==='ArrowRight') pan.x =  1;
+        if (e.key==='w' || e.key==='ArrowUp')    pan.z = -1;
+        if (e.key==='s' || e.key==='ArrowDown')  pan.z =  1;
+      });
+      window.addEventListener('keyup', (e)=>{
+        if (e.key==='a' || e.key==='ArrowLeft')  if (pan.x<0) pan.x = 0;
+        if (e.key==='d' || e.key==='ArrowRight') if (pan.x>0) pan.x = 0;
+        if (e.key==='w' || e.key==='ArrowUp')    if (pan.z<0) pan.z = 0;
+        if (e.key==='s' || e.key==='ArrowDown')  if (pan.z>0) pan.z = 0;
+      });
+
+      scene.onBeforeRenderObservable.add(()=>{
+        if (pan.x || pan.z){
+          const speed = orthoScale * 0.02; // pan scales with zoom
+          cam.target.addInPlace(new BABYLON.Vector3(pan.x*speed, 0, pan.z*speed));
+        }
+      });
+
+      // Lights
       const hemi = new BABYLON.HemisphericLight('boot_hemi', new BABYLON.Vector3(0,1,0), scene);
-      hemi.intensity = 0.75;
+      hemi.intensity = 0.8;
 
       engine.runRenderLoop(function(){ scene.render(); });
-      window.addEventListener('resize', function(){ engine.resize(); });
+      window.addEventListener('resize', function(){ engine.resize(); updateOrtho(); });
     })();
   </script>
 
@@ -99,7 +156,6 @@
 
   <!-- Builder Tool (Sims-like) -->
   <script>
-    // Provide default options for the builder if it reads globals
     window.BUILDER_OPTS = { gridSnap:true, gridStep:0.5 };
   </script>
   <script src="./assets/index3/builder_tool.js?v=1.0"></script>
@@ -130,7 +186,6 @@
             window.GROUND_NAME_HINTS = [/^StartPad_Wood$/, /^Ground_Main$/];
           }
         }catch{}
-        // player spawn marker
         let sp = scene.getTransformNodeByName('Spawn_Player');
         if (!sp){ sp = new BABYLON.TransformNode('Spawn_Player', scene); sp.position = v3(0, 0.1, -size*0.25); }
       }
@@ -140,10 +195,9 @@
         if (scene.getMeshByName('Van_Floor')) return;
 
         const sizeX = 10, sizeZ = 6, h = 3, t = 0.18;
-        const offsetX = (window.World?.size?.() || 80) * 0.35; // side of baseplate
+        const offsetX = (window.World?.size?.() || 80) * 0.35;
         const center = v3(+offsetX, 0, 0);
 
-        // Floor
         const floor = BABYLON.MeshBuilder.CreateGround('Van_Floor', {width:sizeX, height:sizeZ}, scene);
         floor.position = center.add(v3(0,0.01,0));
         floor.checkCollisions = true; floor.isPickable = true;
@@ -152,7 +206,6 @@
         floor.material = fmat;
         floor.metadata = { builder:{ type:'floor', size:[sizeX,sizeZ], room:'Van', floorIndex:0 } };
 
-        // Walls (gap/door on the west/left side)
         function wbox(name, L, pos, rotY){
           const wall = BABYLON.MeshBuilder.CreateBox(name, {width:L, depth:t, height:h}, scene);
           wall.position = pos.clone(); wall.rotation.y = rotY||0;
@@ -163,17 +216,13 @@
           wall.metadata = { builder:{ type:'wall', floorIndex:0, a:null, b:null, h:h, t:t }, isGhostBlocker:true };
           return wall;
         }
-        // North/South
         wbox('Van_Wall_N', sizeX, center.add(v3(0, h/2, -sizeZ/2)), 0);
         wbox('Van_Wall_S', sizeX, center.add(v3(0, h/2,  sizeZ/2)), 0);
-        // West: split for a 1.2m doorway
         const gap = 1.2, remain = (sizeZ - gap)/2;
         wbox('Van_Wall_W1', remain, center.add(v3(-sizeX/2, h/2, - (gap/2 + remain/2))), Math.PI/2);
         wbox('Van_Wall_W2', remain, center.add(v3(-sizeX/2, h/2,   (gap/2 + remain/2))), Math.PI/2);
-        // East
         wbox('Van_Wall_E', sizeZ, center.add(v3( sizeX/2, h/2, 0)), Math.PI/2);
 
-        // Tool props (placeholders)
         function tool(name, local){
           const b = BABYLON.MeshBuilder.CreateBox('Van_Tool_'+name, {width:0.4, height:0.25, depth:0.25}, scene);
           b.position = center.add(local);
@@ -191,7 +240,6 @@
           tool(tName, v3(x, 0.2, lineZ));
         });
 
-        // van spawn
         let sv = scene.getTransformNodeByName('Spawn_Van');
         if (!sv){ sv = new BABYLON.TransformNode('Spawn_Van', scene); sv.position = center.add(v3(-sizeX/2+1.0, 0.1, 0)); }
       }
@@ -285,12 +333,10 @@
             const sz = m.metadata.builder.size || [m.getBoundingInfo().boundingBox.extendSizeWorld.x*2, m.getBoundingInfo().boundingBox.extendSizeWorld.z*2];
             out.floors.push({ name:m.name, pos:[m.position.x, m.position.y, m.position.z], size:sz, floorIndex: (m.metadata.builder.floorIndex|0)||0 });
           } else if (tag==='wall'){
-            // Prefer saved endpoints if present
             let a = m.metadata.builder.a, b = m.metadata.builder.b, h=m.metadata.builder.h, t=m.metadata.builder.t;
             if (!a || !b){
-              // Compute endpoints from world matrix along local X axis
               const wm = m.getWorldMatrix();
-              const half = (m.getBoundingInfo().boundingBox.extendSize.x)*m.scaling.x; // approx
+              const half = (m.getBoundingInfo().boundingBox.extendSize.x)*m.scaling.x;
               const p1 = BABYLON.Vector3.TransformCoordinates(new BABYLON.Vector3(-half, 0, 0), wm);
               const p2 = BABYLON.Vector3.TransformCoordinates(new BABYLON.Vector3( half, 0, 0), wm);
               a = {x:p1.x,y:p1.y-(m.getBoundingInfo().boundingBox.extendSizeWorld.y),z:p1.z};
@@ -314,7 +360,6 @@
         return out;
       }
 
-      // localStorage projects
       const KEY = 'pp_builder_projects';
       function listProjects(){ try{ return JSON.parse(localStorage.getItem(KEY)||'{}'); }catch{ return {}; } }
       function saveProjects(map){ try{ localStorage.setItem(KEY, JSON.stringify(map)); }catch{} }
@@ -331,14 +376,11 @@
         if (!window.scene || !window.World || !window.Builder) return;
         clearInterval(uiBoot);
 
-        // Always enable builder (top view)
         try { Builder.enable(); } catch {}
 
-        // Ensure base elements
         addStartPad();
         if (document.getElementById('van-toggle').checked) addVanRoom();
 
-        // Wire grid snap
         const gchk = document.getElementById('grid-snap');
         const gstep= document.getElementById('grid-step');
         function applyGrid(){
@@ -349,7 +391,6 @@
         }
         gchk.onchange = applyGrid; gstep.onchange = applyGrid; applyGrid();
 
-        // Wire project bar
         const name = document.getElementById('proj-name');
         const saveBtn = document.getElementById('proj-save');
         const saveAsBtn = document.getElementById('proj-saveas');
@@ -422,7 +463,6 @@
         vanTgl.onchange = ()=>{
           if (vanTgl.checked){ addVanRoom(); }
           else {
-            // remove van meshes
             window.scene.meshes.slice().forEach(m=>{
               if (m.name.startsWith('Van_') || m.metadata?.storage) try{ m.dispose(false,true);}catch{}
             });
