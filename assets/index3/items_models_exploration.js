@@ -1,201 +1,215 @@
-// ./assets/index3/items_models_exploration.js — v1.0
-// Scans exploration_objects.glb and links the found meshes to your item keys,
-// with helpers to spawn/equip and (optionally) attach VideoFeed to "screen" meshes.
+// ./assets/index3/items_models_exploration.js — v2.0
+// Loads ./assets/models/items/exploration_objects.glb and exposes a tiny API:
+//   ItemsModels.init()
+//   ItemsModels.showInHand(name)
+//   ItemsModels.hideInHand()
+//   ItemsModels.getActiveInHand() -> {name, root}
+//   ItemsModels.instantiate(name, parent?) -> TransformNode (world clone)
+//
+// Auto-fixes PBR looking too dark by setting unlit if there's no environment.
 
 (function(){
   "use strict";
-  if (window.ItemModels && window.ItemModels.__v === "1.0") return;
+  if (window.ItemsModels && window.ItemsModels.__v === '2.0') return;
 
-  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
-  const CAMERA= ()=> window.camera || SCENE()?.activeCamera;
-  const v3    = (x,y,z)=> new BABYLON.Vector3(x,y,z);
+  const PATH = "./assets/models/items/";
+  const FILE = "exploration_objects.glb";
 
-  const PATH  = "./assets/models/items/";
-  const FILE  = "exploration_objects.glb";
-
-  // Map your item keys → group name + mesh names (and optional screen)
-  // These names are from the GLB you uploaded.
-  const ITEM_MODEL_LINKS = {
-    thermometer:     { group:"Thermometer",     meshes:["Thermometer_Thermometer_0"] },
-    emf:             { group:"EMF_Detector",    meshes:["EMF_Detector_EMF_Detector_0"] },
-    spirit_box:      { group:"Cone.001",        meshes:["Cone.001_Spirit_Box_0"] },
-    photo_camera:    { group:"Photo_Camera",    meshes:["Photo_Camera_Photo_Camera_0"], screen:"Photo_Camera_Pantalla_0" },
-    thermal_camera:  { group:"Thermal_Camera",  meshes:["Thermal_Camera_Thermal_Camera_0"], screen:"Thermal_Camera_Pantalla_0" },
-    voice_recorder:  { group:"Voice_Recorder",  meshes:["Voice_Recorder_Voice_Recorder_0"] },
-    flashlight:      { group:"Flashlight",      meshes:["Flashlight_Flashlight_0"] },
-    flashlight_pocket:{group:"Flashlight_Poquet", meshes:["Flashlight_Poquet_Flashlight_Poquet_0"] },
-  };
-
-  const ST = {
-    loaded:false,
-    // for each item key, we keep references to the *source* meshes to instance from
-    sources: {},   // key -> { groupNode, meshes: AbstractMesh[], screenMesh?: AbstractMesh }
-  };
-
-  async function loadOnce(){
-    if (ST.loaded) return true;
-
-    const s = SCENE(); if (!s) return false;
-
-    // Import the GLB
-    try{
-      await BABYLON.SceneLoader.ImportMeshAsync(null, PATH, FILE, s);
-    }catch(err){
-      console.error("[ItemModels] Could not import", PATH+FILE, err);
-      return false;
+  const STATE = {
+    ready:false,
+    loading:false,
+    map:{},              // logicalName -> template TransformNode
+    sourceContainer:null,
+    handAnchor:null,
+    inHand:null,         // {name, root}
+    offsets:{
+      // per-item hand offsets (right-hand, screen space-ish)
+      default: {pos:[0.28,-0.25,0.7], rot:[0.0, Math.PI*0.06, 0.0], scl:1.0},
+      EMF:     {pos:[0.24,-0.27,0.68], rot:[0.0, Math.PI*0.08, 0.0], scl:1.0},
+      SpiritBox:{pos:[0.26,-0.29,0.70], rot:[0.0, Math.PI*0.04, 0.0], scl:1.0},
+      UV:      {pos:[0.24,-0.29,0.66], rot:[0.0, Math.PI*0.10, 0.0], scl:1.0},
+      DOTS:    {pos:[0.28,-0.26,0.70], rot:[0.0, Math.PI*0.10, 0.0], scl:1.0},
+      Camera:  {pos:[0.22,-0.23,0.75], rot:[0.0, Math.PI*0.12, 0.0], scl:1.0},
+      Candle:  {pos:[0.30,-0.22,0.72], rot:[0.0, Math.PI*0.04, 0.0], scl:1.1},
+      Thermometer:{pos:[0.24,-0.27,0.70], rot:[0.0, Math.PI*0.06, 0.0], scl:1.0},
+      Lighter: {pos:[0.28,-0.28,0.65], rot:[0.0, Math.PI*0.05, 0.0], scl:1.2},
+      Salt:    {pos:[0.28,-0.26,0.72], rot:[0.0, Math.PI*0.10, 0.0], scl:1.0},
+      Book:    {pos:[0.26,-0.29,0.68], rot:[-0.05, Math.PI*0.14, 0.0], scl:1.0},
+      WritingBook:{pos:[0.26,-0.29,0.68], rot:[-0.05, Math.PI*0.14, 0.0], scl:1.0},
+      Crucifix:{pos:[0.28,-0.26,0.68], rot:[0.0, Math.PI*0.05, 0.0], scl:1.1},
+      Incense:{pos:[0.28,-0.28,0.68], rot:[0.0, Math.PI*0.05, 0.0], scl:1.1},
+      Tripod:{pos:[0.18,-0.30,0.85], rot:[0.0, Math.PI*0.18, 0.0], scl:1.0},
     }
+  };
 
-    // Build the sources per key
-    Object.entries(ITEM_MODEL_LINKS).forEach(([key, def])=>{
-      const groupNode = s.getNodeByName(def.group) || s.getTransformNodeByName?.(def.group) || s.getMeshByName(def.group);
-      const meshRefs = [];
-      def.meshes.forEach(nm=>{
-        const m = s.getMeshByName(nm);
-        if (m) meshRefs.push(m);
-      });
-      let screenRef = null;
-      if (def.screen){
-        screenRef = s.getMeshByName(def.screen) || null;
-      }
-      // Hide *source* meshes
-      meshRefs.forEach(m=>{
-        try{
-          m.setEnabled(false);
-          m.isPickable = false;
-          m.visibility = 0;
-        }catch{}
-      });
-      if (screenRef){
-        try{
-          screenRef.setEnabled(false);
-          screenRef.isPickable = false;
-          screenRef.visibility = 0;
-        }catch{}
-      }
-      ST.sources[key] = { groupNode, meshes: meshRefs, screen: screenRef };
+  function SCENE(){ return window.scene || BABYLON.Engine?.LastCreatedScene; }
+  function CAM(){ return window.camera || SCENE()?.activeCamera; }
+  function v3(x,y,z){ return new BABYLON.Vector3(x,y,z); }
+
+  // fuzzy lookup helper: picks first mesh whose name contains all parts
+  function findLike(meshes, ...parts){
+    const wants = parts.map(p=> String(p).toLowerCase());
+    return meshes.find(m=>{
+      const n = (m.name||'').toLowerCase();
+      return wants.every(w=> n.includes(w));
     });
-
-    ST.loaded = true;
-    console.log("[ItemModels] linked items:", Object.keys(ST.sources));
-    return true;
   }
 
-  // Create a TransformNode and instance each mesh under it
-  function instanceItem(key, opts={}){
-    const s = SCENE(); if (!s) return null;
-    const src = ST.sources[key];
-    if (!src || !src.meshes.length) {
-      console.warn("[ItemModels] No source for", key);
-      return null;
-    }
-    const root = new BABYLON.TransformNode(`Item_${key}_${Date.now().toString(36)}`, s);
+  function makeTemplateFromMesh(mesh){
+    // Wrap mesh into a transform root so we can position/scale without altering shared mesh
+    const s = SCENE();
+    const root = new BABYLON.TransformNode(mesh.name+"_TEMPLATE_ROOT", s);
+    mesh.parent = root;
+    root.setEnabled(false);
+    return root;
+  }
 
-    // instantiate meshes
-    const instances = src.meshes.map(m=>{
-      const inst = m.createInstance(`${m.name}_inst_${(Math.random()*1e6|0)}`);
-      inst.parent = root;
-      inst.isPickable = true;
-      inst.alwaysSelectAsActiveMesh = true;
-      // give each instance its own material (so we can tint/screens etc)
-      try {
-        // clone material if present; else Standard
-        const mat = m.material ? m.material.clone(`${m.material.name}_for_${inst.name}`) : new BABYLON.StandardMaterial(`Mat_${inst.name}`, s);
-        inst.material = mat;
-      } catch {}
-      return inst;
-    });
-
-    // optional screen instance
-    let screenInst = null;
-    if (src.screen){
-      screenInst = src.screen.createInstance(`${src.screen.name}_inst_${(Math.random()*1e6|0)}`);
-      screenInst.parent = root;
-      screenInst.isPickable = false;
+  function normalizeMaterials(node){
+    node.getChildMeshes?.()?.forEach(m=>{
+      const mat = m.material;
+      if (!mat) return;
+      // If PBR and no environment set -> make unlit so albedo shows (prevents "black blocks")
       try{
-        // screen material: emissive for video feed
-        const mat = new BABYLON.StandardMaterial(`ScreenMat_${screenInst.name}`, s);
-        mat.disableLighting = true;
-        mat.emissiveColor = new BABYLON.Color3(1,1,1);
-        screenInst.material = mat;
-      }catch{}
-    }
-
-    // place / flags
-    const p = opts.position || v3(0, 1.0, 0);
-    root.position.copyFrom(p);
-    if (opts.rotation) root.rotation = opts.rotation.clone?.() || opts.rotation;
-    if (opts.scaling)  root.scaling  = opts.scaling.clone?.()  || opts.scaling;
-
-    // item physics-ish flags
-    const wantPick = opts.pickable ?? true;
-    const wantToss = opts.tossable ?? true;
-    root.metadata = Object.assign({}, root.metadata, {
-      itemKey: key, pickable: wantPick, tossable: wantToss
-    });
-    instances.forEach(inst=> { inst.isPickable = wantPick; });
-
-    // simple bounding-box drop to ground if requested
-    if (opts.snapToGround){
-      try {
-        const bb = root.getHierarchyBoundingVectors();
-        const center = bb.min.add(bb.max).scale(0.5);
-        const from = new BABYLON.Vector3(center.x, bb.max.y + 3, center.z);
-        const ray  = new BABYLON.Ray(from, v3(0,-1,0), 20);
-        const hit  = s.pickWithRay(ray, m=> m && m.isPickable !== false);
-        if (hit?.hit) root.position.y = hit.pickedPoint.y + 0.02;
-      } catch {}
-    }
-
-    // optional: attach live VideoFeed if available and this item has a screen
-    if (screenInst && opts.attachVideoFeed && window.VideoFeed){
-      try {
-        VideoFeed.setActive(true);
-        const tex = VideoFeed.getTexture();
-        if (screenInst.material) {
-          screenInst.material.emissiveTexture = tex;
-          screenInst.material.emissiveColor   = new BABYLON.Color3(1,1,1);
+        if (mat.getClassName && /PBR/i.test(mat.getClassName())){
+          if (!SCENE().environmentTexture){ mat.unlit = true; }
+          mat.backFaceCulling = true;
         }
-      } catch(e){ console.warn("[ItemModels] feed attach failed", e); }
-    }
-
-    return { root, instances, screen: screenInst };
+      }catch{}
+      // Ensure textures render
+      try{ if (mat.diffuseTexture){ mat.diffuseTexture.updateSamplingMode(BABYLON.Texture.TRILINEAR_SAMPLINGMODE); } }catch{}
+    });
   }
 
-  // Convenience for "equip" → makes a child of the player camera
-  function equipToCamera(key, opts={}){
-    const s = SCENE(), cam = CAMERA(); if (!s || !cam) return null;
-    const out = instanceItem(key, opts);
-    if (!out) return null;
-    const x = opts.offset || v3(0.15, -0.08, 0.28);
-    out.root.parent = cam;
-    out.root.position.set(x.x, x.y, x.z);
-    out.root.rotation.set(0,0,0);
-    out.root.scaling.set(1,1,1);
-    // optional screen feed
-    if (out.screen && opts.attachVideoFeed && window.VideoFeed){
-      try { VideoFeed.setActive(true); } catch {}
-    }
-    return out;
+  function mapLogicalNames(allMeshes){
+    const map = {};
+    const pick = (...parts)=> {
+      const m = findLike(allMeshes, ...parts);
+      return m ? makeTemplateFromMesh(m) : null;
+    };
+    // Common tools (try several name patterns)
+    map.EMF         = pick('emf')            || pick('reader');
+    map.SpiritBox   = pick('spirit','box')   || pick('radio');
+    map.UV          = pick('uv')             || pick('flash','light') || pick('black','light');
+    map.DOTS        = pick('dots')           || pick('projector');
+    map.Camera      = pick('video','cam')    || pick('camera');
+    map.Candle      = pick('candle');
+    map.Thermometer = pick('thermo');
+    map.Lighter     = pick('lighter');
+    map.Salt        = pick('salt');
+    map.Book        = pick('book');
+    map.WritingBook = map.Book;
+    map.Crucifix    = pick('crucifix');
+    map.Incense     = pick('smudge')         || pick('incense');
+    map.Tripod      = pick('tripod');
+
+    // Fallbacks (simple boxes so something shows up)
+    Object.keys(map).forEach(k=>{
+      if (!map[k]){
+        const s = SCENE();
+        const box = BABYLON.MeshBuilder.CreateBox('Fallback_'+k, {size:0.18}, s);
+        const mat = new BABYLON.StandardMaterial('Mat_'+k, s);
+        mat.diffuseColor = new BABYLON.Color3(0.2,0.8,0.8);
+        box.material = mat;
+        map[k] = makeTemplateFromMesh(box);
+      }
+      normalizeMaterials(map[k]);
+    });
+
+    STATE.map = map;
   }
 
-  // Public API
-  window.ItemModels = {
-    __v:"1.0",
-    load: loadOnce,
-    links: ITEM_MODEL_LINKS,
-    has: (key)=> !!ST.sources[key],
-    getSourceNames: ()=> Object.fromEntries(Object.entries(ST.sources).map(([k,v])=>[k, { group:v.groupNode?.name||null, meshes:v.meshes.map(m=>m.name), screen:v.screen?.name || null }])),
-    instance: (key, opts)=> instanceItem(key, opts),
-    equipToCamera: (key, opts)=> equipToCamera(key, opts),
+  function ensureHandAnchor(){
+    if (STATE.handAnchor && !STATE.handAnchor.isDisposed()) return STATE.handAnchor;
+    const s = SCENE();
+    const c = CAM();
+    const root = new BABYLON.TransformNode('HandAnchor', s);
+    if (c) root.parent = c;
+    STATE.handAnchor = root;
+    return root;
+  }
+
+  function applyOffset(root, name){
+    const o = STATE.offsets[name] || STATE.offsets.default;
+    const p = o.pos, r = o.rot, scl = o.scl||1;
+    root.position.set(p[0], p[1], p[2]);
+    root.rotation.set(r[0], r[1], r[2]);
+    root.scaling.set(scl, scl, scl);
+  }
+
+  function cloneTemplate(name, parent){
+    const t = STATE.map[name];
+    if (!t) return null;
+    const s = SCENE();
+    // deep clone hierarchy
+    const clone = t.clone(name+'_inHand_root', parent||null);
+    // Make sure children are enabled
+    (function enableTree(n){
+      n.setEnabled(true);
+      n.getChildren?.().forEach(enableTree);
+    })(clone);
+    return clone;
+  }
+
+  function showInHand(name){
+    if (!STATE.ready) return;
+    hideInHand();
+    const anchor = ensureHandAnchor();
+    if (!anchor) return;
+
+    const root = cloneTemplate(name, anchor);
+    if (!root) return;
+
+    applyOffset(root, name);
+    // in-hand shouldn't block rays
+    root.getChildMeshes?.().forEach(m=>{ m.isPickable = false; });
+    STATE.inHand = { name, root };
+  }
+
+  function hideInHand(){
+    if (STATE.inHand?.root && !STATE.inHand.root.isDisposed()){
+      try{ STATE.inHand.root.dispose(false,true); }catch{}
+    }
+    STATE.inHand = null;
+  }
+
+  function instantiate(name, parent){
+    const root = cloneTemplate(name, parent||null);
+    if (!root) return null;
+    // world clones should be pickable & collide; let game decide collisions
+    root.getChildMeshes?.().forEach(m=>{ m.isPickable = true; });
+    return root;
+  }
+
+  function init(){
+    if (STATE.ready || STATE.loading) return;
+    if (!SCENE()) return;
+    STATE.loading = true;
+
+    BABYLON.SceneLoader.LoadAssetContainer(PATH, FILE, SCENE(), (container)=>{
+      STATE.sourceContainer = container;
+      // add to scene (but keep templates disabled via makeTemplateFromMesh)
+      container.addAllToScene();
+      // Gather meshes once they’re in the scene
+      const meshes = container.meshes.filter(m=> m && m.name && !/^-?__root__$/i.test(m.name));
+      mapLogicalNames(meshes);
+      // hide originals
+      meshes.forEach(m=>{ m.setEnabled(false); });
+      STATE.ready = true;
+      window.dispatchEvent(new CustomEvent('ItemsModelsReady'));
+    }, null, (scene, msg, e)=>{
+      console.warn('[ItemsModels] load error:', msg || e);
+      STATE.ready = true; // allow fallbacks
+      window.dispatchEvent(new CustomEvent('ItemsModelsReady'));
+    });
+  }
+
+  window.ItemsModels = {
+    __v:'2.0',
+    init, showInHand, hideInHand, instantiate,
+    getActiveInHand: ()=> STATE.inHand,
+    isReady: ()=> STATE.ready
   };
 
-  // lazy boot after scene is ready
-  const boot = setInterval(()=>{
-    try{
-      if (SCENE()){
-        clearInterval(boot);
-        // don’t auto-import; caller will call ItemModels.load() after map loads
-      }
-    }catch{}
-  },120);
+  // auto-boot
+  const boot = setInterval(()=>{ try{ if (SCENE()){ clearInterval(boot); init(); } }catch{} }, 150);
 })();
