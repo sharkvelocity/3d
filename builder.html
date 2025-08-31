@@ -89,6 +89,7 @@
   </div>
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   <!-- ─────────────────────────────────────────────────────────────────────────────
        Minimal boot: engine + orthographic arc camera (locked top-down)
        * Beta & Alpha are locked to prevent tilt
@@ -207,6 +208,93 @@
       e.preventDefault();
       zoomBy(e.deltaY);
     }, { passive:false });
+=======
+  <!-- Minimal boot: engine + scene (locked orthographic top-down) -->
+<script>
+  (function(){
+    const canvas = document.getElementById('renderCanvas');
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    const scene  = new BABYLON.Scene(engine);
+    window.engine = engine;
+    window.scene  = scene;
+
+    // Locked top-down orthographic camera
+    const cam = new BABYLON.ArcRotateCamera('TopDownCam', 0, 0.0001, 50, new BABYLON.Vector3(0,0,0), scene);
+    cam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+    cam.lowerAlphaLimit = cam.upperAlphaLimit = 0;       // no yaw
+    cam.lowerBetaLimit  = cam.upperBetaLimit  = 0.0001;  // no tilt
+    cam.useAutoRotationBehavior = false;
+    cam.inputs.clear();
+    cam.panningSensibility = 0; // we pan manually
+    cam.attachControl(canvas, true);
+    window.camera = cam;
+
+    // Ortho zoom handling
+    let orthoScale = 30;
+    function updateOrtho(){
+      const ratio = engine.getRenderWidth() / engine.getRenderHeight();
+      cam.orthoLeft   = -orthoScale * ratio;
+      cam.orthoRight  =  orthoScale * ratio;
+      cam.orthoTop    =  orthoScale;
+      cam.orthoBottom = -orthoScale;
+    }
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    function zoomBy(deltaY){
+      const step = Math.sign(deltaY) * 2.0;                 // consistent step
+      orthoScale = clamp(orthoScale + step, 5, 150);
+      updateOrtho();
+    }
+    updateOrtho();
+
+    // Expose a hook for other scripts (optional)
+    window.__builderZoom = zoomBy;
+
+    // Zoom on canvas wheel
+    canvas.addEventListener('wheel', (e)=>{
+      e.preventDefault();
+      zoomBy(e.deltaY);
+    }, { passive:false });
+
+    // Zoom even when mouse is not over canvas (but ignore UI/panels)
+    const UI_BLOCK = '#project-bar, .builder-panel, [data-builder-ui], .builder-scroll';
+    window.addEventListener('wheel', (e)=>{
+      if (e.target.closest(UI_BLOCK)) return;  // let panels scroll themselves
+      e.preventDefault();
+      zoomBy(e.deltaY);
+    }, { passive:false });
+
+    // WASD/Arrow pan
+    const pan = { x:0, z:0 };
+    addEventListener('keydown', (e)=>{
+      if (e.repeat) return;
+      if (e.key==='a' || e.key==='ArrowLeft')  pan.x = -1;
+      if (e.key==='d' || e.key==='ArrowRight') pan.x =  1;
+      if (e.key==='w' || e.key==='ArrowUp')    pan.z = -1;
+      if (e.key==='s' || e.key==='ArrowDown')  pan.z =  1;
+    });
+    addEventListener('keyup', (e)=>{
+      if (e.key==='a' || e.key==='ArrowLeft')  if (pan.x<0) pan.x = 0;
+      if (e.key==='d' || e.key==='ArrowRight') if (pan.x>0) pan.x = 0;
+      if (e.key==='w' || e.key==='ArrowUp')    if (pan.z<0) pan.z = 0;
+      if (e.key==='s' || e.key==='ArrowDown')  if (pan.z>0) pan.z = 0;
+    });
+    scene.onBeforeRenderObservable.add(()=>{
+      if (pan.x || pan.z){
+        const speed = orthoScale * 0.02; // matches zoom level
+        cam.target.addInPlace(new BABYLON.Vector3(pan.x*speed, 0, pan.z*speed));
+      }
+    });
+
+    // Basic light so geometry is readable while building
+    const hemi = new BABYLON.HemisphericLight('boot_hemi', new BABYLON.Vector3(0,1,0), scene);
+    hemi.intensity = 0.8;
+
+    engine.runRenderLoop(()=> scene.render());
+    addEventListener('resize', ()=>{ engine.resize(); updateOrtho(); });
+  })();
+</script>
+
+>>>>>>> Stashed changes
 
     // Zoom even when mouse is not over canvas (but ignore UI/panels)
     const UI_BLOCK = '#project-bar, .builder-panel, [data-builder-ui], .builder-scroll';
