@@ -38,13 +38,13 @@
     #loading-bar{ height:100%; width:0%; background:linear-gradient(90deg, #0ff, #08a); transition:width 160ms ease; }
     #loading-text{ color:#8ff; font-size:12px; margin-top:8px; text-align:center; opacity:0.95; }
 
-   #hud-bar{ position:fixed; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; }
-    .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; background:rgba(0,0,0,0.5); }
-    .sanity-wrap{ display:flex; align-items:center; gap:6px; padding:0 6px; }
-    #sanity-gauge{ width:170px; height:10px; border:1px solid #066; background:#061013; border-radius:8px; overflow:hidden; }
-    #sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
-    #hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; display:none; }
-
+    /* HUD */
+    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
+    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    #hud .label{ color:#9ff; }
+    #hud .value{ color:#0ff; font-weight:bold; }
+    #weather{ font-size:12px; color:#aff; opacity:0.9; }
+    #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
 
     /* Storage button + modal */
     #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
@@ -64,10 +64,10 @@
     .ev-row input{ transform:scale(1.3); }
 
     /* Dev gate/panel */
-    #dev-gate, #devtools-panel{ display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
+    #dev-gate, #dev-panel{ display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
     .card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:10px; padding:14px; width:min(820px,92vw); max-height:88vh; overflow:auto; }
-    #devtools-panel{ right:12px; bottom:12px; width:480px; max-height:80vh; overflow:auto; background:#111; border:1px solid #333; border-radius:10px; padding:12px; z-index:9999; font:12px/1.4 monospace; color:#ddd; display:none; }
-
+    #dev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+    #dev-log{ background:#000; border:1px solid #033; min-height:120px; padding:8px; border-radius:6px; color:#8ff; font-size:12px; white-space:pre-wrap; }
     .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
 
     /* Hand preview */
@@ -93,28 +93,16 @@
 
     /* Toast */
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
-
-    /* Thermometer HUD (left edge, shown only when holding) */
-    #thermo-hud{
-      position:fixed; left:10px; top:50%; transform:translateY(-50%);
-      display:none; z-index:6500; padding:8px 10px; border:1px solid #066; border-radius:8px;
-      background:rgba(0,0,0,0.55); color:#9ff; min-width:120px;
-    }
-    #thermo-hud .t-row{ display:flex; align-items:center; gap:8px; }
-    #thermo-icon{ width:20px; height:20px; object-fit:contain; image-rendering:crisp-edges; }
   </style>
 </head>
 
 <body>
   <div id="flash-overlay"></div>
-
-  <!-- Camera/PIP overlay -->
   <div id="camera-overlay">
     <div id="camera-rec">REC ●</div>
     <div id="camera-orb"></div>
     <div id="camera-ir">IR</div>
   </div>
-
   <canvas id="renderCanvas"></canvas>
 
   <!-- Start screen -->
@@ -135,35 +123,12 @@
     </div>
   </div>
 
-  <div id="hud-bar">
-    <div class="chip">Weather: <span id="hud-weather">—</span></div>
-    <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div>
-    <div class="chip">Room: <span id="hud-room">Van</span></div>
-    <div class="chip sanity-wrap">Sanity:
-      <div id="sanity-gauge"><div id="sanity-fill"></div></div>
-      <span id="hud-sanity">100%</span>
-    </div>
-  </div>
-  <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
-  <div id="belt"></div>
-
-  <div id="action-bar">
-    <button id="btn-use" class="hud-btn">Use</button>
-    <button id="btn-place" class="hud-btn">Place</button>
-    <button id="btn-toss" class="hud-btn">Toss</button>
-    <button id="btn-notebook" class="hud-btn">Notebook</button>
-  </div>
-
-  <div id="touch-left"  class="touch-half"></div>
-  <div id="touch-right" class="touch-half"></div>
-
-  <div id="mobile-sprint"><button id="btn-sprint">Sprint: OFF</button></div>
-  <!-- Thermometer HUD (only visible when holding the thermometer) -->
-  <div id="thermo-hud">
-    <div class="t-row">
-      <img id="thermo-icon" src="./assets/icons/thermometer.png" alt="">
-      <div><span id="thermo-value">--.-</span>°C</div>
-    </div>
+  <!-- HUD -->
+  <div id="hud">
+    <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
+    <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
+    <div id="weather">Weather: <span id="hud-weather">Clear</span></div>
+    <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
   </div>
 
   <!-- Storage -->
@@ -183,42 +148,10 @@
     </div>
   </div>
 
-  <!-- Notebook -->
-  <div id="notebook-modal">
-    <div id="notebook-card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <div style="font-weight:bold; color:#9ff;">Investigator's Journal</div>
-        <button id="notebook-close" class="hud-btn">Close</button>
-      </div>
-      <div id="notebook-tabs">
-        <div class="tab active" data-tab="ghosts">Ghosts</div>
-        <div class="tab" data-tab="evidence">Evidence</div>
-        <div class="tab" data-tab="guess">Guess</div>
-      </div>
-      <div id="page-ghosts" class="page active"></div>
-      <div id="page-evidence" class="page"></div>
-      <div id="page-guess" class="page"></div>
-    </div>
-  </div>
-
-  <!-- Dev Gate + Tools -->
-  <div id="dev-gate">
-    <div class="card">
-      <div style="font-weight:bold; color:#9ff; margin-bottom:6px;">Enable Developer Options?</div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button id="dev-yes" class="hud-btn">Yes</button>
-        <button id="dev-no"  class="hud-btn">No</button>
-      </div>
-      <div id="dev-pass-wrap" style="display:none; margin-top:10px;">
-        <div style="color:#8ff; margin-bottom:4px;">Enter password:</div>
-        <input id="dev-pass" type="password" placeholder="password" style="padding:6px 8px; background:#000; color:#0ff; border:1px solid #066; border-radius:4px; width:200px;" />
-        <button id="dev-pass-submit" class="hud-btn" style="margin-left:6px;">Submit</button>
-      </div>
-    </div>
-  </div>
-
   <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
-  <div id="devtools-panel"></div>
+  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:480px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
+    <!-- (Dev tools body preserved; the JS wiring lives in devtools.js) -->
+  </div>
 
   <div id="hand-preview"></div>
   <div id="belt"></div>
@@ -230,102 +163,119 @@
   </div>
   <div id="toast"></div>
 
-  <!-- Ordered scripts (non-module to keep your original globals/flow) -->
+  <!-- Engine/core -->
   <script src="./assets/index3/core.js"></script>
   <script src="./assets/index3/utils.js"></script>
 
   <!-- Reticle -->
   <script>
-    window.RETICLE_OPTS = { style: "dot", size: 22, color: "#9ff", hitColor: "#0f0" };
+    window.RETICLE_OPTS = { style: "circle-dot", size: 22, color: "#9ff", hitColor: "#0f0" };
   </script>
   <script src="./assets/index3/reticle.js?v=1"></script>
 
   <!-- Input & UI -->
   <script src="./assets/index3/ui_input.js?v=1"></script>
 
-  <!-- icons + items -->
-  <script src="./assets/index3/icons.js?v=1.0"></script>
+  <!-- Icons config (use your actual filenames in /assets/icons) -->
+  <script>
+    window.ICONS_BASE_URL = './assets/icons';
+    window.ITEM_ICON_MAP = {
+      emf: 'emf.png',
+      spirit_box: 'spirit_box.png',
+      book: 'book.png',
+      uv: 'uv.png',
+      dots: 'dots.png',
+      camera: 'camera.png',
+      candle: 'candle.png',
+      thermometer: 'thermometer.png',
+      lighter: 'lighter.png',
+      notebook: 'notebook.png',
+      salt: 'salt.png',
+      crucifix: 'crucifix.png',
+      smudge: 'smudge.png'
+    };
+    // optional fallbacks (tries multiple bases/names if missing)
+    window.ITEM_ICON_HINTS = {
+      emf: ['emf.png','emf_reader.png','emf5.png'],
+      spirit_box: ['spirit_box.png','spiritbox.png'],
+      uv: ['uv.png','uv_light.png','blacklight.png'],
+      dots: ['dots.png','dots_projector.png'],
+      thermometer: ['thermometer.png','thermo.png']
+    };
+  </script>
+  <script src="./assets/index3/icons.js?v=2.0"></script>
+
+  <!-- Items / models -->
   <script src="./assets/index3/video_feed.js?v=1.0"></script>
   <script src="./assets/index3/items_models_exploration.js?v=1.0"></script>
-  <script src="./assets/index3/items.js?v=2.0"></script>
+  <script src="./assets/index3/items.js?v=2.1"></script>
 
   <!-- atmosphere / world -->
   <script src="./assets/index3/atmosphere.js?v=1"></script>
 
-  <!-- Audio Unlocker: must run BEFORE weather.js so audio starts after user gesture -->
+  <!-- Weather config FIRST -->
   <script>
-  (function audioUnlocker(){
-    if (window.__audioUnlockerInstalled) return;
-    window.__audioUnlockerInstalled = true;
-    window.audioUnlocked = false;
-    function unlockOnce(){
-      try {
-        const eng = BABYLON.EngineStore?.LastCreatedEngine || window.ENGINE;
-        const scn = BABYLON.EngineStore?.LastCreatedScene  || window.scene || window.SCENE;
-        if (BABYLON.Engine?.audioEngine?.unlock) BABYLON.Engine.audioEngine.unlock();
-        if (eng?.audioEngine?.unlock) eng.audioEngine.unlock();
-        const ctx =
-          eng?.getAudioContext?.() ||
-          BABYLON.Engine?.audioEngine?.audioContext ||
-          BABYLON.Engine?.audioEngine?._audioContext || null;
-        if (ctx?.state === 'suspended') { ctx.resume().catch(()=>{}); }
-        if (eng) eng.audioEnabled = true;
-        if (scn) scn.audioEnabled = true;
-        window.audioUnlocked = true;
-        document.dispatchEvent(new CustomEvent('pp-audio-unlocked'));
-        window.removeEventListener('pointerdown', unlockOnce, true);
-        window.removeEventListener('keydown', unlockOnce, true);
-        const btn = document.getElementById('start-button');
-        if (btn) btn.removeEventListener('click', unlockOnce, true);
-        console.log('[audio] unlocked');
-      } catch (e) { console.warn('[audio] unlock attempt failed', e); }
-    }
-    window.addEventListener('pointerdown', unlockOnce, true);
-    window.addEventListener('keydown', unlockOnce, true);
-    setTimeout(()=>{
-      const btn = document.getElementById('start-button');
-      if (btn) btn.addEventListener('click', unlockOnce, {once:true, capture:true});
-    }, 0);
-  })();
-  </script>
-
-  <!-- Weather config FIRST, then weather engine -->
-  <script>
-    // ambient.mp3 is only for Clear; Rainstorm/Snow use their own loops
+    // ambient.mp3 is only for Clear; Rainstorm/Snow use their own files.
     window.WEATHER_AUDIO_MAP = {
-      thunder: ['thunder.mp3'] // ./assets/audio/thunder.mp3
-      // If you named your weather files differently, you can also add:
-      // rain: ['rainstorm.mp3'],
-      // snow: ['snow.mp3']
+      clear: ['ambient.mp3'],
+      rain: ['rainstorm.mp3'],
+      snow: ['snow.mp3'],
+      thunder: ['thunder.mp3']
     };
+    window.RANDOM_WEATHER_ON_START = true; // pick Clear/Rainstorm/Snow when investigation starts
   </script>
-  <script src="./assets/index3/audio_boot.js?v=1"></script>
-  <script src="./assets/index3/weather.js?v=1"></script>
+  <script src="./assets/index3/weather.js?v=2.3"></script>
   <script>
-    // When audio unlocks, ensure weather loops (and volumes) start immediately
-    document.addEventListener('pp-audio-unlocked', ()=>{
-      try {
-        if (window.Weather) {
-          Weather.init();
-          Weather.set(window.__lastWeatherState || "Clear");
+    // ensure random weather gets applied after audio unlock
+    (function(){
+      function go(){
+        if (!window.Weather) return;
+        if (window.RANDOM_WEATHER_ON_START){
+          const pick = ['Clear','Rainstorm','Snow'][Math.floor(Math.random()*3)];
+          try { Weather.set(pick, { immediate:true, intensity:0.9 }); } catch {}
+        } else {
+          try { Weather.set('Clear', { immediate:true }); } catch {}
         }
-      } catch(e) { console.warn('[weather] re-init after unlock failed', e); }
-    });
+      }
+      document.getElementById('start-button')?.addEventListener('click', go, { once:true });
+    })();
   </script>
 
   <script src="./assets/index3/temperature.js?v=1"></script>
   <script src="./assets/index3/moon.js?v=1"></script>
   <script src="./assets/index3/lights.js?v=1"></script>
 
+  <!-- Map -->
+  <script>window.MAP_URL = "./assets/models/map/jailhouse.glb";</script>
   <script src="./assets/index3/map.js?v=2.1"></script>
 
-  <!-- Player posture -->
+  <!-- Player options (crouch etc.) -->
   <script src="./assets/index3/player_crouch.js?v=1.0"></script>
+
+  <!-- Physics (Havok) for drop/throw -->
+  <script src="./cdn/havok/HavokPhysics.js"></script>
+  <script>
+    window.enableHavok = async function(){
+      try{
+        const HK = await HavokPhysics({ locateFile: (f)=> './cdn/havok/' + f });
+        const scene = window.scene || BABYLON.Engine.LastCreatedScene;
+        if (!scene) return;
+        const plugin = new BABYLON.HavokPlugin(true, HK);
+        scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), plugin);
+        window.physicsPlugin = plugin;
+        console.log('[havok] enabled');
+      }catch(e){ console.warn('[havok] failed', e); }
+    };
+    (function hookPhysics(){
+      const once = ()=> window.enableHavok?.();
+      document.getElementById('start-button')?.addEventListener('click', once, { once:true });
+      window.addEventListener('pointerdown', once, { once:true, passive:true });
+    })();
+  </script>
 
   <!-- DevTools (prevent auto-open unless Alt+T or ?dev=1) -->
   <script>window.DEVTOOLS_AUTO_OPEN = false;</script>
   <script src="./assets/index3/devtools.js?v=7.4.0"></script>
-  <!-- Hard guard against auto-open -->
   <script>
     (function(){
       const css = document.createElement('style');
@@ -347,10 +297,8 @@
     })();
   </script>
 
-  <!-- Ghost Dev panel -->
+  <!-- Ghost Dev panel + runtime -->
   <script src="./assets/index3/ghost_dev.js?v=1.4"></script>
-
-  <!-- The only ghost runtime -->
   <script src="./assets/index3/ghost_movement.js?v=1.7"></script>
 
   <!-- Keep your registry/glue AFTER the runtime so they bind immediately -->
@@ -360,24 +308,39 @@
   <!-- Ghost camera (PIP) -->
   <script src="./assets/index3/ghost_cam.js?v=1.0"></script>
 
-  <!-- Post-load helpers -->
+  <!-- Audio unlock (fixes "sound broken" on first load) -->
   <script>
-    // Attach live video feed to the board mesh once available
+    (function audioGate(){
+      let unlocked = false;
+      function unlock(){
+        if (unlocked) return;
+        try { BABYLON.Engine.audioEngine?.unlock(); } catch {}
+        unlocked = true; window.audioUnlocked = true;
+        try { Weather && Weather.init && Weather.init(); } catch {}
+        window.removeEventListener('pointerdown', unlock, true);
+        window.removeEventListener('keydown', unlock, true);
+      }
+      const btn = document.getElementById('start-button');
+      if (btn) btn.addEventListener('click', unlock, { once:true });
+      window.addEventListener('pointerdown', unlock, true);
+      window.addEventListener('keydown', unlock, true);
+    })();
+  </script>
+
+  <!-- Attach live video feed if the board exists -->
+  <script>
     (function spawnFeedOnPizarra(){
       const id = setInterval(()=>{
         const s = window.scene;
         if (!s || !window.VideoFeed) return;
         const m = s.getMeshByName('Pizarra_Pizarra_0');
-        if (!m) return; // wait for GLB
+        if (!m) return;
         clearInterval(id);
-
         VideoFeed.setActive(true);
-        VideoFeed.setLight(true, 0.8); // small camera light
-
+        VideoFeed.setLight(true, 0.8);
         let mat = m.material;
         const isPBR = mat && mat.getClassName && /PBR/i.test(mat.getClassName());
         const tex = VideoFeed.getTexture();
-
         if (isPBR){
           mat.emissiveTexture = tex;
           mat.emissiveColor = new BABYLON.Color3(1,1,1);
