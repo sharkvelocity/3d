@@ -1,776 +1,684 @@
-// ./assets/index3/builder_tool.js — v1.0
-// All-in-one, Sims-style map builder for Babylon.js
-// • Top-down builder mode (orthographic) with grid + snapping
-// • Pick/place, select/drag/rotate/delete, copy/undo/redo
-// • Draw Room (click-drag) => floor + four walls (ghost-blockers)
-// • Draw Wall (click-drag), Draw Floor (click-drag)
-// • Stairs tool (straight run), Basement support (negative floors)
-// • Paint tool with Babylon materials (swatches)
-// • Save/Load JSON; export ghost-compatible {rooms, barriers}
-// Notes:
-// - Requires window.scene (Babylon scene) and a working canvas (renderCanvas).
-// - Plays nice with your existing runtime; doesn’t auto-open.
-// - Toggle: Alt+B (or click the “Builder” pill).
+/* =========================================================================
+   PhasmaPhoney — Builder Tool (Sims-like)  v1.7
+   - Always-on top-down builder for floors, walls, props
+   - Grid snap, copy/paste room, undo/redo
+   - Material Browser integrated (Babylon materialsLibrary)
+   - Public API used by your page:
+       Builder.enable()
+       Builder.setGridSnap(on, step)  // or Builder.setGrid({snap, step})
+       Builder.export()               // { floors, walls, props, spawn, ... }
+   -------------------------------------------------------------------------
+   OPTIONAL (recommended) scripts to include in builder.html
+   (Put these after babylon.js and before this file; only include what you want):
+
+   <script src="./cdn/materialsLibrary/babylon.woodProceduralTexture.js"></script>
+   <script src="./cdn/materialsLibrary/babylon.brickProceduralTexture.js"></script>
+   <script src="./cdn/materialsLibrary/babylon.marbleProceduralTexture.js"></script>
+   <script src="./cdn/materialsLibrary/babylon.cloudProceduralTexture.js"></script>
+   <script src="./cdn/materialsLibrary/babylon.grassProceduralTexture.js"></script>
+   <script src="./cdn/materialsLibrary/babylon.fireProceduralTexture.js"></script>
+   <script src="./cdn/materialsLibrary/babylon.roadsProceduralTexture.js"></script>
+   <script src="./cdn/materialsLibrary/babylon.normalProceduralTexture.js"></script>
+   ... (any others you like)
+
+   Thumbnails still show even if a given library isn’t loaded;
+   applying that material will gracefully fall back.
+   ========================================================================= */
 
 (function(){
   "use strict";
-  if (window.Builder) return; // guard
 
-  // ---------- Shortcuts ----------
-  const SCENE = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
-  const ENGINE= ()=> window.engine || SCENE()?.getEngine?.();
-  const CAM   = ()=> SCENE()?.activeCamera;
-  const v3    = (x,y,z)=> new BABYLON.Vector3(x,y,z);
-  const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
-  const mid   = (a,b)=> a.add(b).scale(0.5);
-  const lenXZ = (a,b)=> Math.sqrt((a.x-b.x)**2 + (a.z-b.z)**2);
-  const toast = (m)=> (window.toast? window.toast(m,1200) : console.log('[Builder]', m));
-  const byId  = (id)=> document.getElementById(id);
+  // ------------------------------------------------------------
+  // Small helpers
+  // ------------------------------------------------------------
+  const S = ()=> window.scene;
+  const v3 = (x,y,z)=> new BABYLON.Vector3(x,y,z);
+  const C3 = BABYLON.Color3;
+  const PI = Math.PI;
 
-  // ---------- State ----------
-  const ST = {
-    enabled: false,
-    ui: null,
-    topCam: null,
-    prevCam: null,
-    grid: null,
-    gridSize: 0.5,
-    snap: true,
-    floorIndex: 0,          // 0 = ground, 1 = second floor, -1 = basement
-    floorHeight: 3.0,
-    currentY: 0,            // Y position for created geometry (derived from floorIndex*floorHeight)
-    mode: 'select',         // 'select'|'place'|'room'|'wall'|'floor'|'stairs'|'paint'
-    placing: { preset:null, rotationY:0, preview:null },
-    selection: { mesh:null, start:null, dragStart:null },
-    draw: { start:null, temp:null }, // for room/wall/floor drag
-    stairs: { width:1.0, stepRise:0.2, steps:10, tread:0.35 },
-    mats: {},
-    ghostBarrierColor: new BABYLON.Color3(0.1,0.9,1.0),
-    undo: [], redo: [],
-    worldGridY: 0,
-    overlay: null,
+  const clamp = (v,a,b)=> Math.max(a, Math.min(b,v));
+  const snapTo = (v,step)=> Math.round(v/step)*step;
+
+  const toast = (msg)=> {
+    try{
+      const t = document.getElementById('toast');
+      if (t){ t.textContent = msg; t.style.display='block'; setTimeout(()=>t.style.display='none', 1200); }
+      else console.log('[Builder]', msg);
+    }catch{ console.log('[Builder]', msg); }
   };
 
-  // ---------- Utilities ----------
-  function withOutline(mesh, on){
-    if (!mesh) return;
-    mesh.renderOutline = !!on;
-    mesh.outlineColor = mesh.outlineColor || new BABYLON.Color3(0.2,1,1);
-    mesh.outlineWidth = 0.06;
-  }
-  function snapVal(v){ return ST.snap ? Math.round(v/ST.gridSize)*ST.gridSize : v; }
-  function snapVecXZ(p){ return v3(snapVal(p.x), p.y, snapVal(p.z)); }
-  function pickXZ(evt){
-    const s = SCENE(); if (!s) return null;
-    const ray = s.createPickingRay(evt.offsetX, evt.offsetY, null, s.activeCamera);
-    // Intersect a horizontal plane at currentY
-    const t = (ST.currentY - ray.origin.y) / ray.direction.y;
-    if (!isFinite(t)) return null;
-    const point = ray.origin.add(ray.direction.scale(t));
-    return point;
-  }
-  function setFloorIndex(idx){
-    ST.floorIndex = idx|0;
-    ST.currentY = ST.floorIndex * ST.floorHeight;
-    if (ST.grid) ST.grid.position.y = ST.currentY - 0.001;
-    byId('bld-floor-index').value = ST.floorIndex;
-    byId('bld-floor-y').textContent = ST.currentY.toFixed(2);
-  }
-  function makeMat(name, color, emissive){
-    const s = SCENE(); if (!s) return null;
-    const m = new BABYLON.StandardMaterial('BMat_'+name, s);
-    m.diffuseColor = color.clone();
-    if (emissive) m.emissiveColor = emissive.clone();
-    m.specularColor = new BABYLON.Color3(0.1,0.1,0.1);
-    return m;
-  }
-  function ensureMaterials(){
-    if (Object.keys(ST.mats).length) return;
-    ST.mats.concrete = makeMat('concrete', new BABYLON.Color3(0.6,0.6,0.65));
-    ST.mats.wood     = makeMat('wood',     new BABYLON.Color3(0.55,0.42,0.2));
-    ST.mats.tile     = makeMat('tile',     new BABYLON.Color3(0.85,0.85,0.88));
-    ST.mats.wall     = makeMat('wall',     new BABYLON.Color3(0.85,0.88,0.92));
-    ST.mats.accent   = makeMat('accent',   new BABYLON.Color3(0.7,0.2,0.2), new BABYLON.Color3(0.1,0,0));
-    ST.mats.blocker  = makeMat('blocker',  ST.ghostBarrierColor);
-  }
+  // ------------------------------------------------------------
+  // State
+  // ------------------------------------------------------------
+  const ST = {
+    ready:false,
+    grid:{ snap:true, step:0.5 },
+    mode:'select',             // 'select' | 'floor' | 'wall' | 'room' | 'place'
+    yLevel:0,                  // current Y plane for building
+    defaultMats:{ floor:null, wall:null }, // default material choices
+    sel:null,                  // selected mesh
+    copyRoom:null,             // {size:[w,h], matKey, isFloor:true}
+    drag:{ active:false, a:null, b:null, ghost:null }, // for drag-to-place
+    hist:{ stack:[], i:-1 },   // undo/redo
+    hl:null,                   // HighlightLayer
+  };
 
-  // ---------- Camera & Grid ----------
-  function makeTopCamera(){
-    const s = SCENE(); if (!s) return null;
-    const c = new BABYLON.ArcRotateCamera('BuilderTopCam', Math.PI/2, 0, 30, v3(0, ST.currentY, 0), s);
-    c.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-    const w = s.getEngine().getRenderWidth();
-    const h = s.getEngine().getRenderHeight();
-    const ortho = 20; // half-size
-    c.orthoLeft   = -ortho * (w/h);
-    c.orthoRight  =  ortho * (w/h);
-    c.orthoTop    =  ortho;
-    c.orthoBottom = -ortho;
-    c.panningSensibility = 30;
-    c.wheelPrecision = 5;
-    c.attachControl(byId('renderCanvas'), true);
-    return c;
-  }
-  function createGrid(){
-    const s = SCENE(); if (!s) return null;
-    const size = 200;
-    const g = BABYLON.MeshBuilder.CreateGround('BuilderGrid', {width:size, height:size}, s);
-    g.position.y = ST.currentY - 0.001;
-    g.isPickable = false;
-    // Lightweight grid material
-    const mat = new BABYLON.StandardMaterial('BuilderGridMat', s);
-    mat.diffuseColor = new BABYLON.Color3(0,0,0);
-    mat.emissiveColor= new BABYLON.Color3(0.05,0.1,0.1);
-    mat.specularColor= new BABYLON.Color3(0,0,0);
-    mat.alpha = 0.9;
-    g.material = mat;
+  // ------------------------------------------------------------
+  // Material Browser (auto-detect available materialsLibrary classes)
+  // ------------------------------------------------------------
+  const Materials = (function(){
+    // Catalog entries -> how to build + fallback color
+    // key: unique id we store in mesh.metadata.builder.matKey
+    const CATALOG = [
+      { key:'wood',   label:'Wood',   color:'#8b6b3e', make: makeWood },
+      { key:'brick',  label:'Brick',  color:'#a33d31', make: makeBrick },
+      { key:'marble', label:'Marble', color:'#bbbfc8', make: makeMarble },
+      { key:'tile',   label:'Tile',   color:'#d7dada', make: makeTile },
+      { key:'concrete',label:'Concrete',color:'#9aa0a6', make: makeConcrete },
+      { key:'carpet', label:'Carpet', color:'#80706a', make: makeCarpet },
+      { key:'grass',  label:'Grass',  color:'#3f7d38', make: makeGrass },
+      { key:'road',   label:'Road',   color:'#3a3a3a', make: makeRoad },
+      { key:'cloud',  label:'Cloud',  color:'#cfd8e6', make: makeCloud },
+      { key:'fire',   label:'Fire',   color:'#ff7b00', make: makeFire },
+    ];
 
-    // Grid lines using DynamicTexture
-    const tex = new BABYLON.DynamicTexture('BuilderGridTex', {width:1024, height:1024}, s, false);
-    const ctx = tex.getContext();
-    ctx.fillStyle = 'rgba(0,0,0,1)'; ctx.fillRect(0,0,1024,1024);
-    const step = Math.max(2, Math.round( ST.gridSize * 20 ));
-    for (let x=0; x<=1024; x+=step){
-      ctx.fillStyle = (x%(step*5)===0) ? 'rgba(0,255,255,0.25)' : 'rgba(0,255,255,0.12)';
-      ctx.fillRect(x, 0, 1, 1024);
-      ctx.fillRect(0, x, 1024, 1);
-    }
-    tex.update();
-    mat.diffuseTexture = tex;
-    mat.diffuseTexture.uScale = 20;
-    mat.diffuseTexture.vScale = 20;
-    return g;
-  }
-
-  // ---------- Creation helpers ----------
-  function createFloorRect(a, b, y=ST.currentY, mat){
-    const s = SCENE(); ensureMaterials();
-    const x1 = Math.min(a.x, b.x), z1 = Math.min(a.z, b.z);
-    const x2 = Math.max(a.x, b.x), z2 = Math.max(a.z, b.z);
-    const w = Math.max(0.1, x2-x1);
-    const h = Math.max(0.1, z2-z1);
-    const m = BABYLON.MeshBuilder.CreateGround('FLR_'+Date.now().toString(36), {width:w, height:h}, s);
-    m.position.set(x1 + w/2, y, z1 + h/2);
-    m.isPickable = true;
-    m.metadata = m.metadata || {};
-    m.metadata.builder = { type:'floor', floorIndex: ST.floorIndex };
-    m.material = mat || ST.mats.tile;
-    try{ m.checkCollisions = true; }catch{}
-    // register as ground root if function exists
-    try{
-      if (typeof window.registerGroundRoots === 'function'){
-        window.registerGroundRoots([ new RegExp('^'+m.name+'$') ]);
+    // ---- builders (use materialsLibrary if available; else StandardMaterial) ----
+    function makeWood(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      mat.specularColor = new C3(0.05,0.05,0.05);
+      if (BABYLON.WoodProceduralTexture){
+        mat.diffuseTexture = new BABYLON.WoodProceduralTexture(name+'_tex', 256, scene);
+      } else {
+        mat.diffuseColor = new C3(0.55,0.42,0.2);
       }
+      return mat;
+    }
+    function makeBrick(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      mat.specularColor = new C3(0.05,0.05,0.05);
+      if (BABYLON.BrickProceduralTexture){
+        const t = new BABYLON.BrickProceduralTexture(name+'_tex', 256, scene);
+        t.numberOfBricksHeight = 5; t.numberOfBricksWidth = 10;
+        mat.diffuseTexture = t;
+      } else {
+        mat.diffuseColor = new C3(0.63,0.25,0.2);
+      }
+      return mat;
+    }
+    function makeMarble(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      mat.specularColor = new C3(0.15,0.15,0.15);
+      if (BABYLON.MarbleProceduralTexture){
+        mat.diffuseTexture = new BABYLON.MarbleProceduralTexture(name+'_tex', 256, scene);
+      } else {
+        mat.diffuseColor = new C3(0.72,0.76,0.82);
+      }
+      return mat;
+    }
+    function makeTile(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      mat.specularColor = new C3(0.12,0.12,0.12);
+      if (BABYLON.CheckerProceduralTexture){ // simple checker as "tile"
+        const t = new BABYLON.CheckerProceduralTexture(name+'_tex', 256, scene);
+        t.numberOfColumns = 8; t.numberOfRows = 8;
+        t.colors = [ new C3(0.92,0.94,0.95), new C3(0.78,0.82,0.85) ];
+        mat.diffuseTexture = t;
+      } else {
+        mat.diffuseColor = new C3(0.84,0.86,0.86);
+      }
+      return mat;
+    }
+    function makeConcrete(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      mat.specularColor = new C3(0.05,0.05,0.05);
+      mat.diffuseColor  = new C3(0.6,0.62,0.65);
+      return mat;
+    }
+    function makeCarpet(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      mat.specularColor = new C3(0.02,0.02,0.02);
+      mat.diffuseColor  = new C3(0.5,0.44,0.42);
+      return mat;
+    }
+    function makeGrass(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      if (BABYLON.GrassProceduralTexture){
+        mat.diffuseTexture = new BABYLON.GrassProceduralTexture(name+'_tex', 256, scene);
+      } else {
+        mat.diffuseColor = new C3(0.26,0.55,0.28);
+      }
+      return mat;
+    }
+    function makeRoad(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      if (BABYLON.RoadProceduralTexture){
+        mat.diffuseTexture = new BABYLON.RoadProceduralTexture(name+'_tex', 256, scene);
+      } else {
+        mat.diffuseColor = new C3(0.2,0.2,0.2);
+      }
+      mat.specularColor = new C3(0.05,0.05,0.05);
+      return mat;
+    }
+    function makeCloud(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      if (BABYLON.CloudProceduralTexture){
+        mat.diffuseTexture = new BABYLON.CloudProceduralTexture(name+'_tex', 256, scene);
+      } else {
+        mat.diffuseColor = new C3(0.8,0.85,0.9);
+      }
+      return mat;
+    }
+    function makeFire(name, scene){
+      const mat = new BABYLON.StandardMaterial(name, scene);
+      if (BABYLON.FireProceduralTexture){
+        mat.emissiveTexture = new BABYLON.FireProceduralTexture(name+'_tex', 256, scene);
+        mat.disableLighting = true;
+      } else {
+        mat.emissiveColor = new C3(1,0.32,0);
+        mat.disableLighting = true;
+      }
+      return mat;
+    }
+
+    // DOM: build a small palette that docks bottom-left
+    function ensurePanel(){
+      if (document.getElementById('mat-panel')) return;
+
+      const style = document.createElement('style');
+      style.textContent = `
+        #mat-panel{ position:fixed; left:12px; bottom:64px; z-index:12001;
+          background:rgba(0,0,0,0.82); border:1px solid #066; color:#9ff; border-radius:10px;
+          padding:8px 10px; font:12px monospace; max-width: 260px; pointer-events:auto; }
+        #mat-grid{ display:grid; grid-template-columns:repeat(4, 52px); gap:8px; margin-top:6px;}
+        .mat-card{ width:52px; }
+        .mat-thumb{ width:52px; height:36px; border-radius:6px; border:1px solid #066; cursor:pointer; }
+        .mat-name{ margin-top:4px; text-align:center; font-size:10px; color:#bfe; }
+        #mat-actions{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+        #mat-actions .btn{ border:1px solid #066; background:#111; color:#9ff; padding:4px 8px; border-radius:8px; cursor:pointer; }
+      `;
+      document.head.appendChild(style);
+
+      const wrap = document.createElement('div');
+      wrap.id = 'mat-panel';
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <div><b>Materials</b></div>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="mat-pin" checked>
+            <span>Pin</span>
+          </label>
+        </div>
+        <div id="mat-grid"></div>
+        <div id="mat-actions">
+          <button id="mat-apply" class="btn" title="Apply to selected mesh">Apply to Selection</button>
+          <button id="mat-floor-default" class="btn" title="Use on new floors">Set Floor Default</button>
+          <button id="mat-wall-default" class="btn" title="Use on new walls">Set Wall Default</button>
+          <button id="mat-copy-room" class="btn" title="Copy selected room (size+material)">Copy Room</button>
+          <button id="mat-paste-room" class="btn" title="Paste room at pointer">Paste Room</button>
+        </div>`;
+      document.body.appendChild(wrap);
+
+      // Clicking outside when not pinned hides it
+      document.addEventListener('mousedown', (e)=>{
+        const pin = document.getElementById('mat-pin');
+        if (!pin || pin.checked) return;
+        const p = document.getElementById('mat-panel');
+        if (!p) return;
+        if (!p.contains(e.target)) p.style.display='none';
+      });
+
+      // Build grid items
+      const grid = wrap.querySelector('#mat-grid');
+      CATALOG.forEach(entry=>{
+        const card = document.createElement('div');
+        card.className = 'mat-card';
+        const sw = document.createElement('div');
+        sw.className = 'mat-thumb';
+        sw.style.background = entry.color;
+        sw.title = entry.label;
+        sw.dataset.key = entry.key;
+        sw.onclick = ()=> selectMat(entry.key);
+        const label = document.createElement('div');
+        label.className = 'mat-name';
+        label.textContent = entry.label;
+        card.appendChild(sw);
+        card.appendChild(label);
+        grid.appendChild(card);
+      });
+
+      document.getElementById('mat-apply').onclick = ()=> {
+        if (!ST.__matSel) return toast('Pick a material first.');
+        if (!ST.sel) return toast('Select a mesh to apply.');
+        applyMatToMesh(ST.sel, ST.__matSel);
+      };
+      document.getElementById('mat-floor-default').onclick = ()=> {
+        if (!ST.__matSel) return toast('Pick a material first.');
+        ST.defaultMats.floor = ST.__matSel;
+        toast('Default floor material set: '+ST.__matSel);
+      };
+      document.getElementById('mat-wall-default').onclick = ()=> {
+        if (!ST.__matSel) return toast('Pick a material first.');
+        ST.defaultMats.wall = ST.__matSel;
+        toast('Default wall material set: '+ST.__matSel);
+      };
+      document.getElementById('mat-copy-room').onclick = copyRoomFromSelection;
+      document.getElementById('mat-paste-room').onclick = pasteRoomAtPointer;
+    }
+
+    function selectMat(key){
+      ST.__matSel = key;
+      toast('Material selected: '+key);
+    }
+
+    function makeMaterialForKey(key, name){
+      const sc = S();
+      const entry = CATALOG.find(x=> x.key===key);
+      if (!entry) return null;
+      try{
+        const m = entry.make((name||('Mat_'+key+'_'+Date.now().toString(36))), sc);
+        m.freeze(); // tiny perf
+        m['__pp_key'] = key;
+        return m;
+      }catch(e){
+        console.warn('[Builder] material make failed for', key, e);
+        const mat = new BABYLON.StandardMaterial('Mat_'+key, sc);
+        mat.diffuseColor = C3.FromHexString(entry.color);
+        return mat;
+      }
+    }
+
+    function applyMatToMesh(mesh, key){
+      const sc = S();
+      if (!mesh || mesh.isDisposed()) return;
+      const tag = mesh.metadata?.builder?.type;
+      const name = 'Mat_'+key+'_'+(tag||'');
+      const mat = makeMaterialForKey(key, name) || new BABYLON.StandardMaterial(name, sc);
+      mesh.material = mat;
+      mesh.metadata = mesh.metadata || {};
+      mesh.metadata.builder = mesh.metadata.builder || {};
+      mesh.metadata.builder.matKey = key;
+    }
+
+    return {
+      ensurePanel,
+      applyMatToMesh,
+      makeMaterialForKey,
+      catalog: ()=> CATALOG.slice(),
+    };
+  })();
+
+  // ------------------------------------------------------------
+  // Mesh creation helpers
+  // ------------------------------------------------------------
+  function createFloorRect(name, ax, az, bx, bz, y, matKey){
+    const sc = S();
+    const w = Math.abs(bx-ax), h = Math.abs(bz-az);
+    const cx = (ax+bx)/2, cz = (az+bz)/2;
+    const floor = BABYLON.MeshBuilder.CreateGround(name, { width:w, height:h, subdivisions:2 }, sc);
+    floor.position = v3(cx, y, cz);
+    floor.checkCollisions = true; floor.isPickable = true;
+    // material
+    let mat = null;
+    if (matKey) mat = Materials.makeMaterialForKey(matKey, 'Mat_floor_'+matKey);
+    else if (ST.defaultMats.floor) mat = Materials.makeMaterialForKey(ST.defaultMats.floor, 'Mat_floor_'+ST.defaultMats.floor);
+    if (!mat){
+      mat = new BABYLON.StandardMaterial('Mat_Floor_Default', sc);
+      mat.diffuseColor = new C3(0.53,0.43,0.25);
+      mat.specularColor= new C3(0.05,0.05,0.05);
+    }
+    floor.material = mat;
+    floor.metadata = { builder:{ type:'floor', size:[w,h], y:y, matKey: (mat['__pp_key']||matKey)||null, floorIndex: 0 } };
+
+    // Register as "ground" so ghost glue knows it
+    try{
+      window.registerGroundRoots && window.registerGroundRoots([new RegExp('^'+name+'$')]);
     }catch{}
-    return m;
+
+    return floor;
   }
 
-  function createWallSegment(a, b, opts={}){
-    const s = SCENE(); ensureMaterials();
-    const height = opts.height ?? ST.floorHeight;
-    const thick  = opts.thickness ?? 0.18;
-    const yBase  = opts.y ?? ST.currentY;
-    const L = lenXZ(a,b);
-    if (L < 0.01) return null;
-    const wall = BABYLON.MeshBuilder.CreateBox('WALL_'+Date.now().toString(36), {width:L, depth:thick, height:height}, s);
-    wall.position.copyFrom( mid(a,b) );
-    wall.position.y = yBase + height/2;
-    wall.rotation.y = Math.atan2(b.x - a.x, b.z - a.z); // face along segment
-    wall.isPickable = true;
-    wall.material = ST.mats.wall;
-    wall.metadata = wall.metadata || {};
-    wall.metadata.builder = { type:'wall', floorIndex: ST.floorIndex, a: {x:a.x,y:yBase,z:a.z}, b:{x:b.x,y:yBase,z:b.z}, h:height, t:thick };
-    wall.metadata.isGhostBlocker = true; // integrate with ghost barrier logic
-    try{ wall.checkCollisions = true; }catch{}
+  function createWallBox(name, a, b, h, t, y, matKey){
+    const sc = S();
+    const L = BABYLON.Vector3.Distance(a, b);
+    const wall = BABYLON.MeshBuilder.CreateBox(name, { width:L, depth:t, height:h }, sc);
+    const mid = a.add(b).scale(0.5);
+    wall.position = v3(mid.x, y + h/2, mid.z);
+    wall.rotation.y = Math.atan2(b.x-a.x, b.z-a.z);
+    wall.checkCollisions = true; wall.isPickable = true;
+
+    let mat = null;
+    if (matKey) mat = Materials.makeMaterialForKey(matKey, 'Mat_wall_'+matKey);
+    else if (ST.defaultMats.wall) mat = Materials.makeMaterialForKey(ST.defaultMats.wall, 'Mat_wall_'+ST.defaultMats.wall);
+    if (!mat){
+      mat = new BABYLON.StandardMaterial('Mat_Wall_Default', sc);
+      mat.diffuseColor = new C3(0.82,0.84,0.88);
+      mat.specularColor= new C3(0.1,0.1,0.1);
+    }
+    wall.material = mat;
+    wall.metadata = { builder:{ type:'wall', a: {x:a.x,y:y,z:a.z}, b:{x:b.x,y:y,z:b.z}, h, t, y, matKey: (mat['__pp_key']||matKey)||null, floorIndex: 0 }, isGhostBlocker:true };
+
     return wall;
   }
 
-  function createRoomRect(a, b, opts={}){
-    const y = opts.y ?? ST.currentY;
-    const h = opts.height ?? ST.floorHeight;
-    const t = opts.thickness ?? 0.18;
-    // Floor first
-    const floor = createFloorRect(a,b,y, ST.mats.tile);
-    // Perimeter walls
-    const x1 = Math.min(a.x, b.x), z1 = Math.min(a.z, b.z);
-    const x2 = Math.max(a.x, b.x), z2 = Math.max(a.z, b.z);
-    const A=v3(x1,y,z1), B=v3(x2,y,z1), C=v3(x2,y,z2), D=v3(x1,y,z2);
-    const w1 = createWallSegment(A,B,{y, height:h, thickness:t});
-    const w2 = createWallSegment(B,C,{y, height:h, thickness:t});
-    const w3 = createWallSegment(C,D,{y, height:h, thickness:t});
-    const w4 = createWallSegment(D,A,{y, height:h, thickness:t});
-    const room = { id:'ROOM_'+Date.now().toString(36), floorIndex: ST.floorIndex, a: {x:x1,y:y,z:z1}, b:{x:x2,y:y,z:z2}, height:h, walls:[w1,w2,w3,w4], floor };
-    floor.metadata.builder.roomId = room.id;
-    room.walls.forEach(w=>{ if (w) w.metadata.builder.roomId = room.id; });
-    return room;
+  // ------------------------------------------------------------
+  // Selection + highlight (no isDisposed crash)
+  // ------------------------------------------------------------
+  function ensureHL(){
+    if (ST.hl && !ST.hl.isDisposed()) return;
+    ST.hl = new BABYLON.HighlightLayer('builderHL', S());
+    ST.hl.blurHorizontalSize = 0.0;
+    ST.hl.blurVerticalSize   = 0.0;
+    ST.hl.outerGlow = false;
+    ST.hl.innerGlow = true;
+  }
+  function select(mesh){
+    ensureHL();
+    if (ST.sel && !ST.sel.isDisposed()) ST.hl.removeMesh(ST.sel);
+    ST.sel = mesh || null;
+    if (ST.sel) ST.hl.addMesh(ST.sel, new C3(0,1,1));
   }
 
-  function createStairs(start, dir, params){
-    const s = SCENE(); ensureMaterials();
-    const p = Object.assign({ width:1.0, stepRise:0.2, steps:10, tread:0.35 }, params||{});
-    const root = new BABYLON.TransformNode('STAIRS_'+Date.now().toString(36), s);
-    root.position.copyFrom(start);
-    root.position.y = ST.currentY;
-    const y0 = 0;
-    for (let i=0;i<p.steps;i++){
-      const step = BABYLON.MeshBuilder.CreateBox('STEP', { width:p.width, depth:p.tread, height:p.stepRise }, s);
-      step.position.set(0, y0 + p.stepRise/2 + i*p.stepRise, (i+0.5)*p.tread);
-      step.parent = root;
-      step.material = ST.mats.concrete;
-      step.isPickable = true;
-      step.metadata = { builder: { type:'stairStep', floorIndex: ST.floorIndex } };
-      try{ step.checkCollisions = true; }catch{}
-    }
-    // orient by dir
-    const ang = Math.atan2(dir.x, dir.z);
-    root.rotation.y = ang;
-    root.metadata = { builder: { type:'stairs', floorIndex: ST.floorIndex, params:p } };
-    return root;
-  }
-
-  // ---------- Undo/Redo ----------
-  function pushUndo(action){
-    ST.undo.push(action);
-    ST.redo.length = 0;
-  }
-  function doDeleteMesh(m){
-    if (!m || m.isDisposed()) return;
-    withOutline(m,false);
-    m.dispose(false,true);
-  }
-
-  // ---------- Export / Import ----------
-  function collectExport(){
-    const s = SCENE();
-    const out = { meta:{ floorHeight:ST.floorHeight }, floors:[], walls:[], stairs:[], props:[] };
-    s.meshes.forEach(m=>{
-      const b = m.metadata?.builder?.type;
-      if (!b) return;
-      if (b==='floor'){
-        out.floors.push({ name:m.name, floorIndex:m.metadata.builder.floorIndex, pos:m.position.asArray(), size:[m._width||m.getBoundingInfo().boundingBox.extendSizeWorld.x*2, m._height||m.getBoundingInfo().boundingBox.extendSizeWorld.z*2] });
-      } else if (b==='wall'){
-        out.walls.push(Object.assign({ name:m.name }, m.metadata.builder));
-      } else if (b==='prop'){
-        out.props.push({ name:m.name, pos:m.position.asArray(), rot:m.rotation ? m.rotation.asArray() : [0, m.rotation?.y||0, 0], scl:m.scaling?.asArray?.()||[1,1,1] });
+  // ------------------------------------------------------------
+  // Input (pointer -> place things)
+  // ------------------------------------------------------------
+  function groundHitFromPointer(){
+    const sc = S(); if (!sc) return null;
+    const pick = sc.pick(sc.pointerX, sc.pointerY, (m)=> true, false, sc.activeCamera);
+    if (pick && pick.pickedPoint){
+      const p = pick.pickedPoint.clone();
+      if (ST.grid?.snap) {
+        p.x = snapTo(p.x, ST.grid.step);
+        p.z = snapTo(p.z, ST.grid.step);
+        p.y = ST.yLevel;
       }
-    });
-    // stairs (as roots)
-    s.transformNodes?.forEach?.(n=>{
-      if (n.metadata?.builder?.type === 'stairs'){
-        out.stairs.push({ name:n.name, pos:n.position.asArray(), rot:n.rotation?.asArray?.()||[0,n.rotation?.y||0,0], params:n.metadata.builder.params, floorIndex:n.metadata.builder.floorIndex });
+      return p;
+    }
+    return null;
+  }
+
+  function beginDrag(point){
+    ST.drag.active = true;
+    ST.drag.a = point.clone();
+    ST.drag.b = point.clone();
+
+    // ghost mesh (thin plane / box)
+    if (ST.mode==='floor' || ST.mode==='room'){
+      const ghost = BABYLON.MeshBuilder.CreateGround('GhostFloor', {width:0.01,height:0.01}, S());
+      ghost.position = v3(point.x, ST.yLevel, point.z);
+      ghost.isPickable = false; ghost.alphaIndex = 0;
+      const m = new BABYLON.StandardMaterial('Mat_GhostFloor', S());
+      m.diffuseColor = new C3(0.3,0.5,0.4); m.alpha = 0.6; m.specularColor = new C3(0,0,0);
+      ghost.material = m; ST.drag.ghost = ghost;
+    } else if (ST.mode==='wall'){
+      const ghost = BABYLON.MeshBuilder.CreateBox('GhostWall', {width:0.01, depth:0.18, height:3.0}, S());
+      ghost.position = v3(point.x, ST.yLevel+1.5, point.z);
+      ghost.isPickable = false; ghost.alphaIndex = 0;
+      const m = new BABYLON.StandardMaterial('Mat_GhostWall', S());
+      m.diffuseColor = new C3(0.5,0.7,0.8); m.alpha = 0.45; m.specularColor = new C3(0,0,0);
+      ghost.material = m; ST.drag.ghost = ghost;
+    }
+  }
+
+  function updateDrag(point){
+    if (!ST.drag.active) return;
+    ST.drag.b = point.clone();
+    const a = ST.drag.a, b = ST.drag.b;
+
+    if (ST.drag.ghost && !ST.drag.ghost.isDisposed()){
+      if (ST.mode==='floor' || ST.mode==='room'){
+        const w = Math.max(0.01, Math.abs(b.x-a.x));
+        const h = Math.max(0.01, Math.abs(b.z-a.z));
+        ST.drag.ghost.dispose(false, true);
+        const ghost = BABYLON.MeshBuilder.CreateGround('GhostFloor', {width:w, height:h}, S());
+        ghost.position = v3((a.x+b.x)/2, ST.yLevel, (a.z+b.z)/2);
+        ghost.isPickable = false;
+        const m = new BABYLON.StandardMaterial('Mat_GhostFloor', S());
+        m.diffuseColor = new C3(0.3,0.5,0.4); m.alpha = 0.6; m.specularColor = new C3(0,0,0);
+        ghost.material = m; ST.drag.ghost = ghost;
+      } else if (ST.mode==='wall'){
+        const L = BABYLON.Vector3.Distance(a,b);
+        const ghost = ST.drag.ghost;
+        ghost.scaling = v3(1,1,1); // reset
+        ghost.position = v3((a.x+b.x)/2, ST.yLevel + 1.5, (a.z+b.z)/2);
+        ghost.rotation.y = Math.atan2(b.x-a.x, b.z-a.z);
+        ghost.scaling.x  = L; // width
+      }
+    }
+  }
+
+  function endDrag(point){
+    if (!ST.drag.active) return;
+    ST.drag.active = false;
+
+    const a = ST.drag.a, b = point.clone();
+    if (ST.drag.ghost && !ST.drag.ghost.isDisposed()){
+      ST.drag.ghost.dispose(false,true);
+      ST.drag.ghost = null;
+    }
+    if (ST.mode==='floor' || ST.mode==='room'){
+      const name = 'FLR_'+Date.now().toString(36);
+      const m = createFloorRect(name, a.x,a.z, b.x,b.z, ST.yLevel, null);
+      pushHist({ op:'add', mesh:m });
+      select(m);
+    } else if (ST.mode==='wall'){
+      const name = 'WALL_'+Date.now().toString(36);
+      const m = createWallBox(name, a, b, 3.0, 0.18, ST.yLevel, null);
+      pushHist({ op:'add', mesh:m });
+      select(m);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Copy / Paste room
+  // ------------------------------------------------------------
+  function copyRoomFromSelection(){
+    const m = ST.sel;
+    if (!m || m.isDisposed()) return toast('Select a room (floor) to copy.');
+    const tag = m.metadata?.builder?.type;
+    if (tag!=='floor') return toast('Copy works on floors (rooms) only.');
+    const size = (m.metadata.builder && m.metadata.builder.size) || [m._width||2, m._height||2];
+    const key  = m.metadata.builder.matKey || null;
+    ST.copyRoom = { size:[+size[0], +size[1]], matKey:key };
+    toast('Room copied.');
+  }
+
+  function pasteRoomAtPointer(){
+    if (!ST.copyRoom) return toast('No copied room.');
+    const p = groundHitFromPointer(); if (!p) return;
+    const w = Math.max(0.1, ST.copyRoom.size[0]);
+    const h = Math.max(0.1, ST.copyRoom.size[1]);
+    const a = v3(p.x - w/2, ST.yLevel, p.z - h/2);
+    const b = v3(p.x + w/2, ST.yLevel, p.z + h/2);
+    const name = 'FLR_'+Date.now().toString(36);
+    const m = createFloorRect(name, a.x,a.z, b.x,b.z, ST.yLevel, ST.copyRoom.matKey||null);
+    pushHist({ op:'add', mesh:m });
+    select(m);
+  }
+
+  // ------------------------------------------------------------
+  // Undo / Redo (very simple)
+  // ------------------------------------------------------------
+  function pushHist(entry){
+    ST.hist.stack.length = ST.hist.i+1;
+    ST.hist.stack.push(entry);
+    ST.hist.i++;
+  }
+  function undo(){
+    const e = ST.hist.stack[ST.hist.i];
+    if (!e) return;
+    ST.hist.i--;
+    if (e.op==='add' && e.mesh && !e.mesh.isDisposed()){
+      try{ e.mesh.setEnabled(false); e.mesh.isVisible=false; }catch{}
+      e.__undone = true;
+    }
+  }
+  function redo(){
+    const e = ST.hist.stack[ST.hist.i+1];
+    if (!e) return;
+    ST.hist.i++;
+    if (e.op==='add' && e.mesh && e.__undone){
+      try{ e.mesh.setEnabled(true); e.mesh.isVisible=true; e.__undone=false; }catch{}
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Public export (JSON manifest-ish)
+  // ------------------------------------------------------------
+  function exportJSON(){
+    const sc = S();
+    const out = {
+      pp_map_format:'v1',
+      meta:{ origin:[0,0,0], grid: { snap:ST.grid.snap, step:ST.grid.step } },
+      spawn:{},
+      floors:[],
+      walls:[],
+      props:[]
+    };
+    const sp = sc.getTransformNodeByName?.('Spawn_Player');
+    const sv = sc.getTransformNodeByName?.('Spawn_Van');
+    if (sp) out.spawn.player = [sp.position.x, sp.position.y, sp.position.z];
+    if (sv) out.spawn.van    = [sv.position.x, sv.position.y, sv.position.z];
+
+    sc.meshes.forEach(m=>{
+      const tag = m.metadata?.builder?.type;
+      if (tag==='floor'){
+        out.floors.push({
+          name: m.name,
+          pos: [m.position.x, m.position.y, m.position.z],
+          size: m.metadata.builder.size || [m.getBoundingInfo().boundingBox.extendSizeWorld.x*2, m.getBoundingInfo().boundingBox.extendSizeWorld.z*2],
+          floorIndex: m.metadata.builder.floorIndex|0,
+          matKey: m.metadata.builder.matKey||null
+        });
+      } else if (tag==='wall'){
+        out.walls.push({
+          name: m.name,
+          a: m.metadata.builder.a,
+          b: m.metadata.builder.b,
+          h: m.metadata.builder.h,
+          t: m.metadata.builder.t,
+          floorIndex: m.metadata.builder.floorIndex|0,
+          matKey: m.metadata.builder.matKey||null
+        });
+      } else if (tag==='prop'){
+        out.props.push({
+          name:m.name,
+          kind:m.metadata.builder.kind||'prop',
+          pos:[m.position.x, m.position.y, m.position.z],
+          rot:[m.rotation.x||0, m.rotation.y||0, m.rotation.z||0],
+          scl:[m.scaling.x||1, m.scaling.y||1, m.scaling.z||1]
+        });
       }
     });
     return out;
   }
-  function exportGhostLayout(){
-    const s = SCENE();
-    const res = { rooms:[], barriers:[] };
-    // rooms from floors (rects)
-    s.meshes.forEach(m=>{
-      const b = m.metadata?.builder?.type;
-      if (b === 'floor' && m.metadata.builder.roomId){
-        const bb = m.getBoundingInfo().boundingBox;
-        res.rooms.push({
-          name: m.metadata.builder.roomId,
-          floorIndex: m.metadata.builder.floorIndex,
-          a: {x: bb.minimumWorld.x, y: m.position.y, z: bb.minimumWorld.z },
-          b: {x: bb.maximumWorld.x, y: m.position.y, z: bb.maximumWorld.z }
-        });
-      }
-      if (b === 'wall'){
-        const w = m.metadata.builder;
-        res.barriers.push( [{x:w.a.x,y:w.a.y,z:w.a.z},{x:w.b.x,y:w.b.y,z:w.b.z}] );
-      }
-    });
-    return res;
-  }
-  function downloadJSON(name, obj){
-    const a = document.createElement('a');
-    a.download = name;
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)], {type:'application/json'}));
-    a.click();
-    setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
+
+  // ------------------------------------------------------------
+  // Input wiring & modes
+  // ------------------------------------------------------------
+  function setMode(m){
+    ST.mode = m;
+    toast('Mode: '+m);
   }
 
-  // ---------- UI ----------
-  function buildUI(){
-    if (ST.ui) return ST.ui;
-    const panel = document.createElement('div');
-    panel.id = 'builder-panel';
-    panel.style.cssText = `
-      position:fixed; top:10px; left:50%; transform:translateX(-50%);
-      background:rgba(0,0,0,0.78); border:1px solid #066; padding:8px 10px; border-radius:10px;
-      color:#9ff; font:12px monospace; z-index:12001; display:none; gap:8px; align-items:center;
-    `;
-    panel.innerHTML = `
-      <span style="font-weight:bold;color:#0ff;">BUILDER</span>
-      <button id="bld-mode-select" class="bbtn">Select</button>
-      <button id="bld-mode-place"  class="bbtn">Place</button>
-      <button id="bld-mode-room"   class="bbtn">Room</button>
-      <button id="bld-mode-wall"   class="bbtn">Wall</button>
-      <button id="bld-mode-floor"  class="bbtn">Floor</button>
-      <button id="bld-mode-stairs" class="bbtn">Stairs</button>
-      <label style="margin-left:6px;">Grid
-        <input id="bld-grid" type="number" min="0.05" step="0.05" value="${ST.gridSize}" style="width:60px;background:#000;color:#0ff;border:1px solid #066;border-radius:4px;padding:2px 4px;">
-      </label>
-      <label>Snap <input id="bld-snap" type="checkbox" ${ST.snap?'checked':''}></label>
-      <label>Floor <input id="bld-floor-index" type="number" step="1" value="${ST.floorIndex}" style="width:40px;background:#000;color:#0ff;border:1px solid #066;border-radius:4px;padding:2px 4px;"></label>
-      <span>Y=<span id="bld-floor-y">${ST.currentY.toFixed(2)}</span></span>
-      <button id="bld-undo" class="bbtn">Undo</button>
-      <button id="bld-redo" class="bbtn">Redo</button>
-      <button id="bld-save" class="bbtn" title="Export full builder JSON">Save</button>
-      <button id="bld-save-ghost" class="bbtn" title="Export ghost rooms/barriers JSON">Ghost JSON</button>
-      <label class="bbtn" style="padding:3px 8px; cursor:pointer;">
-        Import <input id="bld-load" type="file" accept="application/json" style="display:none">
-      </label>
-      <button id="bld-close" class="bbtn" style="margin-left:6px;color:#faa;border-color:#933;">Close</button>
-    `;
-    document.body.appendChild(panel);
-
-    // Left toolbox
-    const left = document.createElement('div');
-    left.id = 'builder-left';
-    left.style.cssText = `
-      position:fixed; left:10px; top:70px; width:240px; max-height:80vh; overflow:auto;
-      background:rgba(0,0,0,0.78); border:1px solid #066; border-radius:10px; padding:8px; color:#9ff; display:none; z-index:12001;
-    `;
-    left.innerHTML = `
-      <div style="font-weight:bold;color:#0ff;margin-bottom:6px;">Tools</div>
-      <div id="bld-tools"></div>
-      <hr style="border-color:#044;">
-      <div style="font-weight:bold;color:#0ff;margin:6px 0;">Place Library</div>
-      <div id="bld-lib" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;"></div>
-      <hr style="border-color:#044;">
-      <div style="font-weight:bold;color:#0ff;margin:6px 0;">Paint</div>
-      <div id="bld-paint" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;"></div>
-      <hr style="border-color:#044;">
-      <div style="font-weight:bold;color:#0ff;margin:6px 0;">Stairs</div>
-      <label>Width <input id="bld-stair-width" type="number" step="0.1" value="${ST.stairs.width}" style="width:80px;background:#000;color:#0ff;border:1px solid #066;border-radius:4px;"></label>
-      <label>Rise <input id="bld-stair-rise" type="number" step="0.05" value="${ST.stairs.stepRise}" style="width:80px;background:#000;color:#0ff;border:1px solid #066;border-radius:4px;"></label>
-      <label>Steps <input id="bld-stair-steps" type="number" step="1" value="${ST.stairs.steps}" style="width:80px;background:#000;color:#0ff;border:1px solid #066;border-radius:4px;"></label>
-      <label>Tread <input id="bld-stair-tread" type="number" step="0.05" value="${ST.stairs.tread}" style="width:80px;background:#000;color:#0ff;border:1px solid #066;border-radius:4px;"></label>
-    `;
-    document.body.appendChild(left);
-
-    // Toggle pill
-    const pill = document.createElement('button');
-    pill.id = 'builder-toggle';
-    pill.textContent = 'Builder';
-    pill.className = 'hud-btn';
-    pill.style.cssText = `position:fixed;top:10px;right:10px;z-index:12001;`;
-    pill.onclick = ()=> toggle(!ST.enabled);
-    document.body.appendChild(pill);
-
-    // Small CSS
-    const css = document.createElement('style');
-    css.textContent = `
-      .bbtn{ border:1px solid #066; background:#111; color:#9ff; padding:4px 8px; border-radius:8px; cursor:pointer; }
-      .bbtn:active{ transform:translateY(1px); }
-      .bld-item{ border:1px solid #055; background:#0a0a0a; color:#9ff; border-radius:6px; padding:6px; text-align:center; cursor:pointer; }
-      .bld-item.active{ outline:2px solid #0ff; }
-      .swatch{ width:40px; height:28px; border:1px solid #044; border-radius:6px; cursor:pointer; }
-      .swatch.active{ outline:2px solid #0ff; }
-    `;
-    document.head.appendChild(css);
-
-    // Library presets (primitives + markers)
-    const lib = byId('bld-lib');
-    const presets = [
-      { key:'box', label:'Box' },
-      { key:'sphere', label:'Sphere' },
-      { key:'doorframe', label:'Door' },
-      { key:'pointlight', label:'Light' }
-    ];
-    presets.forEach(p=>{
-      const d = document.createElement('div');
-      d.className = 'bld-item';
-      d.textContent = p.label;
-      d.onclick = ()=> {
-        ST.mode = 'place';
-        setActiveModeButton('place');
-        ST.placing.preset = p.key;
-        lib.querySelectorAll('.bld-item').forEach(x=> x.classList.remove('active'));
-        d.classList.add('active');
-        toast('Place: '+p.label);
-      };
-      lib.appendChild(d);
-    });
-
-    // Paint swatches
-    ensureMaterials();
-    const paint = byId('bld-paint');
-    Object.entries(ST.mats).forEach(([k,mat])=>{
-      if (k==='blocker') return; // internal
-      const sw = document.createElement('div');
-      sw.className='swatch'; sw.title=k;
-      sw.style.background = `rgb(${(mat.diffuseColor.r*255)|0}, ${(mat.diffuseColor.g*255)|0}, ${(mat.diffuseColor.b*255)|0})`;
-      sw.onclick = ()=>{
-        ST.mode='paint'; setActiveModeButton('paint');
-        paint.querySelectorAll('.swatch').forEach(x=>x.classList.remove('active'));
-        sw.classList.add('active');
-        ST.placing.preset = 'paint:'+k;
-        toast('Paint: '+k);
-      };
-      paint.appendChild(sw);
-    });
-
-    // Top bar interactions
-    byId('bld-mode-select').onclick = ()=> { ST.mode='select'; setActiveModeButton('select'); };
-    byId('bld-mode-place').onclick  = ()=> { ST.mode='place';  setActiveModeButton('place');  };
-    byId('bld-mode-room').onclick   = ()=> { ST.mode='room';   setActiveModeButton('room');   };
-    byId('bld-mode-wall').onclick   = ()=> { ST.mode='wall';   setActiveModeButton('wall');   };
-    byId('bld-mode-floor').onclick  = ()=> { ST.mode='floor';  setActiveModeButton('floor');  };
-    byId('bld-mode-stairs').onclick = ()=> { ST.mode='stairs'; setActiveModeButton('stairs'); };
-    byId('bld-undo').onclick = undo;
-    byId('bld-redo').onclick = redo;
-    byId('bld-save').onclick = ()=> downloadJSON('builder_export.json', collectExport());
-    byId('bld-save-ghost').onclick = ()=> downloadJSON('ghost_layout.json', exportGhostLayout());
-    byId('bld-load').onchange = (e)=> {
-      try{
-        const file = e.target.files[0]; if (!file) return;
-        const r = new FileReader();
-        r.onload = ()=> { try{ loadFromJSON(JSON.parse(r.result)); }catch(ex){ alert('Invalid JSON'); } };
-        r.readAsText(file);
-      }catch{}
-    };
-    byId('bld-close').onclick = ()=> toggle(false);
-
-    // Settings
-    byId('bld-grid').onchange = (e)=>{ ST.gridSize = Math.max(0.05, +e.target.value||0.5); };
-    byId('bld-snap').onchange = (e)=>{ ST.snap = !!e.target.checked; };
-    byId('bld-floor-index').onchange = (e)=> setFloorIndex(+e.target.value||0);
-
-    ST.ui = { panel, left, pill };
-    return ST.ui;
-  }
-  function setActiveModeButton(id){
-    const ids = ['select','place','room','wall','floor','stairs','paint'];
-    ids.forEach(k=>{
-      const el = byId('bld-mode-'+k);
-      if (el) el.style.outline = (k===id) ? '2px solid #0ff' : 'none';
-    });
-  }
-
-  // ---------- Enable / Disable ----------
-  function enable(){
-    const s = SCENE();
-    if (!s) return toast('Scene not ready');
-    buildUI();
-    ensureMaterials();
-    setFloorIndex(ST.floorIndex);
-
-    ST.prevCam = CAM();
-    ST.topCam = makeTopCamera();
-    s.activeCamera = ST.topCam;
-
-    ST.grid = createGrid();
-
-    ST.enabled = true;
-    ST.ui.panel.style.display = 'flex';
-    ST.ui.left.style.display  = 'block';
-
-    attachInput();
-    toast('Builder ON');
-  }
-  function disable(){
-    const s = SCENE(); if (!s) return;
-    detachInput();
-    if (ST.grid){ ST.grid.dispose(false,true); ST.grid=null; }
-    if (ST.topCam){ ST.topCam.detachControl(); ST.topCam.dispose(); ST.topCam=null; }
-    if (ST.prevCam){ s.activeCamera = ST.prevCam; ST.prevCam = null; }
-    if (ST.selection.mesh){ withOutline(ST.selection.mesh,false); ST.selection.mesh=null; }
-    ST.enabled = false;
-    if (ST.ui){ ST.ui.panel.style.display='none'; ST.ui.left.style.display='none'; }
-    toast('Builder OFF');
-  }
-  function toggle(on){
-    if (typeof on==='boolean') (on? enable(): disable());
-    else (ST.enabled? disable(): enable());
-  }
-
-  // ---------- Input / Editing ----------
-  function attachInput(){
-    const cvs = byId('renderCanvas');
-    ST._onDown = (e)=> onPointerDown(e);
-    ST._onMove = (e)=> onPointerMove(e);
-    ST._onUp   = (e)=> onPointerUp(e);
-    ST._onKey  = (e)=> onKey(e);
-    cvs.addEventListener('pointerdown', ST._onDown, {passive:false});
-    cvs.addEventListener('pointermove', ST._onMove, {passive:false});
-    window.addEventListener('pointerup', ST._onUp, {passive:false});
-    window.addEventListener('keydown', ST._onKey, {passive:false});
-  }
-  function detachInput(){
-    const cvs = byId('renderCanvas');
-    if (ST._onDown){ cvs.removeEventListener('pointerdown', ST._onDown); ST._onDown=null; }
-    if (ST._onMove){ cvs.removeEventListener('pointermove', ST._onMove); ST._onMove=null; }
-    if (ST._onUp)  { window.removeEventListener('pointerup', ST._onUp);   ST._onUp=null; }
-    if (ST._onKey) { window.removeEventListener('keydown', ST._onKey);    ST._onKey=null; }
-  }
-
-  function onPointerDown(e){
-    if (!ST.enabled) return;
-    const p = pickXZ(e); if (!p) return;
-    p.y = ST.currentY;
-    const sp = snapVecXZ(p);
+  function onPointerDown(evt){
+    if (evt.button!==0) return; // left only
+    const p = groundHitFromPointer(); if (!p) return;
 
     if (ST.mode==='select'){
-      const pick = SCENE().pick(e.offsetX, e.offsetY, m=> !!m && m.isPickable && m.name!=='BuilderGrid');
-      if (pick.hit && pick.pickedMesh){
-        if (ST.selection.mesh) withOutline(ST.selection.mesh,false);
-        ST.selection.mesh = pick.pickedMesh;
-        withOutline(ST.selection.mesh,true);
-        ST.selection.dragStart = { pos: ST.selection.mesh.position.clone(), pointer: sp.clone() };
-      } else {
-        if (ST.selection.mesh){ withOutline(ST.selection.mesh,false); ST.selection.mesh=null; }
-      }
+      const pick = S().pick(S().pointerX, S().pointerY); 
+      if (pick && pick.pickedMesh){ select(pick.pickedMesh); }
+      return;
     }
-    else if (ST.mode==='room' || ST.mode==='wall' || ST.mode==='floor' || ST.mode==='stairs'){
-      ST.draw.start = sp.clone();
-      if (ST.mode==='stairs'){
-        // store start; actual creation on pointer up using direction
-      } else {
-        ST.draw.temp = ST.draw.temp || createPreviewRect();
-        updatePreviewRect(ST.draw.temp, ST.draw.start, sp);
-      }
-    }
-    else if (ST.mode==='place'){
-      placePresetAt(sp);
-    }
-    else if (ST.mode==='paint'){
-      paintAt(e);
-    }
-    e.preventDefault();
+
+    beginDrag(p);
   }
 
-  function onPointerMove(e){
-    if (!ST.enabled) return;
-    const p = pickXZ(e); if (!p) return;
-    p.y = ST.currentY;
-    const sp = snapVecXZ(p);
-
-    if (ST.mode==='select' && ST.selection.mesh && ST.selection.dragStart){
-      const d = sp.subtract(ST.selection.dragStart.pointer);
-      ST.selection.mesh.position.copyFrom( ST.selection.dragStart.pos.add(d) );
-    }
-    else if ((ST.mode==='room' || ST.mode==='wall' || ST.mode==='floor') && ST.draw.start && ST.draw.temp){
-      updatePreviewRect(ST.draw.temp, ST.draw.start, sp);
-    }
-    else if (ST.mode==='stairs' && ST.draw.start){
-      // Could show a direction arrow preview; omitted for lightness
-    }
+  function onPointerMove(){
+    if (!ST.drag.active) return;
+    const p = groundHitFromPointer(); if (!p) return;
+    updateDrag(p);
   }
 
-  function onPointerUp(e){
-    if (!ST.enabled) return;
-    const p = pickXZ(e); if (!p) return;
-    p.y = ST.currentY;
-    const sp = snapVecXZ(p);
-
-    if (ST.mode==='select'){
-      ST.selection.dragStart = null;
-    }
-    else if (ST.mode==='room' && ST.draw.start){
-      const room = createRoomRect(ST.draw.start, sp);
-      if (ST.draw.temp){ ST.draw.temp.dispose(false,true); ST.draw.temp=null; }
-      pushUndo({ type:'create-room', created:[room.floor, ...room.walls.filter(Boolean)] });
-      toast('Room created');
-      ST.draw.start=null;
-    }
-    else if (ST.mode==='wall' && ST.draw.start){
-      const w = createWallSegment(ST.draw.start, sp);
-      if (ST.draw.temp){ ST.draw.temp.dispose(false,true); ST.draw.temp=null; }
-      if (w) pushUndo({ type:'create-wall', created:[w] });
-      toast('Wall created');
-      ST.draw.start=null;
-    }
-    else if (ST.mode==='floor' && ST.draw.start){
-      const f = createFloorRect(ST.draw.start, sp);
-      if (ST.draw.temp){ ST.draw.temp.dispose(false,true); ST.draw.temp=null; }
-      pushUndo({ type:'create-floor', created:[f] });
-      toast('Floor created');
-      ST.draw.start=null;
-    }
-    else if (ST.mode==='stairs' && ST.draw.start){
-      const dir = sp.subtract(ST.draw.start); dir.y=0;
-      if (dir.length() < 0.1){ ST.draw.start=null; return; }
-      const root = createStairs(ST.draw.start, dir, ST.stairs);
-      pushUndo({ type:'create-stairs', created:[root] });
-      toast('Stairs created');
-      ST.draw.start=null;
-    }
+  function onPointerUp(){
+    if (!ST.drag.active) return;
+    const p = groundHitFromPointer(); if (!p) return;
+    endDrag(p);
   }
 
   function onKey(e){
-    if (!ST.enabled) return;
-    // Global toggles
-    if (e.altKey && (e.code==='KeyB')){ toggle(!ST.enabled); return; }
-
-    if (ST.mode==='place'){
-      if (e.code==='KeyR'){ ST.placing.rotationY += Math.PI/8; updatePreviewRotation(); }
-      if (e.code==='Escape'){ clearPlacePreview(); }
-    }
-    if (ST.mode==='select'){
-      if (e.code==='Delete' && ST.selection.mesh){
-        const mesh = ST.selection.mesh; ST.selection.mesh=null;
-        pushUndo({ type:'delete', target:mesh, parent:mesh.parent, data:mesh.serialize?.() });
-        doDeleteMesh(mesh);
-      }
-      if (e.code==='KeyC' && ST.selection.mesh){
-        const m = ST.selection.mesh.clone(ST.selection.mesh.name+'_copy');
-        if (m){ m.position.addInPlace(v3( ST.gridSize, 0, ST.gridSize )); withOutline(m,true); withOutline(ST.selection.mesh,false); ST.selection.mesh=m; pushUndo({type:'create', created:[m]}); }
-      }
-      if (e.code==='KeyQ' && ST.selection.mesh){ ST.selection.mesh.rotation.y -= Math.PI/16; }
-      if (e.code==='KeyE' && ST.selection.mesh){ ST.selection.mesh.rotation.y += Math.PI/16; }
-      if (e.code==='Escape' && ST.selection.mesh){ withOutline(ST.selection.mesh,false); ST.selection.mesh=null; }
-    }
-    // Undo/Redo
-    if (e.ctrlKey && e.code==='KeyZ'){ undo(); e.preventDefault(); }
-    if (e.ctrlKey && e.code==='KeyY'){ redo(); e.preventDefault(); }
-
-    // Quick modes
-    if (!e.ctrlKey && !e.altKey){
-      if (e.code==='KeyS') { ST.mode='select'; setActiveModeButton('select'); }
-      if (e.code==='KeyW') { ST.mode='wall';   setActiveModeButton('wall'); }
-      if (e.code==='KeyR') { ST.mode='room';   setActiveModeButton('room'); }
-      if (e.code==='KeyF') { ST.mode='floor';  setActiveModeButton('floor'); }
-      if (e.code==='KeyP') { ST.mode='place';  setActiveModeButton('place'); }
+    if (e.repeat) return;
+    if (e.key==='s' || e.key==='S') setMode('select');
+    if (e.key==='f' || e.key==='F') setMode('floor');
+    if (e.key==='w' || e.key==='W') setMode('wall');
+    if (e.key==='r' || e.key==='R') setMode('room'); // same as floor rectangle
+    if (e.key==='c' || e.key==='C') copyRoomFromSelection();
+    if (e.key==='v' || e.key==='V') pasteRoomAtPointer();
+    if (e.key==='Delete'){ if (ST.sel && !ST.sel.isDisposed()){ try{ ST.sel.dispose(false,true);}catch{} ST.sel=null; } }
+    if (e.ctrlKey && (e.key==='z' || e.key==='Z')) undo();
+    if (e.ctrlKey && (e.key==='y' || (e.shiftKey && (e.key==='z'||e.key==='Z')))) redo();
+    if (e.key==='m' || e.key==='M'){ // toggle material panel
+      Materials.ensurePanel();
+      const p = document.getElementById('mat-panel');
+      if (p) p.style.display = (p.style.display==='none'?'block':'none');
     }
   }
 
-  // ---------- Preview rectangle ----------
-  function createPreviewRect(){
-    const s = SCENE();
-    const lines = BABYLON.MeshBuilder.CreateLineSystem('PREVIEW', { lines:[ [v3(0,0,0), v3(0,0,0)] ] }, s);
-    lines.color = new BABYLON.Color3(0,1,1);
-    lines.isPickable = false;
-    return lines;
-  }
-  function updatePreviewRect(mesh, a, b){
-    const x1=Math.min(a.x,b.x), x2=Math.max(a.x,b.x), z1=Math.min(a.z,b.z), z2=Math.max(a.z,b.z);
-    const y = ST.currentY + 0.02;
-    const lines = [
-      [v3(x1,y,z1), v3(x2,y,z1)],
-      [v3(x2,y,z1), v3(x2,y,z2)],
-      [v3(x2,y,z2), v3(x1,y,z2)],
-      [v3(x1,y,z2), v3(x1,y,z1)],
-    ];
-    mesh = BABYLON.MeshBuilder.CreateLineSystem(null, { lines, instance: mesh });
-    mesh.color = new BABYLON.Color3(0,1,1);
-    return mesh;
-  }
+  // ------------------------------------------------------------
+  // Public API
+  // ------------------------------------------------------------
+  const API = {
+    enable(){
+      if (ST.ready) return;
+      ST.ready = true;
 
-  // ---------- Place presets ----------
-  function clearPlacePreview(){
-    if (ST.placing.preview){ doDeleteMesh(ST.placing.preview); ST.placing.preview=null; }
-    ST.placing.preset=null; ST.placing.rotationY=0;
-  }
-  function updatePreviewRotation(){
-    if (ST.placing.preview){ ST.placing.preview.rotation.y = ST.placing.rotationY; }
-  }
-  function placePresetAt(p){
-    const s = SCENE(); ensureMaterials();
-    let mesh=null;
-    if (ST.placing.preset==='box'){
-      mesh = BABYLON.MeshBuilder.CreateBox('BOX_'+Date.now().toString(36), {size:1}, s);
-      mesh.material = ST.mats.wood;
-    } else if (ST.placing.preset==='sphere'){
-      mesh = BABYLON.MeshBuilder.CreateSphere('SPH_'+Date.now().toString(36), {diameter:0.8}, s);
-      mesh.material = ST.mats.accent;
-    } else if (ST.placing.preset==='doorframe'){
-      mesh = BABYLON.MeshBuilder.CreateBox('DOOR_'+Date.now().toString(36), {width:0.1, depth:1.0, height:2.1}, s);
-      mesh.material = ST.mats.wall;
-    } else if (ST.placing.preset==='pointlight'){
-      const L = new BABYLON.PointLight('PL_'+Date.now().toString(36), p.clone().add(v3(0,1.8,0)), s);
-      L.diffuse = new BABYLON.Color3(1,1,1);
-      L.intensity = 0.7;
-      pushUndo({ type:'create-light', created:[L] });
-      toast('Light placed');
-      return;
-    } else if (ST.placing.preset?.startsWith('paint:')){
-      paintAtPoint(p); return;
-    }
-    if (mesh){
-      mesh.position.copyFrom(p);
-      mesh.isPickable = true;
-      mesh.metadata = mesh.metadata || {};
-      mesh.metadata.builder = { type:'prop', floorIndex: ST.floorIndex };
-      pushUndo({ type:'create', created:[mesh] });
-      toast('Placed');
-    }
-  }
-  function paintAt(evt){
-    const pick = SCENE().pick(evt.offsetX, evt.offsetY, m=> !!m && m.isPickable && m.name!=='BuilderGrid');
-    if (!pick.hit || !pick.pickedMesh) return;
-    const k = (ST.placing.preset||'').split(':')[1];
-    if (!k || !ST.mats[k]) return;
-    pick.pickedMesh.material = ST.mats[k];
-    pushUndo({ type:'paint', target: pick.pickedMesh, mat: k });
-  }
-  function paintAtPoint(p){ /* optional direct point paint */ }
+      // basic collisions on
+      try{ S().collisionsEnabled = true; }catch{}
 
-  // ---------- Undo/Redo ops ----------
-  function undo(){
-    const op = ST.undo.pop(); if (!op) return;
-    ST.redo.push(op);
-    if (op.type.startsWith('create')){
-      (op.created||[]).forEach(m=>{ try{ doDeleteMesh(m); }catch{} });
-    } else if (op.type==='delete'){
-      // If we stored full serialize, we could reconstruct; for now, just skip
-      toast('Cannot undelete without full serialize (coming soon)');
-    } else if (op.type==='paint'){
-      // (No previous material stored in this lightweight pass)
-    }
-  }
-  function redo(){
-    // Intentionally minimal (we can extend later)
-    toast('Nothing to redo (lightweight stack)');
-  }
+      // highlight layer
+      ensureHL();
 
-  // ---------- Load ----------
-  function loadFromJSON(obj){
-    if (!obj) return;
-    const s = SCENE(); ensureMaterials();
-    (obj.floors||[]).forEach(F=>{
-      const m = BABYLON.MeshBuilder.CreateGround(F.name||('FLR_'+Date.now().toString(36)), {width:F.size?.[0]||2, height:F.size?.[1]||2}, s);
-      m.position = BABYLON.Vector3.FromArray(F.pos||[0,0,0]);
-      m.isPickable = true; m.material = ST.mats.tile;
-      m.metadata = { builder:{ type:'floor', floorIndex:F.floorIndex|0 } };
-    });
-    (obj.walls||[]).forEach(W=>{
-      const a = v3(W.a.x,W.a.y,W.a.z); const b=v3(W.b.x,W.b.y,W.b.z);
-      createWallSegment(a,b,{y:W.a.y, height:W.h||ST.floorHeight, thickness:W.t||0.18});
-    });
-    (obj.stairs||[]).forEach(Ss=>{
-      const p = Object.assign({width:1,stepRise:0.2,steps:10,tread:0.35}, Ss.params||{});
-      const root = createStairs( BABYLON.Vector3.FromArray(Ss.pos||[0,0,0]), v3(0,0,1), p );
-      if (Ss.rot) root.rotation = BABYLON.Vector3.FromArray(Ss.rot);
-    });
-    (obj.props||[]).forEach(P=>{
-      const b = BABYLON.MeshBuilder.CreateBox(P.name||('PROP_'+Date.now().toString(36)), {size:1}, s);
-      b.position = BABYLON.Vector3.FromArray(P.pos||[0,0,0]);
-      if (P.rot) b.rotation = BABYLON.Vector3.FromArray(P.rot);
-      if (P.scl) b.scaling = BABYLON.Vector3.FromArray(P.scl);
-      b.material = ST.mats.wood;
-      b.isPickable = true;
-      b.metadata = { builder:{ type:'prop', floorIndex: (P.floorIndex|0)??0 } };
-    });
-    toast('Loaded layout');
-  }
+      // mouse listeners
+      const c = S().getEngine().getRenderingCanvas();
+      c.addEventListener('pointerdown', onPointerDown);
+      c.addEventListener('pointermove', onPointerMove);
+      c.addEventListener('pointerup',   onPointerUp);
+      window.addEventListener('keydown', onKey);
 
-  // ---------- Expose ----------
-  window.Builder = {
-    toggle, enable, disable,
-    setFloorIndex,
-    export: ()=> collectExport(),
-    exportGhostLayout,
+      // material palette is available
+      Materials.ensurePanel();
+
+      toast('Builder ready. (F:Floor, W:Wall, S:Select, R:Room, M:Materials)');
+    },
+
+    setGridSnap(on, step){
+      ST.grid.snap = !!on;
+      ST.grid.step = Math.max(0.05, +step||0.5);
+      toast('Grid: '+(ST.grid.snap?'ON ':'OFF ')+'step '+ST.grid.step);
+    },
+    setGrid(opts){ // alt signature
+      if (opts && typeof opts.snap==='boolean') ST.grid.snap = opts.snap;
+      if (opts && typeof opts.step==='number')  ST.grid.step = Math.max(0.05, opts.step);
+      toast('Grid updated.');
+    },
+
+    export(){
+      return exportJSON();
+    },
+
+    // for your right-side UI hooks (optional)
+    setMode,
+    applyMatToSelection(key){
+      if (!ST.sel) return toast('No selection.');
+      Materials.applyMatToMesh(ST.sel, key);
+    },
+    copyRoom: copyRoomFromSelection,
+    pasteRoom: pasteRoomAtPointer,
+
+    // selection utilities
+    select,
   };
 
-  // ---------- Global Hotkey ----------
-  window.addEventListener('keydown', (e)=>{
-    if (e.altKey && (e.code==='KeyB' || e.key==='b' || e.key==='B')){
-      toggle();
-    }
-  });
+  // expose
+  window.Builder = API;
 
 })();
