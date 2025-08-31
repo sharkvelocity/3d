@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — House Loader (GLB + Doors, Start+Loader, Inspector Top)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
+  <title>PhasmaPhoney — 3D Prototype</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <meta name="author" content="Shark-Blades" />
+  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
+  <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
 
-  <!-- Babylon core + loaders (use your local ./cdn/ stack or your hosted CDN) -->
+  <!-- Babylon core + loaders (local to repo) -->
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
@@ -13,284 +16,323 @@
   <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
-  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
-  <!-- Optional: include the procedural builder (only used if MODE === "PROCEDURAL") -->
-  <script src="./assets/index3/house_procedural.js"></script>
+  <!-- Optional: room names (unchanged) -->
+  <script src="./rooms.js"></script>
 
   <style>
-    html, body { margin:0; height:100%; background:#000; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    #renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
+    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
+    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
 
-    /* Start screen + Loader */
-    #startScreen, #loadingBox, #hud, #reticle { position:fixed; left:0; right:0; pointer-events:none; }
-    #startScreen { top:0; bottom:0; display:flex; align-items:center; justify-content:center; background:#05070bdd; z-index:900000; }
-    #startScreen .card { pointer-events:auto; background:#0b111bcc; border:1px solid #17263d; padding:24px 28px; border-radius:16px; color:#e6f1ff; text-align:center; box-shadow:0 12px 40px #000a; }
-    #startBtn { pointer-events:auto; background:#1b2b48; color:#e6f1ff; border:1px solid #29456e; padding:10px 16px; border-radius:10px; cursor:pointer; font-weight:600; }
-    #startBtn:hover { background:#21365b; }
+    #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
 
-    #loadingBox { bottom:20px; margin:0 auto; width:420px; max-width:90vw; z-index:800000; display:none; }
-    #loadingBox .bar { height:10px; background:#101827; border:1px solid #1f2e4a; border-radius:999px; overflow:hidden; }
-    #loadingBox .fill { height:100%; width:0%; background:#35c1ff; transition:width .1s; }
+    /* Title */
+    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
+    #title-content{ text-align:center; max-width:90vw;}
+    #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
+    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
+    #start-button:active{ transform:translateY(1px); }
 
-    #hud { top:10px; left:10px; width:auto; pointer-events:none; color:#cfe7ff; font-size:13px; z-index:700000; }
-    #hud .pill { display:inline-block; background:#0b111bcc; border:1px solid #17263d; padding:6px 10px; border-radius:999px; margin:4px; }
+    /* Loading overlay */
+    #loading-overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.9); display:none; align-items:center; justify-content:center; z-index:10050; }
+    #loading-card{ width:min(520px,92vw); background:#0a0a0a; border:1px solid #066; border-radius:12px; padding:16px; box-shadow:0 0 24px rgba(0,255,255,0.15); }
+    #loading-title{ color:#9ff; font-weight:bold; margin:0 0 8px 0; text-align:center; }
+    #loading-bar-wrap{ height:14px; background:#051416; border:1px solid #0a3c3f; border-radius:8px; overflow:hidden; }
+    #loading-bar{ height:100%; width:0%; background:linear-gradient(90deg, #0ff, #08a); transition:width 160ms ease; }
+    #loading-text{ color:#8ff; font-size:12px; margin-top:8px; text-align:center; opacity:0.95; }
 
-    #reticle { top:50%; transform:translateY(-50%); text-align:center; z-index:600000; color:#8fd0ff; font-weight:700; font-size:18px; }
-    #reticle span { background:transparent; }
+    /* HUD */
+    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
+    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    #hud .label{ color:#9ff; }
+    #hud .value{ color:#0ff; font-weight:bold; }
+    #weather{ font-size:12px; color:#aff; opacity:0.9; }
+    #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
 
-    /* Keep Babylon Inspector on top when opened */
-    /* overlay:true uses an iframe; it will already float above. These extra rules help for embedded mode too */
-    .babylonjs-inspector, .inspector { z-index: 999999 !important; }
+    /* Storage button + modal */
+    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
+    #storage-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
+    #storage-card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:8px; width:min(740px,92vw); max-height:86vh; overflow:auto; padding:12px 14px; }
+    #storage-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:10px; }
 
-    /* Optional: basic help corner */
-    #help { position:fixed; right:10px; bottom:10px; background:#0b111bcc; border:1px solid #17263d; color:#a8c9ff; padding:8px 10px; border-radius:10px; z-index:650000; }
+    /* Notebook */
+    #notebook-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.82); align-items:center; justify-content:center; }
+    #notebook-card{ background:#0b0b0b; color:#0ff; border:1px solid #066; border-radius:10px; width:min(920px,95vw); max-height:90vh; overflow:auto; padding:14px 16px; box-shadow:0 0 20px rgba(0,255,255,0.2); }
+    #notebook-tabs{ display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+    .tab{ padding:6px 10px; border:1px solid #066; color:#9ff; background:#111; border-radius:6px; cursor:pointer; }
+    .tab.active{ color:#0ff; border-color:#0ff; box-shadow:0 0 10px rgba(0,255,255,0.2) inset; }
+    .page{ display:none; }
+    .page.active{ display:block; }
+    .ev-row{ display:flex; align-items:center; gap:8px; margin:6px 0; }
+    .ev-row input{ transform:scale(1.3); }
+
+    /* Dev gate/panel */
+    #dev-gate, #dev-panel{ display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
+    .card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:10px; padding:14px; width:min(820px,92vw); max-height:88vh; overflow:auto; }
+    #dev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+    #dev-log{ background:#000; border:1px solid #033; min-height:120px; padding:8px; border-radius:6px; color:#8ff; font-size:12px; white-space:pre-wrap; }
+    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
+
+    /* Hand preview */
+    #hand-preview{ position:fixed; right:18px; bottom:110px; width:180px; height:140px; pointer-events:none; z-index:5000; display:none; }
+
+    /* Camera overlay */
+    #camera-overlay{ position:fixed; inset:0; z-index:4000; display:none; pointer-events:none; background:radial-gradient(transparent 70%, rgba(0,0,0,0.45)); }
+    #camera-rec{ position:absolute; top:12px; left:14px; color:#f44; font-size:14px; letter-spacing:1px; text-shadow:0 0 6px rgba(255,0,0,0.5); }
+    #camera-orb{ position:absolute; width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,0.9); filter:blur(0.5px); display:none; box-shadow:0 0 10px rgba(255,255,255,0.8); }
+    #camera-ir { position:absolute; top:12px; right:14px; color:#9f9; font-size:14px; display:none; }
+
+    /* Belt */
+    #belt{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
+    .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
+    .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+    .slot canvas, .slot img{ max-width:60px; max-height:60px; image-rendering:crisp-edges; }
+
+    /* Touch controls */
+    #touch-controls{ position:fixed; right:12px; bottom:12px; display:none; grid-template-columns:repeat(2,64px); gap:8px; z-index:6000; }
+    .tbtn{ width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.5); border:1px solid #066; color:#0ff; display:flex; align-items:center; justify-content:center; user-select:none; }
+    .tbtn:active{ transform:translateY(1px); }
+
+    /* Toast */
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+    /* Thermometer HUD */
+    #thermo-hud{
+      position:fixed; left:10px; top:50%; transform:translateY(-50%);
+      display:none; z-index:6500; padding:8px 10px; border:1px solid #066; border-radius:8px;
+      background:rgba(0,0,0,0.55); color:#9ff; min-width:120px;
+    }
+    #thermo-hud .t-row{ display:flex; align-items:center; gap:8px; }
+    #thermo-icon{ width:20px; height:20px; object-fit:contain; image-rendering:crisp-edges; }
   </style>
 </head>
+
 <body>
+  <div id="flash-overlay"></div>
+  <div id="camera-overlay">
+    <div id="camera-rec">REC ●</div>
+    <div id="camera-orb"></div>
+    <div id="camera-ir">IR</div>
+  </div>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- Start gate -->
-  <div id="startScreen">
-    <div class="card">
-      <h2 style="margin:0 0 8px 0;">PhasmaPhoney — House Demo</h2>
-      <p style="opacity:.9; margin:0 0 16px 0;">Loads a 2-story house with basement. Click doors to open/close. Press <b>I</b> for Inspector.</p>
-      <button id="startBtn">Start</button>
+  <!-- Start screen -->
+  <div id="title-screen">
+    <div id="title-content">
+      <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
+      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <button id="start-button">Start Investigation</button>
     </div>
   </div>
 
-  <!-- Loader (appears only after Start) -->
-  <div id="loadingBox">
-    <div style="display:flex;justify-content:space-between;color:#a8c9ff;margin:0 0 6px 0;">
-      <span>Loading…</span><span id="loadingPct">0%</span>
+  <!-- Loading overlay -->
+  <div id="loading-overlay" aria-hidden="true">
+    <div id="loading-card">
+      <div id="loading-title">initializing…</div>
+      <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+      <div id="loading-text">0%</div>
     </div>
-    <div class="bar"><div class="fill" id="loadingFill"></div></div>
   </div>
 
   <!-- HUD -->
   <div id="hud">
-    <div class="pill">WASD move · Space jump</div>
-    <div class="pill">Click doors to toggle</div>
-    <div class="pill">I = Inspector</div>
+    <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
+    <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
+    <div id="weather">Weather: <span id="hud-weather">Clear</span></div>
+    <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
   </div>
 
+  <!-- Thermometer HUD (only visible when holding the thermometer) -->
+  <div id="thermo-hud">
+    <div class="t-row">
+      <img id="thermo-icon" src="./assets/icons/thermometer.png" alt="">
+      <div><span id="thermo-value">--.-</span>°C</div>
+    </div>
+  </div>
+
+  <!-- Storage -->
+  <button id="storage-button">STORAGE</button>
+  <div id="storage-modal">
+    <div id="storage-card">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div style="font-weight:bold;color:#9ff;">Van Storage — Pick 3 (slots 1–3)</div>
+        <button id="storage-close" class="hud-btn">Close</button>
+      </div>
+      <div style="margin:6px 0 10px; color:#8ff;">Slot 4 is always Lighter. Slot 5 is always Notebook.</div>
+      <div id="storage-grid"></div>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button id="storage-confirm" class="hud-btn" style="border:1px solid #0ff; color:#0ff;">Confirm Loadout</button>
+        <span id="storage-info" style="color:#8ff;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notebook -->
+  <div id="notebook-modal">
+    <div id="notebook-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="font-weight:bold; color:#9ff;">Investigator's Journal</div>
+        <button id="notebook-close" class="hud-btn">Close</button>
+      </div>
+      <div id="notebook-tabs">
+        <div class="tab active" data-tab="ghosts">Ghosts</div>
+        <div class="tab" data-tab="evidence">Evidence</div>
+        <div class="tab" data-tab="guess">Guess</div>
+      </div>
+      <div id="page-ghosts" class="page active"></div>
+      <div id="page-evidence" class="page"></div>
+      <div id="page-guess" class="page"></div>
+    </div>
+  </div>
+
+  <!-- Dev Gate + Tools -->
+  <div id="dev-gate">
+    <div class="card">
+      <div style="font-weight:bold; color:#9ff; margin-bottom:6px;">Enable Developer Options?</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="dev-yes" class="hud-btn">Yes</button>
+        <button id="dev-no"  class="hud-btn">No</button>
+      </div>
+      <div id="dev-pass-wrap" style="display:none; margin-top:10px;">
+        <div style="color:#8ff; margin-bottom:4px;">Enter password:</div>
+        <input id="dev-pass" type="password" placeholder="password" style="padding:6px 8px; background:#000; color:#0ff; border:1px solid #066; border-radius:4px; width:200px;" />
+        <button id="dev-pass-submit" class="hud-btn" style="margin-left:6px;">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
+  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:480px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
+    <!-- Dev tools body preserved; JS wiring lives in devtools.js -->
+  </div>
+
+  <div id="hand-preview"></div>
+  <div id="belt"></div>
+  <div id="touch-controls">
+    <div class="tbtn" id="t-up">↑</div>
+    <div class="tbtn" id="t-use">USE</div>
+    <div class="tbtn" id="t-left">←</div>
+    <div class="tbtn" id="t-right">→</div>
+  </div>
+  <div id="toast"></div>
+
+  <!-- Ordered scripts (non-module to keep your original globals/flow) -->
+  <script src="./assets/index3/core.js"></script>
+  <script src="./assets/index3/utils.js"></script>
+
   <!-- Reticle -->
-  <div id="reticle"><span>+</span></div>
+  <script>
+    window.RETICLE_OPTS = { style: "circle-dot", size: 22, color: "#9ff", hitColor: "#0f0" };
+  </script>
+  <script src="./assets/index3/reticle.js?v=1"></script>
 
-  <div id="help">Spawn is just outside the front door. Doors are scriptable via their <code>*_hinge</code> nodes.</div>
+  <!-- Input & UI -->
+  <script src="./assets/index3/ui_input.js?v=1"></script>
 
-<script>
-(() => {
-  // ====== Config ======
-  const MODE = "GLB"; // "GLB" | "PROCEDURAL"
-  const HOUSE_FOLDER = "./assets/models/map/";
-  const HOUSE_FILE   = "house_procedural_export.glb"; // change if you rename the file
-  const PLAYER_HEIGHT = 1.8;
+  <!-- icons + items -->
+  <script src="./assets/index3/icons.js?v=1"></script>
+  <script src="./assets/index3/video_feed.js?v=1.0"></script>
+  <script src="./assets/index3/items_models_exploration.js?v=1.0"></script>
+  <script src="./assets/index3/items.js?v=2.0"></script>
 
-  // ====== Bootstrap ======
-  const canvas = document.getElementById("renderCanvas");
-  const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-  let scene;
+  <!-- atmosphere / world -->
+  <script src="./assets/index3/atmosphere.js?v=1"></script>
 
-  // UI
-  const startScreen = document.getElementById("startScreen");
-  const startBtn    = document.getElementById("startBtn");
-  const loadingBox  = document.getElementById("loadingBox");
-  const loadingFill = document.getElementById("loadingFill");
-  const loadingPct  = document.getElementById("loadingPct");
+  <!-- Weather config FIRST, then weather engine -->
+  <script>
+    // Map SFX names used by the weather engine
+    // ambient.mp3 is only for Clear; Rainstorm/Snow use their own files
+    window.WEATHER_AUDIO_MAP = {
+      thunder: ['thunder.mp3'] // ./assets/audio/thunder.mp3
+      // rain: ['rainstorm.mp3'], // optional override
+      // snow: ['snow.mp3']       // optional override
+    };
+  </script>
+  <script src="./assets/index3/weather.js?v=1"></script>
 
-  function setLoading(progress01) {
-    const pct = Math.max(0, Math.min(1, progress01)) * 100;
-    loadingFill.style.width = pct.toFixed(1) + "%";
-    loadingPct.textContent = Math.round(pct) + "%";
-  }
+  <script src="./assets/index3/temperature.js?v=1"></script>
+  <script src="./assets/index3/moon.js?v=1"></script>
+  <script src="./assets/index3/lights.js?v=1"></script>
+  <script>window.MAP_URL = "./assets/models/map/jailhouse.glb";</script>
+  <script src="./assets/index3/map.js?v=2.1"></script>
+  <script src="./assets/index3/player_crouch.js?v=1.0"></script>
 
-  function showLoader(show) {
-    loadingBox.style.display = show ? "block" : "none";
-  }
+  <!-- DevTools (prevent auto-open unless Alt+T or ?dev=1) -->
+  <script>window.DEVTOOLS_AUTO_OPEN = false;</script>
+  <script src="./assets/index3/devtools.js?v=7.4.0"></script>
+  <!-- Hard guard against auto-open -->
+  <script>
+    (function(){
+      const css = document.createElement('style');
+      css.id = 'devtools-startup-hide';
+      css.textContent = `#dev-gate, #devtools-panel { display:none !important; visibility:hidden !important; }`;
+      document.head.appendChild(css);
+      const hide = ()=> {
+        const a=document.getElementById('dev-gate'), b=document.getElementById('devtools-panel');
+        if (a){ a.style.display='none'; a.style.visibility='hidden'; }
+        if (b){ b.style.display='none'; b.style.visibility='hidden'; }
+      };
+      const sweep = setInterval(hide, 60); setTimeout(()=>clearInterval(sweep), 2000);
+      const allow=()=>{ const s=document.getElementById('devtools-startup-hide'); if (s) s.remove(); };
+      const btn=document.getElementById('devtools-toggle'); if (btn) btn.addEventListener('click', allow, {capture:true, once:true});
+      window.addEventListener('keydown', (e)=>{ if (e.altKey && (e.code==='KeyT'||e.key==='t'||e.key==='T')) allow(); }, {capture:true});
+      if (/[?#](dev|devtools)=1/i.test(location.href)) allow();
+      const mo=new MutationObserver(()=>{ if (document.getElementById('devtools-startup-hide')) hide(); else mo.disconnect(); });
+      mo.observe(document.documentElement, { attributes:true, childList:true, subtree:true });
+    })();
+  </script>
 
-  // ====== Scene setup ======
-  function createScene() {
-    scene = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0,0,0,1);
-    scene.collisionsEnabled = true;
-    scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
+  <!-- Ghost Dev panel -->
+  <script src="./assets/index3/ghost_dev.js?v=1.4"></script>
 
-    // Lights
-    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 0.9;
+  <!-- The only ghost runtime -->
+  <script src="./assets/index3/ghost_movement.js?v=1.7"></script>
 
-    const dir = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-0.5, -1, 0.2), scene);
-    dir.position = new BABYLON.Vector3(10, 12, -6);
-    dir.intensity = 0.5;
+  <!-- Keep your registry/glue AFTER the runtime so they bind immediately -->
+  <script src="./assets/index3/ghost_glue.js?v=1"></script>
+  <script src="./assets/index3/ghost_data.js?v=1"></script>
 
-    // Camera (first-person-ish)
-    const cam = new BABYLON.UniversalCamera("PlayerCam", new BABYLON.Vector3(0, PLAYER_HEIGHT, -7.2), scene);
-    cam.attachControl(canvas, true);
-    cam.minZ = 0.05;
-    cam.speed = 0.6;
-    cam.inertia = 0.7;
-    cam.angularSensibility = 2200;
-    cam.checkCollisions = true;
-    cam.applyGravity = true;
-    cam.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
-    cam.keysUp.push(87);   // W
-    cam.keysDown.push(83); // S
-    cam.keysLeft.push(65); // A
-    cam.keysRight.push(68);// D
+  <!-- Ghost camera (PIP) -->
+  <script src="./assets/index3/ghost_cam.js?v=1.0"></script>
 
-    // Ground safety (in case you step off the slab)
-    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 60, height: 60 }, scene);
-    ground.position.y = -2.8;
-    ground.checkCollisions = true;
-    ground.isPickable = false;
+  <!-- Post-load helpers -->
+  <script>
+    // Attach live video feed to the board mesh once available
+    (function spawnFeedOnPizarra(){
+      const id = setInterval(()=>{
+        const s = window.scene;
+        if (!s || !window.VideoFeed) return;
+        const m = s.getMeshByName('Pizarra_Pizarra_0');
+        if (!m) return; // wait for GLB
+        clearInterval(id);
 
-    // Simple ambient
-    const env = scene.createDefaultEnvironment({
-      createGround: false,
-      createSkybox: true,
-      skyboxSize: 1000,
-      skyboxColor: new BABYLON.Color3(0.02, 0.03, 0.06)
-    });
+        VideoFeed.setActive(true);
+        VideoFeed.setLight(true, 0.8); // small camera light
 
-    // Toggle inspector with "I"
-    window.addEventListener("keydown", (ev) => {
-      if (ev.key.toLowerCase() === "i") {
-        if (scene.debugLayer.isVisible()) scene.debugLayer.hide();
-        else scene.debugLayer.show({ overlay: true }); // overlay keeps it topmost
-      }
-    });
+        let mat = m.material;
+        const isPBR = mat && mat.getClassName && /PBR/i.test(mat.getClassName());
+        const tex = VideoFeed.getTexture();
 
-    return scene;
-  }
-
-  // ====== Door toggling (GLB) ======
-  const doorState = new Map(); // name -> boolean open?
-  function toggleDoorFromMesh(mesh) {
-    if (!mesh || !mesh.name) return false;
-
-    // Accept: *_leaf mesh or any frame mesh; derive the base door id: e.g., "Door_Front"
-    let base;
-    if (mesh.name.includes("_leaf")) {
-      base = mesh.name.replace(/_leaf.*/,"");
-    } else if (mesh.name.includes("_frame")) {
-      base = mesh.name.replace(/_frame.*/,"");
-    } else if (mesh.name.includes("_frameSide") || mesh.name.includes("_frameHead")) {
-      base = mesh.name.split("_frame")[0];
-    } else if (mesh.name.includes("_hinge")) {
-      base = mesh.name.replace(/_hinge.*/,"");
-    } else {
-      // climb parents to find something with door naming
-      let p = mesh.parent;
-      while (p && !/Door_.+_/i.test(p.name)) p = p.parent;
-      if (p) base = p.name.split("_").slice(0,2).join("_"); // Door_X
-    }
-    if (!base) return false;
-
-    const hingeName = base + "_hinge";
-    const hinge = scene.getTransformNodeByName(hingeName);
-    if (!hinge) return false;
-
-    const isOpen = doorState.get(base) === true;
-    const target = isOpen ? 0 : Math.PI/2;
-    BABYLON.Animation.CreateAndStartAnimation("swing_"+base, hinge, "rotation.y", 60, 15, hinge.rotation.y, target, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
-    doorState.set(base, !isOpen);
-    return true;
-  }
-
-  function enableDoorClicks() {
-    scene.onPointerObservable.add((pi) => {
-      if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-      const pick = scene.pick(scene.pointerX, scene.pointerY);
-      if (pick && pick.hit && pick.pickedMesh) {
-        toggleDoorFromMesh(pick.pickedMesh);
-      }
-    });
-  }
-
-  // ====== Loaders ======
-  async function loadGLBHouse() {
-    showLoader(true);
-    setLoading(0);
-
-    return new Promise((resolve, reject) => {
-      BABYLON.SceneLoader.Append(
-        HOUSE_FOLDER,
-        HOUSE_FILE,
-        scene,
-        () => {
-          // Collisions on for everything (meshes only)
-          scene.meshes.forEach(m => { m.checkCollisions = true; });
-
-          // Spawn the camera outside the front door (south face centered)
-          const cam = scene.activeCamera;
-          cam.position = new BABYLON.Vector3(0, PLAYER_HEIGHT, -6.8);
-          cam.setTarget(new BABYLON.Vector3(0, PLAYER_HEIGHT, -5.0));
-
-          enableDoorClicks();
-          showLoader(false);
-          resolve();
-        },
-        (evt) => {
-          if (evt.lengthComputable) {
-            setLoading(evt.loaded / evt.total);
-          } else {
-            // best-effort: grow fill a bit
-            const cur = parseFloat(loadingFill.style.width) || 0;
-            setLoading(Math.min(1, (cur/100) + 0.02));
+        if (isPBR){
+          mat.emissiveTexture = tex;
+          mat.emissiveColor = new BABYLON.Color3(1,1,1);
+          try { mat.unlit = true; } catch {}
+        } else {
+          if (!(mat instanceof BABYLON.StandardMaterial)) {
+            mat = new BABYLON.StandardMaterial('PizarraVideoMat', s);
+            m.material = mat;
           }
-        },
-        (scene, msg, ex) => {
-          showLoader(false);
-          console.error("GLB load error:", msg, ex);
-          reject(new Error(msg || "Failed to load GLB"));
+          mat.disableLighting = true;
+          mat.emissiveTexture = tex;
+          mat.emissiveColor = new BABYLON.Color3(1,1,1);
+          mat.backFaceCulling = false;
         }
-      );
-    });
-  }
+      }, 120);
+    })();
+  </script>
 
-  async function buildProceduralHouseAndWire() {
-    showLoader(true);
-    setLoading(0.1);
-
-    // Build
-    const house = window.buildProceduralHouse(scene, { rootName: "MainHouse" });
-    setLoading(0.6);
-
-    // Simple click toggles (already handles hinge & animation)
-    window.enableDoorClickToggles(scene, house.doors, { openSeconds: 0.25, openAngleDeg: 95 });
-    setLoading(0.9);
-
-    // Spawn outside front
-    const cam = scene.activeCamera;
-    cam.position = new BABYLON.Vector3(0, PLAYER_HEIGHT, -6.8);
-    cam.setTarget(new BABYLON.Vector3(0, PLAYER_HEIGHT, -5.0));
-
-    showLoader(false);
-  }
-
-  // ====== Start -> create scene -> load content -> run loop ======
-  startBtn.addEventListener("click", async () => {
-    startScreen.style.display = "none";
-    showLoader(true);
-
-    createScene();
-
-    try {
-      if (MODE === "GLB") {
-        await loadGLBHouse();
-      } else {
-        await buildProceduralHouseAndWire();
-      }
-    } catch (e) {
-      alert("Error loading house: " + e.message);
-    }
-
-    engine.runRenderLoop(() => { if (scene) scene.render(); });
-  });
-
-  window.addEventListener("resize", () => engine.resize());
-})();
-</script>
+  <!-- main last -->
+  <script src="./assets/index3/main.js?v=1"></script>
 </body>
 </html>
