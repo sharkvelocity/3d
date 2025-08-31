@@ -2,13 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — 3D Prototype</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-  <meta name="author" content="Shark-Blades" />
-  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
-  <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
+  <title>PhasmaPhoney — House Loader (GLB + Doors, Start+Loader, Inspector Top)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
 
-  <!-- Babylon core + loaders -->
+  <!-- Babylon core + loaders (use your local ./cdn/ stack or your hosted CDN) -->
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
@@ -16,95 +13,284 @@
   <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
+  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
-  <!-- Procedural house builder -->
+  <!-- Optional: include the procedural builder (only used if MODE === "PROCEDURAL") -->
   <script src="./assets/index3/house_procedural.js"></script>
-  <!-- (Removed the old inline call here) -->
-
-  <!-- Optional: room names -->
-  <script src="./rooms.js"></script>
 
   <style>
-    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
-    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
-    /* (all your existing CSS unchanged) */
+    html, body { margin:0; height:100%; background:#000; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
+
+    /* Start screen + Loader */
+    #startScreen, #loadingBox, #hud, #reticle { position:fixed; left:0; right:0; pointer-events:none; }
+    #startScreen { top:0; bottom:0; display:flex; align-items:center; justify-content:center; background:#05070bdd; z-index:900000; }
+    #startScreen .card { pointer-events:auto; background:#0b111bcc; border:1px solid #17263d; padding:24px 28px; border-radius:16px; color:#e6f1ff; text-align:center; box-shadow:0 12px 40px #000a; }
+    #startBtn { pointer-events:auto; background:#1b2b48; color:#e6f1ff; border:1px solid #29456e; padding:10px 16px; border-radius:10px; cursor:pointer; font-weight:600; }
+    #startBtn:hover { background:#21365b; }
+
+    #loadingBox { bottom:20px; margin:0 auto; width:420px; max-width:90vw; z-index:800000; display:none; }
+    #loadingBox .bar { height:10px; background:#101827; border:1px solid #1f2e4a; border-radius:999px; overflow:hidden; }
+    #loadingBox .fill { height:100%; width:0%; background:#35c1ff; transition:width .1s; }
+
+    #hud { top:10px; left:10px; width:auto; pointer-events:none; color:#cfe7ff; font-size:13px; z-index:700000; }
+    #hud .pill { display:inline-block; background:#0b111bcc; border:1px solid #17263d; padding:6px 10px; border-radius:999px; margin:4px; }
+
+    #reticle { top:50%; transform:translateY(-50%); text-align:center; z-index:600000; color:#8fd0ff; font-weight:700; font-size:18px; }
+    #reticle span { background:transparent; }
+
+    /* Keep Babylon Inspector on top when opened */
+    /* overlay:true uses an iframe; it will already float above. These extra rules help for embedded mode too */
+    .babylonjs-inspector, .inspector { z-index: 999999 !important; }
+
+    /* Optional: basic help corner */
+    #help { position:fixed; right:10px; bottom:10px; background:#0b111bcc; border:1px solid #17263d; color:#a8c9ff; padding:8px 10px; border-radius:10px; z-index:650000; }
   </style>
 </head>
-
 <body>
-  <div id="flash-overlay"></div>
-  <div id="camera-overlay">
-    <div id="camera-rec">REC ●</div>
-    <div id="camera-orb"></div>
-    <div id="camera-ir">IR</div>
-  </div>
   <canvas id="renderCanvas"></canvas>
 
-  <!-- (HUD, notebook, storage, dev tools etc. all unchanged from your current file) -->
+  <!-- Start gate -->
+  <div id="startScreen">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0;">PhasmaPhoney — House Demo</h2>
+      <p style="opacity:.9; margin:0 0 16px 0;">Loads a 2-story house with basement. Click doors to open/close. Press <b>I</b> for Inspector.</p>
+      <button id="startBtn">Start</button>
+    </div>
+  </div>
 
-  <!------------------------------- SCRIPTS ---------------------------->
-  <script src="./assets/index3/core.js"></script>
-  <script src="./assets/index3/utils.js"></script>
+  <!-- Loader (appears only after Start) -->
+  <div id="loadingBox">
+    <div style="display:flex;justify-content:space-between;color:#a8c9ff;margin:0 0 6px 0;">
+      <span>Loading…</span><span id="loadingPct">0%</span>
+    </div>
+    <div class="bar"><div class="fill" id="loadingFill"></div></div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="pill">WASD move · Space jump</div>
+    <div class="pill">Click doors to toggle</div>
+    <div class="pill">I = Inspector</div>
+  </div>
 
   <!-- Reticle -->
-  <script>
-    window.RETICLE_OPTS = { style: "circle-dot", size: 22, color: "#9ff", hitColor: "#0f0" };
-  </script>
-  <script src="./assets/index3/reticle.js?v=1"></script>
+  <div id="reticle"><span>+</span></div>
 
-  <!-- Input & UI -->
-  <script src="./assets/index3/ui_input.js?v=1"></script>
+  <div id="help">Spawn is just outside the front door. Doors are scriptable via their <code>*_hinge</code> nodes.</div>
 
-  <!-- icons + items -->
-  <script src="./assets/index3/icons.js?v=1"></script>
-  <script src="./assets/index3/video_feed.js?v=1.2"></script>
-  <script src="./assets/index3/items_models_exploration.js?v=2.0"></script>
-  <script src="./assets/index3/spiritbox_audio_glue.js?v=1.0"></script>
-  <script src="./assets/index3/items_runtime_patch.js?v=1.1"></script>
-  <script src="./assets/index3/items.js?v=2.0"></script>
+<script>
+(() => {
+  // ====== Config ======
+  const MODE = "GLB"; // "GLB" | "PROCEDURAL"
+  const HOUSE_FOLDER = "./assets/models/map/";
+  const HOUSE_FILE   = "house_procedural_export.glb"; // change if you rename the file
+  const PLAYER_HEIGHT = 1.8;
 
-  <!-- atmosphere / world -->
-  <script src="./assets/index3/atmosphere.js?v=1"></script>
+  // ====== Bootstrap ======
+  const canvas = document.getElementById("renderCanvas");
+  const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+  let scene;
 
-  <!-- Weather config FIRST, then weather engine -->
-  <script>
-    window.WEATHER_AUDIO_MAP = { thunder: ['thunder.mp3'] };
-  </script>
-  <script src="./assets/index3/weather.js?v=1"></script>
-  <script src="./assets/index3/weather_glue.js?v=1.0"></script>
+  // UI
+  const startScreen = document.getElementById("startScreen");
+  const startBtn    = document.getElementById("startBtn");
+  const loadingBox  = document.getElementById("loadingBox");
+  const loadingFill = document.getElementById("loadingFill");
+  const loadingPct  = document.getElementById("loadingPct");
 
-  <script src="./assets/index3/temperature.js?v=1"></script>
-  <script src="./assets/index3/moon.js?v=1"></script>
-  <script src="./assets/index3/lights.js?v=1"></script>
-  <script>window.MAP_URL = "./assets/models/map/jailhouse.glb";</script>
+  function setLoading(progress01) {
+    const pct = Math.max(0, Math.min(1, progress01)) * 100;
+    loadingFill.style.width = pct.toFixed(1) + "%";
+    loadingPct.textContent = Math.round(pct) + "%";
+  }
 
-  <script src="./assets/index3/map.js?v=2.1"></script>
-  <script src="./assets/index3/player_crouch.js?v=1.0"></script>
+  function showLoader(show) {
+    loadingBox.style.display = show ? "block" : "none";
+  }
 
-  <!-- DevTools -->
-  <script>window.DEVTOOLS_AUTO_OPEN = false;</script>
-  <script src="./assets/index3/devtools.js?v=7.4.0"></script>
-  <!-- (devtools guard code unchanged) -->
+  // ====== Scene setup ======
+  function createScene() {
+    scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0,0,0,1);
+    scene.collisionsEnabled = true;
+    scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
 
-  <!-- Ghost systems -->
-  <script src="./assets/index3/ghost_dev.js?v=1.4"></script>
-  <script src="./assets/index3/ghost_movement.js?v=2.2"></script>
-  <script src="./assets/index3/ghost_glue.js?v=1"></script>
-  <script src="./assets/index3/ghost_data.js?v=1"></script>
-  <script src="./assets/index3/ghost_cam.js?v=1.0"></script>
+    // Lights
+    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+    hemi.intensity = 0.9;
 
-  <!-- Post-load helpers (video feed, ground tagging) -->
-  <script>
-    // (unchanged helper code)
-  </script>
+    const dir = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-0.5, -1, 0.2), scene);
+    dir.position = new BABYLON.Vector3(10, 12, -6);
+    dir.intensity = 0.5;
 
-  <!-- Main runtime -->
-  <script src="./assets/index3/main.js?v=1"></script>
+    // Camera (first-person-ish)
+    const cam = new BABYLON.UniversalCamera("PlayerCam", new BABYLON.Vector3(0, PLAYER_HEIGHT, -7.2), scene);
+    cam.attachControl(canvas, true);
+    cam.minZ = 0.05;
+    cam.speed = 0.6;
+    cam.inertia = 0.7;
+    cam.angularSensibility = 2200;
+    cam.checkCollisions = true;
+    cam.applyGravity = true;
+    cam.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+    cam.keysUp.push(87);   // W
+    cam.keysDown.push(83); // S
+    cam.keysLeft.push(65); // A
+    cam.keysRight.push(68);// D
 
-  <!-- Havok integration -->
-  <script src="./cdn/havok/HavokPhysics_umd.js"></script>
-  <script src="./assets/index3/havok_bootstrap.js"></script>
-  <script src="./assets/index3/house_physics.js"></script>
-  <script src="./assets/index3/init_house_and_havok.js"></script>
+    // Ground safety (in case you step off the slab)
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 60, height: 60 }, scene);
+    ground.position.y = -2.8;
+    ground.checkCollisions = true;
+    ground.isPickable = false;
+
+    // Simple ambient
+    const env = scene.createDefaultEnvironment({
+      createGround: false,
+      createSkybox: true,
+      skyboxSize: 1000,
+      skyboxColor: new BABYLON.Color3(0.02, 0.03, 0.06)
+    });
+
+    // Toggle inspector with "I"
+    window.addEventListener("keydown", (ev) => {
+      if (ev.key.toLowerCase() === "i") {
+        if (scene.debugLayer.isVisible()) scene.debugLayer.hide();
+        else scene.debugLayer.show({ overlay: true }); // overlay keeps it topmost
+      }
+    });
+
+    return scene;
+  }
+
+  // ====== Door toggling (GLB) ======
+  const doorState = new Map(); // name -> boolean open?
+  function toggleDoorFromMesh(mesh) {
+    if (!mesh || !mesh.name) return false;
+
+    // Accept: *_leaf mesh or any frame mesh; derive the base door id: e.g., "Door_Front"
+    let base;
+    if (mesh.name.includes("_leaf")) {
+      base = mesh.name.replace(/_leaf.*/,"");
+    } else if (mesh.name.includes("_frame")) {
+      base = mesh.name.replace(/_frame.*/,"");
+    } else if (mesh.name.includes("_frameSide") || mesh.name.includes("_frameHead")) {
+      base = mesh.name.split("_frame")[0];
+    } else if (mesh.name.includes("_hinge")) {
+      base = mesh.name.replace(/_hinge.*/,"");
+    } else {
+      // climb parents to find something with door naming
+      let p = mesh.parent;
+      while (p && !/Door_.+_/i.test(p.name)) p = p.parent;
+      if (p) base = p.name.split("_").slice(0,2).join("_"); // Door_X
+    }
+    if (!base) return false;
+
+    const hingeName = base + "_hinge";
+    const hinge = scene.getTransformNodeByName(hingeName);
+    if (!hinge) return false;
+
+    const isOpen = doorState.get(base) === true;
+    const target = isOpen ? 0 : Math.PI/2;
+    BABYLON.Animation.CreateAndStartAnimation("swing_"+base, hinge, "rotation.y", 60, 15, hinge.rotation.y, target, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
+    doorState.set(base, !isOpen);
+    return true;
+  }
+
+  function enableDoorClicks() {
+    scene.onPointerObservable.add((pi) => {
+      if (pi.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
+      const pick = scene.pick(scene.pointerX, scene.pointerY);
+      if (pick && pick.hit && pick.pickedMesh) {
+        toggleDoorFromMesh(pick.pickedMesh);
+      }
+    });
+  }
+
+  // ====== Loaders ======
+  async function loadGLBHouse() {
+    showLoader(true);
+    setLoading(0);
+
+    return new Promise((resolve, reject) => {
+      BABYLON.SceneLoader.Append(
+        HOUSE_FOLDER,
+        HOUSE_FILE,
+        scene,
+        () => {
+          // Collisions on for everything (meshes only)
+          scene.meshes.forEach(m => { m.checkCollisions = true; });
+
+          // Spawn the camera outside the front door (south face centered)
+          const cam = scene.activeCamera;
+          cam.position = new BABYLON.Vector3(0, PLAYER_HEIGHT, -6.8);
+          cam.setTarget(new BABYLON.Vector3(0, PLAYER_HEIGHT, -5.0));
+
+          enableDoorClicks();
+          showLoader(false);
+          resolve();
+        },
+        (evt) => {
+          if (evt.lengthComputable) {
+            setLoading(evt.loaded / evt.total);
+          } else {
+            // best-effort: grow fill a bit
+            const cur = parseFloat(loadingFill.style.width) || 0;
+            setLoading(Math.min(1, (cur/100) + 0.02));
+          }
+        },
+        (scene, msg, ex) => {
+          showLoader(false);
+          console.error("GLB load error:", msg, ex);
+          reject(new Error(msg || "Failed to load GLB"));
+        }
+      );
+    });
+  }
+
+  async function buildProceduralHouseAndWire() {
+    showLoader(true);
+    setLoading(0.1);
+
+    // Build
+    const house = window.buildProceduralHouse(scene, { rootName: "MainHouse" });
+    setLoading(0.6);
+
+    // Simple click toggles (already handles hinge & animation)
+    window.enableDoorClickToggles(scene, house.doors, { openSeconds: 0.25, openAngleDeg: 95 });
+    setLoading(0.9);
+
+    // Spawn outside front
+    const cam = scene.activeCamera;
+    cam.position = new BABYLON.Vector3(0, PLAYER_HEIGHT, -6.8);
+    cam.setTarget(new BABYLON.Vector3(0, PLAYER_HEIGHT, -5.0));
+
+    showLoader(false);
+  }
+
+  // ====== Start -> create scene -> load content -> run loop ======
+  startBtn.addEventListener("click", async () => {
+    startScreen.style.display = "none";
+    showLoader(true);
+
+    createScene();
+
+    try {
+      if (MODE === "GLB") {
+        await loadGLBHouse();
+      } else {
+        await buildProceduralHouseAndWire();
+      }
+    } catch (e) {
+      alert("Error loading house: " + e.message);
+    }
+
+    engine.runRenderLoop(() => { if (scene) scene.render(); });
+  });
+
+  window.addEventListener("resize", () => engine.resize());
+})();
+</script>
 </body>
 </html>
