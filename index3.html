@@ -158,9 +158,8 @@
   <script src="./assets/dev/merge_patch.js"></script>
   <script src="./assets/dev/glue_patch.js"></script>
 
-  <!-- --- ICONS configuration (prevent 404s) --- -->
+  <!-- --- ICONS configuration (prevents 404s) --- -->
   <script>
-    // Point these to your actual repo paths
     window.ICONS_BASE_URL = './assets/icons';
     window.ITEM_ICON_MAP = {
       emf: 'emf.png',
@@ -180,41 +179,30 @@
     window.ITEM_ICON_HINTS = {
       emf: ['emf.png','emf_reader.png','emf5.png'],
       spirit_box: ['spirit_box.png','spiritbox.png'],
-      book: ['book.png','ghost_book.png','writing_book.png'],
+      book: ['book.png','writing_book.png','ghost_book.png'],
       uv: ['uv.png','uv_light.png','blacklight.png'],
       dots: ['dots.png','dots_projector.png'],
       thermometer: ['thermometer.png','thermo.png']
     };
-    // Safe resolver anyone can use:
-    window.getItemIcon = function(key){
-      const base = window.ICONS_BASE_URL || '.';
-      const main = window.ITEM_ICON_MAP?.[key];
-      const hints = window.ITEM_ICON_HINTS?.[key] || [];
-      const list = [].concat(main? [main]:[], hints);
-      return list.map(f=> `${base}/${f}`);
-    };
   </script>
+  <!-- Icon resolver used by items/icons code -->
+  <script src="./assets/index3/icons.js?v=2.0"></script>
 
   <!-- --- MAP registry + dropdown (sets MAP_URL before bootstrap uses it) --- -->
   <script>
   (function(){
-    // Include the maps you actually ship:
     window.MAP_REGISTRY = {
       "Jailhouse": "./assets/models/map/jailhouse.glb"
       // "Farmhouse": "./assets/models/map/farmhouse.glb",
       // "School":    "./assets/models/map/school.glb"
     };
-
     const sel = document.getElementById('map-select');
     const status = document.getElementById('map-status');
-
     const savedKey = localStorage.getItem('PP_MAP');
     const firstKey = Object.keys(MAP_REGISTRY)[0];
     const initialKey = (savedKey && MAP_REGISTRY[savedKey]) ? savedKey : firstKey;
-
     window.MAP_URL = MAP_REGISTRY[initialKey];
 
-    // Build dropdown
     sel.innerHTML = '';
     Object.entries(MAP_REGISTRY).forEach(([label, url])=>{
       const opt = document.createElement('option');
@@ -223,8 +211,8 @@
       sel.appendChild(opt);
     });
 
-    // Quick HEAD check
-    async function ping(url){ try{ const r = await fetch(url, {method:'HEAD'}); return r.ok; } catch { return false; } }
+    async function ping(url){ try{ const r=await fetch(url,{method:'HEAD'}); return r.ok; }catch{return false;}
+    }
     (async ()=>{
       status.textContent = 'Checking map…';
       const ok = await ping(window.MAP_URL);
@@ -238,17 +226,16 @@
       window.MAP_URL = url;
       localStorage.setItem('PP_MAP', key);
       status.textContent = 'Checking map…';
-      const ok = await fetch(url, {method:'HEAD'}).then(r=>r.ok).catch(()=>false);
+      const ok = await fetch(url,{method:'HEAD'}).then(r=>r.ok).catch(()=>false);
       status.textContent = ok ? `Selected: ${key}` : `⚠ ${key} missing`;
       status.style.color = ok ? '#9ff' : '#f88';
     });
 
-    // Re-assert before Start
     document.getElementById('start-button')?.addEventListener('click', ()=>{
       const key = sel.value;
       window.MAP_URL = MAP_REGISTRY[key];
       localStorage.setItem('PP_MAP', key);
-    }, {capture:true, once:false});
+    }, {capture:true});
   })();
   </script>
 
@@ -279,7 +266,6 @@
     if (window.__PP_BOOT_ONCE__) return; window.__PP_BOOT_ONCE__ = true;
 
     const B = window.BABYLON;
-
     function scene(){ return window.SCENE || B.Engine?.LastCreatedScene; }
     function cam(){ return (scene() && scene().activeCamera) || window.camera; }
 
@@ -291,7 +277,6 @@
       return (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.y : null;
     }
 
-    // Clamp player scale if base model is huge
     function normalizePlayerScale(){
       const s = scene(); if (!s) return;
       const root = s.getTransformNodeByName?.('player_root') || s.getMeshByName?.('player_capsule') || null;
@@ -300,7 +285,7 @@
       if (!bb) return;
       const size = bb.max.subtract(bb.min);
       const tallest = Math.max(0.01, size.y);
-      if (tallest > 3.2){                     // too big? scale down to ~1.8m
+      if (tallest > 3.2){
         const k = 1.8 / tallest;
         try { root.scaling.scaleInPlace(k); } catch {}
       }
@@ -308,18 +293,16 @@
 
     function placePlayerAboveGround(){
       const s = scene(); const c = cam(); if (!s || !c) return;
-      // Prefer named spawn points in the map:
       const spawnNode = s.getTransformNodeByName?.('spawn') || s.getTransformNodeByName?.('van_spawn');
       let p = spawnNode?.getAbsolutePosition?.() || c.position.clone();
       const gy = groundYAtXZ(p.x, p.z, p.y);
-      if (gy != null) c.position.set(p.x, gy + 1.7, p.z); // NEVER under the map
+      if (gy != null) c.position.set(p.x, gy + 1.7, p.z);
     }
 
     function attachFPKeys(){
       window.addEventListener('keydown', (e)=>{
-        if (e.code === 'KeyV'){               // toggle FP/TP
-          try { PP && PP.rig && PP.rig.toggleView && PP.rig.toggleView(); }
-          catch{}
+        if (e.code === 'KeyV'){
+          try { PP && PP.rig && PP.rig.toggleView && PP.rig.toggleView(); } catch{}
         }
       });
     }
@@ -341,34 +324,25 @@
 
     const btn = document.getElementById('start-button');
     if (btn) btn.addEventListener('click', onceStart, { once:true });
-
-    // Safety: if Start already pressed or auto booted
-    setTimeout(onceStart, 3500);
+    setTimeout(onceStart, 3500); // safety if auto-booted
   })();
   </script>
 
-  <!-- Simple WEATHER driver (no external file; uses audio, updates HUD, randomizes on start) -->
+  <!-- Simple WEATHER driver (inline; uses audio, updates HUD, randomizes on start) -->
   <script>
   (function WeatherDriver(){
     const B = BABYLON;
     const hud = document.getElementById('hud-weather');
-
     const AUDIO = {
       clear:   ['ambient.mp3'],
       rain:    ['rainstorm.mp3'],
       snow:    ['snow.mp3'],
       thunder: ['thunder.mp3']
     };
-    const MODES = ['clear','rain','snow']; // pick from these on start
-
+    const MODES = ['clear','rain','snow'];
     let current = null, sounds = [];
-
     function scene(){ return window.SCENE || B.Engine?.LastCreatedScene; }
-
-    function stopAll(){
-      sounds.forEach(s=>{ try{s.stop();}catch{} }); sounds = [];
-    }
-
+    function stopAll(){ sounds.forEach(s=>{ try{s.stop();}catch{} }); sounds = []; }
     function play(list){
       (list||[]).forEach(name=>{
         try{
@@ -377,28 +351,19 @@
         }catch(e){ console.warn('[weather] audio', e); }
       });
     }
-
     function tint(mode){
       const s = scene(); if (!s) return;
-      if (!s.environmentIntensity) s.environmentIntensity = 1.0;
       if (mode==='clear'){ s.fogEnabled=false; s.clearColor = new B.Color4(0,0,0,1); }
       if (mode==='rain'){  s.fogEnabled=true;  s.fogColor = new B.Color3(0.05,0.08,0.12); s.fogDensity=0.006; }
       if (mode==='snow'){  s.fogEnabled=true;  s.fogColor = new B.Color3(0.2,0.22,0.25); s.fogDensity=0.01; }
     }
-
     function set(mode){
       if (current === mode) return;
-      current = mode;
-      stopAll();
-      play(AUDIO[mode] || []);
-      tint(mode);
+      current = mode; stopAll(); play(AUDIO[mode] || []); tint(mode);
       if (hud) hud.textContent = mode[0].toUpperCase() + mode.slice(1);
       window.currentWeather = mode;
     }
-
     window.Weather = { set };
-
-    // Start weather after audio unlock
     function startRand(){
       const pick = MODES[Math.floor(Math.random()*MODES.length)];
       try { set(pick); } catch {}
@@ -417,9 +382,7 @@
     function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
     function apply(){
       const s = S(); if (!s) return setTimeout(apply, 50);
-      let c = s.activeCamera;
-      if (!c) return setTimeout(apply, 50);
-
+      let c = s.activeCamera; if (!c) return setTimeout(apply, 50);
       if (BABYLON.ArcRotateCamera && c instanceof BABYLON.ArcRotateCamera){
         const u = new BABYLON.UniversalCamera("PlayerCam", c.position.clone(), s);
         if (c.rotation) u.rotation.copyFrom(c.rotation);
@@ -429,9 +392,7 @@
         c = u;
       }
       if (c.inputs && c.inputs.clear) c.inputs.clear();
-      c.inertia = 0;
-      c.angularSensibility = 1e9;
-
+      c.inertia = 0; c.angularSensibility = 1e9;
       (function tether(){
         const body = s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule'));
         if (body && s.activeCamera){
@@ -443,6 +404,33 @@
     }
     apply();
   })();
+  </script>
+
+  <!-- ===== Belt / Items (ORDER MATTERS) ===== -->
+  <script>window.ITEMS_GLTF_URL = "./assets/models/items/exploration_objects.glb";</script>
+  <!-- input helpers required by items.js -->
+  <script src="./assets/index3/ui_input.js?v=1"></script>
+  <!-- load meshes/materials from tools GLB -->
+  <script src="./assets/index3/items_models_exploration.js?v=1.0"></script>
+  <!-- belt UI, item logic (uses icons + helpers above) -->
+  <script src="./assets/index3/items.js?v=2.1"></script>
+  <!-- initialize belt on Start (guarded) -->
+  <script>
+    (function initItemsOnce(){
+      const btn = document.getElementById('start-button');
+      if (!btn) return;
+      btn.addEventListener('click', function onStart(){
+        btn.removeEventListener('click', onStart);
+        try {
+          const beltRoot = document.getElementById('belt');
+          if (window.ITEMS && typeof ITEMS.init === 'function') {
+            ITEMS.init({ beltRoot });
+          }
+        } catch (e) {
+          console.warn('[ITEMS.init] failed', e);
+        }
+      }, { once: true });
+    })();
   </script>
 
   <!-- HUD XYZ updater (optional) -->
