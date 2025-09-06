@@ -1,24 +1,21 @@
-// ./assets/index3/ghost_movement.js — v2.2
-// Room-aware roaming + personality behaviors + Forbidden actions + Characteristic behaviors
-// Adds tendency/weight system for events, breaker/lights actions, para-mic whispers,
-// DOTS chasing (Banshee), near-player calming (Thaye), shy activity (Shade),
-// frequent manifestations (Oni), wander-to-player bias (Phantom/Banshee),
-// lower activity in lit rooms (Mare), and short-roam (Goryo).
+// ./assets/index3/ghost_movement.js — v2.3
+// Room-aware roaming + personality behaviors + LOS/Hearing + Investigate + Barrier clamp + Deogen
 //
-// Public API (unchanged + new):
+// Public API (unchanged):
 //   window.ghostCtrl.{init,startInvestigation,randomizeGhost,beginHunt,endHunt,triggerEvent,
 //                     teleportGhostToLook,setGhostScale,setHomeRoomById,onSmudged,getState}
-//   window.GHOST_RULES: { canToggleBreaker, canToggleLight, canPerformEvent, canStepSalt,
-//                         canShowDOTS, canStartHuntHere, canThrowEMF3, getTraits,
-//                         // NEW weights:
-/*                       eventWeight(type), breakerActionWeight(action), lightActionWeight(action),
-                         paraWhisperWeight() */
+//   window.GHOST_RULES:{ canToggleBreaker, canToggleLight, canPerformEvent, canStepSalt,
+//                        canShowDOTS, canStartHuntHere, canThrowEMF3, getTraits,
+//                        eventWeight, breakerActionWeight, lightActionWeight, paraWhisperWeight }
 //
-// Safe to include multiple times (guards on __v).
+// Optional globals used if present:
+//   - window.GhostBarrier.clamp(mesh)
+//   - window.PLAYER_STATE = { isRunning, isCrouched, noise? }
+//   - GhostSense.pingElectronic(pos,str) / GhostSense.pingNoise(pos,loud)
 //
 (function(){
   "use strict";
-  if (window.ghostCtrl && /^2\.2$/.test(window.ghostCtrl.__v||"")) return;
+  if (window.ghostCtrl && /^2\.3$/.test(window.ghostCtrl.__v||"")) return;
 
   const SCENE  = ()=> window.scene || BABYLON.Engine?.LastCreatedScene;
   const CAMERA = ()=> window.camera || SCENE()?.activeCamera;
@@ -27,7 +24,7 @@
   const v3     = (x,y,z)=> new BABYLON.Vector3(x,y,z);
   const devForce = ()=> !!window.GHOST_DEV_FORCE_VISIBLE;
 
-  // ---------- Traits (merged with external JSON if present) ----------
+  // ---------- Traits ----------
   const TRAITS = {
     Goryo: { roomLock:true, goryoDotsVideoOnly:true, roamRadiusScale:0.6 },
     Mare:  { avoidLight:true,  avoidLightStrength: 1.4, lessActivityInLight:true },
@@ -41,19 +38,21 @@
     Oni:   { manifestOften:true },
     Phantom:{ wanderToPlayer:true },
     Banshee:{ wanderToPlayer:true, singOften:true, dotsChaseMarked:true },
-    Thaye: { calmsNearPlayer:true }
+    Thaye: { calmsNearPlayer:true },
+    Deogen:{ omniscient:true } // special below
   };
   try{ if (window.GHOST_TRAITS && typeof window.GHOST_TRAITS === 'object'){ Object.assign(TRAITS, window.GHOST_TRAITS); } }catch{}
 
   // ---------- Config ----------
   const CFG = {
+    // movement
     roamSpeed: 1.55,
     huntSpeed: 2.65,
     accelRate: 6.0,
     steerAngles: [15,-15,30,-30,45,-45,60,-60,90,-90,120,-120,150,-150,180],
     barrierLookahead: 1.6,
     blinkMin: 0.10, blinkMax: 0.28,
-    eventCooldown: 7.5, eventChance: 0.35,   // base chance, modified by tendencies each tick
+    eventCooldown: 7.5, eventChance: 0.35,
     roamTargetClose: 1.1,
     playerScareRadius: 6.5,
     sanityDrainPerMin: 2.5, sanityDrainProximity: 9, sanityDrainHunt: 22,
@@ -68,23 +67,25 @@
     hazardRefreshSec: 0.7,
     // pattern
     insetMargin: 0.9,
-    patternPoints: 8,
-    // rule distances
-    onryoNoHuntFireDist: 4.0,
-    demonCrucifixRadii: {1:4.5, 2:6.0, 3:6.0},
-    shadeSameRoomBlockChance: 0.9,
-    // characteristic behavior dials
-    oniEventMult: 2.2,
-    shadeNearEventMult: 0.35,
-    thayeCalmHalfLifeSec: 35,   // near-player timer half-life for activity (shorter = calms faster)
-    mareLightActivityMult: 0.5, // activity scale when bright
-    wanderToPlayerTickProb: 0.18, // Banshee/Phantom bias per second
-    dotsChaseSpeedBoost: 1.15
+    // LOS / Hearing / Investigate
+    FOV_DEG: 95,
+    SIGHT_RANGE: 22,
+    HEAR_RANGE_MAX: 16,
+    HEAR_BASE_CHANCE: 0.18,     // baseline chance per second (scaled by loudness & distance)
+    ELECTRONIC_DECAY_S: 4.0,    // how long electronic pings last
+    INVESTIGATE_TIME_S: 6.0,    // time to search around last-known
+    INVESTIGATE_WANDER: 2.5,    // small radius around last-known
+    STUCK_SPEED_EPS: 0.02,      // below this average movement = stuck
+    STUCK_TIME_S: 0.8,          // if stuck for this long, pick a fresh target
+    // Deogen dials
+    deogenFarSpeed: 4.2,
+    deogenNearSpeed: 0.65,
+    deogenNearDist: 2.2
   };
 
   // ---------- State ----------
   const ST = {
-    __v:'2.2',
+    __v:'2.3',
     ready:false, s:null, c:null,
     ghostRoot:null, modelName:null, ghostTypeKey:null,
     defaultVisibility:0, scale:1,
@@ -92,7 +93,7 @@
     curSpeed:0, lastUpdateT:performance.now()/1000,
     lastEventT:0, nextHuntReadyT:0,
     isVisible:false, lastPosY:null,
-    // rooms & barriers
+    // rooms & barriers/layout
     layout:null, rooms:[], barriers:[], doorGaps:[],
     homeRoom:null, curRoom:null,
     patrol:[], patrolIdx:0, target:null, autoStarted:false,
@@ -101,8 +102,37 @@
     // rule timers
     smudgedUntil:0,
     // characteristic timers
-    nearPlayerTime:0   // seconds accumulated when player close
+    nearPlayerTime:0,
+    // perception
+    lastKnown:null,            // Vector3 (last seen/heard/electronic)
+    lastSeenAt:0,
+    lastHeardAt:0,
+    investigateUntil:0,
+    // stuck detection
+    _stuckTimer:0,
+    _lastPos:null
   };
+
+  // ---------- Optional Sense Bus ----------
+  (function ensureSenseBus(){
+    if (!window.GhostSense){
+      const pings = []; // {pos:{x,y,z}, t:now, str}
+      const noises= []; // {pos:{x,y,z}, t, loud}
+      window.GhostSense = {
+        pingElectronic(pos,str=1){ pings.push({pos:{x:pos.x,y:pos.y,z:pos.z}, t:performance.now()/1000, str:clamp(+str||1,0,5)}); },
+        pingNoise(pos,loud=1){ noises.push({pos:{x:pos.x,y:pos.y,z:pos.z}, t:performance.now()/1000, loud:clamp(+loud||1,0,5)}); },
+        _take(now){
+          // clean + expose copies
+          const pes = pings.filter(p=> now - p.t <= CFG.ELECTRONIC_DECAY_S);
+          const nes = noises.filter(n=> now - n.t <= 3.0);
+          // prune
+          pings.length = 0; pes.forEach(p=>pings.push(p));
+          noises.length= 0; nes.forEach(n=>noises.push(n));
+          return { pings:pes.slice(), noises:nes.slice() };
+        }
+      };
+    }
+  })();
 
   // ---------- Public API ----------
   const API = {
@@ -128,7 +158,7 @@
     tryAutoGroundTagging();
     tryLoadLayout();
     publishRulesAPI();
-    ST.ready = true; toast('Ghost ctrl v2.2 ready');
+    ST.ready = true; toast('Ghost ctrl v2.3 ready');
   }
   const boot = setInterval(()=>{ try{ if (SCENE() && CAMERA()){ clearInterval(boot); init(); } }catch{} }, 150);
 
@@ -241,7 +271,6 @@
   }
   function insetRectPoly(poly, margin){
     const minx=poly[0][0], minz=poly[0][1], maxx=poly[2][0], maxz=poly[2][1];
-    // allow Goryo to shrink radius further
     const scale = (traits().roamRadiusScale || 1);
     const m = margin * scale;
     return [
@@ -268,8 +297,7 @@
   }
   function maybeSwitchRoom(){
     const T = traits();
-    if (T.roomLock) return; // Goryo stays
-    // Yurei smudge lock
+    if (T.roomLock) return;
     if (ST.ghostTypeKey==='Yurei' && performance.now()/1000 < ST.smudgedUntil) return;
     if (!ST.rooms?.length || !ST.curRoom) return;
     const curC = ST.curRoom.center || [0,0,0];
@@ -447,7 +475,7 @@
       if (!ST.barriers?.length) return false;
       const A=[a.x,a.z], B=[b.x,b.z];
       for (const seg of ST.barriers){
-        const U=seg.a, V=seg.b;
+        const U=[seg.a.x, seg.a.z], V=[seg.b.x, seg.b.z];
         if (segmentsIntersect(A,B,U,V)){
           if (ST.doorGaps?.length){
             if (gapCoversIntersection(A,B,U,V, ST.doorGaps)) continue;
@@ -465,7 +493,7 @@
   function gapCoversIntersection(A,B,U,V, gaps){
     const mid=[ (U[0]+V[0])*0.5, (U[1]+V[1])*0.5 ];
     for (const g of gaps){
-      const G=g.a, H=g.b;
+      const G=[g.a[0], g.a[1]], H=[g.b[0], g.b[1]];
       const d = Math.hypot( ((G[0]+H[0])*0.5)-mid[0], ((G[1]+H[1])*0.5)-mid[1] );
       if (d < 0.75) return true;
     }
@@ -493,17 +521,57 @@
     }
   }
 
+  // ---------- Perception ----------
+  function canSeePlayer(){
+    const p = ST.c?.position; const g = ST.ghostRoot; if (!p || !g) return false;
+    const to = p.subtract(g.position);
+    const dist = to.length();
+    if (dist > CFG.SIGHT_RANGE) return false;
+    if (isSegmentBlocked(g.position, p)) return false;
+    // FOV check (use ghost forward = +Z by rotation.y)
+    const yaw = (g.rotationQuaternion ? g.rotationQuaternion.toEulerAngles().y : g.rotation?.y) || 0;
+    const fwd = v3(Math.sin(yaw), 0, Math.cos(yaw));
+    const angle = Math.acos( clamp(BABYLON.Vector3.Dot(fwd.normalize(), to.normalize()), -1, 1) ) * 180/Math.PI;
+    return angle <= (CFG.FOV_DEG * 0.5);
+  }
+  function chanceHearPlayer(dt){
+    const p = ST.c?.position; const g = ST.ghostRoot; if (!p || !g) return false;
+    const dx=g.position.x-p.x, dz=g.position.z-p.z;
+    const dist = Math.sqrt(dx*dx+dz*dz);
+    if (dist > CFG.HEAR_RANGE_MAX) return false;
+    // Player noise estimate
+    const PS = window.PLAYER_STATE || {};
+    let noise = (typeof PS.noise === 'number') ? PS.noise : 0.45;
+    if (PS.isRunning) noise *= 1.8;
+    if (PS.isCrouched) noise *= 0.6;
+    const falloff = clamp(1 - (dist / CFG.HEAR_RANGE_MAX), 0, 1);
+    const perSec = CFG.HEAR_BASE_CHANCE * noise * falloff;
+    return Math.random() < (perSec * dt);
+  }
+  function consumeSenseEvents(now){
+    try{
+      const ev = window.GhostSense?._take(now);
+      return ev || {pings:[], noises:[]};
+    }catch{ return {pings:[], noises:[]}; }
+  }
+
   // ---------- Movement ----------
   function moveToward(target, targetSpeed, dt){
     const g=ST.ghostRoot; if (!g) return;
     const cur=g.position;
     let to=target.subtract(cur);
     let dist=to.length();
-    if (dist < 1e-4) { ST.curSpeed = 0; return; }
-    const desired = targetSpeed;
+    if (dist < 1e-3) { ST.curSpeed = 0; return; }
+
+    // smooth accelerate/decelerate (arrive)
+    const arriveRadius = 1.2;
+    const desired = (dist < arriveRadius) ? clamp(targetSpeed * (dist/arriveRadius), 0.25, targetSpeed) : targetSpeed;
     if (ST.curSpeed < desired) ST.curSpeed = Math.min(desired, ST.curSpeed + CFG.accelRate*dt);
     else if (ST.curSpeed > desired) ST.curSpeed = Math.max(desired, ST.curSpeed - CFG.accelRate*dt);
+
     let dir = to.scale(1/dist);
+
+    // hazard repulsion
     refreshHazards();
     const T = traits();
     if (T.avoidLight && ST.lightsCache.length){
@@ -514,10 +582,13 @@
       const repel = hazardRepulsion(cur, ST.firesCache, CFG.fireScanRadius);
       dir = dir.add(repel.scale(T.avoidFireStrength||1.6)).normalize();
     }
+
+    // layout avoidance
     const aheadA=cur;
     const aheadB=cur.add(dir.scale(CFG.barrierLookahead));
     if (isSegmentBlocked(aheadA,aheadB)){
-      const yaw=Math.atan2(dir.x,dir.z); let steered=null;
+      const yaw=Math.atan2(dir.x,dir.z);
+      let steered=null;
       for (const deg of CFG.steerAngles){
         const ang=yaw + (deg*Math.PI/180), tryDir=v3(Math.sin(ang),0,Math.cos(ang));
         const b=cur.add(tryDir.scale(CFG.barrierLookahead));
@@ -525,11 +596,29 @@
       }
       if (steered) dir=steered; else { ST.curSpeed = 0; return; }
     }
+
     const step = ST.curSpeed * dt;
     const next = cur.add(dir.scale(step));
     snapY(next, dt);
     g.position.copyFrom(next);
     try{ g.rotationQuaternion=null; g.rotation.y=Math.atan2(dir.x,dir.z); }catch{}
+
+    // clamp to barrier (optional)
+    try{ if (window.GhostBarrier?.clamp) window.GhostBarrier.clamp(g); }catch{}
+
+    // stuck detection → pick new roam target
+    const lp = ST._lastPos || cur;
+    const moved = BABYLON.Vector3.DistanceSquared(lp, g.position);
+    ST._lastPos = g.position.clone();
+    if (moved < CFG.STUCK_SPEED_EPS*CFG.STUCK_SPEED_EPS) ST._stuckTimer += dt; else ST._stuckTimer = 0;
+    if (ST._stuckTimer > CFG.STUCK_TIME_S && ST.mode!=='hunt'){
+      ST._stuckTimer = 0;
+      // sidestep 90° and move a little to break loops
+      const yaw2 = (Math.random()<0.5?+1:-1) * 90 * Math.PI/180;
+      const base = Math.atan2(dir.x,dir.z) + yaw2;
+      const nudge = v3(Math.sin(base),0,Math.cos(base)).scale(2.5);
+      ST.target = g.position.add(nudge);
+    }
   }
   function hazardRepulsion(cur, points, radius){
     let R = v3(0,0,0);
@@ -549,13 +638,11 @@
   }
 
   function pickRoamTarget(){
-    // Phantom/Banshee tendency: wander to player sometimes
     const T = traits();
-    if ((T.wanderToPlayer) && Math.random() < CFG.wanderToPlayerTickProb * tickScale()){
+    if ((T.wanderToPlayer) && Math.random() < 0.18 * tickScale()){
       const p = ST.c?.position?.clone && ST.c.position.clone();
       if (p && ST.curRoom && roomForPos(p)?.id === ST.curRoom.id){ return p; }
     }
-    // Banshee DOTS chase (if any DOTS system tells us we're in DOTS state)
     if (ST.ghostTypeKey==='Banshee' && isDOTSActive()){
       const pos = getMarkedPlayerPos() || ST.c?.position;
       if (pos){ return pos.clone ? pos.clone() : v3(pos.x,pos.y,pos.z); }
@@ -566,7 +653,7 @@
       }
       return ST.target.clone();
     }
-    // fallback random roam
+    // broad fallback
     let min=new BABYLON.Vector3(+Infinity,+Infinity,+Infinity), max=new BABYLON.Vector3(-Infinity,-Infinity,-Infinity);
     ST.s.meshes.forEach(m=>{ try{ const bb=m.getBoundingInfo?.().boundingBox; if (bb){ min=BABYLON.Vector3.Minimize(min,bb.minimumWorld); max=BABYLON.Vector3.Maximize(max,bb.maximumWorld); } }catch{} });
     for (let i=0;i<20;i++){
@@ -605,7 +692,6 @@
       const dx=g.x-p.x, dz=g.z-p.z, dist=Math.sqrt(dx*dx+dz*dz);
       if (dist <= CFG.playerScareRadius){ ST.sanity -= (CFG.sanityDrainProximity/60)*dt; near=true; }
     }
-    // track near-player exposure (Thaye calm)
     if (near) ST.nearPlayerTime += dt*1.0; else ST.nearPlayerTime = Math.max(0, ST.nearPlayerTime - dt*0.5);
     if (ST.mode==='hunt') ST.sanity -= (CFG.sanityDrainHunt/60)*dt;
     ST.sanity = clamp(ST.sanity,0,100);
@@ -614,20 +700,13 @@
   }
 
   function chooseEventType(){
-    // base weights
     const W = { blink:1, flicker:0.8, whisper:0.9, sing:0.3, airball:0.3, shadow:0.4 };
     const T = traits();
-    // Oni: frequent physically manifested events -> raise blink/shadow
     if (ST.ghostTypeKey==='Oni'){ W.blink *= 1.8; W.shadow *= 1.6; }
-    // Banshee: favors singing events
-    if (ST.ghostTypeKey==='Banshee'){ W.sing *= 2.2; }
-    // Shade: favors shadow/clear (blink) and airball, but shy near player
+    if (ST.ghostTypeKey==='Banshee'){ W.sing  *= 2.2; }
     if (ST.ghostTypeKey==='Shade'){ W.shadow *= 1.8; W.airball *= 1.6; W.blink *= 1.2; }
-    // Myling: frequent whispers (parabolic mic)
-    if (ST.ghostTypeKey==='Myling'){ W.whisper *= 2.0; }
-    // Mare: more flicker-ish behavior
-    if (ST.ghostTypeKey==='Mare'){ W.flicker *= 1.4; }
-    // Normalize and pick
+    if (ST.ghostTypeKey==='Myling'){ W.whisper*= 2.0; }
+    if (ST.ghostTypeKey==='Mare'){ W.flicker*= 1.4; }
     const total = Object.values(W).reduce((a,b)=>a+b,0);
     let r = Math.random()*total;
     for (const k of Object.keys(W)){ r -= W[k]; if (r<=0) return k; }
@@ -635,15 +714,14 @@
   }
 
   function triggerEvent(type){
-    // Oni rule-out: no mistform
     if ((type==='mist'||type==='mistform') && ST.ghostTypeKey==='Oni') return;
     const t = type || chooseEventType();
     if (t==='blink'){ blinkManifest(); }
     else if (t==='flicker'){ tryLightFlickerNear(ST.ghostRoot?.position, 0.6 + Math.random()*0.6); }
     else if (t==='whisper'){ /* para mic-friendly */ }
-    else if (t==='sing'){ /* Banshee singing event placeholder */ }
-    else if (t==='airball'){ /* Shade airball placeholder */ }
-    else if (t==='shadow'){ /* visual style choice for manifestation */ }
+    else if (t==='sing'){ /* Banshee singing */ }
+    else if (t==='airball'){ /* Shade airball */ }
+    else if (t==='shadow'){ /* shadow form */ }
   }
 
   function tryLightFlickerNear(pos, durSec){
@@ -657,17 +735,19 @@
   function beginHunt(){
     if (!ST.ghostRoot) return;
     const now=performance.now()/1000; if (now < ST.nextHuntReadyT) return;
-    if (!rules_canStartHuntHere()) return; // Onryo fire / Demon crucifix / Shade same-room
+    if (!rules_canStartHuntHere()) return;
     setMode('hunt');
     blinkManifest(0.4 + Math.random()*0.4);
     setCollisionsEnabled(ST.isVisible);
+    // clear perception so we don't retain stale info from before hunt
+    ST.lastKnown = null; ST.lastSeenAt = 0; ST.lastHeardAt = 0; ST.investigateUntil = 0;
   }
   function endHunt(){
     if (!ST.ghostRoot) return;
     setMode('cooldown');
     setGhostVisible(false);
     const now=performance.now()/1000;
-    ST.nextHuntReadyT = now + (CFG.minHuntCooldown + Math.random()*(CFG.maxHuntCooldown-CFG.maxHuntCooldown));
+    ST.nextHuntReadyT = now + (CFG.minHuntCooldown + Math.random()*(CFG.maxHuntCooldown - CFG.minHuntCooldown)); // fixed
   }
   function setMode(m){
     ST.mode=m;
@@ -707,7 +787,6 @@
     });
     return out;
   }
-
   function nearAnyFire(pos, dist){
     refreshHazards();
     const r2 = dist*dist;
@@ -716,33 +795,30 @@
     }
     return false;
   }
-
   function nearCrucifix(pos){
     const list = getCrucifixes();
     if (!list.length) return false;
     for (const c of list){
-      const R = CFG.demonCrucifixRadii[c.tier||2] || 6.0;
+      const R = CFG.demonCrucifixRadii?.[c.tier||2] || 6.0;
       const dx=pos.x-(c.pos?.x||0), dz=pos.z-(c.pos?.z||0);
       const d2 = dx*dx+dz*dz;
       if (d2 <= R*R) return true;
     }
     return false;
   }
-
   function rules_canStartHuntHere(){
     const type = ST.ghostTypeKey;
     const pos = ST.ghostRoot?.position || v3(0,0,0);
     if (type==='Shade'){
       const pr = playerRoom();
       if (pr && ST.curRoom && pr.id === ST.curRoom.id){
-        if (Math.random() < CFG.shadeSameRoomBlockChance) return false;
+        if (Math.random() < 0.9) return false;
       }
     }
-    if (type==='Onryo'){ if (nearAnyFire(pos, CFG.onryoNoHuntFireDist)) return false; }
+    if (type==='Onryo'){ if (nearAnyFire(pos, 4.0)) return false; }
     if (type==='Demon'){ if (nearCrucifix(pos)) return false; }
     return true;
   }
-
   function onSmudged(){
     if (ST.ghostTypeKey==='Yurei'){
       ST.smudgedUntil = (performance.now()/1000) + (TRAITS.Yurei.smudgeRoomLockSec||90);
@@ -753,26 +829,22 @@
   function activityScale(){
     let k = 1.0;
     const T = traits();
-    // Mare: lower activity in lit rooms
     if (T.lessActivityInLight && ST.curRoom){
       const center = {x:ST.curRoom.center?.[0]||ST.ghostRoot.position.x, y:ST.ghostRoot.position.y, z:ST.curRoom.center?.[2]||ST.ghostRoot.position.z};
       const E = illuminationAtPoint(center);
-      if (E>0) k *= CFG.mareLightActivityMult;
+      if (E>0) k *= 0.5;
     }
-    // Shade: shy near player
     const near = ST.nearPlayerTime > 0.2;
-    if (T.shyNearPlayer && near) k *= CFG.shadeNearEventMult;
-    // Thaye: calms over time near players: exponential decay based on nearPlayerTime
+    if (T.shyNearPlayer && near) k *= 0.35;
     if (ST.ghostTypeKey==='Thaye'){
-      const half = CFG.thayeCalmHalfLifeSec;
+      const half = 35;
       const decay = Math.pow(0.5, ST.nearPlayerTime / Math.max(half, 1));
       k *= decay;
     }
-    // Oni: more manifested events in general
-    if (ST.ghostTypeKey==='Oni'){ k *= CFG.oniEventMult; }
+    if (ST.ghostTypeKey==='Oni'){ k *= 2.2; }
     return k;
   }
-  function tickScale(){ // convert per-second prob to per-tick (dt ~ 0.016..0.033..)
+  function tickScale(){
     const now=performance.now()/1000, dt=Math.min(0.1, Math.max(0, now-ST.lastUpdateT||0.016));
     return Math.min(1, dt);
   }
@@ -792,7 +864,7 @@
 
     updateSanity(dt);
 
-    // dynamic event chance using tendencies
+    // dynamic event chance
     const chance = CFG.eventChance * activityScale();
     if (now-ST.lastEventT>CFG.eventCooldown){
       ST.lastEventT=now;
@@ -803,18 +875,70 @@
       if (Math.random()<0.12) beginHunt();
     }
 
+    // ------------- Perception update -------------
+    const sense = consumeSenseEvents(now);
+    const saw   = traits().omniscient ? true : canSeePlayer();
+    const heard = traits().omniscient ? true : chanceHearPlayer(dt);
+    let pingPos = null;
+    if (sense.pings.length){
+      let best = sense.pings[0]; // strongest = most recent * strength
+      for (const p of sense.pings){ if (p.str >= (best.str||1) && p.t >= best.t) best = p; }
+      pingPos = v3(best.pos.x, ST.ghostRoot.position.y, best.pos.z);
+    }
+    if (saw){
+      ST.lastKnown = ST.c.position.clone();
+      ST.lastSeenAt = now;
+      ST.investigateUntil = now + CFG.INVESTIGATE_TIME_S;
+    } else if (heard){
+      ST.lastKnown = ST.c.position.clone();
+      ST.lastHeardAt = now;
+      ST.investigateUntil = now + CFG.INVESTIGATE_TIME_S * 0.75;
+    } else if (pingPos){
+      ST.lastKnown = pingPos;
+      ST.investigateUntil = now + CFG.ELECTRONIC_DECAY_S;
+    }
+
+    // ------------- Behavior -------------
     if (ST.mode==='roam'){
       if (Math.random()<0.01) maybeSwitchRoom();
-      let speed = CFG.roamSpeed;
-      if (ST.ghostTypeKey==='Banshee' && isDOTSActive()) speed *= CFG.dotsChaseSpeedBoost;
+      const speed = (ST.ghostTypeKey==='Banshee' && isDOTSActive())
+        ? CFG.roamSpeed * 1.15
+        : CFG.roamSpeed;
       const t = pickRoamTarget();
       moveToward(t, speed, dt);
+
     } else if (ST.mode==='hunt'){
-      const t = ST.c?.position ? ST.c.position.clone() : ST.ghostRoot.position.clone();
-      moveToward(t, CFG.huntSpeed, dt);
+      let targetPos = null;
+      let speed = CFG.huntSpeed;
+
+      if (traits().omniscient){ // Deogen: always knows; fast far, slow near
+        const p = ST.c?.position || ST.ghostRoot.position;
+        const g = ST.ghostRoot.position;
+        const d = Math.max(0.001, BABYLON.Vector3.Distance(p, g));
+        const k = clamp((d - CFG.deogenNearDist)/ (8.0 - CFG.deogenNearDist), 0, 1); // 0 near → 1 far-ish
+        speed = CFG.deogenNearSpeed + (CFG.deogenFarSpeed - CFG.deogenNearSpeed) * k;
+        targetPos = p.clone();
+      } else if (saw) {
+        targetPos = ST.c.position.clone();
+      } else if (ST.lastKnown && now <= ST.investigateUntil) {
+        // investigate around last-known
+        const jitter = v3(
+          (Math.random()*2-1)*CFG.INVESTIGATE_WANDER,
+          0,
+          (Math.random()*2-1)*CFG.INVESTIGATE_WANDER
+        );
+        targetPos = ST.lastKnown.add(jitter);
+      } else {
+        // failed to reacquire → keep hunting but roam
+        targetPos = pickRoamTarget();
+      }
+
+      moveToward(targetPos, speed, dt);
+
       if (!devForce() && Math.random()<0.03) blinkManifest(0.12+Math.random()*0.18);
       if (canKillPlayer()) performKill();
       if (ST.sanity<=0) endHunt();
+
     } else if (ST.mode==='cooldown'){
       const t = pickRoamTarget();
       moveToward(t, CFG.roamSpeed*0.65, dt);
@@ -822,46 +946,27 @@
     }
   }
 
-  // ---------- Rules API (with weights) ----------
+  // ---------- Rules API ----------
   function publishRulesAPI(){
     window.GHOST_RULES = {
       getTraits: ()=> Object.assign({}, TRAITS[ST.ghostTypeKey]||{}),
-      // Breaker: Jinn cannot turn OFF; Hantu cannot turn ON
-      canToggleBreaker(action/*'on'|'off'*/){
-        if (ST.ghostTypeKey==='Jinn'  && action==='off') return false;
-        if (ST.ghostTypeKey==='Hantu' && action==='on')  return false;
-        return true;
-      },
-      // Lights: Mare cannot turn lights ON
-      canToggleLight(action/*'on'|'off'*/){
-        if (ST.ghostTypeKey==='Mare' && action==='on') return false;
-        return true;
-      },
-      // Events: Oni cannot do 'mist'/'mistform'
-      canPerformEvent(type){
-        if ((type==='mist'||type==='mistform') && ST.ghostTypeKey==='Oni') return false;
-        return true;
-      },
-      // Salt: Wraith leaves no salt steps
+      canToggleBreaker(action){ if (ST.ghostTypeKey==='Jinn' && action==='off') return false; if (ST.ghostTypeKey==='Hantu'&& action==='on') return false; return true; },
+      canToggleLight(action){ if (ST.ghostTypeKey==='Mare' && action==='on') return false; return true; },
+      canPerformEvent(type){ if ((type==='mist'||type==='mistform') && ST.ghostTypeKey==='Oni') return false; return true; },
       canStepSalt(){ return ST.ghostTypeKey!=='Wraith'; },
-      // DOTS: Goryo video-only when player is not in the room
-      canShowDOTS(ctx/*{viewer:'player'|'video', playerInRoom?:boolean}*/){
+      canShowDOTS(ctx){
         if (ST.ghostTypeKey!=='Goryo') return true;
         const v = (ctx&&ctx.viewer)||'player';
         const inRoom = (ctx&&ctx.playerInRoom)!=null ? !!ctx.playerInRoom :
                        (!!playerRoom() && ST.curRoom && playerRoom().id===ST.curRoom.id);
         if (v==='video' && !inRoom) return true; else return false;
       },
-      // Hunts
       canStartHuntHere(){ return rules_canStartHuntHere(); },
-      // Shade: EMF3 throw block in same room
       canThrowEMF3(){
         if (ST.ghostTypeKey!=='Shade') return true;
         const pr = playerRoom();
         return !(pr && ST.curRoom && pr.id===ST.curRoom.id);
       },
-      // -------- Weights (characteristic frequencies) --------
-      // eventWeight: multiply your event scheduler rates by this
       eventWeight(type){
         let w = 1;
         if (ST.ghostTypeKey==='Oni' && (type==='blink'||type==='shadow')) w *= 1.8;
@@ -869,37 +974,21 @@
         if (ST.ghostTypeKey==='Shade' && (type==='airball'||type==='shadow'||type==='blink')) w *= 1.4;
         if (ST.ghostTypeKey==='Myling' && type==='whisper') w *= 2.0;
         if (ST.ghostTypeKey==='Mare' && (type==='flicker')) w *= 1.3;
-        // Reduce in bright rooms for Mare
         if (ST.ghostTypeKey==='Mare' && ST.curRoom){
           const center = {x:ST.curRoom.center?.[0]||ST.ghostRoot.position.x, y:ST.ghostRoot.position.y, z:ST.curRoom.center?.[2]||ST.ghostRoot.position.z};
-          const E = illuminationAtPoint(center); if (E>0) w *= CFG.mareLightActivityMult;
+          const E = illuminationAtPoint(center); if (E>0) w *= 0.5;
         }
-        // Shade: shy near player
-        if (ST.ghostTypeKey==='Shade' && ST.nearPlayerTime>0.2) w *= CFG.shadeNearEventMult;
-        // Thaye: calm over time near players
+        if (ST.ghostTypeKey==='Shade' && ST.nearPlayerTime>0.2) w *= 0.35;
         if (ST.ghostTypeKey==='Thaye'){
-          const half = CFG.thayeCalmHalfLifeSec;
+          const half = 35;
           const decay = Math.pow(0.5, ST.nearPlayerTime / Math.max(half, 1));
           w *= decay;
         }
         return w;
       },
-      // breakerActionWeight: for schedulers that decide breaker toggles
-      breakerActionWeight(action){
-        let w=1;
-        if (ST.ghostTypeKey==='Hantu' && action==='off') w*=2.0; // Hantu turns off frequently
-        return w;
-      },
-      // lightActionWeight: for light switch decisions
-      lightActionWeight(action){
-        let w=1;
-        if (ST.ghostTypeKey==='Mare' && action==='off') w*=2.0; // frequent off
-        return w;
-      },
-      // paraMic: how often to whisper / talk
-      paraWhisperWeight(){
-        return (ST.ghostTypeKey==='Myling') ? 2.2 : 1.0;
-      }
+      breakerActionWeight(action){ let w=1; if (ST.ghostTypeKey==='Hantu' && action==='off') w*=2.0; return w; },
+      lightActionWeight(action){ let w=1; if (ST.ghostTypeKey==='Mare' && action==='off') w*=2.0; return w; },
+      paraWhisperWeight(){ return (ST.ghostTypeKey==='Myling') ? 2.2 : 1.0; }
     };
   }
 
