@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PhasmaPhoney — 3D Prototype</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+  <meta name="author" content="Shark-Blades" />
+  <meta name="description" content="3D ghost hunting prototype built with Babylon.js" />
+  <meta name="keywords" content="PhasmaPhoney, Phasmophobia, ghost, hunting, game, HTML, Babylon.js" />
+
+  <!-- Babylon core + loaders (local to repo) -->
+  <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/earcut.min.js"></script>
+  <script src="./cdn/meshopt_decoder.js"></script>
+  <script src="./cdn/draco_decoder_gltf.js"></script>
+  <script src="./cdn/loaders/babylon.glTF2FileLoader.js"></script>
+  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+  <script src="./cdn/gui/babylon.gui.min.js"></script>
+
+  <!-- Optional: room names -->
+  <script src="./rooms.js"></script>
+
+  <style>
+    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
+    #renderCanvas { width:100vw; height:100vh; touch-action:none; display:block; background:#000; }
+
+    #flash-overlay{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:10000; transition:opacity 120ms ease-out; }
+
+    /* Title */
+    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.85); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;}
+    #title-content{ text-align:center; max-width:90vw;}
+    #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; margin-bottom:24px;}
+    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; box-shadow:0 0 14px rgba(0,255,255,0.25); }
+    #start-button:active{ transform:translateY(1px); }
+
+    /* Loading overlay (hidden by default, but here if you want to re-use) */
+    #loading-overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.9); display:none; align-items:center; justify-content:center; z-index:10050; }
+    #loading-card{ width:min(520px,92vw); background:#0a0a0a; border:1px solid #066; border-radius:12px; padding:16px; box-shadow:0 0 24px rgba(0,255,255,0.15); }
+    #loading-title{ color:#9ff; font-weight:bold; margin:0 0 8px 0; text-align:center; }
+    #loading-bar-wrap{ height:14px; background:#051416; border:1px solid #0a3c3f; border-radius:8px; overflow:hidden; }
+    #loading-bar{ height:100%; width:0%; background:linear-gradient(90deg, #0ff, #08a); transition:width 160ms ease; }
+    #loading-text{ color:#8ff; font-size:12px; margin-top:8px; text-align:center; opacity:0.95; }
+
+    /* HUD */
+    #hud{ position:fixed; top:10px; left:10px; z-index:6000; background:rgba(0,0,0,0.5); border:1px solid #066; padding:8px 10px; border-radius:6px; min-width:260px; display:none; flex-direction:column; gap:6px; pointer-events:none; }
+    #hud .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    #hud .label{ color:#9ff; }
+    #hud .value{ color:#0ff; font-weight:bold; }
+    #weather{ font-size:12px; color:#aff; opacity:0.9; }
+    #hud-hunt { font-size:12px; color:#faa; opacity:0.95; }
+
+    /* Storage button + modal */
+    #storage-button{ position:fixed; right:12px; top:12px; z-index:6000; display:none; padding:10px 16px; border:2px solid #0ff; color:#0ff; background:#111; border-radius:8px; cursor:pointer; box-shadow:0 0 10px rgba(0,255,255,0.2); pointer-events:auto;}
+    #storage-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; }
+    #storage-card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:8px; width:min(740px,92vw); max-height:86vh; overflow:auto; padding:12px 14px; }
+    #storage-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:10px; }
+
+    /* Notebook */
+    #notebook-modal{ display:none; position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.82); align-items:center; justify-content:center; }
+    #notebook-card{ background:#0b0b0b; color:#0ff; border:1px solid #066; border-radius:10px; width:min(920px,95vw); max-height:90vh; overflow:auto; padding:14px 16px; box-shadow:0 0 20px rgba(0,255,255,0.2); }
+    #notebook-tabs{ display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+    .tab{ padding:6px 10px; border:1px solid #066; color:#9ff; background:#111; border-radius:6px; cursor:pointer; }
+    .tab.active{ color:#0ff; border-color:#0ff; box-shadow:0 0 10px rgba(0,255,255,0.2) inset; }
+    .page{ display:none; }
+    .page.active{ display:block; }
+    .ev-row{ display:flex; align-items:center; gap:8px; margin:6px 0; }
+    .ev-row input{ transform:scale(1.3); }
+
+    /* Dev gate/panel */
+    #dev-gate, #dev-panel{ display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.8); align-items:center; justify-content:center; }
+    .card{ background:#0a0a0a; color:#0ff; border:1px solid #066; border-radius:10px; padding:14px; width:min(820px,92vw); max-height:88vh; overflow:auto; }
+    #dev-panel .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+    #dev-log{ background:#000; border:1px solid #033; min-height:120px; padding:8px; border-radius:6px; color:#8ff; font-size:12px; white-space:pre-wrap; }
+    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
+
+    /* Hand preview */
+    #hand-preview{ position:fixed; right:18px; bottom:110px; width:180px; height:140px; pointer-events:none; z-index:5000; display:none; }
+
+    /* Camera overlay */
+    #camera-overlay{ position:fixed; inset:0; z-index:4000; display:none; pointer-events:none; background:radial-gradient(transparent 70%, rgba(0,0,0,0.45)); }
+    #camera-rec{ position:absolute; top:12px; left:14px; color:#f44; font-size:14px; letter-spacing:1px; text-shadow:0 0 6px rgba(255,0,0,0.5); }
+    #camera-orb{ position:absolute; width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,0.9); filter:blur(0.5px); display:none; box-shadow:0 0 10px rgba(255,255,255,0.8); }
+    #camera-ir { position:absolute; top:12px; right:14px; color:#9f9; font-size:14px; display:none; }
+
+    /* Belt */
+    #belt{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+    .slot{ width:72px; height:72px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; }
+    .slot .key{ position:absolute; top:2px; left:4px; font-size:11px; color:#9ff; opacity:0.9; }
+    .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+    .slot canvas, .slot img{ max-width:60px; max-height:60px; image-rendering:crisp-edges; }
+
+    /* Touch controls */
+    #touch-controls{ position:fixed; right:12px; bottom:12px; display:none; grid-template-columns:repeat(2,64px); gap:8px; z-index:6000; }
+    .tbtn{ width:64px; height:64px; border-radius:50%; background:rgba(0,0,0,0.5); border:1px solid #066; color:#0ff; display:flex; align-items:center; justify-content:center; user-select:none; }
+    .tbtn:active{ transform:translateY(1px); }
+
+    /* Toast */
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+  </style>
+</head>
+
+<body>
+  <div id="flash-overlay"></div>
+  <div id="camera-overlay">
+    <div id="camera-rec">REC ●</div>
+    <div id="camera-orb"></div>
+    <div id="camera-ir">IR</div>
+  </div>
+  <canvas id="renderCanvas"></canvas>
+
+  <!-- Start screen -->
+  <div id="title-screen">
+    <div id="title-content">
+      <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
+      <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
+      <button id="start-button">Start Investigation</button>
+    </div>
+  </div>
+
+  <!-- (optional) Loading overlay -->
+  <div id="loading-overlay" aria-hidden="true">
+    <div id="loading-card">
+      <div id="loading-title">Loading assets…</div>
+      <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+      <div id="loading-text">0%</div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="row"><div class="label">Sanity</div><div class="value" id="hud-sanity">100%</div></div>
+    <div class="row"><div class="label">Room</div><div class="value" id="hud-room">Van</div></div>
+    <div id="weather">Weather: <span id="hud-weather">Clear</span></div>
+    <div id="hud-hunt">Hunt: <span id="hud-hunt-state">Calm</span></div>
+  </div>
+
+  <!-- Storage -->
+  <button id="storage-button">STORAGE</button>
+  <div id="storage-modal">
+    <div id="storage-card">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div style="font-weight:bold;color:#9ff;">Van Storage — Pick 3 (slots 1–3)</div>
+        <button id="storage-close" class="hud-btn">Close</button>
+      </div>
+      <div style="margin:6px 0 10px; color:#8ff;">Slot 4 is always Lighter. Slot 5 is always Notebook.</div>
+      <div id="storage-grid"></div>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button id="storage-confirm" class="hud-btn" style="border:1px solid #0ff; color:#0ff;">Confirm Loadout</button>
+        <span id="storage-info" style="color:#8ff;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notebook -->
+  <div id="notebook-modal">
+    <div id="notebook-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="font-weight:bold; color:#9ff;">Investigator's Journal</div>
+        <button id="notebook-close" class="hud-btn">Close</button>
+      </div>
+      <div id="notebook-tabs">
+        <div class="tab active" data-tab="ghosts">Ghosts</div>
+        <div class="tab" data-tab="evidence">Evidence</div>
+        <div class="tab" data-tab="guess">Guess</div>
+      </div>
+      <div id="page-ghosts" class="page active"></div>
+      <div id="page-evidence" class="page"></div>
+      <div id="page-guess" class="page"></div>
+    </div>
+  </div>
+
+  <!-- Dev gate (ESC) -->
+  <div id="dev-gate">
+    <div class="card">
+      <div style="font-weight:bold; color:#9ff; margin-bottom:6px;">Enable Developer Options?</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="dev-yes" class="hud-btn">Yes</button>
+        <button id="dev-no"  class="hud-btn">No</button>
+      </div>
+      <div id="dev-pass-wrap" style="display:none; margin-top:10px;">
+        <div style="color:#8ff; margin-bottom:4px;">Enter password:</div>
+        <input id="dev-pass" type="password" placeholder="password" style="padding:6px 8px; background:#000; color:#0ff; border:1px solid #066; border-radius:4px; width:200px;" />
+        <button id="dev-pass-submit" class="hud-btn" style="margin-left:6px;">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dev Tools -->
+  <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
+
+  <div id="devtools-panel" style="position:fixed;right:12px;bottom:12px;width:480px;max-height:80vh;overflow:auto;background:#111;border:1px solid #333;border-radius:10px;padding:12px;display:none;z-index:9999;font:12px/1.4 monospace;color:#ddd;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
+      <strong>Developer Tools</strong>
+      <div style="display:flex;gap:6px;">
+        <button id="devtools-open-overlay" class="hud-btn" title="Open devtools_overlay.html">Open External Overlay</button>
+        <button id="devtools-enable" class="hud-btn">Enable Developer Listen</button>
+      </div>
+    </div>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Listen Groups</legend>
+      <label><input id="devtools-group-ghost" type="checkbox" checked> Ghost tracking</label><br>
+      <label><input id="devtools-group-evidence" type="checkbox"> Evidence item activity</label><br>
+      <label><input id="devtools-group-xyz" type="checkbox"> XYZ tracker (player)</label>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Map Recorder</legend>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button id="devtools-map-start" class="hud-btn">Start Map</button>
+        <button id="devtools-map-pin" class="hud-btn" disabled>Pin</button>
+        <button id="devtools-map-confirm" class="hud-btn" disabled>Confirm</button>
+        <select id="devtools-room-select" style="flex:1;min-width:160px;">
+          <option value="">Select room…</option>
+        </select>
+        <button id="devtools-export-rooms" class="hud-btn" title="Download a rooms.generated.js skeleton">Export Rooms</button>
+      </div>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Player / Debug</legend>
+      <div class="row" style="gap:12px;align-items:center;">
+        <label style="flex:1;">Walk speed
+          <input id="devtools-walk" type="range" min="0.20" max="3.00" step="0.05" value="0.90" style="width:100%;">
+        </label>
+        <label style="flex:1;">Run speed
+          <input id="devtools-run" type="range" min="0.40" max="6.00" step="0.05" value="1.80" style="width:100%;">
+        </label>
+      </div>
+      <div class="row">
+        <label><input id="devtools-god" type="checkbox"> God mode</label>
+        <label><input id="devtools-fly" type="checkbox"> Fly (PageUp/PageDown)</label>
+      </div>
+      <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button id="devtools-teleport" class="hud-btn">Teleport to ghost</button>
+        <button id="devtools-inspector" class="hud-btn">Inspector</button>
+        <button id="devtools-ping" class="hud-btn">Ping XYZ</button>
+        <button id="devtools-reveal-ghost" class="hud-btn">Toggle Ghost Visible</button>
+        <button id="devtools-force-hunt" class="hud-btn">Force Hunt</button>
+        <button id="devtools-end-hunt" class="hud-btn">End Hunt</button>
+      </div>
+    </fieldset>
+
+    <fieldset style="border:1px solid #333;border-radius:8px;margin:8px 0;padding:8px;">
+      <legend>Assets / GLB & Materials</legend>
+      <div class="row" style="gap:6px;">
+        <button id="asset-reload-map" class="hud-btn" title="Re-import the default house GLB">Reload Map</button>
+        <input id="asset-glb-file" type="file" accept=".glb,.gltf,.zip,.bin" class="hud-btn" style="padding:6px;"/>
+        <button id="asset-append-glb" class="hud-btn">Append GLB</button>
+        <button id="asset-replace-map" class="hud-btn">Replace Map</button>
+      </div>
+      <div class="row" style="gap:6px;">
+        <button id="asset-list-meshes" class="hud-btn">List Meshes</button>
+        <button id="asset-export-meshes" class="hud-btn">Export Mesh List</button>
+      </div>
+      <div class="row" style="gap:6px;">
+        <select id="asset-mesh-select" style="flex:1;min-width:140px;">
+          <option value="">(select a mesh)</option>
+        </select>
+        <button id="asset-focus" class="hud-btn">Focus</button>
+      </div>
+      <div class="row" style="gap:12px;">
+        <label><input id="asset-visible" type="checkbox"> visible</label>
+        <label><input id="asset-pick" type="checkbox"> pickable</label>
+        <label><input id="asset-collide" type="checkbox"> collisions</label>
+        <label><input id="asset-bbox" type="checkbox"> bbox</label>
+        <label><input id="asset-wire" type="checkbox"> wireframe</label>
+      </div>
+      <div class="row" style="gap:6px;">
+        <select id="asset-mat-select" style="flex:1;min-width:140px;">
+          <option value="">(material)</option>
+        </select>
+        <label>alpha <input id="asset-alpha" type="range" min="0" max="1" step="0.01" value="1" /></label>
+      </div>
+      <div class="row" style="gap:6px;">
+        <input id="asset-tex-url" type="text" placeholder="albedo/diffuse texture URL…" style="flex:1;min-width:200px;background:#0b0b0b;color:#9ff;border:1px solid #333;border-radius:6px;padding:6px;">
+        <button id="asset-apply-tex" class="hud-btn">Apply Texture</button>
+      </div>
+    </fieldset>
+
+    <div>
+      <label for="devtools-log">Developer Log</label>
+      <textarea id="devtools-log" style="width:100%;height:180px;background:#0b0b0b;color:#a8f;resize:vertical;border:1px solid #333;border-radius:8px;padding:8px;" readonly></textarea>
+    </div>
+  </div>
+
+  <!-- Hand preview, Belt, Touch controls, Toast -->
+  <div id="hand-preview"></div>
+  <div id="belt"></div>
+  <div id="touch-controls">
+    <div class="tbtn" id="t-up">↑</div>
+    <div class="tbtn" id="t-use">USE</div>
+    <div class="tbtn" id="t-left">←</div>
+    <div class="tbtn" id="t-right">→</div>
+  </div>
+  <div id="toast"></div>
+
+<script>
+/* ===========================================================
+   GLOBALS / GAME STATE
+   =========================================================== */
+const canvas = document.getElementById('renderCanvas');
+let engine, scene, camera, skybox;
+
+let moonLight, moonShadows, flashLight, flashShadows, uvLight, irLight, cloudMat, cloudScroll = 0;
+let moonMesh = null, moonMat = null;
+let hemiLight = null;
+
+let houseLights = []; let housePower = true;
+
+let player = { sanity:100, room:'Van', speedWalk:0.9, speedRun:1.8, running:false, god:false };
+let controls = { forward:false, back:false, left:false, right:false };
+let allowFly = false;
+
+let houseRoot = null;
+let doorMeshes = [];
+let ghost = {
+  mesh:null, target:null, speed:1.4, slowSpeed:0.9, fastSpeed:1.4, alive:true,
+  anims:{ idle:null, walk:null },
+  visible:false, hunting:false,
+  nextStep:0, stepInterval:0.55, footAudible:18,
+  isTwins:false, meshFast:null
+};
+
+// Cold breath FX
+const BREATH_RANGE = 5.0;
+let breath = { ps:null, anchor:null, pulse:0, cooldown:0 };
+
+/* Weather state + modifiers */
+let weather = {
+  state:'Clear',
+  rainPS:null,
+  snowPS:null,
+  snowTex:null,
+  lightningTimer:0, nextStrike:0,
+  modSanityDrain:1.0,
+  modHuntChance:1.0,
+  modHuntPace:1.0
+};
+
+let weatherAnchor = null; // <— follows house roof (or camera fallback)
+
+let vanZone = { center: new BABYLON.Vector3(43.657, 2, -119.008), radius: 11 };
+
+let storageOpen = false;
+let dev = { enabled:false, gateOpen:false, log:[] };
+let activeItemSlot = 1;
+
+let inventory = {
+  slots:{1:null,2:null,3:null,4:'Lighter',5:'Notebook'},
+  models:{}, icons:{},
+  slotCharges:{1:0,2:0,3:0,4:Infinity,5:Infinity}
+};
+const ITEM_DEFAULT_CHARGES = { 'Smudge':1, 'Salt':3 };
+const devBus = new EventTarget();
+let __devGhostLogTimer = 0;
+
+const STORAGE_ITEMS = ['Flashlight','UV Light','Camera','EMF','Spirit Box','Thermometer','Crucifix','Salt','Smudge','D.O.T.S','Ghost Writing Book','Motion Sensor'];
+const ITEM_MODEL_MAP = {
+  'EMF':'EMF_Detector_EMF_Detector_0',
+  'Spirit Box':'Cone.001_Spirit_Box_0',
+  'Thermometer':'Thermometer_Thermometer_0',
+  'Camera':'Photo_Camera_Photo_Camera_0',
+  'UV Light':'Flashlight_Flashlight_0',
+  'Flashlight':'Flashlight_Poquet_Flashlight_Poquet_0',
+  'Thermal Camera':'Thermal_Camera_Thermal_Camera_0',
+  'Voice Recorder':'Voice_Recorder_Voice_Recorder_0',
+  'Ghost Writing Book':'(book-placeholder)',
+  'D.O.T.S':'(dots-proj)',
+  'Motion Sensor':'(motion-placeholder)'
+};
+const EVIDENCE_TYPES = ["EMF Level 5","Spirit Box","Fingerprints","Ghost Writing","Freezing Temps","D.O.T.S","Orbs"];
+const GHOSTS = {
+  spirit:["Spirit Box","Ghost Writing","EMF Level 5"],
+  wraith:["Spirit Box","D.O.T.S","EMF Level 5"],
+  poltergeist:["Spirit Box","Ghost Writing","Fingerprints"],
+  banshee:["D.O.T.S","Fingerprints","Orbs"],
+  jinn:["EMF Level 5","Freezing Temps","Fingerprints"],
+  mare:["Spirit Box","Ghost Writing","Orbs"],
+  revenant:["Ghost Writing","Orbs","Freezing Temps"],
+  shade:["Ghost Writing","Freezing Temps","EMF Level 5"],
+  demon:["Freezing Temps","Ghost Writing","Fingerprints"],
+  yurei:["Freezing Temps","D.O.T.S","Orbs"],
+  oni:["EMF Level 5","Freezing Temps","D.O.T.S"],
+  yokai:["Spirit Box","D.O.T.S","Orbs"],
+  hantu:["Freezing Temps","Ghost Writing","Fingerprints"],
+  goryo:["EMF Level 5","D.O.T.S","Fingerprints"],
+  myling:["Ghost Writing","EMF Level 5","Fingerprints"],
+  onryo:["Freezing Temps","Spirit Box","Orbs"],
+  "the twins":["Spirit Box","Freezing Temps","EMF Level 5"],
+  raiju:["EMF Level 5","D.O.T.S","Orbs"],
+  obake:["EMF Level 5","Orbs","Fingerprints"],
+  "the mimic":["Spirit Box","Freezing Temps","Fingerprints"],
+  moroi:["Freezing Temps","Ghost Writing","Spirit Box"],
+  deogen:["Spirit Box","Ghost Writing","D.O.T.S"],
+  thaye:["Ghost Writing","Orbs","D.O.T.S"],
+  phantom:["Spirit Box","D.O.T.S","Fingerprints"],
+  succubus:["Ghost Writing","Orbs","Spirit Box"]
+};
+let discoveredEvidence = new Set();
+let currentGhostKey = null;
+
+let ghostPolygon = [
+  new BABYLON.Vector3(18.404, 0, -96.040),
+  new BABYLON.Vector3(57.205, 0, -94.031),
+  new BABYLON.Vector3(62.145, 0, -105.142),
+  new BABYLON.Vector3(61.872, 0, -149.928),
+  new BABYLON.Vector3(18.660, 0, -149.900)
+];
+
+/* Placeables / rules */
+const CRUCIFIX_BASE_RADIUS = 3.0;
+const CRUCIFIX_DEMON_RADIUS = 5.0;
+const TWINS_SEP_MIN = 10.0, TWINS_SEP_MAX = 12.0;
+
+const placeables = { motionSensors: [], crucifixes: [] };
+
+/* ===========================================================
+   UTILS
+   =========================================================== */
+function toast(msg, ms=1500){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none', ms); }
+function inVanZone(pos){ return BABYLON.Vector3.Distance(pos, vanZone.center) <= vanZone.radius; }
+function pickGroundHeightAt(x, z){
+  const ray = new BABYLON.Ray(new BABYLON.Vector3(x, 80, z), new BABYLON.Vector3(0,-1,0), 200);
+  const hit = scene.pickWithRay(ray, m=>{
+    if(!m || !m.isPickable) return false;
+    const n = (m.name||"");
+    return /ground|floor|terrain|fallbackground/i.test(n);
+  });
+  if(hit.hit && hit.pickedPoint) return hit.pickedPoint.y;
+  return 1.2;
+}
+function randomPointInPolygonXZ(poly){
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  poly.forEach(p=>{ minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x); minZ=Math.min(minZ,p.z); maxZ=Math.max(maxZ,p.z); });
+  for(let i=0;i<500;i++){
+    const x = minX + Math.random()*(maxX-minX);
+    const z = minZ + Math.random()*(maxZ-minZ);
+    if(pointInPolyXZ(new BABYLON.Vector3(x,0,z), poly)) return new BABYLON.Vector3(x, 0, z);
+  }
+  return poly[0].clone();
+}
+function pointInPolyXZ(p, poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+    const intersect = ((zi>p.z)!=(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/(zj-zi)+xi);
+    if(intersect) inside=!inside;
+  }
+  return inside;
+}
+function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir.y=0; if(dir.lengthSquared()>0.001){ mesh.rotationQuaternion=null; mesh.rotation = new BABYLON.Vector3(0, Math.atan2(dir.x, dir.z), 0); } }
+function $(s){ return document.querySelector(s); }
+
+function playFootstep(){
+  const arr = [audio.step1,audio.step2,audio.step3];
+  const s = arr[Math.floor(Math.random()*arr.length)];
+  if(s){ s.currentTime=0; s.volume=0.6; s.play().catch(()=>{}); }
+}
+
+/* ===========================================================
+   BOOT / STARTUP
+   =========================================================== */
+let __started = false;
+async function safeStart(){
+  if(__started) return;
+  __started = true;
+
+  if(!window.BABYLON || !BABYLON.Engine){
+    toast("Engine not ready. Check Babylon includes.", 2200);
+    __started = false;
+    return;
+  }
+
+  // hide title to satisfy user-gesture for audio
+  const scr = document.getElementById('title-screen');
+  if (scr) scr.style.display = 'none';
+
+  try{
+    await boot();
+  }catch(err){
+    __started = false;
+    console.error(err);
+    toast("Startup failed: " + (err?.message||err), 2800);
+    if (scr) scr.style.display = 'flex';
+    return;
+  }
+
+  // Weather + ghost
+  const r = Math.random();
+  const w = r < 0.40 ? 'Clear' : r < 0.65 ? 'Rain' : r < 0.85 ? 'Snow' : 'Blood Moon';
+  setWeather(w);
+
+  const keys = Object.keys(GHOSTS);
+  currentGhostKey = keys[Math.floor(Math.random() * keys.length)];
+  if ((currentGhostKey||"").toLowerCase()==='myling'){ ghost.footAudible = 8; } // harder to hear
+
+  toast(`Investigation started. Weather: ${w}.`, 1600);
+}
+
+(function bindStart(){
+  const btn = document.getElementById('start-button');
+  const screen = document.getElementById('title-screen');
+  if (btn){
+    btn.onclick = safeStart;
+    btn.onkeydown = e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); safeStart(); } };
+  }
+  if (screen){
+    screen.addEventListener('click', e=>{ if(e.target===screen) safeStart(); });
+  }
+  window.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.code==='Space') safeStart(); });
+})();
+
+/* ===========================================================
+   ENGINE & SCENE
+   =========================================================== */
+async function boot(){
+  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, disableWebGL2Support:false });
+  try{ engine.setHardwareScalingLevel(1 / (window.devicePixelRatio||1)); }catch{}
+  scene = new BABYLON.Scene(engine);
+  scene.environmentTexture = null;
+  const oldSky = scene.getMeshByName("BackgroundSkybox"); if (oldSky) oldSky.dispose();
+  scene.collisionsEnabled = true;
+  scene.gravity = new BABYLON.Vector3(0, -0.5, 0);
+
+  // Camera
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(43.657, 3, -119.008), scene);
+  camera.attachControl(canvas, true);
+  camera.applyGravity = true;
+  camera.checkCollisions = true;
+  camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+  camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
+  camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
+  camera.minZ = 0.1; camera.inertia = 0;
+  camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
+
+  // Atmosphere/lights
+  setupNightAtmosphere();
+
+  // Hemispheric low-level fill to avoid total-black edge cases
+  hemiLight = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+  hemiLight.intensity = 0.06;
+
+  // Map + items + ghost + moon
+  await loadMap().catch(()=>{});
+  afterMapLoadedForShadows();
+  if (!adoptExistingGltfLights()) buildHouseLights();
+  await loadItems().catch(()=>{});
+  await loadGhost().catch(()=>{});
+  await loadMoon().catch(()=>{});
+  setupBreathFX();
+
+  // ===== Weather anchor (follows house roof or camera) =====
+  weatherAnchor = new BABYLON.TransformNode("weatherAnchor", scene);
+
+  if (!houseRoot){
+    const ground = BABYLON.MeshBuilder.CreateGround("fallbackGround", { width:120, height:120 }, scene);
+    ground.position.y = 0; ground.checkCollisions = true;
+    const gmat = new BABYLON.StandardMaterial("gmat", scene);
+    gmat.diffuseColor = new BABYLON.Color3(0.06,0.08,0.12); gmat.specularColor = new BABYLON.Color3(0,0,0);
+    ground.material = gmat;
+
+    const lamp = new BABYLON.PointLight("fallbackLamp", new BABYLON.Vector3(0,4,0), scene);
+    lamp.intensity = 0.8; houseLights.push({ light: lamp, mesh: null });
+  }
+
+  if (ghost.mesh){ moonShadows.addShadowCaster(ghost.mesh, true); flashShadows.addShadowCaster(ghost.mesh, true); }
+  if (ghost.meshFast){ moonShadows.addShadowCaster(ghost.meshFast, true); flashShadows.addShadowCaster(ghost.meshFast, true); }
+
+  // UI/inputs
+  initUI();
+  updateHUD();
+
+  // Render loop + tickers
+  scene.onBeforeRenderObservable.add(()=>{
+    const dt = engine.getDeltaTime()/1000;
+    handleMovement(dt);
+    updatePlayerFootsteps(dt);
+    sanityTick(dt);
+
+    // Reposition weather emitter above house roof (or camera fallback)
+    updateWeatherAnchor();
+
+    // Rain hidden while in van
+    if (weather.state.includes('Rain') && weather.rainPS){
+      weather.rainPS.emitRate
