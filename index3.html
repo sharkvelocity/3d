@@ -13,33 +13,9 @@
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
   <script src="./cdn/draco_decoder_gltf.js"></script>
-  <!-- keep the loaders bundle (includes glTF2); removed duplicate single glTF2 loader -->
+  <!-- keep the loaders bundle (includes glTF2) -->
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
-<script>
-(async()=>{
-  const log = (...a)=>console.log('%c[asset-check]','color:#0ff',...a);
-
-  // 1) Is the glTF loader alive?
-  log('glTF loader available?', BABYLON.SceneLoader.IsPluginForExtensionAvailable('.glb'));
-
-  // 2) MAP_URL reachable?
-  const mapUrl = window.MAP_URL || './assets/models/map/jailhouse.glb';
-  try {
-    const r = await fetch(mapUrl, { method:'HEAD' });
-    log('MAP_URL', mapUrl, r.ok ? r.status : 'MISSING');
-  } catch (e) { log('MAP_URL fetch error', e); }
-
-  // 3) One icon sample reachable?
-  const iconBase = window.ICONS_BASE_URL || './assets/icons';
-  const iconFile = (window.ITEM_ICON_MAP && window.ITEM_ICON_MAP.lighter) || 'lighter.png';
-  const iconUrl = `${iconBase.replace(/\/$/,'')}/${iconFile}`;
-  try {
-    const r = await fetch(iconUrl, { method:'HEAD' });
-    log('ICON', iconUrl, r.ok ? r.status : 'MISSING');
-  } catch (e) { log('ICON fetch error', e); }
-})();
-</script>
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; }
@@ -187,6 +163,24 @@
   </div>
   <div id="toast"></div>
 
+  <!-- ==================== Asset check (map, icons, tools) ==================== -->
+  <script>
+  (async()=>{
+    const log = (...a)=>console.log('%c[asset-check]','color:#0ff',...a);
+    log('glTF loader available?', BABYLON.SceneLoader.IsPluginForExtensionAvailable('.glb'));
+
+    const mapUrl = (window.MAP_URL = "./assets/models/map/jailhouse.glb");
+    const iconBase = (window.ICONS_BASE_URL || './assets/icons').replace(/\/$/,'');
+    const iconName = (window.ITEM_ICON_MAP && window.ITEM_ICON_MAP.lighter) || 'lighter.png';
+    const toolsUrl = './assets/models/items/exploration_objects.glb';
+
+    for (const [label,url] of [['MAP',mapUrl],['ICON',`${iconBase}/${iconName}`],['TOOLS',toolsUrl]]) {
+      try { const r=await fetch(url,{method:'HEAD'}); log(label, url, r.ok?r.status:'MISSING'); }
+      catch(e){ log(label, 'ERR', e); }
+    }
+  })();
+  </script>
+
   <!-- Engine/core -->
   <script src="./assets/index3/core.js"></script>
   <script src="./assets/index3/utils.js"></script>
@@ -200,7 +194,7 @@
   <!-- Input & UI -->
   <script src="./assets/index3/ui_input.js?v=1"></script>
 
-  <!-- Icons config (use your actual filenames in /assets/icons) -->
+  <!-- Icons config -->
   <script>
     window.ICONS_BASE_URL = './assets/icons';
     window.ITEM_ICON_MAP = {
@@ -218,7 +212,6 @@
       crucifix: 'crucifix.png',
       smudge: 'smudge.png'
     };
-    // optional fallbacks (tries multiple bases/names if missing)
     window.ITEM_ICON_HINTS = {
       emf: ['emf.png','emf_reader.png','emf5.png'],
       spirit_box: ['spirit_box.png','spiritbox.png'],
@@ -229,7 +222,73 @@
   </script>
   <script src="./assets/index3/icons.js?v=2.0"></script>
 
-  <!-- Items / models -->
+  <!-- ==================== Item-model shim (uses exploration_objects.glb) ==================== -->
+  <script>
+  (function(){
+    const TOOLS_GLB = './assets/models/items/exploration_objects.glb';
+    const KEY_HINTS = {
+      lighter:['lighter','zippo','flame'],
+      emf:['emf','meter'],
+      book:['book','journal'],
+      camera:['camera'],
+      dots:['dots','projector'],
+      uv:['uv','blacklight'],
+      candle:['candle'],
+      thermometer:['thermo','thermometer'],
+      crucifix:['crucifix','cross'],
+      smudge:['smudge','incense','sage'],
+      salt:['salt'],
+      spirit_box:['spirit box','spiritbox','radio']
+    };
+    let _loaded=null; const REGISTRY={};
+
+    async function load(scene){
+      if (_loaded) return _loaded;
+      _loaded = BABYLON.SceneLoader.ImportMeshAsync('', TOOLS_GLB, undefined, scene)
+        .then(res=>{
+          const meshes=(res.meshes||[]).filter(m=>m && m.name && m.name!=='__root__');
+          const names=meshes.map(m=>m.name), lower=names.map(n=>n.toLowerCase());
+          for (const [key,hints] of Object.entries(KEY_HINTS)){
+            let idx=-1; for (const h of hints){ idx=lower.findIndex(n=>n.includes(h)); if (idx!==-1) break; }
+            if (idx!==-1) REGISTRY[key]=meshes[idx];
+          }
+          console.log('[items] exploration_objects loaded; keys:', Object.fromEntries(Object.entries(REGISTRY).map(([k,m])=>[k,m.name])));
+        })
+        .catch(e=>console.warn('[items] load failed', TOOLS_GLB, e));
+      return _loaded;
+    }
+
+    function clone(key, scene){
+      const src=REGISTRY[key]; if (!src) return null;
+      const c=src.clone(key+'_clone', null); c.setEnabled(true);
+      c.getChildMeshes().forEach((m,i)=>{ if (m.material) m.material = m.material.clone((m.material.name||key)+'_mat_'+i); });
+      return c;
+    }
+
+    window.ItemModels = { ready: load, clone: (k,s)=>clone(k,s) };
+
+    window.replaceItemPrimitive = async function(primitiveMesh, key){
+      try{
+        const scene=primitiveMesh.getScene(); await load(scene);
+        const real=clone(key, scene);
+        if (real){
+          real.position.copyFrom(primitiveMesh.position);
+          if (primitiveMesh.rotationQuaternion){
+            real.rotationQuaternion = primitiveMesh.rotationQuaternion.clone();
+          } else if (primitiveMesh.rotation) {
+            real.rotation = primitiveMesh.rotation.clone ? primitiveMesh.rotation.clone() : primitiveMesh.rotation;
+          }
+          real.scaling.copyFrom(primitiveMesh.scaling);
+          primitiveMesh.dispose();
+          return real;
+        }
+      }catch(e){ console.warn('[items] replace failed', key, e); }
+      return primitiveMesh;
+    };
+  })();
+  </script>
+
+  <!-- Items / models (now can use ItemModels/replaceItemPrimitive) -->
   <script src="./assets/index3/video_feed.js?v=1.0"></script>
   <script src="./assets/index3/items_models_exploration.js?v=1.0"></script>
   <script src="./assets/index3/items.js?v=2.1"></script>
@@ -239,18 +298,16 @@
 
   <!-- Weather config FIRST -->
   <script>
-    // ambient.mp3 is only for Clear; Rainstorm/Snow use their own files.
     window.WEATHER_AUDIO_MAP = {
       clear: ['ambient.mp3'],
       rain: ['rainstorm.mp3'],
       snow: ['snow.mp3'],
       thunder: ['thunder.mp3']
     };
-    window.RANDOM_WEATHER_ON_START = true; // pick Clear/Rainstorm/Snow when investigation starts
+    window.RANDOM_WEATHER_ON_START = true;
   </script>
   <script src="./assets/index3/weather.js?v=2.3"></script>
   <script>
-    // ensure random weather gets applied after audio unlock
     (function(){
       function go(){
         if (!window.Weather) return;
