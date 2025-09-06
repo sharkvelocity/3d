@@ -1,4 +1,3 @@
-<script>
 // assets/index3/ghost_barrier.js
 (function(){
   const S = {
@@ -142,4 +141,3 @@
     setVisible: (v)=> { if (S.line) S.line.isVisible = !!v; },
   };
 })();
-</script>
