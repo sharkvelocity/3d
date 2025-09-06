@@ -14,6 +14,74 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+<script>
+(function(){
+  // 1) Your maps here
+  window.MAP_REGISTRY = {
+    "Jailhouse": "./assets/models/map/jailhouse.glb",
+    // "Farmhouse": "./assets/models/map/farmhouse.glb",
+    // "School":    "./assets/models/map/school.glb"
+  };
+
+  // 2) resolve default map
+  const sel   = document.getElementById('map-select');
+  const stat  = document.getElementById('map-status');
+  const saved = localStorage.getItem('PP_MAP');
+  const first = Object.keys(MAP_REGISTRY)[0];
+  const key   = (saved && MAP_REGISTRY[saved]) ? saved : first;
+
+  // expose early for map.js
+  window.MAP_URL = MAP_REGISTRY[key];
+
+  // build dropdown
+  sel.innerHTML = '';
+  for (const [label, url] of Object.entries(MAP_REGISTRY)) {
+    const o = document.createElement('option');
+    o.value = label; o.textContent = label; o.dataset.url = url;
+    if (label === key) o.selected = true;
+    sel.appendChild(o);
+  }
+
+  async function head(u){
+    try { const r = await fetch(u, { method:'HEAD', cache:'no-cache' }); return r.ok; }
+    catch { return false; }
+  }
+  // warm the browser cache with a lightweight GET
+  async function warm(u){
+    try { await fetch(u, { method:'GET', cache:'force-cache' }); } catch {}
+  }
+
+  async function updateStatus(u){
+    stat.textContent = 'Checking…'; stat.style.color = '#9ff';
+    const ok = await head(u);
+    if (ok) {
+      stat.textContent = 'OK';
+      stat.style.color = '#9ff';
+      warm(u); // pull into HTTP cache so start is snappier
+    } else {
+      stat.textContent = '⚠ missing';
+      stat.style.color = '#f88';
+    }
+  }
+
+  updateStatus(window.MAP_URL);
+
+  sel.addEventListener('change', async ()=>{
+    const k = sel.value;
+    const u = MAP_REGISTRY[k];
+    window.MAP_URL = u;
+    localStorage.setItem('PP_MAP', k);
+    updateStatus(u);
+  });
+
+  // Re-assert the selected URL right before the game starts
+  document.getElementById('start-button')?.addEventListener('click', ()=>{
+    const k = sel.value;
+    window.MAP_URL = MAP_REGISTRY[k];
+    localStorage.setItem('PP_MAP', k);
+  }, { capture:true });
+})();
+</script>
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
@@ -65,14 +133,107 @@
 
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-    <button id="start-button">Start Investigation</button>
+    <button id="start-button">Start</button>
     <div id="map-wrap">
       <span>Map:</span>
       <select id="map-select">
         <option value="-1">(loading maps...)</option>
       </select>
+      <!-- status text restored -->
+      <span id="map-status" style="margin-left:8px;color:#9ff;">Checking…</span>
     </div>
   </div>
+
+  <!-- Map registry + pre-check (restored) -->
+  <script>
+  (function(){
+    // 1) your maps here
+    window.MAP_REGISTRY = {
+      "Jailhouse": "./assets/models/map/jailhouse.glb",
+      // "Farmhouse": "./assets/models/map/farmhouse.glb",
+      // "School":    "./assets/models/map/school.glb"
+    };
+
+    const sel  = document.getElementById('map-select');
+    const stat = document.getElementById('map-status');
+
+    // 2) resolve default + expose MAP_URL early for your loader
+    const saved = localStorage.getItem('PP_MAP');
+    const first = Object.keys(MAP_REGISTRY)[0];
+    const key   = (saved && MAP_REGISTRY[saved]) ? saved : first;
+    window.MAP_URL = MAP_REGISTRY[key];
+
+    // 3) build dropdown
+    sel.innerHTML = '';
+    for (const [label, url] of Object.entries(MAP_REGISTRY)) {
+      const o = document.createElement('option');
+      o.value = label; o.textContent = label; o.dataset.url = url;
+      if (label === key) o.selected = true;
+      sel.appendChild(o);
+    }
+
+    async function head(u){
+      try { const r = await fetch(u, { method:'HEAD', cache:'no-cache' }); return r.ok; }
+      catch { return false; }
+    }
+    async function warm(u){ try { await fetch(u, { method:'GET', cache:'force-cache' }); } catch {} }
+
+    async function updateStatus(u){
+      if (!stat) return;
+      stat.textContent = 'Checking…'; stat.style.color = '#9ff';
+      const ok = await head(u);
+      if (ok) { stat.textContent = 'OK'; stat.style.color = '#9ff'; warm(u); }
+      else    { stat.textContent = '⚠ missing'; stat.style.color = '#f88'; }
+    }
+
+    updateStatus(window.MAP_URL);
+
+    sel.addEventListener('change', ()=>{
+      const k = sel.value;
+      const u = MAP_REGISTRY[k];
+      window.MAP_URL = u;
+      localStorage.setItem('PP_MAP', k);
+      updateStatus(u);
+    });
+
+    // Re-assert selection right before Start handlers run
+    document.getElementById('start-button')?.addEventListener('click', ()=>{
+      const k = sel.value;
+      window.MAP_URL = MAP_REGISTRY[k];
+      localStorage.setItem('PP_MAP', k);
+    }, { capture:true });
+
+    // --- Optional: true Babylon pre-parse (toggle) ---
+    const WANT_PREPARSE = false; // set true to actually parse GLB in background
+    if (WANT_PREPARSE) {
+      (function preparse(){
+        function waitEngine(){
+          return new Promise(res=>{
+            (function poll(){
+              const eng = BABYLON.Engine?.LastCreatedEngine || BABYLON.EngineStore?.LastCreatedEngine;
+              if (eng) return res(eng);
+              setTimeout(poll, 60);
+            })();
+          });
+        }
+        async function doLoad(url){
+          try{
+            const engine = await waitEngine();
+            const preScene = new BABYLON.Scene(engine);
+            BABYLON.SceneLoader.LoadAssetContainer(url, null, preScene, (container)=>{
+              window.__PRELOADED_MAP__ = { url, container, preScene };
+              if (stat){ stat.textContent = 'Ready'; stat.style.color = '#9ff'; }
+            });
+          }catch(e){ console.warn('[map preparse] failed', e); }
+        }
+        // kick once URL exists
+        (function kick(){ if (!window.MAP_URL) return setTimeout(kick, 60); doLoad(window.MAP_URL); })();
+        // re-preparse on selection change
+        sel.addEventListener('change', ()=> doLoad(window.MAP_URL));
+      })();
+    }
+  })();
+  </script>
 
   <canvas id="renderCanvas" tabindex="0"></canvas>
 
@@ -134,131 +295,5 @@
   </script>
 
   <script src="./assets/dev/util/player_rig_controller_final.js"></script>
-  <script src="./assets/dev/util/moon.js"></script>
-  <script src="./assets/dev/util/minimap_northup_xyz.js"></script>
-
-  <script>
-  (function ensureMinimapCamera(){
-    function S(){ return window.SCENE; }
-    function getMiniCam(){
-      const s=S(); if (!s) return null;
-      return s && s.cameras && s.cameras.find(c => /mini|mm|map/i.test(c.name)) || null;
-    }
-    function tick(){
-      const s=S(), mm=getMiniCam();
-      if (s && mm) {
-        if (!s.activeCameras) s.activeCameras = [];
-        if (!s.activeCameras.includes(s.activeCamera)) s.activeCameras = [s.activeCamera];
-        if (!s.activeCameras.includes(mm)) s.activeCameras.push(mm);
-      }
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  })();
-  </script>
-
-  <!-- Master runtime -->
-  <script src="./assets/dev/util/pp_runtime.js"></script>
-
-  <!-- Remaining util + dev helpers -->
-  <script src="./assets/dev/util/sound_engine.js"></script>
-  <script src="./assets/dev/util/devtools.js"></script>
-
-  <!-- Ghost data & logic (subfolder fixed) -->
-  <script src="./assets/dev/ghost/ghost_db.js"></script>
-  <script src="./assets/dev/ghost/ghost_logic.js"></script>
-
-  <!-- Evidence & interaction systems (tools subfolder fixed) -->
-  <script src="./assets/dev/tools/uv_prints.js"></script>
-  <script src="./assets/dev/tools/salt_system.js"></script>
-  <script src="./assets/dev/tools/spirit_box.js"></script>
-  <script src="./assets/dev/tools/dots_system.js"></script>
-  <script src="./assets/dev/tools/writing_book.js"></script>
-
-  <!-- Bootstrap + patches -->
-  <script src="./assets/dev/game_bootstrap.js"></script>
-  <script src="./assets/dev/merge_patch.js"></script>
-  <script src="./assets/dev/glue_patch.js"></script>
-
-  <!-- Globals exporter -->
-  <script>
-  (function ensureGlobals(){
-    function tryExport(){
-      try {
-        if (window.ENGINE && window.SCENE) { window.camera = window.SCENE.activeCamera || window.camera; return; }
-        var eng = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedEngine) || (BABYLON.Engine && BABYLON.Engine.LastCreatedEngine);
-        var scn = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedScene)  || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene);
-        if (eng && scn){
-          window.ENGINE = eng;
-          window.SCENE  = scn;
-          window.camera = scn.activeCamera || window.camera;
-          return;
-        }
-      } catch(e){ /* swallow & retry */ }
-      setTimeout(tryExport, 50);
-    }
-    tryExport();
-  })();
-  </script>
-
-  <!-- Sync & camera ownership -->
-  <script src="./assets/dev/util/fp_tp_sync.js"></script>
-
-  <!-- Anti-orbit patch -->
-  <script>
-  (function antiOrbitOnce(){
-    if (window.__antiOrbitApplied__) return; window.__antiOrbitApplied__ = true;
-    function S(){ return window.SCENE || window.scene || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-    function apply(){
-      const s = S(); if (!s) return setTimeout(apply, 50);
-      let c = s.activeCamera;
-      if (!c) return setTimeout(apply, 50);
-
-      if (BABYLON.ArcRotateCamera && c instanceof BABYLON.ArcRotateCamera){
-        const u = new BABYLON.UniversalCamera("PlayerCam", c.position.clone(), s);
-        if (c.rotation) u.rotation.copyFrom(c.rotation);
-        s.activeCamera = u;
-        try { c.detachControl(); } catch(_){}
-        try { c.dispose(); } catch(_){}
-        c = u;
-      }
-      if (c.inputs && c.inputs.clear) c.inputs.clear();
-      c.inertia = 0;
-      c.angularSensibility = 1e9;
-
-      (function tether(){
-        const body = s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule'));
-        if (body && s.activeCamera){
-          try { s.activeCamera._lockedTarget = body; } catch(_){}
-          return;
-        }
-        setTimeout(tether, 50);
-      })();
-    }
-    apply();
-  })();
-  </script>
-
-  <!-- HUD XYZ updater -->
-  <script>
-  (function fixHudXYZ(){
-    const label = document.getElementById('hud-xyz');
-    if (!label) return;
-    function S(){ return window.SCENE; }
-    function src(){
-      const s=S(); if (!s) return null;
-      return s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')) || s.activeCamera || null;
-    }
-    function loop(){
-      const o = src();
-      if (o && o.position){
-        const p = o.position;
-        label.textContent = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
-      }
-      requestAnimationFrame(loop);
-    }
-    requestAnimationFrame(loop);
-  })();
-  </script>
-
-</body></html>
+</body>
+</html>
