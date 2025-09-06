@@ -123,7 +123,7 @@
   <!-- Start screen -->
   <div id="title-screen">
     <div id="title-content">
-      <img id="title-logo" src="./logo.jpg" alt="PhasmaPhoney Logo" />
+      <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
       <div style="margin:8px 0 16px; color:#9ff;">“Welcome back. Keep the lights on and the sanity high.”</div>
       <button id="start-button">Start Investigation</button>
     </div>
@@ -479,9 +479,9 @@ function lookAtXZ(mesh, target){ const dir = target.subtract(mesh.position); dir
 function $(s){ return document.querySelector(s); }
 
 function playFootstep(){
-  const arr = [audio.step1,audio.step2,audio.step3];
-  const s = arr[Math.floor(Math.random()*arr.length)];
-  if(s){ s.currentTime=0; s.volume=0.6; s.play().catch(()=>{}); }
+  // Use the shared step pool to avoid referencing undefined audio.step1/2/3
+  playStep(0.45);
+}); }
 }
 
 /* ===========================================================
@@ -1543,24 +1543,58 @@ function selectSlot(n){
   syncHeldLights();
 }
 function refreshHandPreview(){
-  const wrap = document.getElementById('hand-preview'); wrap.innerHTML = '';
+  const wrap = document.getElementById('hand-preview'); 
+  wrap.innerHTML = '';
   const item = inventory.slots[activeItemSlot];
-  if(!item || !itemsGlb){ wrap.style.display='none'; return; }
-  const c = document.createElement('canvas'); c.width=180; c.height=140; c.style.width='100%'; c.style.height='100%'; wrap.appendChild(c);
+  if (!item || !itemsGlb){ wrap.style.display='none'; return; }
 
-  const pv = new BABYLON.Engine(c, true);
-  const pvScene = new BABYLON.Scene(pv);
-  const pvCam = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), pvScene);
-  pvCam.attachControl(c, false); pvCam.panningSensibility=0; pvCam.wheelPrecision=50;
-  pvScene.clearColor = new BABYLON.Color4(0,0,0,0);
-  const hem = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), pvScene); hem.intensity=1.2;
+  // Reuse a single engine/scene to avoid leaks
+  window.__handPV = window.__handPV || { engine:null, scene:null, camera:null, light:null, canvas:null, mesh:null, running:false, resizeHandler:null };
+  const PV = window.__handPV;
 
-  const meshName = ITEM_MODEL_MAP[item]; const src = meshName && inventory.models[meshName];
-  if(!src){ wrap.style.display='none'; pv.dispose(); return; }
-  const clone = src.clone("pv-"+meshName, null, true); pvScene.addMesh(clone);
-  clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0); clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
-  wrap.style.display='block'; pv.runRenderLoop(()=>pvScene.render()); window.addEventListener('resize', ()=> pv.resize());
+  if (!PV.canvas){
+    const c = document.createElement('canvas'); 
+    c.width=180; c.height=140; c.style.width='100%'; c.style.height='100%'; 
+    wrap.appendChild(c);
+    PV.canvas = c;
+  } else {
+    wrap.appendChild(PV.canvas);
+  }
+
+  if (!PV.engine){
+    PV.engine = new BABYLON.Engine(PV.canvas, true);
+    PV.scene = new BABYLON.Scene(PV.engine);
+    PV.scene.clearColor = new BABYLON.Color4(0,0,0,0);
+    PV.camera = new BABYLON.ArcRotateCamera("pvcam", Math.PI*1.2, Math.PI/3, 2.4, new BABYLON.Vector3(0,0.1,0), PV.scene);
+    PV.camera.attachControl(PV.canvas, false); PV.camera.panningSensibility=0; PV.camera.wheelPrecision=50;
+    PV.light = new BABYLON.HemisphericLight("pvH", new BABYLON.Vector3(0,1,0), PV.scene); PV.light.intensity=1.2;
+
+    if (!PV.running){
+      PV.running = true;
+      PV.engine.runRenderLoop(()=> PV.scene && PV.scene.render());
+    }
+    if (!PV.resizeHandler){
+      PV.resizeHandler = ()=> PV.engine && PV.engine.resize();
+      window.addEventListener('resize', PV.resizeHandler);
+    }
+  }
+
+  // Replace mesh
+  if (PV.mesh){ try{ PV.mesh.dispose(); }catch{} PV.mesh=null; }
+
+  const meshName = ITEM_MODEL_MAP[item]; 
+  const src = meshName && inventory.models[meshName];
+  if (!src){ wrap.style.display='none'; return; }
+
+  const clone = src.clone("pv-"+meshName, null, true);
+  PV.scene.addMesh(clone);
+  clone.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI, 0); 
+  clone.scaling = new BABYLON.Vector3(0.008,0.008,0.008);
+  PV.mesh = clone;
+
+  wrap.style.display='block';
 }
+function refreshCameraOverlay(){
 function refreshCameraOverlay(){
   const item = inventory.slots[activeItemSlot];
   const show = (item==='Camera');
@@ -1883,7 +1917,7 @@ window.addEventListener('keyup', (e)=>{
     case 'Shift': player.running = false; break;
   }
 });
-window.addEventListener('mousedown', (e)=>{ if(e.button===0) useActiveItem(); });
+canvas.addEventListener('mousedown', e=>{ if(e.button===0) useActiveItem(); });
 window.addEventListener('wheel', (e)=>{
   const dir = Math.sign(e.deltaY);
   activeItemSlot += dir>0 ? 1 : -1;
