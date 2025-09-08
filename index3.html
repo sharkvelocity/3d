@@ -1,3 +1,4 @@
+<!-- index.html  (FULL FILE: order fixed + audio guard + staged prewarm) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,7 +15,7 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
-<script src="./assets/index3/devtools.js?v=7.4.0"></script>
+  <script src="./assets/index3/devtools.js?v=7.4.0"></script>
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
@@ -56,7 +57,7 @@
 
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
 
-    /* --- Belt icon clamp + leak guard --- */
+    /* Belt icon clamp + leak guard */
     #belt img.item-icon { max-width:60px; max-height:60px; image-rendering:crisp-edges; }
     body > img[src*="/assets/icons/"] { display:none !important; position:absolute !important; left:-99999px !important; top:-99999px !important; }
     #belt img[src*="/assets/icons/"] { display:inline-block !important; position:static !important; left:auto !important; top:auto !important; }
@@ -121,75 +122,100 @@
 
   <div id="toast"></div>
 
-  <!-- Player & world systems -->
-  <script src="./assets/dev/util/modular_settings.js"></script>
-  <script src="./assets/dev/modular_bindings.js"></script>
-  <script src="./assets/dev/modular_audio.js"></script>
+  <!-- ======= Media Autoplay Guard (prevents SFX before click) ======= -->
   <script>
-  (function hookAudioStart(){
-    function attach(){
-      var btn = document.getElementById('start-button') || document.querySelector('[data-start]');
-      if (!btn){ return setTimeout(attach, 100); }
-      btn.addEventListener('click', function once(){
-        btn.removeEventListener('click', once);
-        try { PP && PP.audio && PP.audio.init(); } catch(e){ console.warn('[audio.init] failed', e); }
-      });
+  (function mediaAutoplayGuard(){
+    const proto = window.HTMLMediaElement && HTMLMediaElement.prototype;
+    const OriginalAudio = window.Audio;
+    const guard = { unlocked:false, queue:[] };
+
+    function safePlay(el){
+      if (!guard.unlocked) {
+        guard.queue.push(() => el.play?.().catch(()=>{}));
+        return Promise.resolve(); // swallow attempts pre-unlock
+      }
+      return el.play?.().catch(()=>{});
     }
-    attach();
+
+    if (proto && !proto.__pp_guarded) {
+      const _play = proto.play;
+      proto.play = function(){ return safePlay(this) || Promise.resolve(); };
+      proto.__pp_guarded = true;
+    }
+
+    if (OriginalAudio && !OriginalAudio.__pp_guarded) {
+      window.Audio = function(src){
+        const el = new OriginalAudio(src);
+        // Never autoplay
+        el.autoplay = false;
+        el.muted = !guard.unlocked;
+        return el;
+      };
+      window.Audio.__pp_guarded = true;
+    }
+
+    window.__PP_AUDIO_GUARD__ = {
+      unlock(){
+        guard.unlocked = true;
+        // Drain queued plays
+        const q = guard.queue.splice(0, guard.queue.length);
+        q.forEach(fn => { try{ fn(); }catch{} });
+      }
+    };
   })();
   </script>
 
+  <!-- ======= Core utilities (keep order) ======= -->
+  <script src="./assets/dev/util/modular_settings.js"></script>
+  <script src="./assets/dev/modular_bindings.js"></script>
+
+  <!-- ======= Audio (no init until Start click) ======= -->
+  <script src="./assets/dev/modular_audio.js"></script>
+  <script src="./assets/dev/util/sound_engine.js"></script>
+
+  <!-- ======= Player & world ======= -->
   <script src="./assets/dev/util/player_rig_controller_final.js"></script>
   <script src="./assets/dev/util/moon.js"></script>
   <script src="./assets/dev/util/minimap_northup_xyz.js"></script>
-
   <script src="./assets/dev/util/pp_runtime.js"></script>
-  <script src="./assets/dev/util/sound_engine.js"></script>
- 
-  <!-- Ghost systems -->
+
+  <!-- ======= Ghost + tools ======= -->
   <script src="./assets/dev/ghost/ghost_db.js"></script>
   <script src="./assets/dev/ghost/ghost_logic.js"></script>
-
-  <!-- Tools -->
   <script src="./assets/dev/tools/uv_prints.js"></script>
   <script src="./assets/dev/tools/salt_system.js"></script>
   <script src="./assets/dev/tools/spirit_box.js"></script>
   <script src="./assets/dev/tools/dots_system.js"></script>
   <script src="./assets/dev/tools/writing_book.js"></script>
 
-  <!-- Game bootstrap -->
+  <!-- ======= Bootstrap & patches ======= -->
   <script src="./assets/dev/game_bootstrap.js"></script>
   <script src="./assets/dev/merge_patch.js"></script>
   <script src="./assets/dev/glue_patch.js"></script>
-
-  <!-- Make global handles available quickly -->
-  <script>
-  (function ensureGlobals(){
-    function tryExport(){
-      try {
-        if (window.ENGINE && window.SCENE) { window.camera = window.SCENE.activeCamera || window.camera; return; }
-        var eng = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedEngine) || (BABYLON.Engine && BABYLON.Engine.LastCreatedEngine);
-        var scn = (BABYLON.EngineStore && BABYLON.EngineStore.LastCreatedScene)  || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene);
-        if (eng && scn){
-          window.ENGINE = eng;
-          window.SCENE  = scn;
-          window.camera = scn.activeCamera || window.camera;
-          return;
-        }
-      } catch(e){ }
-      setTimeout(tryExport, 50);
-    }
-    tryExport();
-  })();
-  </script>
-
-  <!-- Sync FP/TP -->
   <script src="./assets/dev/util/fp_tp_sync.js"></script>
 
-  <!-- ========== NEW PATCHES ========== -->
-
-  <!-- Pointer lock toggle: Press L to lock/unlock; ESC always unlocks -->
+  <!-- ======= Startup hooks ======= -->
   <script>
+  // Initialize audio ONLY on Start button click, then unlock guard
+  (function hookAudioStart(){
+    function attach(){
+      var btn = document.getElementById('start-button') || document.querySelector('[data-start]');
+      if (!btn){ return setTimeout(attach, 100); }
+      btn.addEventListener('click', function once(){
+        btn.removeEventListener('click', once);
+        try {
+          PP && PP.audio && PP.audio.init().then(()=>{
+            // allow media play; staged prewarm so UI stays smooth
+            window.__PP_AUDIO_GUARD__?.unlock();
+            PP.audio.stagePrewarm();
+          });
+        } catch(e){ console.warn('[audio.init] failed', e); }
+      });
+    }
+    attach();
+  })();
+
+  // Pointer lock toggle (L), ESC unlocks
   (function pointerLockFix(){
     const canvas = document.getElementById('renderCanvas');
     let desireLock = false;
@@ -198,25 +224,19 @@
     document.addEventListener('pointerlockchange', ()=>{ desireLock = (document.pointerLockElement === canvas); });
     canvas.addEventListener('click', ()=>{ if (desireLock) lock(); });
     window.addEventListener('keydown', (e)=>{
-      if (e.code === 'KeyL'){ // toggle
-        if (document.pointerLockElement) unlock(); else { desireLock = true; lock(); }
-      }
+      if (e.code === 'KeyL'){ if (document.pointerLockElement) unlock(); else { desireLock = true; lock(); } }
       if (e.code === 'Escape') unlock();
     }, {capture:true});
     document.getElementById('start-button')?.addEventListener('click', ()=>{ desireLock=true; setTimeout(lock, 150); }, {once:true});
   })();
-  </script>
 
-  <!-- Belt/icon leak guard -->
-  <script>
+  // Belt/icon leak guard (unchanged)
   (function guardIconLeaks(){
     const belt = () => document.getElementById('belt');
     const hide = (img) => { img.style.display='none'; img.style.position='absolute'; img.style.left='-99999px'; img.style.top='-99999px'; };
-    // clamp any existing
     document.querySelectorAll('img[src*="/assets/icons/"]').forEach(img=>{
       if (!belt() || !belt().contains(img)) hide(img); else img.classList.add('item-icon');
     });
-    // observe future additions
     new MutationObserver(muts=>{
       for (const m of muts) for (const n of m.addedNodes){
         if (n && n.tagName==='IMG' && (n.src||'').includes('/assets/icons/')){
@@ -225,103 +245,8 @@
       }
     }).observe(document.documentElement, {childList:true, subtree:true});
   })();
-  </script>
 
-  <!-- Spawn/scale fix: put player on ground once; auto-scale giant model to ~1.75m -->
-  <script>
-  (function spawnAndScaleFix(){
-    const TARGET_HEIGHT = 1.75;  // meters
-    const CAP_RADIUS    = 0.35;  // capsule radius for a little lift
-    let applied = false;
-
-    function S(){ return window.SCENE || BABYLON.Engine?.LastCreatedScene; }
-
-    function groundYAt(x,z,approxY){
-      const s=S(); if(!s) return null;
-      const from = new BABYLON.Vector3(x, (approxY??2) + 6, z);
-      const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,-1,0), 50);
-      const hit  = s.pickWithRay(ray, (m)=>{
-        if (!m) return false;
-        if (m.metadata?.isGround === true) return true;
-        const n=(m.name||'').toLowerCase();
-        return /(floor|ground|asphalt|concrete|tile|yard|cell|corridor|hall|street|pavement|stairs)/.test(n);
-      });
-      return (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.y : null;
-    }
-
-    function scaleIfGiant(node){
-      try{
-        const bb = node.getBoundingInfo?.().boundingBox;
-        if (!bb) return;
-        const h = bb.maximumWorld.y - bb.minimumWorld.y;
-        if (isFinite(h) && h>0.01){
-          const sf = TARGET_HEIGHT / Math.min(h, 1000);
-          if (sf>0 && sf<10) node.scaling.scaleInPlace(sf);
-        }
-      }catch{}
-    }
-
-    function findBodyOrCamera(){
-      const s=S(); if (!s) return null;
-      return s.__playerBody || s.getMeshByName?.('player_capsule') || s.activeCamera || null;
-    }
-
-    function findSpawnAnchor(){
-      const s=S(); if (!s) return null;
-      const names = ['PlayerSpawn','Spawn','Start','Van_Spawn','player_spawn','spawn_point'];
-      for (const n of names){
-        const t = s.getTransformNodeByName?.(n) || s.getNodeByName?.(n);
-        if (t) return t;
-      }
-      return null;
-    }
-
-    function applyOnce(){
-      if (applied) return;
-      const s=S(); if (!s) return setTimeout(applyOnce, 120);
-
-      const body   = findBodyOrCamera();
-      const anchor = findSpawnAnchor();
-
-      if (!body) return setTimeout(applyOnce, 120);
-
-      // scale
-      scaleIfGiant(body);
-
-      // position to ground
-      let p = (anchor && anchor.getAbsolutePosition?.()) || body.position.clone();
-      const gy = groundYAt(p.x, p.z, p.y);
-      if (gy != null) { p.y = gy + CAP_RADIUS + 0.12; body.position.copyFrom(p); }
-      else            { body.position.set(0, 1.8, 0); }
-
-      applied = true;
-      console.log('[spawnAndScaleFix] positioned at', body.position.asArray());
-    }
-
-    // try after start, and once scene is populated with meshes
-    document.getElementById('start-button')?.addEventListener('click', ()=> setTimeout(applyOnce, 400), {once:true});
-    const poll = setInterval(()=>{ const s=S(); if (s && (s.meshes?.length||0) > 20){ clearInterval(poll); applyOnce(); } }, 300);
-  })();
-  </script>
-
-  <!-- Optional: ensure ghost controller initializes and randomizes once -->
-  <script>
-  (function ensureGhost(){
-    function go(){
-      try{
-        if (window.ghostCtrl){
-          ghostCtrl.init?.();
-          const st = ghostCtrl.getState?.();
-          if (!st || !st.type) ghostCtrl.randomizeGhost?.();
-        }
-      }catch(e){}
-    }
-    document.getElementById('start-button')?.addEventListener('click', ()=> setTimeout(go, 800), {once:true});
-  })();
-  </script>
-
-  <!-- HUD XYZ updater (kept from your file; shows coords if you unhide the element) -->
-  <script>
+  // HUD XYZ updater (unchanged behavior)
   (function fixHudXYZ(){
     const label = document.getElementById('hud-xyz');
     if (!label) return;
@@ -341,8 +266,8 @@
     requestAnimationFrame(loop);
   })();
   </script>
-<button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
-<div id="devtools-panel" style="display:none;"></div>
 
+  <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
+  <div id="devtools-panel" style="display:none;"></div>
 </body>
 </html>
