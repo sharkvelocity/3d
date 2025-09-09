@@ -1,6 +1,5 @@
-<script>
 // Weather system with crossfades + lightning/thunder + indoor muffling.
-// SAFE: no longer gated on window.audioUnlocked to construct sounds.
+// STARTS ONLY AFTER "pp:start" (fired when user clicks Start Investigation).
 (function(){
   "use strict";
   const lerp = (a,b,t)=> a + (b-a)*Math.max(0, Math.min(1, t));
@@ -19,10 +18,14 @@
     lastT: performance.now()/1000,
     boundUpdate: null,
     lightCache: [],
+    // indoor monitor
+    _indoorLast: null,
+    _indoorAcc: 0,
+    _indoorPeriod: 0.5, // seconds
   };
 
   function ensureSounds(){
-    if (S.ready || !window.scene) return; // ← removed `!window.audioUnlocked` gate
+    if (S.ready || !window.scene) return;
     const scn = window.scene;
     try {
       S.sounds.ambient = new BABYLON.Sound("amb", "./assets/audio/ambient.mp3", scn, null,
@@ -34,13 +37,11 @@
       S.sounds.rain    = new BABYLON.Sound("rain", "./assets/audio/rainstorm.mp3", scn, null,
         { loop:true, autoplay:false, volume:0.0, spatialSound:false });
 
-      // Optional Snow
       try {
         S.sounds.snow = new BABYLON.Sound("snow", "./assets/audio/snow.mp3", scn, null,
           { loop:true, autoplay:false, volume:0.0, spatialSound:false });
       } catch(_){ S.sounds.snow = null; }
 
-      // Optional thunder list (can be provided by WEATHER_AUDIO_MAP)
       const list = (window.WEATHER_AUDIO_MAP?.thunder?.length ? window.WEATHER_AUDIO_MAP.thunder : ["thunder1.mp3","thunder2.mp3","thunder3.mp3"]);
       list.forEach((f,i)=>{
         try{
@@ -135,11 +136,56 @@
     }catch{}
   }
 
+  // -------- INDOOR / OUTDOOR DETECTION (fixes "muffled outside") --------
+  function _isIndoorAt(pos){
+    const sc = window.scene; if (!sc || !pos) return false;
+
+    // 1) Van zone override → outdoor
+    try{
+      const V = window.PP?.CONFIG?.VAN;
+      if (V && V.POSITION && typeof V.RADIUS === 'number') {
+        if (BABYLON.Vector3.Distance(pos, V.POSITION) <= (V.RADIUS + 1.0)) return false;
+      }
+    } catch {}
+
+    // 2) Upward ray: if we hit a roof/ceiling above us, treat as indoor
+    const from = new BABYLON.Vector3(pos.x, pos.y + 0.5, pos.z);
+    const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,1,0), 12); // up to 12m overhead
+    const hit  = sc.pickWithRay(ray, (m)=>{
+      if (!m) return false;
+      if (m.isPickable === false) return false;
+      if (m.metadata?.isRoof || m.metadata?.isCeiling) return true;
+      const n = (m.name || '').toLowerCase();
+      return /roof|ceiling|attic|upper|secondfloor/.test(n);
+    });
+    return !!(hit && hit.hit);
+  }
+
+  function _indoorMonitor(dt){
+    S._indoorAcc += dt;
+    if (S._indoorAcc < S._indoorPeriod) return;
+    S._indoorAcc = 0;
+
+    const cam = scene?.activeCamera || window.camera;
+    const p = cam?.position;
+    if (!p) return;
+
+    const isIn = _isIndoorAt(p);
+    if (isIn !== S._indoorLast){
+      S._indoorLast = isIn;
+      Weather.setIndoor(isIn); // this will update volumes & HUD text
+    }
+  }
+  // ---------------------------------------------------------------------
+
   function _update(dt){
     if (S.state === "Rainstorm"){
       const now = performance.now()/1000;
       if (now >= S.nextLightningAt){ _flashLightning(); _scheduleLightningSoon(); }
     }
+    // Check indoor/outdoor at low frequency
+    _indoorMonitor(dt);
+
     _applyTargets(dt);
     const hw = document.getElementById('hud-weather');
     if (hw) hw.textContent = S.state + (S.indoor ? " (Indoor)" : "");
@@ -160,7 +206,7 @@
   window.Weather = {
     init(){
       ensureSounds();
-      Weather.set(S.state, { immediate:true }); // set current targets and start loops if possible
+      Weather.set(S.state, { immediate:true });
       _hookSceneUpdate();
     },
     set(state, opts={}){
@@ -188,27 +234,14 @@
         _scheduleLightningSoon(999,999);
       }
 
-      if (opts.immediate){
-        try{
-          ensureSounds();
-          if (!S.ready) return;
-          const muffle = S.indoor ? 0.35 : 1.0;
-          S.sounds.ambient?.setVolume(S.volTarget.ambient);
-          S.sounds.clear?.setVolume(S.volTarget.clear);
-          S.sounds.rain?.setVolume(S.volTarget.rain * S.intensity * muffle);
-          S.sounds.snow?.setVolume(S.volTarget.snow * S.intensity * muffle);
-          // ensure loops are running after setting volumes
-          S.sounds.ambient && !S.sounds.ambient.isPlaying && S.sounds.ambient.play();
-          (state==="Clear")    && S.sounds.clear && !S.sounds.clear.isPlaying && S.sounds.clear.play();
-          (state==="Rainstorm")&& S.sounds.rain  && !S.sounds.rain.isPlaying  && S.sounds.rain.play();
-          (state==="Snow")     && S.sounds.snow  && !S.sounds.snow.isPlaying  && S.sounds.snow.play();
-        }catch{}
-      }
-
       const hw = document.getElementById('hud-weather');
       if (hw) hw.textContent = S.state + (S.indoor ? " (Indoor)" : "");
     },
-    setIndoor(on){ S.indoor = !!on; },
+    setIndoor(on){
+      S.indoor = !!on;
+      // Recompute targets to apply muffling immediately
+      Weather.set(S.state, { intensity:S.intensity });
+    },
     setVolumes(v){
       Object.assign(S.volBase, {
         ambient: (v.ambient ?? S.volBase.ambient),
@@ -224,24 +257,17 @@
     update(){ /* no-op; driven by scene */ }
   };
 
-  // React to the global unlock event: (re)start loops immediately
-  document.addEventListener('pp-audio-unlocked', ()=>{
-    try{
+  // ---------- START TRIGGER ----------
+  window.addEventListener('pp:start', ()=>{
+    const tryStart = () => {
+      if (!window.scene) return setTimeout(tryStart, 100);
       ensureSounds();
-      if (!S.ready) return;
-      // Apply current state immediately and kick loops
-      Weather.set(S.state, { immediate:true, intensity:S.intensity });
-    }catch(e){ console.warn('[weather] unlock hook failed', e); }
+      const r = Math.random();
+      const next = (r < 0.5) ? "Clear" : (r < 0.8 ? "Rainstorm" : "Snow");
+      Weather.set(next, { immediate:true, intensity: 0.85 });
+      Weather.init();
+      console.log("[Weather] started:", S.state);
+    };
+    tryStart();
   });
-
-  // Auto-init when scene is present; play will wait for unlock
-  const boot = setInterval(()=> {
-    try {
-      if (window.scene){
-        clearInterval(boot);
-        Weather.init();
-      }
-    } catch {}
-  }, 200);
 })();
-</script>
