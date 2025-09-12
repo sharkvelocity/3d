@@ -59,7 +59,7 @@
 
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
 
-    /* Belt icon clamp + leak guard */
+    /* Belt icon clamp + leak guard (fixed line below) */
     #belt img.item-icon { max-width:60px; max-height:60px; image-rendering:crisp-edges; }
     body > img[src*="/assets/icons/"] { display:none !important; position:absolute !important; left:-99999px !important; top:-99999px !important; }
     #belt img[src*="/assets/icons/"] { display:inline-block !important; position:static !important; left:auto !important; top:auto !important; }
@@ -138,7 +138,7 @@
   <script src="./assets/dev/util/modular_settings.js"></script>
   <script src="./assets/dev/modular_bindings.js"></script>
 
-  <!-- Audio core (registry & helpers; no ambient here) -->
+  <!-- Audio core (HTMLAudio: weather-only ambient) -->
   <script src="./assets/dev/modular_audio.js"></script>
   <script src="./assets/dev/util/sound_engine.js"></script>
 
@@ -148,13 +148,13 @@
   <script src="./assets/dev/util/moon.js"></script>
   <script src="./assets/dev/util/minimap_northup_xyz.js"></script>
 
-  <!-- WEATHER = only ambient system (Clear/Rainstorm/Bloodmoon/Snow) -->
+  <!-- WEATHER (ambient + lightning/thunder visuals/audio handled there) -->
   <script src="./assets/dev/util/weather.js"></script>
 
   <!-- Inventory + Belt + Van UI + Effects -->
   <script src="./assets/dev/game/inventory_system.js"></script>
   <script src="./assets/dev/ui/belt_manager.js"></script>
-  <script src="./assets/dev/ui/van.js"></script>
+  <script src="./assets/dev/ui/van_ui.js"></script>
   <script src="./assets/dev/effects/effects_sanity_med.js"></script>
 
   <!-- Ghost systems -->
@@ -176,7 +176,7 @@
 
   <!-- ===================== RUNTIME HELPERS ===================== -->
 
-  <!-- Start button: dispatch pp:start; init audio registry; pointer lock -->
+  <!-- Start button: unlock audio; dispatch pp:start; pointer lock -->
   <script>
   (function wireStart(){
     const btn = document.getElementById('start-button');
@@ -228,11 +228,11 @@
   })();
   </script>
 
-  <!-- Belt/icon leak guard -->
+  <!-- Belt/icon leak guard (fixed) -->
   <script>
   (function guardIconLeaks(){
     const belt = () => document.getElementById('belt');
-    const hide = (img) => { img.style.display='none'; img.style.position='absolute'; img.style.left='-99999px'; img.style.top:'-99999px'; };
+    const hide = (img) => { img.style.display='none'; img.style.position='absolute'; img.style.left='-99999px'; img.style.top='-99999px'; };
     document.querySelectorAll('img[src*="/assets/icons/"]').forEach(img=>{
       if (!belt() || !belt().contains(img)) hide(img); else img.classList.add('item-icon');
     });
@@ -246,140 +246,107 @@
   })();
   </script>
 
-  <!-- Spawn, ground snap, correct yaw (Index3) -->
+  <!-- Spawn: ground snap + scale normalize + yaw toward van/front; robust Index3 -->
   <script>
-  (function spawnAndOrientation(){
-    const TARGET_HEIGHT = 1.75;
+  (function spawnScaleYaw(){
+    const TARGET_HEIGHT = 1.75;       // meters (approx eye height 1.6)
     const CAP_RADIUS    = 0.35;
     let applied = false;
 
     function S(){ return window.SCENE || BABYLON.Engine?.LastCreatedScene; }
 
+    function vOf(t){ try { return t?.getAbsolutePosition?.() || t?.position || null; } catch { return null; } }
+    function yawFrom(t){
+      if (!t) return null;
+      if (t.rotationQuaternion){ return t.rotationQuaternion.toEulerAngles().y; }
+      if (t.rotation && typeof t.rotation.y === 'number') return t.rotation.y;
+      return null;
+    }
+    function qFromYaw(y){ return BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, y); }
+    function setYaw(node, y){
+      if (!node) return;
+      if (node.rotationQuaternion) node.rotationQuaternion.copyFrom(qFromYaw(y));
+      else { node.rotation = node.rotation || new BABYLON.Vector3(0,0,0); node.rotation.y = y; }
+    }
+
     function groundYAt(x,z,approxY){
       const s=S(); if(!s) return null;
-      const from = new BABYLON.Vector3(x, (approxY ?? 6) + 20, z);
+      const from = new BABYLON.Vector3(x, (approxY ?? 4) + 20, z);
       const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,-1,0), 200);
       const hit  = s.pickWithRay(ray, (m)=>{
-        if (!m) return false;
-        if (m.isPickable === false) return false;
+        if (!m || m.isPickable === false) return false;
         const n=(m.name||'').toLowerCase();
-        // ignore sky/atmo/light probes/etc
         if (/sky|cloud|atmo|probe|env|reflection/.test(n)) return false;
-        return true; // accept any pickable geometry
+        return true;
       });
       return (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.y : null;
     }
 
-    function scaleIfGiant(node){
-      try{
-        const bb = node.getBoundingInfo?.().boundingBox;
-        if (!bb) return;
-        const h = bb.maximumWorld.y - bb.minimumWorld.y;
-        if (isFinite(h) && h>0.01){
-          const sf = TARGET_HEIGHT / Math.min(h, 1000);
-          if (sf>0 && sf<10) node.scaling?.scaleInPlace?.(sf);
-        }
-      }catch{}
-    }
-
-    function qFromYaw(y){
-      return BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, y);
-    }
-
-    function setYaw(node, yaw){
-      if (!node) return;
-      if (node.rotationQuaternion){
-        node.rotationQuaternion.copyFrom(qFromYaw(yaw));
-      } else {
-        node.rotation = node.rotation || new BABYLON.Vector3(0,0,0);
-        node.rotation.y = yaw;
-      }
-    }
-
-    function yawFromAnchor(t){
-      if (!t) return null;
-      if (t.rotationQuaternion){
-        const e = t.rotationQuaternion.toEulerAngles();
-        return e.y;
-      }
-      if (t.rotation && typeof t.rotation.y === 'number') return t.rotation.y;
-      return null;
-    }
-
-    function v(t){ try { return t.getAbsolutePosition?.() || t.position || null; } catch { return null; } }
-
-    // Try very hard to find the Index3 spawn with pos + yaw
-    function resolveIndex3Spawn(){
-      const s = S(); if (!s) return null;
-
-      // 1) Direct devtools exports (various conventions)
+    function resolveIndex3(){
+      const s=S(); if (!s) return null;
       const cand = [
         window.Index3Spawn, window.PP_INDEX3_SPAWN, window.PP?.index3?.spawn,
         window.DEVTOOLS?.Index3Spawn, window.DEVTOOLS?.spawns?.index3,
         window.DEVTOOLS?.spawns?.[3], window.DEVTOOLS?.getSpawn?.('index3')
-      ].filter(Boolean)[0];
-
+      ].find(Boolean);
       if (cand){
-        // could be {x,y,z,yaw} or TransformNode
-        if (cand.x !== undefined && cand.y !== undefined && cand.z !== undefined){
-          const pos = new BABYLON.Vector3(cand.x, cand.y, cand.z);
-          const yaw = (typeof cand.yaw === 'number') ? cand.yaw : null;
-          return { pos, yaw };
-        }
-        if (cand.getAbsolutePosition){
-          return { pos: v(cand), yaw: yawFromAnchor(cand) };
-        }
+        if (cand.x!==undefined && cand.y!==undefined && cand.z!==undefined)
+          return { pos:new BABYLON.Vector3(cand.x,cand.y,cand.z), yaw:(typeof cand.yaw==='number')?cand.yaw:null };
+        if (cand.getAbsolutePosition) return { pos:vOf(cand), yaw:yawFrom(cand) };
       }
-
-      // 2) Scene anchors by name
-      const names = [
-        'Index3','index3','Index_3','index_3','Index3_Start','index3_start',
+      const names = ['Index3','index3','Index_3','index_3','Index3_Start','index3_start',
         'Spawn_Index3','spawn_index3','PlayerSpawn_Index3','player_spawn_index3',
-        'Van_Spawn','van_spawn','PlayerSpawn','Spawn','Start'
-      ];
+        'Van_Spawn','van_spawn','PlayerSpawn','Spawn','Start'];
       for (const n of names){
         const t = s.getTransformNodeByName?.(n) || s.getNodeByName?.(n);
-        if (t) return { pos: v(t), yaw: yawFromAnchor(t) };
+        if (t) return { pos:vOf(t), yaw:yawFrom(t) };
       }
-
-      // 3) Mesh metadata
       for (const m of (s.transformNodes||[])){
-        if (m?.metadata?.spawn === 'index3' || m?.metadata?.index === 3){
-          return { pos: v(m), yaw: yawFromAnchor(m) };
-        }
+        if (m?.metadata?.spawn === 'index3' || m?.metadata?.index === 3)
+          return { pos:vOf(m), yaw:yawFrom(m) };
       }
       return null;
     }
 
-    function findBodyOrCamera(){
+    function findBody(){
       const s=S(); if (!s) return null;
       return window.PP?.rig?.body ||
              window.PP?.player?.body ||
              s.__playerBody ||
              s.getMeshByName?.('player_capsule') ||
-             s.activeCamera ||
              null;
+    }
+
+    function normalizePlayerScale(s){
+      try{
+        const mesh = s.__playerMesh;
+        if (!mesh) return;
+        const bb = mesh.getBoundingInfo()?.boundingBox;
+        if (!bb) return;
+        const h = bb.maximumWorld.y - bb.minimumWorld.y;
+        if (h > 0.01){
+          const sf = TARGET_HEIGHT / Math.min(h, 1000);
+          // clamp sane range
+          if (sf > 0.05 && sf < 20) mesh.scaling.setAll(sf);
+        }
+      }catch{}
     }
 
     function applyOnce(){
       if (applied) return;
       const s=S(); if (!s) return setTimeout(applyOnce, 120);
 
-      const body = findBodyOrCamera();
+      const body = findBody();
       if (!body) return setTimeout(applyOnce, 120);
 
-      scaleIfGiant(body);
-
-      // Choose spawn (Index3 strongly preferred)
-      const idx3 = resolveIndex3Spawn();
-
-      // Start from current or resolved
+      // Prefer Index3 spawn
+      const idx3 = resolveIndex3();
       let p = (idx3?.pos && idx3.pos.clone()) ||
               body.getAbsolutePosition?.() ||
               body.position?.clone() ||
               new BABYLON.Vector3(0, 2, 0);
 
-      // Snap to ground
+      // Snap Y to ground
       const gy = groundYAt(p.x, p.z, p.y);
       if (gy != null) p.y = gy + CAP_RADIUS + 0.12;
 
@@ -388,21 +355,19 @@
       else if (body.setAbsolutePosition) body.setAbsolutePosition(p);
       else body.position = p;
 
-      // Correct yaw (fix “controls reversed”)
+      // Face van/front door or map origin if no anchor yaw
       let yaw = (idx3 && typeof idx3.yaw === 'number') ? idx3.yaw : null;
-
       if (yaw == null){
-        // Fallback: face toward map origin (0,?,0) or van spawn if present
         const focus =
           window.PP?.CONFIG?.VAN?.POSITION ||
+          s.getTransformNodeByName?.('Van_Spawn')?.getAbsolutePosition?.() ||
           new BABYLON.Vector3(0, p.y, 0);
         const dir = focus.subtract(p); dir.y = 0;
-        yaw = Math.atan2(dir.x, dir.z); // Yaw around Y (Babylon LH)
+        yaw = Math.atan2(dir.x, dir.z); // Babylon LH yaw
       }
-
       setYaw(body, yaw);
 
-      // If body is not the active camera, try to align camera too
+      // Also align active camera to body
       try {
         const cam = s.activeCamera || window.camera;
         if (cam && cam !== body){
@@ -411,11 +376,14 @@
         }
       } catch {}
 
+      // Normalize player model scale after body is placed
+      normalizePlayerScale(s);
+
       applied = true;
-      console.log('[spawn] pos', body.position?.asArray?.() || body.position, 'yaw', yaw.toFixed ? yaw.toFixed(3) : yaw);
+      console.log('[spawn] pos', body.position?.asArray?.() || body.position, 'yaw', yaw);
     }
 
-    // Apply after start and when meshes exist
+    // Apply on start and once meshes exist
     window.addEventListener('pp:start', ()=> setTimeout(applyOnce, 400), { once:true });
     const poll = setInterval(()=>{
       const s=S();
