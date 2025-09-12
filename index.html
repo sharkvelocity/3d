@@ -15,7 +15,7 @@
   <script src="./cdn/gui/babylon.gui.min.js"></script>
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
-  <!-- Dev tools (provides Index3 spawn, etc.) -->
+  <!-- Dev tools (index3 spawn helpers, etc.) -->
   <script src="./assets/index3/devtools.js?v=7.4.0"></script>
 
   <style>
@@ -42,6 +42,7 @@
 
     #hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; }
 
+    /* Belt */
     #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:flex; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
     .slot{ width:88px; height:64px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; user-select:none; }
     .slot .label{ font-size:12px; color:#adf; text-align:center; line-height:1.1; padding:6px; }
@@ -100,7 +101,7 @@
   </div>
   <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
 
-  <!-- Belt -->
+  <!-- Belt (3 empty slots at start; slot 4 = lighter when UI boots) -->
   <div id="belt"></div>
 
   <!-- Actions -->
@@ -133,11 +134,11 @@
   <div id="toast"></div>
 
   <!-- ===================== MODULE ORDER ===================== -->
-  <!-- Settings / bindings -->
+  <!-- Core settings / input bindings -->
   <script src="./assets/dev/util/modular_settings.js"></script>
   <script src="./assets/dev/modular_bindings.js"></script>
 
-  <!-- Audio core (registry & helpers) -->
+  <!-- Audio registry + helpers (no ambient here) -->
   <script src="./assets/dev/modular_audio.js"></script>
   <script src="./assets/dev/util/sound_engine.js"></script>
 
@@ -150,6 +151,12 @@
   <!-- WEATHER (the only ambient system) -->
   <script src="./assets/dev/util/weather.js"></script>
 
+  <!-- Inventory + Belt + Van UI + Effects -->
+  <script src="./assets/dev/game/inventory_system.js"></script>
+  <script src="./assets/dev/ui/belt_manager.js"></script>
+  <script src="./assets/dev/ui/van_ui.js"></script>
+  <script src="./assets/dev/effects/effects_sanity_med.js"></script>
+
   <!-- Ghost systems -->
   <script src="./assets/dev/ghost/ghost_db.js"></script>
   <script src="./assets/dev/ghost/ghost_logic.js"></script>
@@ -160,6 +167,7 @@
   <script src="./assets/dev/tools/spirit_box.js"></script>
   <script src="./assets/dev/tools/dots_system.js"></script>
   <script src="./assets/dev/tools/writing_book.js"></script>
+  <script src="./assets/dev/tools/parabolic_mic.js"></script>
 
   <!-- Game bootstrap -->
   <script src="./assets/dev/game_bootstrap.js"></script>
@@ -168,18 +176,15 @@
 
   <!-- ===================== RUNTIME HELPERS ===================== -->
 
-  <!-- Start button: dispatch pp:start; init audio registry on demand -->
+  <!-- Start button: dispatch pp:start; no audio until user intent -->
   <script>
   (function wireStart(){
     const btn = document.getElementById('start-button');
     if (!btn) return;
     btn.addEventListener('click', function onStart(){
       try { window.PP && PP.audio && PP.audio.init && PP.audio.init(); } catch(e){ console.warn('[audio.init] failed', e); }
-      // show scene; hide title
       document.getElementById('title-screen')?.remove();
-      // tell systems user started (Weather listens here; no autoplay before this)
-      window.dispatchEvent(new CustomEvent('pp:start'));
-      // pointer-lock desire on first click
+      window.dispatchEvent(new CustomEvent('pp:start'));  // Weather + Van inventory listen here
       try { document.getElementById('renderCanvas')?.requestPointerLock?.(); } catch {}
     }, { once:true });
   })();
@@ -319,7 +324,6 @@
       console.log('[spawnAndScaleFix] positioned at', body.position.asArray());
     }
 
-    // Apply after start and once scene meshes are present
     window.addEventListener('pp:start', ()=> setTimeout(applyOnce, 400), { once:true });
     const poll = setInterval(()=>{ const s=S(); if (s && (s.meshes?.length||0) > 20){ clearInterval(poll); applyOnce(); } }, 300);
   })();
