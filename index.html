@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PhasmaPhoney — Full Build</title>
+  <title>PhasmaPhoney — Full Build (up-to-date)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- Babylon core + loaders -->
@@ -14,74 +14,7 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
-<script>
-(function(){
-  // 1) Your maps here
-  window.MAP_REGISTRY = {
-    "Jailhouse": "./assets/models/map/jailhouse.glb",
-    // "Farmhouse": "./assets/models/map/farmhouse.glb",
-    // "School":    "./assets/models/map/school.glb"
-  };
-
-  // 2) resolve default map
-  const sel   = document.getElementById('map-select');
-  const stat  = document.getElementById('map-status');
-  const saved = localStorage.getItem('PP_MAP');
-  const first = Object.keys(MAP_REGISTRY)[0];
-  const key   = (saved && MAP_REGISTRY[saved]) ? saved : first;
-
-  // expose early for map.js
-  window.MAP_URL = MAP_REGISTRY[key];
-
-  // build dropdown
-  sel.innerHTML = '';
-  for (const [label, url] of Object.entries(MAP_REGISTRY)) {
-    const o = document.createElement('option');
-    o.value = label; o.textContent = label; o.dataset.url = url;
-    if (label === key) o.selected = true;
-    sel.appendChild(o);
-  }
-
-  async function head(u){
-    try { const r = await fetch(u, { method:'HEAD', cache:'no-cache' }); return r.ok; }
-    catch { return false; }
-  }
-  // warm the browser cache with a lightweight GET
-  async function warm(u){
-    try { await fetch(u, { method:'GET', cache:'force-cache' }); } catch {}
-  }
-
-  async function updateStatus(u){
-    stat.textContent = 'Checking…'; stat.style.color = '#9ff';
-    const ok = await head(u);
-    if (ok) {
-      stat.textContent = 'OK';
-      stat.style.color = '#9ff';
-      warm(u); // pull into HTTP cache so start is snappier
-    } else {
-      stat.textContent = '⚠ missing';
-      stat.style.color = '#f88';
-    }
-  }
-
-  updateStatus(window.MAP_URL);
-
-  sel.addEventListener('change', async ()=>{
-    const k = sel.value;
-    const u = MAP_REGISTRY[k];
-    window.MAP_URL = u;
-    localStorage.setItem('PP_MAP', k);
-    updateStatus(u);
-  });
-
-  // Re-assert the selected URL right before the game starts
-  document.getElementById('start-button')?.addEventListener('click', ()=>{
-    const k = sel.value;
-    window.MAP_URL = MAP_REGISTRY[k];
-    localStorage.setItem('PP_MAP', k);
-  }, { capture:true });
-})();
-</script>
+  <script src="./assets/index3/devtools.js?v=7.4.0"></script>
 
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
@@ -122,6 +55,11 @@
     #notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#0ff; display:none; z-index:12000; padding:18px; overflow:auto; }
 
     #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+    /* Belt icon clamp + leak guard */
+    #belt img.item-icon { max-width:60px; max-height:60px; image-rendering:crisp-edges; }
+    body > img[src*="/assets/icons/"] { display:none !important; position:absolute !important; left:-99999px !important; top:-99999px !important; }
+    #belt img[src*="/assets/icons/"] { display:inline-block !important; position:static !important; left:auto !important; top:auto !important; }
   </style>
 </head>
 <body>
@@ -133,107 +71,14 @@
 
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-    <button id="start-button">Start</button>
+    <button id="start-button">Start Investigation</button>
     <div id="map-wrap">
       <span>Map:</span>
       <select id="map-select">
         <option value="-1">(loading maps...)</option>
       </select>
-      <!-- status text restored -->
-      <span id="map-status" style="margin-left:8px;color:#9ff;">Checking…</span>
     </div>
   </div>
-
-  <!-- Map registry + pre-check (restored) -->
-  <script>
-  (function(){
-    // 1) your maps here
-    window.MAP_REGISTRY = {
-      "Jailhouse": "./assets/models/map/jailhouse.glb",
-      // "Farmhouse": "./assets/models/map/farmhouse.glb",
-      // "School":    "./assets/models/map/school.glb"
-    };
-
-    const sel  = document.getElementById('map-select');
-    const stat = document.getElementById('map-status');
-
-    // 2) resolve default + expose MAP_URL early for your loader
-    const saved = localStorage.getItem('PP_MAP');
-    const first = Object.keys(MAP_REGISTRY)[0];
-    const key   = (saved && MAP_REGISTRY[saved]) ? saved : first;
-    window.MAP_URL = MAP_REGISTRY[key];
-
-    // 3) build dropdown
-    sel.innerHTML = '';
-    for (const [label, url] of Object.entries(MAP_REGISTRY)) {
-      const o = document.createElement('option');
-      o.value = label; o.textContent = label; o.dataset.url = url;
-      if (label === key) o.selected = true;
-      sel.appendChild(o);
-    }
-
-    async function head(u){
-      try { const r = await fetch(u, { method:'HEAD', cache:'no-cache' }); return r.ok; }
-      catch { return false; }
-    }
-    async function warm(u){ try { await fetch(u, { method:'GET', cache:'force-cache' }); } catch {} }
-
-    async function updateStatus(u){
-      if (!stat) return;
-      stat.textContent = 'Checking…'; stat.style.color = '#9ff';
-      const ok = await head(u);
-      if (ok) { stat.textContent = 'OK'; stat.style.color = '#9ff'; warm(u); }
-      else    { stat.textContent = '⚠ missing'; stat.style.color = '#f88'; }
-    }
-
-    updateStatus(window.MAP_URL);
-
-    sel.addEventListener('change', ()=>{
-      const k = sel.value;
-      const u = MAP_REGISTRY[k];
-      window.MAP_URL = u;
-      localStorage.setItem('PP_MAP', k);
-      updateStatus(u);
-    });
-
-    // Re-assert selection right before Start handlers run
-    document.getElementById('start-button')?.addEventListener('click', ()=>{
-      const k = sel.value;
-      window.MAP_URL = MAP_REGISTRY[k];
-      localStorage.setItem('PP_MAP', k);
-    }, { capture:true });
-
-    // --- Optional: true Babylon pre-parse (toggle) ---
-    const WANT_PREPARSE = false; // set true to actually parse GLB in background
-    if (WANT_PREPARSE) {
-      (function preparse(){
-        function waitEngine(){
-          return new Promise(res=>{
-            (function poll(){
-              const eng = BABYLON.Engine?.LastCreatedEngine || BABYLON.EngineStore?.LastCreatedEngine;
-              if (eng) return res(eng);
-              setTimeout(poll, 60);
-            })();
-          });
-        }
-        async function doLoad(url){
-          try{
-            const engine = await waitEngine();
-            const preScene = new BABYLON.Scene(engine);
-            BABYLON.SceneLoader.LoadAssetContainer(url, null, preScene, (container)=>{
-              window.__PRELOADED_MAP__ = { url, container, preScene };
-              if (stat){ stat.textContent = 'Ready'; stat.style.color = '#9ff'; }
-            });
-          }catch(e){ console.warn('[map preparse] failed', e); }
-        }
-        // kick once URL exists
-        (function kick(){ if (!window.MAP_URL) return setTimeout(kick, 60); doLoad(window.MAP_URL); })();
-        // re-preparse on selection change
-        sel.addEventListener('change', ()=> doLoad(window.MAP_URL));
-      })();
-    }
-  })();
-  </script>
 
   <canvas id="renderCanvas" tabindex="0"></canvas>
 
@@ -276,24 +121,486 @@
 
   <div id="toast"></div>
 
-  <!-- Player & world systems (paths fixed to match repo) -->
+  <!-- ===================== CORE UTILITIES (order matters) ===================== -->
   <script src="./assets/dev/util/modular_settings.js"></script>
   <script src="./assets/dev/modular_bindings.js"></script>
+
+  <!-- ===================== AUDIO (no autoplay; init on Start) ===================== -->
   <script src="./assets/dev/modular_audio.js"></script>
+  <script src="./assets/dev/util/sound_engine.js"></script>
+
+  <!-- ===================== PLAYER & WORLD ===================== -->
+  <script src="./assets/dev/util/player_rig_controller_final.js"></script>
+  <script src="./assets/dev/util/moon.js"></script>
+  <script src="./assets/dev/util/minimap_northup_xyz.js"></script>
+  <script src="./assets/dev/util/pp_runtime.js"></script>
+
+  <!-- ===================== GHOSTS & TOOLS ===================== -->
+  <script src="./assets/dev/ghost/ghost_db.js"></script>
+  <script src="./assets/dev/ghost/ghost_logic.js"></script>
+  <script src="./assets/dev/tools/uv_prints.js"></script>
+  <script src="./assets/dev/tools/salt_system.js"></script>
+  <script src="./assets/dev/tools/spirit_box.js"></script>
+  <script src="./assets/dev/tools/dots_system.js"></script>
+  <script src="./assets/dev/tools/writing_book.js"></script>
+
+  <!-- ===================== GAME BOOTSTRAP & PATCHES ===================== -->
+  <script src="./assets/dev/game_bootstrap.js"></script>
+  <script src="./assets/dev/merge_patch.js"></script>
+  <script src="./assets/dev/glue_patch.js"></script>
+  <script src="./assets/dev/util/fp_tp_sync.js"></script>
+
+  <!-- ===================== STARTUP HOOK (Audio + Start Event) ===================== -->
   <script>
+  // Initialize audio only after Start is clicked; also dispatch 'pp:start'
   (function hookAudioStart(){
     function attach(){
-      var btn = document.getElementById('start-button') || document.querySelector('[data-start]');
+      var btn = document.getElementById('start-button');
       if (!btn){ return setTimeout(attach, 100); }
       btn.addEventListener('click', function once(){
         btn.removeEventListener('click', once);
-        try { PP && PP.audio && PP.audio.init(); } catch(e){ console.warn('[audio.init] failed', e); }
+        try {
+          PP && PP.audio && PP.audio.init().then(()=>{
+            PP.audio.stagePrewarm?.(2); // small idle prewarm
+          });
+          window.dispatchEvent(new CustomEvent('pp:start'));
+        } catch(e){ console.warn('[audio.init] failed', e); }
       });
     }
     attach();
   })();
   </script>
 
-  <script src="./assets/dev/util/player_rig_controller_final.js"></script>
+  <!-- ===================== WEATHER (starts on 'pp:start', indoor detection) ===================== -->
+  <script>
+  // Weather system with crossfades + lightning/thunder + indoor muffling.
+  // STARTS ONLY AFTER "pp:start" (fired when user clicks Start Investigation).
+  (function(){
+    "use strict";
+    const lerp = (a,b,t)=> a + (b-a)*Math.max(0, Math.min(1, t));
+    const clamp = (v,a,b)=> Math.max(a, Math.min(b,v));
+    const v3 = (x,y,z)=> new BABYLON.Vector3(x,y,z);
+
+    const S = {
+      state: "Clear",          // "Clear" | "Rainstorm" | "Snow"
+      ready: false,
+      sounds: { ambient:null, clear:null, rain:null, snow:null, thunder:[] },
+      volBase: { ambient:0.7, clear:0.25, rain:0.6, snow:0.5, thunder:0.9 },
+      volTarget: { ambient:0.7, clear:0.0,  rain:0.0, snow:0.0, thunder:0.9 },
+      indoor: false,
+      intensity: 1.0,
+      nextLightningAt: 0,
+      lastT: performance.now()/1000,
+      boundUpdate: null,
+      lightCache: [],
+      _indoorLast: null,
+      _indoorAcc: 0,
+      _indoorPeriod: 0.5, // seconds
+    };
+
+    function ensureSounds(){
+      if (S.ready || !window.scene) return;
+      const scn = window.scene;
+      try {
+        S.sounds.ambient = new BABYLON.Sound("amb", "./assets/audio/ambient.mp3", scn, null,
+          { loop:true, autoplay:false, volume:S.volBase.ambient, spatialSound:false });
+
+        S.sounds.clear   = new BABYLON.Sound("clear", "./assets/audio/clearWeather.mp3", scn, null,
+          { loop:true, autoplay:false, volume:0.0, spatialSound:false });
+
+        S.sounds.rain    = new BABYLON.Sound("rain", "./assets/audio/rainstorm.mp3", scn, null,
+          { loop:true, autoplay:false, volume:0.0, spatialSound:false });
+
+        try {
+          S.sounds.snow = new BABYLON.Sound("snow", "./assets/audio/snow.mp3", scn, null,
+            { loop:true, autoplay:false, volume:0.0, spatialSound:false });
+        } catch(_){ S.sounds.snow = null; }
+
+        const list = (window.WEATHER_AUDIO_MAP?.thunder?.length ? window.WEATHER_AUDIO_MAP.thunder : ["thunder1.mp3","thunder2.mp3","thunder3.mp3"]);
+        list.forEach((f,i)=>{
+          try{
+            const th = new BABYLON.Sound("th"+i, "./assets/audio/"+f, scn, null,
+              { loop:false, autoplay:false, volume:S.volBase.thunder, spatialSound:false });
+            S.sounds.thunder.push(th);
+          }catch(_){}
+        });
+
+        S.ready = true;
+      } catch (e) {
+        console.warn("[weather] sound init failed", e);
+      }
+    }
+
+    function _applyTargets(dt){
+      if (!S.ready) return;
+      const muffle = S.indoor ? 0.35 : 1.0;
+      const tAmbient = S.volTarget.ambient;
+      const tClear   = S.volTarget.clear;
+      const tRain    = S.volTarget.rain * S.intensity * muffle;
+      const tSnow    = S.volTarget.snow * S.intensity * muffle;
+      const k = clamp(dt * 1.5, 0, 1);
+
+      try {
+        if (S.sounds.ambient) S.sounds.ambient.setVolume( lerp(S.sounds.ambient.getVolume(), tAmbient, k) );
+        if (S.sounds.clear)   S.sounds.clear.setVolume(   lerp(S.sounds.clear.getVolume(),   tClear,   k) );
+        if (S.sounds.rain)    S.sounds.rain.setVolume(    lerp(S.sounds.rain.getVolume(),    tRain,    k) );
+        if (S.sounds.snow)    S.sounds.snow.setVolume(    lerp(S.sounds.snow.getVolume(),    tSnow,    k) );
+      } catch {}
+
+      try { if (S.sounds.ambient && tAmbient > 0.02 && !S.sounds.ambient.isPlaying) S.sounds.ambient.play(); } catch {}
+      try { if (S.sounds.clear   && tClear   > 0.02 && !S.sounds.clear.isPlaying)   S.sounds.clear.play();   } catch {}
+      try { if (S.sounds.rain    && tRain    > 0.02 && !S.sounds.rain.isPlaying)    S.sounds.rain.play();    } catch {}
+      try { if (S.sounds.snow    && tSnow    > 0.02 && !S.sounds.snow.isPlaying)    S.sounds.snow.play();    } catch {}
+
+      try { if (S.sounds.clear   && tClear   <= 0.01 && S.sounds.clear.isPlaying)   S.sounds.clear.stop();   } catch {}
+      try { if (S.sounds.rain    && tRain    <= 0.01 && S.sounds.rain.isPlaying)    S.sounds.rain.stop();    } catch {}
+      try { if (S.sounds.snow    && tSnow    <= 0.01 && S.sounds.snow.isPlaying)    S.sounds.snow.stop();    } catch {}
+    }
+
+    function _scheduleLightningSoon(min=7, max=18){
+      const now = performance.now()/1000;
+      const k = clamp(S.intensity, 0.15, 1);
+      const delay = (min + (max-min)*(1-k)) * (0.6 + Math.random()*0.8);
+      S.nextLightningAt = now + delay;
+    }
+
+    function _flashLightning(){
+      const layer = document.getElementById('flash-overlay');
+      if (!layer) return;
+      const pulses = 1 + (Math.random()<0.6 ? 1 : 0);
+      let i = 0;
+      const doPulse = () => {
+        if (i++ >= pulses) return;
+        const alpha = 0.6 + Math.random()*0.35;
+        layer.style.opacity = String(alpha);
+        setTimeout(()=> layer.style.opacity = '0', 80 + Math.random()*90);
+        _flickerNearbyLights(0.5 + Math.random()*0.6);
+        setTimeout(_playThunder, 140 + Math.random()*220);
+        if (i < pulses) setTimeout(doPulse, 120 + Math.random()*140);
+      };
+      doPulse();
+    }
+
+    function _playThunder(){
+      const arr = S.sounds.thunder || [];
+      if (!arr.length) return;
+      const s = arr[(Math.random()*arr.length)|0];
+      try {
+        s.setVolume( clamp(S.volBase.thunder * (0.7 + Math.random()*0.5) * (S.indoor?0.6:1.0), 0, 1) );
+        s.play();
+      } catch {}
+    }
+
+    function _flickerNearbyLights(durSec){
+      try{
+        const sc = scene;
+        if (!S.lightCache.length) S.lightCache = (sc.lights||[]).slice();
+        const cam = scene.activeCamera || window.camera;
+        const ref = cam?.position || v3(0,0,0);
+        const lights = S.lightCache.filter(L=>{
+          const p = L.getAbsolutePosition?.() || L.position;
+          if (!p) return false;
+          return BABYLON.Vector3.Distance(p, ref) <= 16;
+        });
+        if (!lights.length) return;
+        const saved = lights.map(L=>({L, i:L.intensity}));
+        const id = setInterval(()=>{ lights.forEach(({L,i})=> L.intensity = i * (0.7 + Math.random()*0.7)); }, 40);
+        setTimeout(()=>{ clearInterval(id); saved.forEach(({L,i})=> L.intensity = i); }, durSec*1000);
+      }catch{}
+    }
+
+    // ---- Indoor / Outdoor detection (fixes muffled outside) ----
+    function _isIndoorAt(pos){
+      const sc = window.scene; if (!sc || !pos) return false;
+
+      // 1) Van zone override → outdoor
+      try{
+        const V = window.PP?.CONFIG?.VAN;
+        if (V && V.POSITION && typeof V.RADIUS === 'number') {
+          if (BABYLON.Vector3.Distance(pos, V.POSITION) <= (V.RADIUS + 1.0)) return false;
+        }
+      } catch {}
+
+      // 2) Upward ray: hit roof/ceiling? then indoor
+      const from = new BABYLON.Vector3(pos.x, pos.y + 0.5, pos.z);
+      const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,1,0), 12);
+      const hit  = sc.pickWithRay(ray, (m)=>{
+        if (!m) return false;
+        if (m.isPickable === false) return false;
+        if (m.metadata?.isRoof || m.metadata?.isCeiling) return true;
+        const n = (m.name || '').toLowerCase();
+        return /roof|ceiling|attic|upper|secondfloor/.test(n);
+      });
+      return !!(hit && hit.hit);
+    }
+
+    function _indoorMonitor(dt){
+      S._indoorAcc += dt;
+      if (S._indoorAcc < S._indoorPeriod) return;
+      S._indoorAcc = 0;
+
+      const cam = scene?.activeCamera || window.camera;
+      const p = cam?.position;
+      if (!p) return;
+
+      const isIn = _isIndoorAt(p);
+      if (isIn !== S.indoor){
+        S.indoor = isIn;
+        Weather.set(S.state, { intensity:S.intensity });
+      }
+    }
+    // ------------------------------------------------------------
+
+    function _update(dt){
+      if (S.state === "Rainstorm"){
+        const now = performance.now()/1000;
+        if (now >= S.nextLightningAt){ _flashLightning(); _scheduleLightningSoon(); }
+      }
+      _indoorMonitor(dt);
+      _applyTargets(dt);
+      const hw = document.getElementById('hud-weather');
+      if (hw) hw.textContent = S.state + (S.indoor ? " (Indoor)" : "");
+    }
+
+    function _hookSceneUpdate(){
+      if (!scene || S.boundUpdate) return;
+      S.boundUpdate = () => {
+        const now = performance.now()/1000;
+        const dt = Math.min(0.2, Math.max(0, now - S.lastT));
+        S.lastT = now;
+        _update(dt);
+      };
+      scene.onBeforeRenderObservable.add(S.boundUpdate);
+    }
+
+    // Public API
+    window.Weather = {
+      init(){
+        ensureSounds();
+        Weather.set(S.state, { immediate:true });
+        _hookSceneUpdate();
+      },
+      set(state, opts={}){
+        if (!/^(Clear|Rainstorm|Snow)$/.test(state)) return;
+        S.state = state;
+        if (typeof opts.intensity === 'number') S.intensity = clamp(opts.intensity, 0, 1);
+
+        if (state === "Clear"){
+          S.volTarget.ambient = S.volBase.ambient;
+          S.volTarget.clear   = S.volBase.clear;
+          S.volTarget.rain    = 0.0;
+          S.volTarget.snow    = 0.0;
+          _scheduleLightningSoon(999,999);
+        } else if (state === "Rainstorm"){
+          S.volTarget.ambient = S.volBase.ambient * 0.9;
+          S.volTarget.clear   = 0.0;
+          S.volTarget.rain    = S.volBase.rain;
+          S.volTarget.snow    = 0.0;
+          _scheduleLightningSoon();
+        } else { // Snow
+          S.volTarget.ambient = S.volBase.ambient * 0.9;
+          S.volTarget.clear   = 0.0;
+          S.volTarget.rain    = 0.0;
+          S.volTarget.snow    = S.volBase.snow;
+          _scheduleLightningSoon(999,999);
+        }
+
+        const hw = document.getElementById('hud-weather');
+        if (hw) hw.textContent = S.state + (S.indoor ? " (Indoor)" : "");
+      },
+      setIndoor(on){
+        S.indoor = !!on;
+        Weather.set(S.state, { intensity:S.intensity });
+      },
+      setVolumes(v){
+        Object.assign(S.volBase, {
+          ambient: (v.ambient ?? S.volBase.ambient),
+          clear:   (v.clear   ?? S.volBase.clear),
+          rain:    (v.rain    ?? S.volBase.rain),
+          snow:    (v.snow    ?? S.volBase.snow),
+          thunder: (v.thunder ?? S.volBase.thunder),
+        });
+        Weather.set(S.state, { intensity:S.intensity });
+      },
+      flashNow(){ if (S.state==="Rainstorm") { _flashLightning(); _scheduleLightningSoon(); } },
+      isRaining(){ return S.state === "Rainstorm"; },
+      update(){ /* no-op; driven by scene */ }
+    };
+
+    // ---------- START TRIGGER ----------
+    window.addEventListener('pp:start', ()=>{
+      const tryStart = () => {
+        if (!window.scene) return setTimeout(tryStart, 100);
+        ensureSounds();
+        const r = Math.random();
+        const next = (r < 0.5) ? "Clear" : (r < 0.8 ? "Rainstorm" : "Snow");
+        Weather.set(next, { immediate:true, intensity: 0.85 });
+        Weather.init();
+        console.log("[Weather] started:", S.state);
+      };
+      tryStart();
+    });
+
+  })();
+  </script>
+
+  <!-- ===================== INLINE HELPERS (kept) ===================== -->
+
+  <!-- Pointer lock toggle: Press L to lock/unlock; ESC always unlocks -->
+  <script>
+  (function pointerLockFix(){
+    const canvas = document.getElementById('renderCanvas');
+    let desireLock = false;
+    function lock(){ if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.(); }
+    function unlock(){ document.exitPointerLock?.(); }
+    document.addEventListener('pointerlockchange', ()=>{ desireLock = (document.pointerLockElement === canvas); });
+    canvas.addEventListener('click', ()=>{ if (desireLock) lock(); });
+    window.addEventListener('keydown', (e)=>{
+      if (e.code === 'KeyL'){ // toggle
+        if (document.pointerLockElement) unlock(); else { desireLock = true; lock(); }
+      }
+      if (e.code === 'Escape') unlock();
+    }, {capture:true});
+    document.getElementById('start-button')?.addEventListener('click', ()=>{ desireLock=true; setTimeout(lock, 150); }, {once:true});
+  })();
+  </script>
+
+  <!-- Belt/icon leak guard -->
+  <script>
+  (function guardIconLeaks(){
+    const belt = () => document.getElementById('belt');
+    const hide = (img) => { img.style.display='none'; img.style.position='absolute'; img.style.left='-99999px'; img.style.top='-99999px'; };
+    // clamp any existing
+    document.querySelectorAll('img[src*="/assets/icons/"]').forEach(img=>{
+      if (!belt() || !belt().contains(img)) hide(img); else img.classList.add('item-icon');
+    });
+    // observe future additions
+    new MutationObserver(muts=>{
+      for (const m of muts) for (const n of m.addedNodes){
+        if (n && n.tagName==='IMG' && (n.src||'').includes('/assets/icons/')){
+          if (!belt() || !belt().contains(n)) hide(n); else n.classList.add('item-icon');
+        }
+      }
+    }).observe(document.documentElement, {childList:true, subtree:true});
+  })();
+  </script>
+
+  <!-- Spawn/scale fix: put player on ground once; auto-scale giant model to ~1.75m -->
+  <script>
+  (function spawnAndScaleFix(){
+    const TARGET_HEIGHT = 1.75;
+    const CAP_RADIUS    = 0.35;
+    let applied = false;
+
+    function S(){ return window.SCENE || BABYLON.Engine?.LastCreatedScene; }
+
+    function groundYAt(x,z,approxY){
+      const s=S(); if(!s) return null;
+      const from = new BABYLON.Vector3(x, (approxY??2) + 6, z);
+      const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,-1,0), 50);
+      const hit  = s.pickWithRay(ray, (m)=>{
+        if (!m) return false;
+        if (m.metadata?.isGround === true) return true;
+        const n=(m.name||'').toLowerCase();
+        return /(floor|ground|asphalt|concrete|tile|yard|cell|corridor|hall|street|pavement|stairs)/.test(n);
+      });
+      return (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.y : null;
+    }
+
+    function scaleIfGiant(node){
+      try{
+        const bb = node.getBoundingInfo?.().boundingBox;
+        if (!bb) return;
+        const h = bb.maximumWorld.y - bb.minimumWorld.y;
+        if (isFinite(h) && h>0.01){
+          const sf = TARGET_HEIGHT / Math.min(h, 1000);
+          if (sf>0 && sf<10) node.scaling.scaleInPlace(sf);
+        }
+      }catch{}
+    }
+
+    function findBodyOrCamera(){
+      const s=S(); if (!s) return null;
+      return s.__playerBody || s.getMeshByName?.('player_capsule') || s.activeCamera || null;
+    }
+
+    function findSpawnAnchor(){
+      const s=S(); if (!s) return null;
+      const names = ['PlayerSpawn','Spawn','Start','Van_Spawn','player_spawn','spawn_point'];
+      for (const n of names){
+        const t = s.getTransformNodeByName?.(n) || s.getNodeByName?.(n);
+        if (t) return t;
+      }
+      return null;
+    }
+
+    function applyOnce(){
+      if (applied) return;
+      const s=S(); if (!s) return setTimeout(applyOnce, 120);
+
+      const body   = findBodyOrCamera();
+      const anchor = findSpawnAnchor();
+
+      if (!body) return setTimeout(applyOnce, 120);
+
+      // scale
+      scaleIfGiant(body);
+
+      // position to ground
+      let p = (anchor && anchor.getAbsolutePosition?.()) || body.position.clone();
+      const gy = groundYAt(p.x, p.z, p.y);
+      if (gy != null) { p.y = gy + CAP_RADIUS + 0.12; body.position.copyFrom(p); }
+      else            { body.position.set(0, 1.8, 0); }
+
+      applied = true;
+      console.log('[spawnAndScaleFix] positioned at', body.position.asArray());
+    }
+
+    document.getElementById('start-button')?.addEventListener('click', ()=> setTimeout(applyOnce, 400), {once:true});
+    const poll = setInterval(()=>{ const s=S(); if (s && (s.meshes?.length||0) > 20){ clearInterval(poll); applyOnce(); } }, 300);
+  })();
+  </script>
+
+  <!-- Optional: ensure ghost controller initializes and randomizes once -->
+  <script>
+  (function ensureGhost(){
+    function go(){
+      try{
+        if (window.ghostCtrl){
+          ghostCtrl.init?.();
+          const st = ghostCtrl.getState?.();
+          if (!st || !st.type) ghostCtrl.randomizeGhost?.();
+        }
+      }catch(e){}
+    }
+    document.getElementById('start-button')?.addEventListener('click', ()=> setTimeout(go, 800), {once:true});
+  })();
+  </script>
+
+  <!-- HUD XYZ updater (shows coords if you unhide the element) -->
+  <script>
+  (function fixHudXYZ(){
+    const label = document.getElementById('hud-xyz');
+    if (!label) return;
+    function S(){ return window.SCENE; }
+    function src(){
+      const s=S(); if (!s) return null;
+      return s.__playerBody || (s.getMeshByName && s.getMeshByName('player_capsule')) || s.activeCamera || null;
+    }
+    function loop(){
+      const o = src();
+      if (o && o.position){
+        const p = o.position;
+        label.textContent = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+      }
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  })();
+  </script>
+
+  <!-- Devtools UI placeholders -->
+  <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
+  <div id="devtools-panel" style="display:none;"></div>
 </body>
 </html>
