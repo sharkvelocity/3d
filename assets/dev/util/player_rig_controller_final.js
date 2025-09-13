@@ -1,289 +1,538 @@
-(function(){ 'use strict';
-  if (window.__PP_RIG_v5__) return; window.__PP_RIG_v5__ = true;
+// assets/dev/util/player_rig_controller_final.js
+// One true rig: body + FPS/TPS cameras + input + spawn + model autoscale.
+// Assumes pp_runtime created ENGINE/SCENE & render loop. No other script should move the player.
 
-  // ---- Tunables ----
-  const TARGET_HEIGHT = 1.75;
-  const CAP_HEIGHT = 1.8, CAP_RADIUS = 0.35;
-  const SPEED_WALK = 1.9, SPEED_RUN = 3.3;
-  const HEAD_OFFSET = 1.6;
-  const MOUSE_SENS = 0.002;
-  const TOUCH_SENS = 0.0022;
-  const TPS_RADIUS_DEFAULT = 3.6;
-  const SPAWN_FALLBACK = new BABYLON.Vector3(-46.18, 1.35, -105.50);
+(function () {
+  "use strict";
+  if (window.__PP_RIG__) return;
+  window.__PP_RIG__ = true;
 
-  // ---- Shortcuts ----
-  const canvas = () => document.getElementById('renderCanvas') || document.querySelector('canvas');
-  const S = () => window.SCENE || window.scene || BABYLON.Engine?.LastCreatedScene || null;
-  const UP = BABYLON.Vector3.Up();
-  const clamp = (v,a,b)=>Math.min(Math.max(v,a),b);
+  const PP = (window.PP = window.PP || {});
+  PP.rig = PP.rig || {};
 
-  // ---- Input (WASD, Shift, V) ----
-  const K = {w:0,a:0,s:0,d:0,run:false};
-  addEventListener('keydown', e=>{
-    const k=(e.key||'').toLowerCase(), c=e.keyCode||0, code=e.code||'';
-    if(k==='w'||c===87)K.w=1; else if(k==='a'||c===65)K.a=1; else if(k==='s'||c===83)K.s=1; else if(k==='d'||c===68)K.d=1; else if(k==='shift'||c===16)K.run=true;
-    if (code==='KeyV'){ e.stopPropagation(); e.preventDefault(); toggleThirdPerson(); }
-  }, true);
-  addEventListener('keyup', e=>{
-    const k=(e.key||'').toLowerCase(), c=e.keyCode||0;
-    if(k==='w'||c===87)K.w=0; else if(k==='a'||c===65)K.a=0; else if(k==='s'||c===83)K.s=0; else if(k==='d'||c===68)K.d=0; else if(k==='shift'||c===16)K.run=false;
-  }, true);
+  // ----------------- Tunables -----------------
+  const TARGET_HEIGHT = 1.75;       // human height (m) for model auto-scale
+  const EYE_HEIGHT    = 1.6;        // FPS camera height from capsule base
+  const CAP_RADIUS    = 0.35;       // capsule radius
+  const CAP_HEIGHT    = 1.8;        // capsule visual height
+  const SPEED_WALK    = 1.9;        // m/s
+  const SPEED_RUN     = 3.3;        // m/s
+  const MOUSE_SENS    = 0.0020;     // radians per pixel
+  const TOUCH_SENS    = 0.0022;
+  const TPS_MIN_R     = 2.8;
+  const TPS_MAX_R     = 7.5;
 
-  // ---- FPS pointer-lock look ----
-  (function initPointerLook(){
-    const c = canvas(); if (!c) return;
-    c.setAttribute('tabindex','0');
-    addEventListener('mousemove', ev=>{
-      const scn=S(); const cam=scn && scn.activeCamera;
-      if (!cam || cam.name!=='FPCam') return;
-      if (document.pointerLockElement !== c) return;
-      cam._rot = cam._rot || new BABYLON.Vector2(0,0);
-      cam._rot.y += -(ev.movementX||0)*MOUSE_SENS;
-      cam._rot.x += -(ev.movementY||0)*MOUSE_SENS;
-      cam._rot.x = clamp(cam._rot.x, -1.45, 1.45);
+  // ----------------- State -----------------
+  const State = {
+    scene: null,
+    engine: null,
+
+    body: null,        // collision capsule (Mesh)
+    rig: null,         // TransformNode parented to body (for attachments)
+    model: null,       // imported GLB root (optional)
+
+    fps: null,         // UniversalCamera parented to rig
+    tps: null,         // ArcRotateCamera locked to body
+
+    useTPS: false,     // current camera mode
+    yaw: 0,            // radians
+    pitch: 0,          // radians (FPS only)
+
+    keys: { w:0, a:0, s:0, d:0, run:false },
+    lastTime: performance.now(),
+
+    // animation (optional)
+    anim: {
+      skeleton: null,
+      groups: { idle: null, walk: null },
+      playing: "idle"
+    },
+
+    _loopAttached: false,
+    _mouseBound: false,
+    _touchBound: false,
+    _wheelBound: false
+  };
+
+  // --------------- Helpers ----------------
+  function S(){ return State.scene || window.SCENE || BABYLON.Engine?.LastCreatedScene; }
+  function Eng(){ return State.engine || window.ENGINE || State.scene?.getEngine?.(); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function v3(x,y,z){ return new BABYLON.Vector3(x,y,z); }
+  function qFromYaw(y){ return BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, y); }
+  function setYaw(node, yaw){
+    if (!node) return;
+    if (node.rotationQuaternion){
+      node.rotationQuaternion.copyFrom(qFromYaw(yaw));
+    } else {
+      node.rotation = node.rotation || new BABYLON.Vector3(0,0,0);
+      node.rotation.y = yaw;
+    }
+  }
+
+  function groundYAt(x,z,approxY=3){
+    const sc=S(); if(!sc) return null;
+    const from = new BABYLON.Vector3(x, approxY + 30, z);
+    const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,-1,0), 300);
+    const hit  = sc.pickWithRay(ray, (m)=>{
+      if (!m || m.isPickable === false) return false;
+      const n=(m.name||'').toLowerCase();
+      if (/sky|cloud|atmo|probe|env|reflection/.test(n)) return false;
+      return true;
+    });
+    return (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.y : null;
+  }
+
+  function findIndex3Spawn(){
+    const sc=S(); if(!sc) return null;
+
+    // 1) Devtools / globals
+    const cand = [
+      window.Index3Spawn, window.PP_INDEX3_SPAWN, window.PP?.index3?.spawn,
+      window.DEVTOOLS?.Index3Spawn, window.DEVTOOLS?.spawns?.index3,
+      window.DEVTOOLS?.spawns?.[3], window.DEVTOOLS?.getSpawn?.('index3')
+    ].find(Boolean);
+    if (cand){
+      if (cand.x!==undefined && cand.y!==undefined && cand.z!==undefined){
+        const pos = v3(cand.x,cand.y,cand.z);
+        const yaw = (typeof cand.yaw === 'number')? cand.yaw : null;
+        return { pos, yaw };
+      }
+      if (cand.getAbsolutePosition){
+        const pos = cand.getAbsolutePosition() || cand.position || null;
+        const yaw = cand.rotationQuaternion ? cand.rotationQuaternion.toEulerAngles().y
+                  : (cand.rotation && typeof cand.rotation.y==='number') ? cand.rotation.y : null;
+        return { pos, yaw };
+      }
+    }
+
+    // 2) Named anchors
+    const names = [
+      'Index3','index3','Index_3','index_3','Index3_Start','index3_start',
+      'Spawn_Index3','spawn_index3','PlayerSpawn_Index3','player_spawn_index3',
+      'Van_Spawn','van_spawn','PlayerSpawn','Spawn','Start'
+    ];
+    for (const n of names){
+      const t = sc.getTransformNodeByName?.(n) || sc.getNodeByName?.(n);
+      if (t){
+        const pos = t.getAbsolutePosition?.() || t.position || null;
+        const yaw = t.rotationQuaternion ? t.rotationQuaternion.toEulerAngles().y
+                  : (t.rotation && typeof t.rotation.y==='number') ? t.rotation.y : null;
+        return { pos, yaw };
+      }
+    }
+
+    // 3) Metadata on transform nodes
+    for (const m of (sc.transformNodes||[])){
+      if (m?.metadata?.spawn === 'index3' || m?.metadata?.index === 3){
+        const pos = m.getAbsolutePosition?.() || m.position || null;
+        const yaw = m.rotationQuaternion ? m.rotationQuaternion.toEulerAngles().y
+                  : (m.rotation && typeof m.rotation.y==='number') ? m.rotation.y : null;
+        return { pos, yaw };
+      }
+    }
+
+    return null;
+  }
+
+  // --------------- Build rig ----------------
+  function ensureBody(){
+    const sc=S(); if (!sc) return null;
+    if (State.body && !State.body.isDisposed()) return State.body;
+
+    const body = BABYLON.MeshBuilder.CreateCapsule(
+      'player_capsule',
+      { height: CAP_HEIGHT, radius: CAP_RADIUS, tessellation: 8, capSubdivisions: 4 },
+      sc
+    );
+    body.visibility = 0;          // invisible physics shell
+    body.isPickable = false;
+    body.checkCollisions = true;
+    body.ellipsoid = new BABYLON.Vector3(CAP_RADIUS, CAP_HEIGHT*0.5, CAP_RADIUS);
+    body.ellipsoidOffset = new BABYLON.Vector3(0, CAP_HEIGHT*0.5 - CAP_RADIUS, 0);
+
+    // Neutral rotation quaternion for consistent yaw application
+    body.rotationQuaternion = body.rotationQuaternion || BABYLON.Quaternion.Identity();
+
+    State.body = body;
+    sc.__playerBody = body; // legacy handle many modules look for
+    return body;
+  }
+
+  function ensureRigNode(){
+    const sc=S(); if(!sc) return null;
+    if (State.rig && !State.rig.isDisposed()) return State.rig;
+    const rig = new BABYLON.TransformNode('PlayerRig', sc);
+    rig.rotationQuaternion = BABYLON.Quaternion.Identity();
+    rig.parent = ensureBody();
+    State.rig = rig;
+    return rig;
+  }
+
+  function ensureFPS(){
+    const sc=S(); if(!sc) return null;
+    if (State.fps && !State.fps.isDisposed()) return State.fps;
+
+    const cam = new BABYLON.UniversalCamera('FPCam', new BABYLON.Vector3(0, EYE_HEIGHT, 0), sc);
+    cam.rotation = new BABYLON.Vector3(0,0,0); // use rotation, not cameraRotation
+    cam.minZ = 0.1;
+    cam.inertia = 0; // manual movement, no glide
+    cam.speed = 0;   // we move the body, not the camera
+    cam.parent = ensureRigNode();
+
+    State.fps = cam;
+    return cam;
+  }
+
+  function ensureTPS(){
+    const sc=S(); if(!sc) return null;
+    if (State.tps && !State.tps.isDisposed()) return State.tps;
+
+    const body = ensureBody();
+    const cam = new BABYLON.ArcRotateCamera(
+      'TPCam',
+      -Math.PI/2, 1.2, 3.6,
+      body.position.clone(),
+      sc
+    );
+    cam.lowerBetaLimit = 0.3;
+    cam.upperBetaLimit = 1.45;
+    cam.lowerRadiusLimit = TPS_MIN_R;
+    cam.upperRadiusLimit = TPS_MAX_R;
+    cam.wheelPrecision = 60;
+    cam.lockedTarget = body;
+
+    State.tps = cam;
+    return cam;
+  }
+
+  function setActiveCameraFPS(){
+    const sc=S(); if(!sc) return;
+    const fps = ensureFPS();
+    sc.activeCamera = fps;
+    try { fps.attachControl(PPCanvas(), true); } catch {}
+    State.useTPS = false;
+    // pointer lock is only meaningful in FPS
+    requestPointerLock();
+  }
+
+  function setActiveCameraTPS(){
+    const sc=S(); if(!sc) return;
+    const tps = ensureTPS();
+    sc.activeCamera = tps;
+    try { tps.attachControl(PPCanvas(), true); } catch {}
+    State.useTPS = true;
+    // exiting pointer lock if any
+    try { document.exitPointerLock?.(); } catch {}
+  }
+
+  function PPCanvas(){
+    return document.getElementById('renderCanvas') || document.querySelector('canvas');
+  }
+
+  function requestPointerLock(){
+    const cvs = PPCanvas();
+    if (!cvs) return;
+    if (document.pointerLockElement !== cvs){
+      try { cvs.requestPointerLock?.(); } catch {}
+    }
+  }
+
+  // --------------- Input ----------------
+  function bindKeys(){
+    const K = State.keys;
+    function kd(e){
+      const k=(e.key||'').toLowerCase(), c=e.keyCode||0, code=e.code||'';
+      if (k==='w'||c===87) K.w=1;
+      else if (k==='a'||c===65) K.a=1;
+      else if (k==='s'||c===83) K.s=1;
+      else if (k==='d'||c===68) K.d=1;
+      else if (k==='shift'||c===16) K.run=true;
+      else if (k==='v' || code==='KeyV' || c===86){ e.stopPropagation(); toggleTPS(); }
+    }
+    function ku(e){
+      const k=(e.key||'').toLowerCase(), c=e.keyCode||0;
+      if (k==='w'||c===87) K.w=0;
+      else if (k==='a'||c===65) K.a=0;
+      else if (k==='s'||c===83) K.s=0;
+      else if (k==='d'||c===68) K.d=0;
+      else if (k==='shift'||c===16) K.run=false;
+    }
+    window.addEventListener('keydown', kd, false);
+    window.addEventListener('keyup',   ku, false);
+    document.addEventListener('keydown', kd, true);
+    document.addEventListener('keyup',   ku, true);
+  }
+
+  function bindMouse(){
+    if (State._mouseBound) return;
+    State._mouseBound = true;
+
+    const cvs = PPCanvas();
+    if (!cvs) return;
+
+    // Click -> lock (FPS only)
+    cvs.addEventListener('click', ()=>{ if (!State.useTPS) requestPointerLock(); });
+
+    // Move -> adjust yaw/pitch (FPS only while locked)
+    window.addEventListener('mousemove', (ev)=>{
+      if (State.useTPS) return;
+      if (document.pointerLockElement !== cvs) return;
+      const dx = ev.movementX || 0;
+      const dy = ev.movementY || 0;
+      State.yaw   -= dx * MOUSE_SENS;
+      State.pitch -= dy * MOUSE_SENS;
+      State.pitch = clamp(State.pitch, -Math.PI*0.48, Math.PI*0.48);
     }, true);
-  })();
+  }
 
-  // ---- Touch look/move (FPS only for look) ----
-  ;(function initTouch(){
-    let leftId=null,rightId=null,lx=0,ly=0,rx=0,ry=0;
+  function bindTouch(){
+    if (State._touchBound) return;
+    State._touchBound = true;
+
+    let rightId=null, rx=0, ry=0;
     addEventListener('touchstart', e=>{
       for(const t of e.changedTouches){
-        if(t.clientX < innerWidth*0.5 && leftId===null){ leftId=t.identifier; lx=t.clientX; ly=t.clientY; }
-        else if(rightId===null){ rightId=t.identifier; rx=t.clientX; ry=t.clientY; }
+        if (t.clientX >= innerWidth*0.5 && rightId===null){ rightId=t.identifier; rx=t.clientX; ry=t.clientY; }
       }
     }, {passive:true});
     addEventListener('touchmove', e=>{
-      const scn=S(); if(!scn) return;
+      if (State.useTPS) return;
       for(const t of e.changedTouches){
-        if(t.identifier===leftId){
-          const dx=t.clientX-lx, dy=t.clientY-ly;
-          K.w = dy<-10?1:0; K.s = dy>10?1:0; K.a = dx<-10?1:0; K.d = dx>10?1:0;
-        } else if(t.identifier===rightId){
-          const cam=scn.activeCamera; if(!cam || cam.name!=='FPCam') continue;
-          cam._rot = cam._rot || new BABYLON.Vector2(0,0);
-          cam._rot.y += -(t.clientX-rx)*TOUCH_SENS;
-          cam._rot.x += -(t.clientY-ry)*TOUCH_SENS;
-          cam._rot.x = clamp(cam._rot.x, -1.45, 1.45);
+        if (t.identifier===rightId){
+          State.yaw   -= (t.clientX-rx) * TOUCH_SENS;
+          State.pitch -= (t.clientY-ry) * TOUCH_SENS;
+          State.pitch  = clamp(State.pitch, -Math.PI*0.48, Math.PI*0.48);
           rx=t.clientX; ry=t.clientY;
         }
       }
     }, {passive:true});
     addEventListener('touchend', e=>{
-      for(const t of e.changedTouches){
-        if(t.identifier===leftId){ leftId=null; K.w=K.a=K.s=K.d=0; }
-        if(t.identifier===rightId){ rightId=null; }
-      }
+      for(const t of e.changedTouches){ if (t.identifier===rightId) rightId=null; }
     }, {passive:true});
-  })();
-
-  // ---- Rig / Cameras ----
-  async function ensureRig(scn){
-    if (!scn.__playerBody){
-      const body = BABYLON.MeshBuilder.CreateCapsule('player_capsule',{height:CAP_HEIGHT,radius:CAP_RADIUS,tessellation:8,capSubdivisions:4},scn);
-      body.checkCollisions=true; body.isPickable=false; body.visibility=0;
-      body.position = resolveSpawn(scn);
-      scn.__playerBody = body;
-    }
-    if (!scn.__playerRig){
-      const rig = new BABYLON.TransformNode('PlayerRig', scn);
-      rig.parent = scn.__playerBody; scn.__playerRig = rig;
-    }
-
-    // FPS: manual yaw/pitch; attachControl just to own pointer lock lifecycle
-    let fps = scn.getCameraByName?.('FPCam');
-    if (!fps){
-      fps = new BABYLON.UniversalCamera('FPCam', new BABYLON.Vector3(0,HEAD_OFFSET,0), scn);
-      fps.parent = scn.__playerRig; fps.minZ=0.1; fps.speed=0; fps.inertia=0;
-      fps.inputs.clear(); // we steer via _rot
-      scn.cameras.push(fps);
-    }
-
-    // TPS: ArcRotate with standard inputs (mouse rotates, wheel zooms) – no pointer lock
-    let tps = scn.getCameraByName?.('TPCam');
-    if (!tps){
-      tps = new BABYLON.ArcRotateCamera('TPCam', -Math.PI/2, 1.15, TPS_RADIUS_DEFAULT, scn.__playerBody.position.clone(), scn);
-      tps.lowerBetaLimit=0.3; tps.upperBetaLimit=1.45;
-      tps.lowerRadiusLimit=2.6; tps.upperRadiusLimit=7.5;
-      tps.wheelPrecision=60;
-      tps.lockedTarget = scn.__playerBody;
-      scn.cameras.push(tps);
-    }
-
-    // start FPS, attach controls
-    setActiveFPS(scn, fps, tps, /*requestPointerLock*/ false);
-    return {fps, tps};
   }
 
-  function resolveSpawn(scn){
-    const names = ['Index3','index3','Index_3','index_3','Index3_Start','index3_start','Spawn_Index3','spawn_index3','Van_Spawn','van_spawn','PlayerSpawn','Spawn','Start'];
-    for (const n of names){
-      const t = scn.getTransformNodeByName?.(n) || scn.getNodeByName?.(n);
-      if (t){
-        const pos=(t.getAbsolutePosition?.()||t.position||SPAWN_FALLBACK).clone();
-        const gy=groundYAt(scn,pos.x,pos.z,pos.y); if(gy!=null) pos.y=gy+CAP_RADIUS+0.12;
-        return pos;
+  function bindWheel(){
+    if (State._wheelBound) return;
+    State._wheelBound = true;
+
+    window.addEventListener('wheel', (e)=>{
+      if (!State.useTPS) return;
+      const cam = State.tps;
+      if (!cam) return;
+      const delta = (e.deltaY || 0) * 0.01;
+      cam.radius = clamp(cam.radius + delta, TPS_MIN_R, TPS_MAX_R);
+    }, {passive:true});
+  }
+
+  // --------------- Movement Loop ----------------
+  function forwardXZ(){
+    // Compute forward from yaw only (decoupled from camera)
+    return new BABYLON.Vector3(Math.sin(State.yaw), 0, Math.cos(State.yaw));
+  }
+  function rightXZ(){
+    const f = forwardXZ();
+    return new BABYLON.Vector3(f.z, 0, -f.x);
+  }
+
+  function loop(){
+    const sc = S(); if (!sc || !State.body) return;
+
+    const now = performance.now();
+    const dt = clamp((now - State.lastTime) / 1000, 0, 0.2);
+    State.lastTime = now;
+
+    // Apply yaw/pitch to FPS camera + body orientation
+    if (State.fps){
+      // FPS camera pitch: rotate camera node around X; yaw is applied to body
+      State.fps.rotation.x = State.pitch;
+    }
+    setYaw(State.body, State.yaw);
+
+    // Movement vector from inputs (WASD)
+    let v = new BABYLON.Vector3(0,0,0);
+    if (State.keys.w) v.addInPlace(forwardXZ());
+    if (State.keys.s) v.addInPlace(forwardXZ().scale(-1));
+    if (State.keys.d) v.addInPlace(rightXZ());
+    if (State.keys.a) v.addInPlace(rightXZ().scale(-1));
+
+    const len = v.length();
+    if (len > 0.0001){
+      v.scaleInPlace(1/len);
+      const spd = (State.keys.run ? SPEED_RUN : SPEED_WALK) * dt;
+      const delta = v.scale(spd);
+      try {
+        if (State.body.moveWithCollisions) State.body.moveWithCollisions(delta);
+        else State.body.position.addInPlace(delta);
+      } catch {}
+      setWalkAnim(true);
+    } else {
+      setWalkAnim(false);
+    }
+
+    // Keep FPS camera sitting at eye height on the rig (already parented)
+    // TPS camera is lockedTarget to body; nothing to do.
+
+    // Update HUD XYZ (if present)
+    try {
+      const hud = document.getElementById('hud-xyz');
+      if (hud){
+        const p = State.body.position;
+        hud.textContent = `XYZ: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
       }
-    }
-    const pos=SPAWN_FALLBACK.clone(); const gy=groundYAt(scn,pos.x,pos.z,pos.y); if(gy!=null) pos.y=gy+CAP_RADIUS+0.12; return pos;
-  }
-  function groundYAt(scn,x,z,approxY){
-    const from=new BABYLON.Vector3(x,(approxY??6)+20,z);
-    const ray=new BABYLON.Ray(from,new BABYLON.Vector3(0,-1,0),200);
-    const hit=scn.pickWithRay(ray,m=>{
-      if(!m||m.isPickable===false) return false;
-      const n=(m.name||'').toLowerCase(); if(/sky|cloud|probe|env|reflection|atmo/.test(n)) return false;
-      return true;
-    });
-    return (hit&&hit.hit&&hit.pickedPoint)?hit.pickedPoint.y:null;
+    } catch {}
   }
 
-  async function ensurePlayerMesh(scn){
-    if (scn.__playerMesh) return scn.__playerMesh;
-    const paths=["assets/models/player/main_player.glb","assets/models/player/player.glb"];
-    for (const full of paths){
+  function attachLoop(){
+    const sc=S(); if (!sc || State._loopAttached) return;
+    State._loopAttached = true;
+    sc.onBeforeRenderObservable.add(loop);
+  }
+
+  // --------------- Model load / autoscale (optional) ---------------
+  async function ensurePlayerModel(){
+    if (State.model && !State.model.isDisposed()) return State.model;
+    const sc=S(); if (!sc) return null;
+
+    // Try common locations; harmless if missing.
+    const CAND = [
+      "assets/models/player/main_player.glb",
+      "assets/models/player/player.glb"
+    ];
+    for (const path of CAND){
       try{
-        const i=full.lastIndexOf('/'); const path=full.substring(0,i+1), file=full.substring(i+1);
-        const r=await BABYLON.SceneLoader.ImportMeshAsync('', path, file, scn);
-        const root=r.meshes && r.meshes[0]; if(!root) continue;
-        root.parent=scn.__playerBody; root.position.set(0,-1.1,0); root.isPickable=false;
-        scaleToHeight(root, TARGET_HEIGHT);
-        scn.__playerAnims=r.animationGroups||[];
-        return (scn.__playerMesh=root);
-      }catch{}
+        const i = path.lastIndexOf('/');
+        const rootUrl = path.substring(0, i+1), file = path.substring(i+1);
+        const r = await BABYLON.SceneLoader.ImportMeshAsync('', rootUrl, file, sc);
+        const root = r.meshes && r.meshes[0];
+        if (!root) continue;
+        root.name = 'PlayerModel';
+        root.parent = ensureBody();
+        root.position = new BABYLON.Vector3(0, -1.1, 0); // roughly feet to capsule base
+        root.layerMask = 0x1;
+        State.model = root;
+
+        // Autoscale to TARGET_HEIGHT
+        try {
+          const bb = root.getBoundingInfo()?.boundingBox;
+          if (bb){
+            const h = bb.maximumWorld.y - bb.minimumWorld.y;
+            if (isFinite(h) && h>0.01){
+              const sf = TARGET_HEIGHT / Math.min(h, 1000);
+              if (sf > 0.05 && sf < 20) root.scaling.setAll(sf);
+            }
+          }
+        } catch {}
+
+        // Optional: hook skeleton animations named "Idle"/"Walk"
+        try {
+          if (r.animationGroups?.length){
+            const groups = r.animationGroups;
+            State.anim.groups.idle = groups.find(g=>/idle/i.test(g.name)) || null;
+            State.anim.groups.walk = groups.find(g=>/walk|run/i.test(g.name)) || null;
+            // play idle by default
+            if (State.anim.groups.idle){ State.anim.groups.idle.start(true); State.anim.playing='idle'; }
+          }
+        } catch {}
+        return root;
+      }catch(_){}
     }
     return null;
   }
-  function scaleToHeight(node, target){
-    try{
-      const bb=node.getHierarchyBoundingVectors?.(true);
-      if(!bb) return;
-      const h=bb.max.y-bb.min.y;
-      const sf=target/Math.min(Math.max(h,0.01),1000);
-      if(sf>0&&sf<10) node.scaling=new BABYLON.Vector3(sf,sf,sf);
-    }catch{}
-  }
 
-  // ---- Movement helpers ----
-  function yawToVec(yaw){ const s=Math.sin(yaw), c=Math.cos(yaw); return new BABYLON.Vector3(s,0,c); }
-  function getFPSYaw(fps){ return (fps._rot?.y)||0; }
-  function setBodyYaw(body, yaw){
-    if(body.rotationQuaternion) body.rotationQuaternion.copyFrom(BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y,yaw));
-    else { body.rotation=body.rotation||new BABYLON.Vector3(0,0,0); body.rotation.y=yaw; }
-  }
-
-  // ---- Camera mode switching ----
-  function requestPointerLock(){ try{ canvas()?.requestPointerLock?.(); }catch{} }
-  function exitPointerLock(){ try{ document.exitPointerLock?.(); }catch{} }
-
-  function setActiveFPS(scn, fps, tps, requestLock=true){
-    // detach TPS controls
-    try{ tps?.detachControl?.(); }catch{}
-    // set yaw continuity if coming from TPS
-    if (scn.activeCamera === tps){
-      const yaw = Math.PI/2 - (tps.alpha||0);
-      fps._rot = fps._rot || new BABYLON.Vector2(0,0);
-      fps._rot.y = yaw;
+  function setWalkAnim(isMoving){
+    const A = State.anim.groups;
+    if (!A.idle && !A.walk) return;
+    if (isMoving && State.anim.playing !== 'walk'){
+      try { A.idle?.stop(); A.walk?.start(true, 1.0, A.walk.from, A.walk.to, false); } catch {}
+      State.anim.playing = 'walk';
+    } else if (!isMoving && State.anim.playing !== 'idle'){
+      try { A.walk?.stop(); A.idle?.start(true); } catch {}
+      State.anim.playing = 'idle';
     }
-    scn.activeCamera = fps; window.camera=fps;
-    try{ fps.attachControl(canvas(), true); }catch{}
-    if (requestLock) requestPointerLock();
-  }
-  function setActiveTPS(scn, fps, tps){
-    // compute TPS orbit that matches current body yaw
-    const yaw = getFPSYaw(fps);
-    tps.lockedTarget = scn.__playerBody;
-    tps.radius = clamp(tps.radius||TPS_RADIUS_DEFAULT, 3.0, 6.0);
-    tps.beta   = clamp(tps.beta||1.15, 0.35, 1.45);
-    tps.alpha  = Math.PI/2 - yaw;
-    // align arc camera “position” instantly by forcing re-target
-    tps.setTarget(scn.__playerBody.getAbsolutePosition?.()||scn.__playerBody.position);
-    // attach standard mouse inputs (no pointer lock)
-    exitPointerLock();
-    try{ tps.attachControl(canvas(), true); }catch{}
-    scn.activeCamera=tps; window.camera=tps;
   }
 
-  function toggleThirdPerson(){
-    const scn=S(); if(!scn) return;
-    const fps=scn.getCameraByName?.('FPCam');
-    const tps=scn.getCameraByName?.('TPCam');
-    if (!fps || !tps) return;
-    if (scn.activeCamera===fps) setActiveTPS(scn, fps, tps);
-    else setActiveFPS(scn, fps, tps);
-  }
-  window.toggleThirdPerson = toggleThirdPerson;
+  // --------------- Spawn ----------------
+  function applySpawnOnce(){
+    const sc=S(); if(!sc) return;
+    const body = ensureBody();
+    if (!body) return;
 
-  // ---- Main loop ----
-  function attachLoop(scn){
-    if (scn.__ppRigLoop_v5) return; scn.__ppRigLoop_v5=true;
+    const idx3 = findIndex3Spawn();
 
-    scn.onBeforeRenderObservable.add(()=>{
-      const cam=scn.activeCamera; if(!cam) return;
-      const body=scn.__playerBody; if(!body) return;
+    // position
+    let p = (idx3?.pos && idx3.pos.clone()) || body.position.clone();
+    const gy = groundYAt(p.x, p.z, p.y);
+    if (gy != null) p.y = gy + CAP_RADIUS + 0.12;
+    if (body.position?.copyFrom) body.position.copyFrom(p); else body.position = p;
 
-      // Compute yaw from current mode
-      let yaw;
-      if (cam.name==='FPCam'){
-        cam._rot = cam._rot || new BABYLON.Vector2(0,0);
-        yaw = cam._rot.y||0;
-      } else {
-        yaw = Math.PI/2 - (cam.alpha||0);
-      }
+    // yaw
+    let yaw = (idx3 && typeof idx3.yaw === 'number') ? idx3.yaw : null;
+    if (yaw == null){
+      // face origin or van position if configured
+      const focus =
+        window.PP?.CONFIG?.VAN?.POSITION ||
+        sc.getTransformNodeByName?.('Van_Spawn')?.getAbsolutePosition?.() ||
+        new BABYLON.Vector3(0, p.y, 0);
+      const dir = focus.subtract(p); dir.y=0;
+      yaw = Math.atan2(dir.x, dir.z);
+    }
+    State.yaw = yaw;
+    setYaw(body, State.yaw);
 
-      // Move body in yaw space
-      const fw = yawToVec(yaw).normalize();
-      const rt = BABYLON.Vector3.Cross(UP, fw).normalize();
-      let v = new BABYLON.Vector3(0,0,0);
-      if (K.w) v.addInPlace(fw);
-      if (K.s) v.addInPlace(fw.scale(-1));
-      if (K.d) v.addInPlace(rt);
-      if (K.a) v.addInPlace(rt.scale(-1));
-      const len=v.length();
-      if (len>0) v.scaleInPlace(1/len);
+    // align TPS initial orbit
+    if (State.tps){
+      State.tps.alpha = -Math.PI/2;
+      State.tps.beta = 1.2;
+      State.tps.radius = clamp(State.tps.radius||3.6, TPS_MIN_R, TPS_MAX_R);
+      State.tps.lockedTarget = body;
+    }
 
-      const eng=scn.getEngine?.() || window.ENGINE;
-      const dt = Math.min(0.066, ((eng?.getDeltaTime?.()||16.7)/1000));
-
-      setBodyYaw(body, yaw);
-
-      if (len>0){
-        const sp=(K.run?SPEED_RUN:SPEED_WALK)*dt;
-        const d=v.scale(sp);
-        try{ body.moveWithCollisions? body.moveWithCollisions(d) : body.position.addInPlace(d); }catch{}
-      }
-
-      // FPS camera sticks to head; we do NOT touch TPS camera position here
-      if (cam.name==='FPCam'){
-        const p = body.getAbsolutePosition?.() || body.position;
-        const rig = scn.__playerRig; if (rig) rig.position.set(0,0,0);
-        cam.position.set(p.x, p.y + HEAD_OFFSET, p.z);
-      }
-
-      // (Optional) simple anim switching
-      try{
-        const speedNow = len * (K.run?SPEED_RUN:SPEED_WALK);
-        const groups=scn.__playerAnims||[];
-        if (groups.length){
-          const play = (want)=> groups.forEach(g=>{
-            const nm=(g.name||'').toLowerCase();
-            if (want==='idle')  { if(/idle|stand|breath/.test(nm)) g.start(true,1.0); else g.stop(); }
-            if (want==='move')  { if(/run|walk|move/.test(nm)) g.start(true, K.run?1.2:1.0); else g.stop(); }
-          });
-          if (speedNow>0.05) play('move'); else play('idle');
-        }
-      }catch{}
-    });
+    // put FPS at body position
+    if (State.fps && State.fps.position && body.position){
+      const wp = body.position;
+      State.fps.parent = ensureRigNode();
+      State.fps.position.copyFrom(new BABYLON.Vector3(0, EYE_HEIGHT, 0));
+    }
   }
 
-  // ---- Boot ----
-  (function boot(){
-    const scn=S(); if (!scn) return requestAnimationFrame(boot);
-    (async ()=>{
-      await ensureRig(scn);
-      await ensurePlayerMesh(scn);
-      attachLoop(scn);
-    })();
-  })();
+  // --------------- Public API ----------------
+  PP.rig.init = async function initRig(){
+    State.scene = S();
+    State.engine = Eng();
+
+    ensureBody();
+    ensureRigNode();
+    ensureFPS();
+    ensureTPS();
+
+    // default to FPS to get pointer lock/mouselook immediately after Start
+    setActiveCameraFPS();
+
+    // Bind inputs and per-frame loop
+    bindKeys(); bindMouse(); bindTouch(); bindWheel();
+    attachLoop();
+
+    // Spawn + model
+    applySpawnOnce();
+    await ensurePlayerModel();
+  };
+
+  PP.rig.toggleThirdPerson = function(){
+    toggleTPS();
+  };
+
+  function toggleTPS(){
+    if (State.useTPS){ setActiveCameraFPS(); }
+    else { setActiveCameraTPS(); }
+  }
+
+  // --------------- Lifecycle hooks ----------------
+  // Initialize after pp:start so audio is unlocked and scene exists.
+  window.addEventListener('pp:start', ()=>{
+    // Make sure canvas is focused to allow pointer lock + keys
+    try { PPCanvas()?.focus(); } catch {}
+    PP.rig.init().catch(console.warn);
+  });
 
 })();
