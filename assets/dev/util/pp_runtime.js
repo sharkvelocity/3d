@@ -1,387 +1,215 @@
-/* ============================================================================
-   pp_runtime.js — Phasma-Phoney master runtime (Env + Bounds + Salt/EMF +
-                   Influence + Phantom/Wraith Teleport + Hooks)
-   Namespace: window.PP
+// assets/dev/util/pp_runtime.js
+// Runtime bootstrap: engine + scene + loader UI + resize + globals.
+// NO cameras, NO spawn, NO movement here. Those are owned by player_rig_controller_final.js.
 
-   Design:
-   - Non-invasive: it won’t overwrite your systems. You opt-in via PP.Runtime.
-   - Hard rule: Ghosts cannot leave the house interior polygon.
-   - Teleport: Only Phantom & Wraith; always emits EMF-2 buzz on teleport.
-   - Salt: Phantom can leave footprints if landing on salt; Wraith never does.
-   - Influence: Returns multipliers; auto-speed scaling is opt-in.
+(function () {
+  "use strict";
+  if (window.__PP_RUNTIME__) return;
+  window.__PP_RUNTIME__ = true;
 
-   Integration (quick):
-   ---------------------------------------------------------------------------
-   <script src="./assets/dev/util/pp_runtime.js"></script>
-   // After scene + player exist:
-   PP.Runtime.setScene(scene).setPlayer(player);
-   PP.Bounds.setPolygon(MAP_DEF?.interior || [{x:-15,z:-20},{x:15,z:-20},{x:15,z:20},{x:-15,z:20}]);
-   // Optional providers
-   PP.Env
-     .setProvider('countActiveElectronicsWithin', (pos,r)=>0)
-     .setProvider('countFireSourcesWithin', (pos,r)=>0)
-     .setProvider('getRoomIdFor', (pos)=>'default');
-   // Optional toggles:
-   PP.Runtime.configure({ APPLY_INFLUENCE:false, DEBUG_BOUNDS:false });
+  // Namespace
+  const PP = (window.PP = window.PP || {});
+  PP.runtime = PP.runtime || {};
 
-   // For each ghost:
-   PP.Runtime.registerGhost(ghost);
+  // ---------- DOM ----------
+  const canvas = () =>
+    document.getElementById("renderCanvas") || document.querySelector("canvas");
+  const $ = (id) => document.getElementById(id);
 
-   // Each frame:
-   const dt = engine.getDeltaTime()*0.001;
-   PP.Runtime.onTick(dt);
-   ---------------------------------------------------------------------------
-============================================================================ */
-
-(function(){
-  const PP = window.PP = window.PP || {};
-
-  // -------------------------- Utilities -----------------------------------
-  function clamp(v,a,b){ return Math.min(Math.max(v,a),b); }
-  function rand(a,b){ return a + Math.random()*(b-a); }
-  function lerp(a,b,t){ return a + (b-a)*t; }
-  function distance2D(a,b){ return Math.hypot((a.x||0)-(b.x||0), (a.z||0)-(b.z||0)); }
-
-  // ---------------------- Environmental State ------------------------------
-  const Env = {
-    breakerOn: false,
-    rooms: new Map(),                 // roomId -> { tempC, lightsOn, hasFire, electronicsActive, noise, isExterior }
-    weather: { type:"clear", rain:0, fog:0, wind:0, moonlight:0.6 },
-    electronicsNearGhost: 0,
-    electronicsNearPlayer: 0,
-    crucifixCountInRoom: 0,
-    fireNearPlayer: 0,
-    illum: new Map(),
-    timeSec: 0,
-    providers: {
-      countActiveElectronicsWithin: null, // (pos, radius) -> int
-      countFireSourcesWithin: null,       // (pos, radius) -> int
-      getRoomIdFor: null,                 // (pos) -> roomId
-    },
-    setProvider(name, fn){ this.providers[name] = fn; return this; },
-
-    tick(dt, scene, player){
-      this.timeSec += dt;
-      // electronics probe
-      if (this.providers.countActiveElectronicsWithin && scene && player){
-        if ((this._elecT = (this._elecT||0) + dt) > 1.0){
-          this._elecT = 0;
-          const ghost = (PP.Runtime && PP.Runtime._firstGhost()) || null;
-          if (ghost){
-            this.electronicsNearGhost =
-              this.providers.countActiveElectronicsWithin(ghost.mesh.position, 12) | 0;
-          }
-          const ppos = (player.position || player.mesh?.position || {x:0,z:0});
-          this.electronicsNearPlayer =
-            this.providers.countActiveElectronicsWithin(ppos, 12) | 0;
-        }
-      }
-      // fire probe
-      if (this.providers.countFireSourcesWithin && player){
-        if ((this._fireT = (this._fireT||0) + dt) > 0.75){
-          this._fireT = 0;
-          const ppos = (player.position || player.mesh?.position || {x:0,z:0});
-          this.fireNearPlayer =
-            this.providers.countFireSourcesWithin(ppos, 7) | 0;
-        }
-      }
-      // cheap thermal drift
-      if ((this._thermalT = (this._thermalT||0) + dt) > 1.0){
-        this._thermalT = 0;
-        for (const [id,r] of this.rooms){
-          let target = 18;
-          if (!this.breakerOn) target -= 2;
-          if (r.hasFire) target += 3;
-          if (this.weather.fog>0.5 || this.weather.rain>0.5) target -= 1;
-          r.tempC = r.tempC ?? 18;
-          r.tempC += (target - r.tempC) * 0.02;
-          this.rooms.set(id, r);
-        }
-      }
-    }
+  // Loader UI handles (optional)
+  const ui = {
+    box: $("loading-box"),
+    text: $("loading-text"),
+    bar: $("loading-bar"),
+    fill: $("loading-fill"),
   };
-  PP.Env = Env;
 
-  // ------------------------- House Bounds ----------------------------------
-  const Bounds = {
-    polygon: [ {x:-15,z:-20},{x:15,z:-20},{x:15,z:20},{x:-15,z:20} ],
-    _aabb: {minX:-15,maxX:15,minZ:-20,maxZ:20},
+  function showLoading(msg) {
+    if (!ui.box) return;
+    ui.box.style.display = "flex";
+    if (ui.text && msg) ui.text.textContent = String(msg);
+    setProgress(0);
+  }
+  function hideLoading() {
+    if (!ui.box) return;
+    ui.box.style.display = "none";
+  }
+  function setProgress(p01) {
+    const p = Math.max(0, Math.min(1, Number(p01) || 0));
+    if (ui.fill) ui.fill.style.width = (p * 100).toFixed(1) + "%";
+  }
 
-    setPolygon(poly){
-      this.polygon = poly.slice();
-      const xs = poly.map(p=>p.x), zs = poly.map(p=>p.z);
-      this._aabb = {
-        minX: Math.min(...xs), maxX: Math.max(...xs),
-        minZ: Math.min(...zs), maxZ: Math.max(...zs)
-      };
-      return this;
-    },
-    pointInPolyXZ(p){
-      const poly = this.polygon;
-      let inside=false;
-      for (let i=0,j=poly.length-1;i<poly.length;j=i++){
-        const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
-        const intersect=((zi>p.z)!==(zj>p.z)) && (p.x < (xj-xi)*(p.z-zi)/((zj-zi)||1e-9)+xi);
-        if (intersect) inside=!inside;
-      }
-      return inside;
-    },
-    _closestPointOnSegmentXZ(ax,az,bx,bz,px,pz){
-      const abx=bx-ax, abz=bz-az, apx=px-ax, apz=pz-az;
-      const ab2=abx*abx+abz*abz||1e-9;
-      let t=(apx*abx+apz*abz)/ab2; t=Math.max(0,Math.min(1,t));
-      return {x:ax+abx*t, z:az+abz*t};
-    },
-    _closestPointOnPolyXZ(p){
-      const poly = this.polygon;
-      let best=null,bestD2=Infinity;
-      for (let i=0,j=poly.length-1;i<poly.length;j=i++){
-        const a=poly[j], b=poly[i];
-        const c=this._closestPointOnSegmentXZ(a.x,a.z,b.x,b.z,p.x,p.z);
-        const dx=c.x-p.x, dz=c.z-p.z, d2=dx*dx+dz*dz;
-        if (d2<bestD2){bestD2=d2;best=c;}
-      }
-      return best;
-    },
-    clampInside(pos, skin=0.06){
-      if (this.pointInPolyXZ(pos)) return pos;
-      const c=this._closestPointOnPolyXZ(pos);
-      const centroid = this.polygon.reduce((a,v)=>({x:a.x+v.x,z:a.z+v.z}),{x:0,z:0});
-      centroid.x/=this.polygon.length; centroid.z/=this.polygon.length;
-      const dirx=centroid.x-c.x, dirz=centroid.z-c.z;
-      const len=Math.hypot(dirx,dirz)||1;
-      return {x:c.x+(dirx/len)*skin, y:pos.y, z:c.z+(dirz/len)*skin};
-    },
-    enforceGhostHouseBounds(ghost){
-      if (!ghost || !ghost.mesh) return;
-      const p = {x:ghost.mesh.position.x, y:ghost.mesh.position.y, z:ghost.mesh.position.z};
-      const clamped = this.clampInside(p);
-      if (p.x!==clamped.x || p.z!==clamped.z){
-        ghost.mesh.position.x=clamped.x; ghost.mesh.position.z=clamped.z;
-        if (ghost.velocity){ ghost.velocity.x*=0.2; ghost.velocity.z*=0.2; }
-      }
+  // ---------- Babylon globals ----------
+  function exposeGlobals(engine, scene) {
+    try {
+      window.ENGINE = engine;
+      window.SCENE = scene;
+      // camera is set by player_rig_controller_final.js; don't touch it here
+    } catch {}
+  }
+  function S() {
+    return (
+      window.SCENE ||
+      BABYLON.EngineStore?.LastCreatedScene ||
+      BABYLON.Engine?.LastCreatedScene ||
+      null
+    );
+  }
+  PP.runtime.S = S;
+
+  // ---------- Engine + Scene ----------
+  async function createEngineAndScene() {
+    const cvs = canvas();
+    if (!cvs) {
+      throw new Error("[pp_runtime] #renderCanvas not found");
     }
-  };
-  PP.Bounds = Bounds;
 
-  // ------------------------ Salt + EMF Shims --------------------------------
-  const Salt = {
-    // items: {type:'disc', c:{x,z}, r} OR {type:'line', a:{x,z}, b:{x,z}}
-    lines: [],
-    clear(){ this.lines.length = 0; },
-    addDisc(x,z,r){ this.lines.push({type:'disc', c:{x:x,z:z}, r:r}); },
-    addLine(ax,az,bx,bz){ this.lines.push({type:'line', a:{x:ax,z:az}, b:{x:bx,z:bz}}); },
+    const engine = new BABYLON.Engine(cvs, true, {
+      preserveDrawingBuffer: true,
+      stencil: true,
+      antialias: true,
+      doNotHandleContextLost: false,
+      powerPreference: "high-performance",
+    });
 
-    _closestPointOnSegmentXZ(ax,az,bx,bz,px,pz){
-      const abx=bx-ax, abz=bz-az, apx=px-ax, apz=pz-az;
-      const ab2=abx*abx+abz*abz||1e-9;
-      let t=(apx*abx+apz*abz)/ab2; t=Math.max(0,Math.min(1,t));
-      return {x:ax+abx*t, z:az+abz*t};
-    },
-    isPointOnSalt(x,z, tol=0.25){
-      for (const s of this.lines){
-        if (s.type==='disc'){
-          const dx=x-s.c.x, dz=z-s.c.z; if (dx*dx+dz*dz <= s.r*s.r) return true;
-        } else {
-          const c=this._closestPointOnSegmentXZ(s.a.x,s.a.z, s.b.x,s.b.z, x,z);
-          if (Math.hypot(c.x-x, c.z-z) <= tol) return true;
-        }
-      }
-      return false;
-    },
-    leaveFootprintAt(x,z){
-      if (PP.Events && PP.Events.spawnUVFootprint){
-        PP.Events.spawnUVFootprint({x:x, z:z});
-      } else {
-        (console.debug||console.log)('[PP.Salt] Footprint at', x.toFixed(2), z.toFixed(2));
-      }
-    }
-  };
-  PP.Salt = Salt;
+    const scene = new BABYLON.Scene(engine);
 
-  const EMF = {
-    spawn(opts){
-      if (window.EMF && typeof window.EMF.spawn==='function'){
-        window.EMF.spawn(opts);
-      } else {
-        (console.debug||console.log)('[PP.EMF] Pulse L'+opts.level, opts.position, 'src=',opts.source);
-      }
-    },
-    emitTeleportBuzz(level, worldPos, duration=1.8){
-      this.spawn({
-        level: level|0, position: {...worldPos}, ttl: duration, source:'teleport'
+    // World defaults (safe; no camera/spawn)
+    scene.useRightHandedSystem = false; // keep Babylon default (left-handed)
+    scene.collisionsEnabled = true;
+    scene.gravity = new BABYLON.Vector3(0, -0.98, 0);
+
+    // Optional environment (no camera):
+    // You can remove this if your map provides its own env.
+    try {
+      scene.createDefaultEnvironment({
+        createGround: false,
+        createSkybox: false,
       });
+    } catch {}
+
+    // Resize
+    window.addEventListener("resize", () => {
+      try {
+        engine.resize();
+      } catch {}
+    });
+
+    exposeGlobals(engine, scene);
+
+    // A lightweight render loop. Active camera is owned elsewhere.
+    engine.runRenderLoop(() => {
+      try {
+        scene.render();
+      } catch {}
+    });
+
+    // Let other modules know a scene exists (weather/inventory may listen).
+    window.dispatchEvent(new CustomEvent("pp:scene-ready", { detail: { scene } }));
+
+    return { engine, scene };
+  }
+
+  // ---------- Asset loading helpers ----------
+  // Map config is expected in PP.CONFIG.MAPS (external). We only provide a loader shell.
+  async function loadMapByDef(def) {
+    const scene = S();
+    if (!scene || !def) throw new Error("[pp_runtime] no scene or map def");
+
+    // Accept either a .glb/.gltf file path or a pair {rootUrl, file}
+    const isPair = def.rootUrl && def.file;
+    const rootUrl = isPair ? def.rootUrl : (def.path ? def.path.replace(/[^/]+$/, "") : "");
+    const file = isPair ? def.file : (def.path ? def.path.split("/").pop() : null);
+
+    if (!file) {
+      console.warn("[pp_runtime] Map def missing 'file/path'", def);
+      return;
     }
-  };
-  PP.EMF = EMF;
 
-  // -------------------- Environmental Influence -----------------------------
-  const Influence = {
-    compute(ghost, roomId){
-      const r = Env.rooms.get(roomId) || {
-        tempC:18, lightsOn:false, hasFire:false, electronicsActive:false, noise:0, isExterior:false
-      };
-      const out = {
-        breakerOn: Env.breakerOn,
-        tempC: r.tempC,
-        lightsOn: Env.breakerOn && r.lightsOn,
-        fireNearby: r.hasFire || Env.fireNearPlayer>0,
-        electronicsBoost: (r.electronicsActive?1:0) + (ghost.isNearPlayer && Env.electronicsNearPlayer>0 ? 1:0),
-        noise: r.noise, exterior: r.isExterior,
-        speedMul:1, huntBias:1, eventBias:1, sanityDrainMul:1, visibilityBias:1
-      };
-      switch (ghost.type){
-        case 'Jinn':
-          if (out.breakerOn && ghost.distanceToPlayer>3){ out.speedMul*=1.15; out.huntBias*=1.1; }
-          break;
-        case 'Hantu':
-          const cold=Math.max(0,(18-out.tempC))*0.02; out.speedMul*=(1+cold);
-          if (out.fireNearby) out.speedMul*=0.9;
-          break;
-        case 'Onryo':
-          if (out.fireNearby) out.huntBias*=0.5;
-          break;
-        case 'Raiju':
-          if (out.electronicsBoost>0){ out.speedMul*=1.35; out.huntBias*=1.15; }
-          break;
-        case 'Mare':
-          if (!out.lightsOn){ out.eventBias*=1.25; out.huntBias*=1.1; } else { out.eventBias*=0.8; out.huntBias*=0.9; }
-          break;
-        case 'Shade':
-          if (ghost.sameRoomAsPlayer){ out.eventBias*=0.2; out.huntBias*=0.6; }
-          if (out.lightsOn) out.eventBias*=0.8;
-          break;
-        case 'Goryo':
-          out.visibilityBias *= out.lightsOn?0.6:1.0;
-          break;
-      }
-      if (Env.weather.fog>0.4 && out.exterior) out.sanityDrainMul*=1.1;
-      if (Env.weather.rain>0.6 && out.exterior) out.eventBias*=1.1;
+    showLoading(`Loading map: ${def.name || file}`);
 
-      out.speedMul = clamp(out.speedMul, 0.6, 1.6);
-      out.eventBias = clamp(out.eventBias, 0.5, 1.6);
-      out.huntBias  = clamp(out.huntBias , 0.5, 1.6);
-      return out;
-    }
-  };
-  PP.Influence = Influence;
+    // Hook Babylon's default loading observable into our UI
+    let lastRatio = 0;
+    const obs = scene.onDataLoadedObservable.add(() => {
+      // No-op here; SceneLoader exposes progress below.
+    });
 
-  // ---------------- Phantom/Wraith Teleport Manager -------------------------
-  const Teleport = {
-    minCD: 18, maxCD: 36,
-    closeBiasMeters: 8, farBiasMeters: 16,
-    _state: new WeakMap(),
-    _pickTarget(playerPos){
-      const box = Bounds._aabb;
-      if (Math.random() < 0.5){
-        const ang=Math.random()*Math.PI*2, r=rand(2, this.closeBiasMeters);
-        return { x: playerPos.x + Math.cos(ang)*r, z: playerPos.z + Math.sin(ang)*r };
+    // Use SceneLoader.Append/ImportMesh — map should be authored to include its own lights/colliders, etc.
+    await BABYLON.SceneLoader.AppendAsync(rootUrl, file, scene, (evt) => {
+      // Progress
+      if (evt.lengthComputable) {
+        const r = evt.loaded / Math.max(1, evt.total);
+        lastRatio = r;
+        setProgress(0.1 + r * 0.85); // keep a bit of headroom
       } else {
-        for (let i=0;i<30;i++){
-          const rx = lerp(box.minX, box.maxX, Math.random());
-          const rz = lerp(box.minZ, box.maxZ, Math.random());
-          const p = {x:rx, z:rz};
-          if (Bounds.pointInPolyXZ(p)) return p;
-        }
-        return { x: playerPos.x, z: playerPos.z };
+        // Fallback to a soft ramp
+        lastRatio = Math.min(1, lastRatio + 0.02);
+        setProgress(0.1 + lastRatio * 0.85);
       }
-    },
-    try(ghost, playerPos, dt){
-      if (!ghost || !ghost.mesh) return;
-      if (!(ghost.type==='Phantom' || ghost.type==='Wraith')) return;
+    });
 
-      let st = this._state.get(ghost);
-      if (!st){ st = { cd: rand(this.minCD, this.maxCD), lastPos: {x:ghost.mesh.position.x, y:ghost.mesh.position.y, z:ghost.mesh.position.z} }; }
-      st.cd -= dt;
-      if (st.cd > 0){ this._state.set(ghost, st); return; }
+    // Let other systems post-process (navmesh bake, tags, etc.)
+    window.dispatchEvent(new CustomEvent("pp:map:loaded", { detail: { def, scene } }));
 
-      const target = this._pickTarget(playerPos);
-      const clamped = Bounds.clampInside({x:target.x, y:ghost.mesh.position.y, z:target.z});
+    // Finish loader
+    setProgress(1);
+    setTimeout(hideLoading, 100);
 
-      // Optional: cancel if a crucifix is very near the target and player
-      if (Env.crucifixCountInRoom>0 && distance2D(clamped, playerPos) < 3.2){
-        st.cd = rand(6,12);
-        this._state.set(ghost, st);
-        return;
-      }
+    // Defer a tick to be safe for systems that need meshes ready
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("pp:map:ready", { detail: { def, scene } }));
+    }, 0);
+  }
 
-      ghost.mesh.position.x = clamped.x;
-      ghost.mesh.position.z = clamped.z;
-
-      const onSalt = Salt.isPointOnSalt(clamped.x, clamped.z);
-      if (ghost.type==='Phantom'){ if (onSalt) Salt.leaveFootprintAt(clamped.x, clamped.z); }
-      // Wraith: never leaves footprints
-
-      EMF.emitTeleportBuzz(2, ghost.mesh.position, 2.0);
-
-      st.cd = rand(this.minCD, this.maxCD);
-      st.lastPos = {x:clamped.x, y:ghost.mesh.position.y, z:clamped.z};
-      this._state.set(ghost, st);
+  // Load map by id key from PP.CONFIG.MAPS
+  async function loadMapById(id) {
+    const def = PP?.CONFIG?.MAPS?.[id];
+    if (!def) {
+      console.warn("[pp_runtime] map id not found:", id);
+      return;
     }
-  };
-  PP.Teleport = Teleport;
+    return loadMapByDef(def);
+  }
 
-  // ---------------------------- Hooks / Runtime -----------------------------
-  const Config = { APPLY_INFLUENCE:false, DEBUG_BOUNDS:false };
-
-  const Runtime = {
-    _ghosts: [],
-    _player: null,
-    _scene: null,
-    _dbgEl: null,
-
-    configure(opts){ Object.assign(Config, opts||{}); return this; },
-    setScene(scene){ this._scene = scene; return this; },
-    setPlayer(player){ this._player = player; return this; },
-    registerGhost(ghost){ if (ghost && this._ghosts.indexOf(ghost)===-1) this._ghosts.push(ghost); return this; },
-    _firstGhost(){ return this._ghosts[0] || null; },
-
-    _ensureDebug(){
-      if (!Config.DEBUG_BOUNDS) return;
-      if (!this._dbgEl){
-        const el = document.createElement('div');
-        el.style.cssText = 'position:fixed;left:8px;bottom:8px;font:12px monospace;color:#0ff;background:rgba(0,0,0,.45);padding:6px 8px;border:1px solid #0ff;z-index:99999';
-        document.body.appendChild(el);
-        this._dbgEl = el;
-      }
-    },
-
-    onTick(dt){
-      if (!this._player) return;
-
-      this._ensureDebug();
-      PP.Env.tick(dt, this._scene, this._player);
-
-      const playerPos = (this._player.mesh?.position || this._player.position || {x:0,z:0});
-
-      for (const ghost of this._ghosts){
-        // Room ID via provider (or ghost.roomId fallback)
-        const getRoomIdFor = PP.Env.providers.getRoomIdFor;
-        const roomId = (typeof getRoomIdFor==='function')
-          ? getRoomIdFor(ghost.mesh.position)
-          : (ghost.roomId ?? 'default');
-
-        // Influence (you can also ignore these and use your own logic)
-        const infl = PP.Influence.compute(ghost, roomId);
-        if (Config.APPLY_INFLUENCE){
-          const base = ghost.baseSpeed || 1.7;
-          ghost.speed = clamp(base * infl.speedMul, 0.4, 3.8);
-        }
-
-        // Hard: ghost cannot leave house
-        PP.Bounds.enforceGhostHouseBounds(ghost);
-
-        // Teleport rules (Phantom/Wraith only)
-        PP.Teleport.try(ghost, playerPos, dt);
-
-        if (this._dbgEl){
-          const inside = PP.Bounds.pointInPolyXZ(ghost.mesh.position);
-          this._dbgEl.textContent = `Ghost@(${ghost.mesh.position.x.toFixed(2)},${ghost.mesh.position.z.toFixed(2)}) inside=${inside?'YES':'NO'}`;
-        }
-      }
-    }
+  // ---------- Public API ----------
+  PP.runtime.init = async function initRuntime() {
+    // Only build engine/scene once
+    if (S()) return S();
+    await createEngineAndScene();
+    return S();
   };
 
-  PP.Runtime = Runtime;
-  PP.Config  = Config;
+  PP.runtime.loadMap = async function loadMap(idOrDef) {
+    const scene = await PP.runtime.init();
+    const def = typeof idOrDef === "string" ? (PP?.CONFIG?.MAPS?.[idOrDef] || null) : idOrDef;
+    if (!def) {
+      console.warn("[pp_runtime] loadMap: missing/unknown id", idOrDef);
+      return;
+    }
+    return loadMapByDef(def);
+  };
+
+  PP.runtime.setLoadingMessage = function (msg) {
+    showLoading(msg || "Loading…");
+  };
+  PP.runtime.setLoadingProgress = setProgress;
+  PP.runtime.hideLoading = hideLoading;
+
+  // When the game “Start” happens (index wires pp:start),
+  // we make sure engine/scene exist — cameras/spawn handled elsewhere.
+  window.addEventListener("pp:start", () => {
+    PP.runtime.init().catch((e) => console.error(e));
+  });
+
+  // Optional: auto-init the scene early so modules (weather/inventory) that poll for SCENE will find it.
+  // Comment this out if you want to delay until pp:start.
+  (function eagerInit() {
+    // If you prefer lazy, delete this IIFE.
+    PP.runtime
+      .init()
+      .then(() => {
+        // Scene ready; do nothing else here.
+      })
+      .catch(() => {});
+  })();
 })();
