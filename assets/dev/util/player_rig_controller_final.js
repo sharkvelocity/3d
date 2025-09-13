@@ -1,5 +1,3 @@
-<!-- save as: ./assets/dev/util/player_rig_controller_final.js -->
-<script>
 /* Player Rig — single source of truth
    - ONE FPS camera + ONE optional TPS camera (toggle: V)
    - Mouse works (Babylon mouse input; no custom deltas)
