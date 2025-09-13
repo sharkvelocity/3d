@@ -1,4 +1,8 @@
-/* game_bootstrap.js — everything loads only after Start (with loader) */
+/* game_bootstrap.js — everything loads only AFTER Start (with loader)
+   - Robust map filename resolver (case/space/underscore/encoding variants)
+   - On-screen diagnostics when a map can't be found
+   - No pre-start work; loader owns the full pipeline
+*/
 (function () {
   if (window.__GameBootstrapReady) return; window.__GameBootstrapReady = true;
 
@@ -11,7 +15,21 @@
     try{ const r=await fetch(u(url),{cache:"no-store"}); if(!r.ok) throw new Error(r.status+" "+r.statusText); return await r.json(); }
     catch(e){ warn("fetchJSON",url,e); return null; }
   }
-  async function headExists(path){ try{ const r=await fetch(u(path),{method:"HEAD",cache:"no-store"}); return r.ok; } catch{ return false; } }
+  async function head(url){
+    try{ const r=await fetch(u(url),{method:"HEAD",cache:"no-store"}); return r.ok; }catch{ return false; }
+  }
+
+  // ---------------- Toast (also used for errors) ----------------
+  function toast(msg, kind="info", ms=4200){
+    const t = $("#toast");
+    if (!t) { console[kind==="error"?"error":"log"]("[toast]", msg); return; }
+    t.textContent = msg;
+    t.style.display = "block";
+    t.style.borderColor = (kind==="error"?"#a33":"#066");
+    t.style.color = (kind==="error"?"#fbb":"#0ff");
+    clearTimeout(toast._h);
+    toast._h = setTimeout(()=>{ t.style.display="none"; }, ms);
+  }
 
   // ---------------- Loader UI ----------------
   const Loader=(()=>{
@@ -36,7 +54,7 @@
     return MAP_FILES[idx];
   }
 
-  // ---------------- Manifest (runs inside loader) ----------------
+  // ---------------- Manifest (inside loader) ----------------
   async function loadManifest(){
     const j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) MAP_FILES = j;
@@ -44,14 +62,12 @@
     if (!MAP_FILES.length){
       MAP_FILES = [
         { file:"Abandoned_House.glb",        title:"Abandoned House", def:"Abandoned_House.config.js" },
-        { file:"Abandoned House.glb",        title:"Abandoned House", def:"Abandoned_House.config.js" },
         { file:"furnished_house.glb",        title:"Furnished House", def:"furnished_house.js" },
-        { file:"Furnished House.glb",        title:"Furnished House", def:"furnished_house.js" },
         { file:"jailhouse.glb",              title:"Jailhouse",       def:"jailhouse.config.js" },
         { file:"apartment_floor_plan.glb",   title:"Apartment",       def:"apartment_floor_plan.config.js" }
       ];
     }
-    // Populate dropdown now (title screen is still visible until loader starts)
+    // Populate dropdown now (title screen still visible before Start)
     const sel = $("#map-select");
     if (sel){
       sel.innerHTML = MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join("");
@@ -70,6 +86,8 @@
     engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
     scene  = new BABYLON.Scene(engine);
 
+    // mild night tint
+    scene.clearColor = new BABYLON.Color4(0.09,0.10,0.14,1.0);
     scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
     scene.fogDensity = 0.0045;
     scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
@@ -123,35 +141,72 @@
     }catch(e){ warn("applyMapDef", e); }
   }
 
+  // Try many filename variants, report each attempt in console
+  async function resolveMapFilename(orig){
+    // Build candidate variants
+    const variants = new Set();
+
+    const push = (s)=>{ if (s) variants.add(s); };
+
+    const base = (orig||"").trim();
+    const uSpace = base.replace(/ /g, "_");
+    const sSpace = base.replace(/_/g, " ");
+    const lc = base.toLowerCase();
+    const ucFirst = base.replace(/(^|[ _-])([a-z])/g, (m,pre,ch)=> pre + ch.toUpperCase());
+
+    // raw names
+    push(base); push(uSpace); push(sSpace);
+    push(lc); push(ucFirst);
+
+    // URL-encoded spaces
+    push(encodeURIComponent(base).replace(/%2F/gi,"/"));
+    push(encodeURIComponent(sSpace).replace(/%2F/gi,"/"));
+    push(encodeURIComponent(uSpace).replace(/%2F/gi,"/"));
+
+    // Common GLB/ext fixes
+    const ensureGlb = (s)=> s.endsWith(".glb") ? s : (s + ".glb");
+    [...Array.from(variants)].forEach(v=>{ push(ensureGlb(v)); });
+
+    // Try each variant
+    const tried = [];
+    for (const v of variants){
+      const rel = `./assets/models/map/${v}`;
+      tried.push(rel);
+      if (await head(rel)) {
+        log("Map resolved:", rel);
+        return { ok:true, file:v, tried };
+      }
+    }
+    return { ok:false, tried };
+  }
+
   async function loadSelectedMap(){
     const m = chosenMap();
-    const filesToTry = [];
-    if (m?.file) filesToTry.push(m.file);
-    if (m?.file && (m.file.includes("_") || m.file.includes(" "))){
-      filesToTry.push(m.file.replace(/_/g," "));
-      filesToTry.push(m.file.replace(/ /g,"_"));
-    }
-    const seen=new Set(), uniq=[]; for(const f of filesToTry){ const k=f.toLowerCase(); if(!seen.has(k)){ seen.add(k); uniq.push(f); } }
+    const target = (m?.file || "Abandoned_House.glb");
 
-    let chosen=null;
-    for (const f of uniq){
-      const rel = `./assets/models/map/${encodeURIComponent(f).replace(/%2F/gi,"/")}`;
-      if (await headExists(rel)){ chosen=f; break; }
+    const { ok, file, tried } = await resolveMapFilename(target);
+    if (!ok){
+      warn("Map file not found. Tried:", tried);
+      toast(`Map not found. Tried:\n${tried.join("\n")}`, "error", 8000);
+      // Show a simple ground so the scene still works
+      const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 200, height: 200 }, scene);
+      g.checkCollisions = true;
+      return;
     }
-    if (!chosen) throw new Error("Map file missing on server");
 
-    await tryLoadMapDef(m?.def, chosen);
+    await tryLoadMapDef(m?.def, file);
 
     try{
-      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", chosen, scene);
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", file, scene);
       const root = res.meshes[0] || null;
       if (root){
         applyMapDefToRoot(root);
         res.meshes.forEach(me=>{ try{ me.checkCollisions=true; me.receiveShadows=true; }catch{} });
       }
-      log("Map imported:", chosen);
+      log("Map imported:", file);
     }catch(e){
       warn("Import failed, ground fallback", e);
+      toast(`Failed to import "${file}". See console.`, "error", 8000);
       const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 200, height: 200 }, scene);
       g.checkCollisions = true;
     }
@@ -184,10 +239,8 @@
     try{ $("#renderCanvas")?.focus?.(); }catch{}
   }
 
-  // The page will NOT load anything until pp:start is fired by Start button
+  // Nothing loads before Start
   window.addEventListener("pp:start", ()=> {
-    startPipeline().catch(e=>{ warn("bootstrap failed:", e); });
+    startPipeline().catch(e=>{ warn("bootstrap failed:", e); toast("Boot failed. See console.", "error"); });
   }, { once:true });
-
-  // No DOMContentLoaded work here — nothing loads before Start.
 })();
