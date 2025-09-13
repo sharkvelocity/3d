@@ -1,106 +1,159 @@
-(function(){ 'use strict';
-  if (window.__minimapInstalled_v2) return; window.__minimapInstalled_v2 = true;
-  const S = ()=>window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null;
-  const whenReady = (cb)=>{ (function t(){const s=S(); if(s&&s.activeCamera){try{cb(s);}catch(_){ } return;} requestAnimationFrame(t); })(); };
-  const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
-  const VIEWPORT = { x: 0.02, y: 0.73, w: 0.24, h: 0.24 };
-  const HEIGHT   = 60;
-  const HALF_EXT = 55;
-  const Y_FALLBK = 1.35;
+<!-- minimap_northup_xyz.js (drop-in replacement) -->
+<script>
+(function(){
+  if (window.__PP_MINIMAP__) return; window.__PP_MINIMAP__ = true;
 
-  function pickable(m){
-    if (m.isPickable === false) return false;
-    const n=(m.name||"").toLowerCase();
-    return n.includes("floor") || n.includes("ground") || n.includes("nav") || true;
+  // Config
+  const SIZE_PX = 256;            // logical pixels; will be scaled by DPR
+  const LAYER_MASK = 0xFFFFFFFF;  // render everything (adjust if you want to hide HUD meshes)
+  const ORTHO_SCALE = 40;         // world meters shown across minimap
+
+  let engine, scene, mapCam, rtt, dprCached = 1, uiRoot, imgEl;
+
+  function S(){ return window.SCENE || BABYLON.Engine?.LastCreatedScene; }
+  function E(){ return window.ENGINE || BABYLON.Engine?.LastCreatedEngine; }
+
+  function currentDPR(){
+    // round to int to avoid fractional RT sizes on some GPUs
+    return Math.max(1, Math.floor(window.devicePixelRatio || 1));
   }
 
-  function buildMinimap(scene){
-    const eng = scene.getEngine();
-    const mm = new BABYLON.FreeCamera("MiniMapCam", new BABYLON.Vector3(0, HEIGHT, 0), scene);
-    mm.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-    mm.orthoLeft=-HALF_EXT; mm.orthoRight=HALF_EXT; mm.orthoBottom=-HALF_EXT; mm.orthoTop=HALF_EXT;
-    mm.minZ = 0.1; mm.maxZ = 10000;
-    mm.rotation.set(Math.PI/2, 0, 0);
-    mm.rotationQuaternion = null;
-    mm.inputs.clear();
-    mm.viewport = new BABYLON.Viewport(VIEWPORT.x, VIEWPORT.y, VIEWPORT.w, VIEWPORT.h);
+  function sizeForRT(){
+    const dpr = currentDPR();
+    const s = Math.max(64, Math.floor(SIZE_PX * dpr));
+    return { width: s, height: s, dpr };
+  }
 
-    scene.activeCameras = scene.activeCameras || [];
-    if (!scene.activeCameras.includes(scene.activeCamera)) scene.activeCameras.push(scene.activeCamera);
-    if (!scene.activeCameras.includes(mm)) scene.activeCameras.push(mm);
+  function disposeMinimap(){
+    try { rtt?.dispose(); } catch{}
+    try { mapCam?.dispose(); } catch{}
+    rtt = null; mapCam = null;
+  }
 
-    let W = eng.getRenderWidth(), H = eng.getRenderHeight();
-    const ui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("MinimapUI", true, scene);
+  function createMinimap(){
+    disposeMinimap();
 
-    const frame = new BABYLON.GUI.Rectangle();
-    frame.thickness = 2; frame.color = "#00FFFF"; frame.background = "rgba(0,0,0,0.14)";
-    frame.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-    frame.verticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+    engine = E(); scene = S();
+    if (!engine || !scene) return;
 
-    const dot = new BABYLON.GUI.Ellipse();
-    dot.width = "8px"; dot.height = "8px"; dot.thickness = 2; dot.color="#00FFFF"; dot.background="#00FFFF";
-    dot.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-    dot.verticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+    // 1) Top-down ortho camera
+    mapCam = new BABYLON.FreeCamera("MinimapCam", new BABYLON.Vector3(0, 50, 0), scene);
+    mapCam.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
+    mapCam.minZ = 0.1; mapCam.maxZ = 1000;
+    mapCam.layerMask = LAYER_MASK;
+    mapCam.rotation.x = Math.PI / 2; // look straight down
 
-    const label = new BABYLON.GUI.TextBlock();
-    label.color="#0ff"; label.fontSize=12; label.text="X:0  Y:0  Z:0";
-    label.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-    label.textVerticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+    // Ortho frustum (units are world units)
+    const half = ORTHO_SCALE * 0.5;
+    mapCam.orthoLeft   = -half;
+    mapCam.orthoRight  =  half;
+    mapCam.orthoTop    =  half;
+    mapCam.orthoBottom = -half;
 
-    function pxRect(){
-      W = eng.getRenderWidth(); H = eng.getRenderHeight();
-      const px = VIEWPORT.x * W, py = (1 - VIEWPORT.y - VIEWPORT.h) * H;
-      frame.left = px + "px"; frame.top = py + "px";
-      frame.width = (VIEWPORT.w * W) + "px"; frame.height = (VIEWPORT.h * H) + "px";
-    }
-    pxRect(); ui.addControl(frame); ui.addControl(dot); ui.addControl(label);
-    eng.onResizeObservable.add(pxRect);
+    // 2) Render target texture
+    const { width, height, dpr } = sizeForRT();
+    dprCached = dpr;
 
-    function placeDotAtWorldXZ(x,z){
-      const px = VIEWPORT.x * W, py = (1 - VIEWPORT.y - VIEWPORT.h) * H;
-      const rw = VIEWPORT.w * W, rh = VIEWPORT.h * H;
-      const dx = (x - mm.position.x) / (2*HALF_EXT) + 0.5;
-      const dz = (-(z - mm.position.z)) / (2*HALF_EXT) + 0.5;
-      const nx = clamp(dx, 0, 1), ny = clamp(dz, 0, 1);
-      dot.left = (px + nx*rw - 4) + "px";
-      dot.top  = (py + ny*rh - 4) + "px";
-    }
+    rtt = new BABYLON.RenderTargetTexture("MinimapRTT", { width, height }, scene, false, true);
+    rtt.ignoreCameraViewport = true;
+    rtt.samples = 1;  // avoid MSAA mismatch on some GPUs
+    rtt.refreshRate = 1;
+    rtt.renderList = null; // whole scene
+    rtt.clearColor = new BABYLON.Color4(0,0,0,0); // transparent BG if you composite into UI
+    rtt.activeCamera = mapCam;
 
-    scene.onBeforeRenderObservable.add(()=>{
-      mm.rotation.set(Math.PI/2, 0, 0);
-      mm.orthoLeft=-HALF_EXT; mm.orthoRight=HALF_EXT; mm.orthoBottom=-HALF_EXT; mm.orthoTop=HALF_EXT;
-      const body = scene.__playerBody || scene.getMeshByName("player_capsule");
-      if (body){
-        mm.position.x = body.position.x;
-        mm.position.z = body.position.z;
-        placeDotAtWorldXZ(body.position.x, body.position.z);
-        const x = body.position.x.toFixed(2), y = body.position.y.toFixed(2), z = body.position.z.toFixed(2);
-        const px = VIEWPORT.x * W, py = (1 - VIEWPORT.y - VIEWPORT.h) * H;
-        label.text = `X:${x}  Y:${y}  Z:${z}`;
-        label.left = (px + 6) + "px"; label.top  = (py + 6) + "px";
-      }
-    });
+    scene.customRenderTargets = scene.customRenderTargets || [];
+    scene.customRenderTargets.push(rtt);
 
-    scene.onPointerObservable.add((evt)=>{
-      if (evt.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-      const x = scene.pointerX, y = scene.pointerY;
-      const nx = x/W, ny = 1 - y/H;
-      const v  = mm.viewport;
-      if (nx < v.x || nx > v.x + v.width || ny < v.y || ny > v.y + v.height) return;
-      const hit = scene.pick(x, y, pickable, false, mm);
-      if (hit && hit.hit && hit.pickedPoint){
-        const p = hit.pickedPoint.clone();
-        const groundRay = new BABYLON.Ray(new BABYLON.Vector3(p.x, p.y + 500, p.z), new BABYLON.Vector3(0,-1,0), 2000);
-        const g = scene.pickWithRay(groundRay, pickable);
-        const body = scene.__playerBody || scene.getMeshByName("player_capsule");
-        if (body){
-          body.position.x = p.x;
-          body.position.z = p.z;
-          body.position.y = g && g.hit ? (g.pickedPoint.y + 0.9) : 1.35;
-        }
-      }
+    // 3) Simple HTML <img> preview (keeps Babylon out of UI FBOs)
+    ensureUI();
+    rtt.onAfterRenderObservable.addOnce(()=> {
+      // use snapshot as dataURL; avoids any cross-attachment bugs
+      const data = rtt.readPixels
+        ? rtt.readPixels() // (kept for completeness, but we’ll use copy to image below)
+        : null;
+      // Simpler: use scene.createScreenshot on this camera into a canvas, then toDataURL:
+      BABYLON.Tools.CreateScreenshotUsingRenderTarget(engine, mapCam, { width, height }, (uri)=>{
+        if (imgEl) imgEl.src = uri;
+      });
     });
   }
 
-  whenReady(buildMinimap);
+  function ensureUI(){
+    if (uiRoot) return;
+    uiRoot = document.createElement('div');
+    uiRoot.style.position = 'fixed';
+    uiRoot.style.left = '10px';
+    uiRoot.style.top = '10px';
+    uiRoot.style.zIndex = 6001;
+    uiRoot.style.pointerEvents = 'none';
+
+    // outer border
+    uiRoot.style.border = '1px solid #066';
+    uiRoot.style.background = 'rgba(0,0,0,0.35)';
+    uiRoot.style.padding = '4px';
+    uiRoot.style.borderRadius = '8px';
+
+    imgEl = document.createElement('img');
+    imgEl.alt = 'minimap';
+    imgEl.width = SIZE_PX;   // CSS pixel size (not DPR)
+    imgEl.height = SIZE_PX;
+    imgEl.style.display = 'block';
+
+    uiRoot.appendChild(imgEl);
+    document.body.appendChild(uiRoot);
+  }
+
+  // Keep camera centered over player/camera each frame
+  function followPlayer(){
+    const s = S(); if (!s || !mapCam) return;
+    const src =
+      window.PP?.rig?.body ||
+      window.PP?.player?.body ||
+      s.getMeshByName?.('player_capsule') ||
+      s.activeCamera;
+    const p = src?.getAbsolutePosition?.() || src?.position;
+    if (!p) return;
+    mapCam.position.x = p.x;
+    mapCam.position.z = p.z;
+  }
+
+  // Build once after scene is ready & first frame rendered (sizes are stable)
+  function buildSoon(){
+    const s = S(); const e = E(); if (!s || !e) return setTimeout(buildSoon, 100);
+    // wait a frame to let canvas settle
+    let built = false;
+    const sub = s.onAfterRenderObservable.add(()=>{
+      if (built) return;
+      built = true;
+      s.onAfterRenderObservable.remove(sub);
+      createMinimap();
+    });
+  }
+
+  // Recreate RTT when engine resizes or DPR changes
+  function hookResize(){
+    const e = E(); if (!e) return;
+    e.onResizeObservable.add(()=>{
+      const dpr = currentDPR();
+      if (!rtt || dpr !== dprCached){
+        createMinimap();
+      }
+    });
+  }
+
+  // Move cam every frame
+  function hookFollow(){
+    const s = S(); if (!s) return setTimeout(hookFollow, 100);
+    s.onBeforeRenderObservable.add(followPlayer);
+  }
+
+  // Boot once start is pressed
+  window.addEventListener('pp:start', ()=>{
+    buildSoon();
+    hookResize();
+    hookFollow();
+  }, { once:true });
+
 })();
+</script>
