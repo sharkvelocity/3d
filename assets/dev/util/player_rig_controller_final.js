@@ -1,7 +1,9 @@
 /* File: assets/dev/util/player_rig_controller_final.js
-   Always-visible avatar. 1P hides only the head slice so you can look down.
-   Fix: strong autoscale to target height + feet anchoring => no “giant body”.
-   Also: 3P & 1P movement with WASD/Arrows fallback, ` toggles 1P/3P.
+   1P/3P rig with proper avatar autoscale, feet anchoring, and auto eye-height from head bone.
+   Fixes:
+   - Camera aligns to avatar head (auto-detect bones; fallback to bbox)
+   - Body anchored at y=0. Camera at body.y + eyeY
+   - WASD/Arrows movement; ` toggles 1P/3P
 */
 (function () {
   if (window.__PP_RIG_READY__) return;
@@ -12,25 +14,25 @@
 
   // ----- Config -----------------------------------------------------------
   const AVATAR = {
-    file: "./assets/models/player/player.glb",  // update if different
-    eyeY: 1.6,            // camera eye height above feet
-    targetHeight: 1.75,   // final avatar height (meters)
-    meshYOffset: 0.0      // manual tweak if needed
+    file: "./assets/models/player/player.glb", // update path if different
+    eyeY: 1.6,            // will be auto-updated from head bone after load
+    targetHeight: 1.75,   // normalize avatar height
+    meshYOffset: 0.0      // extra tweak if the feet look off
   };
-  const FIRST_PERSON_HIDE_TOP_FRACTION = 0.23; // hide this top fraction as “head”
+  const FIRST_PERSON_HIDE_TOP_FRACTION = 0.23; // only hide head slice
   const CAM3 = { back: 2.8, up: 1.25 };
   const ROT_SMOOTH = 10.0;
   const SPEEDS = () => (PP.getSpeeds?.() || { walk: 0.9, run: 1.8 });
 
   // ----- State ------------------------------------------------------------
   let scene = null, camera = null;
-  let body = null;           // transform moved by inputs
+  let body = null;           // transform moved by inputs (feet at y=0)
   let avatarRoot = null;     // glb root
-  let avatarMeshes = [];     // flattened for culling
-  let isThird = false;       // start in 1P
+  let avatarMeshes = [];     // flattened for visibility culling
+  let isThird = false;       // start 1P by default
   let lastPos = null;
 
-  // Fallback movement (if modular_bindings flags aren’t present)
+  // Fallback movement if modular_bindings is absent
   const fallback = { forward:false, back:false, left:false, right:false, running:false };
   addEventListener('keydown', (e)=>{
     const c = e.code;
@@ -54,7 +56,7 @@
 
   function makeBody(){
     const n = new BABYLON.TransformNode("player_body", scene);
-    n.position = new BABYLON.Vector3(0, AVATAR.eyeY, 0); // feet at y=0, eyes at eyeY
+    n.position = new BABYLON.Vector3(0, 0, 0);  // FEET at y=0
     PP.rig.body = n;
     scene.__playerBody = n;
     return n;
@@ -65,40 +67,57 @@
     root.getChildMeshes(false).forEach(m => { if (!m.isDisposed()) avatarMeshes.push(m); });
   }
 
-  // —— Strong autoscale: normalize to AVATAR.targetHeight & anchor feet —— //
+  // —— Strong autoscale: normalize to target height & anchor feet —— //
   function normalizeAvatarScaleAndFeet(root){
     try {
-      // Measure unscaled bounds
-      const prevScaling = root.scaling.clone();
       root.scaling.setAll(1);
       root.computeWorldMatrix(true);
       const bb0 = root.getHierarchyBoundingVectors();
       let rawH = bb0.max.y - bb0.min.y;
-
-      // If model is in centimeters, rawH may be ~170–200; clamp by heuristic:
-      // If height > 5m, assume cm and divide by 100.
-      if (rawH > 5) rawH = rawH / 100;
+      if (rawH > 5) rawH = rawH / 100; // cm → m heuristic
 
       const sf = (rawH > 0.001) ? (AVATAR.targetHeight / rawH) : 1;
       root.scaling.setAll(sf);
       root.computeWorldMatrix(true);
 
-      // Re-measure to anchor feet at y = 0 relative to the body
+      // Anchor feet to y=0
       const bb = root.getHierarchyBoundingVectors();
       const minY = bb.min.y;
-      // Move the avatar up so feet are at y=0, then add optional tweak
       root.position = new BABYLON.Vector3(0, -minY + AVATAR.meshYOffset, 0);
 
-      // Keep rotation clean
       if (root.rotationQuaternion) {
         const e = root.rotationQuaternion.toEulerAngles();
         root.rotationQuaternion.copyFrom(BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, e.y));
       } else {
         root.rotation = new BABYLON.Vector3(0, 0, 0);
       }
-    } catch (e) {
-      console.warn("[rig] normalize failed:", e);
-    }
+    } catch (e) { console.warn("[rig] normalize failed:", e); }
+  }
+
+  // Auto-detect head/eyes
+  function updateEyeFromAvatar(){
+    try{
+      // try skeleton head bone names
+      const skel = avatarRoot.getChildren().find(n=>n.skeleton)?.skeleton;
+      let headY = NaN;
+      if (skel && skel.bones?.length){
+        const re = /(head|Head|HeadTop|HeadTop_End|neck)/;
+        const headBone = skel.bones.find(b => re.test(b.name));
+        if (headBone){
+          const m = headBone.getTransformNode()?.getWorldMatrix() || headBone.getFinalMatrix();
+          const pos = m.getTranslation ? m.getTranslation() :
+                      BABYLON.Vector3.FromArray(m.m ? [m.m[12],m.m[13],m.m[14]] : [0,0,0]);
+          headY = pos.y;
+        }
+      }
+      if (!isFinite(headY)){
+        const bb = avatarRoot.getHierarchyBoundingVectors();
+        headY = bb.max.y;
+      }
+      // feet y is 0 after normalize → eye a bit below the very top
+      const eye = Math.max(1.2, Math.min(1.9, headY - 0.1));
+      AVATAR.eyeY = eye;
+    } catch(e){ /* keep default */ }
   }
 
   function computeWorldHeightBounds(){
@@ -119,7 +138,7 @@
       try{
         const b = m.getBoundingInfo().boundingBox;
         const centerY = b.centerWorld.y;
-        m.isVisible = centerY <= cutoffWorldY; // hide head slice, keep torso/legs
+        m.isVisible = centerY <= cutoffWorldY; // hide head slice only
       }catch{}
     }
   }
@@ -133,17 +152,16 @@
       const res = await BABYLON.SceneLoader.ImportMeshAsync("", folder, name, scene);
       const root = res.meshes[0];
 
-      // Parent under body first (so world matrices chain correctly)
       root.parent = body;
 
-      // Strong normalize: scale to target height and anchor feet
       normalizeAvatarScaleAndFeet(root);
-
-      // Idle animations if present
-      res.animationGroups?.forEach(g => { try { g.start(true); } catch {} });
-
       avatarRoot = root;
       collectMeshes(root);
+      updateEyeFromAvatar();
+
+      // idle anims if present
+      res.animationGroups?.forEach(g => { try { g.start(true); } catch {} });
+
       if (isThird) showAllAvatar(); else applyFirstPersonCulling();
     } catch (e) {
       console.warn("[rig] avatar load failed:", e);
@@ -152,15 +170,12 @@
 
   function syncCameraToBody(){
     if (!camera || !body) return;
+    const feet = body.getAbsolutePosition();
     if (!isThird){
-      // 1P: camera sits at eyes above feet
-      const base = body.getAbsolutePosition();
-      camera.position.set(base.x, base.y + AVATAR.eyeY, base.z);
+      camera.position.set(feet.x, feet.y + AVATAR.eyeY, feet.z);
       applyFirstPersonCulling();
     } else {
-      // 3P: position camera behind & above, looking at eye point
-      const base = body.getAbsolutePosition().clone();
-      const eye = new BABYLON.Vector3(base.x, base.y + AVATAR.eyeY, base.z);
+      const eye = new BABYLON.Vector3(feet.x, feet.y + AVATAR.eyeY, feet.z);
       const fwd = camera.getDirection(BABYLON.Vector3.Forward());
       const back = fwd.scale(-CAM3.back);
       camera.position.copyFrom(eye.add(new BABYLON.Vector3(0, CAM3.up, 0)).add(back));
@@ -226,6 +241,7 @@
     faceCamera(dt);
     syncCameraToBody();
 
+    // step sounds
     if (!lastPos) lastPos = body.position.clone();
     const d = BABYLON.Vector3.Distance(lastPos, body.position);
     if (d > 0.6) {
