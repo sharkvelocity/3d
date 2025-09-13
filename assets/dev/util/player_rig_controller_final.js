@@ -1,311 +1,240 @@
-/* game_bootstrap.js — robust start flow for PhasmaPhoney
-   - Loads map manifest
-   - Imports GLB + matching MAP_DEF (*.config.js or *.js)
-   - Applies MAP_DEF {scale, rotationY, offset, spawn}
-   - Safe render loop (only renders when a camera exists)
-   - Spawns player (PP.rig.body preferred) at MAP_DEF.spawn
+/* File: assets/dev/util/player_rig_controller_final.js
+   Always-visible avatar. In 1st-person, cull head only (look down, see body).
+   - WASD from PP.state.controls (modular_bindings.js)
+   - Backquote (`) toggles 1P/3P
 */
 (function () {
-  if (window.__GameBootstrapReady) return;
-  window.__GameBootstrapReady = true;
+  if (window.__PP_RIG_READY__) return;
+  window.__PP_RIG_READY__ = true;
 
-  // ---------- tiny utils ----------
-  const $ = (s) => document.querySelector(s);
-  const log  = (...a) => { try { console.log("[bootstrap]", ...a); } catch(_){} };
-  const warn = (...a) => { try { console.warn("[bootstrap]", ...a); } catch(_){} };
+  const PP = (window.PP = window.PP || {});
+  PP.rig = PP.rig || {};
 
-  function absUrl(path) {
-    try { return new URL(path, document.baseURI).toString(); }
-    catch (_){ return path; }
+  // ----- Config -----------------------------------------------------------
+  const AVATAR = {
+    file: "./assets/models/player/player.glb",  // change if needed
+    eyeY: 1.6,          // camera eye height
+    targetHeight: 1.75, // desired avatar height after autoscale
+    meshYOffset: 0.0    // extra lift of avatar root if your feet are sinking
+  };
+
+  // In first person, hide the top fraction of the avatar height (the "head")
+  const FIRST_PERSON_HIDE_TOP_FRACTION = 0.23; // ~top 23% (tweak to show more/less)
+
+  const CAM3 = { back: 2.6, up: 1.2 }; // 3rd-person boom
+
+  const SPEEDS = () => (PP.getSpeeds?.() || { walk: 0.9, run: 1.8 });
+
+  // ----- State ------------------------------------------------------------
+  let scene = null, camera = null;
+  let body = null;           // capsule/root transform for movement
+  let avatarRoot = null;     // imported GLB root (parented to body)
+  let avatarMeshes = [];     // flattened mesh list for culling
+  let isThird = false;       // start in 1P by default
+  let lastPos = null;
+
+  function S(){ return window.__SCENE || window.SCENE || BABYLON.EngineStore?.LastCreatedScene || null; }
+
+  function ensureScene(){
+    scene  = S();
+    camera = scene?.activeCamera || window.camera || null;
+    return !!(scene && camera);
   }
 
-  function loadScriptOnce(path) {
-    return new Promise((resolve) => {
-      const s = document.createElement("script");
-      s.src = absUrl(path) + (path.includes("?") ? "" : `?v=${Date.now()}`);
-      s.async = true;
-      s.onload = () => resolve(true);
-      s.onerror = () => resolve(false);
-      document.head.appendChild(s);
+  function makeBody(){
+    const n = new BABYLON.TransformNode("player_body", scene);
+    n.position = new BABYLON.Vector3(0, AVATAR.eyeY - 0.2, 0);
+    PP.rig.body = n;
+    scene.__playerBody = n;
+    return n;
+  }
+
+  function autoscaleAvatar(root){
+    try{
+      const bb = root.getHierarchyBoundingVectors();
+      const h  = bb.max.y - bb.min.y;
+      if (h > 0.01){
+        const sf = AVATAR.targetHeight / h;
+        if (sf > 0.05 && sf < 20) root.scaling.setAll(sf);
+      }
+    }catch{}
+  }
+
+  function collectMeshes(root){
+    avatarMeshes.length = 0;
+    root.getChildMeshes(false).forEach(m => {
+      // Skip invisible helpers
+      if (m.isDisposed()) return;
+      avatarMeshes.push(m);
     });
   }
 
-  async function fetchJSON(url) {
+  function computeWorldHeightBounds(){
+    // Returns {min,max,height} in world space for avatar
     try {
-      const r = await fetch(absUrl(url), { cache: "no-store" });
-      if (!r.ok) throw new Error(r.status + " " + r.statusText);
-      return await r.json();
+      const bb = avatarRoot.getHierarchyBoundingVectors();
+      return { min: bb.min.y, max: bb.max.y, height: (bb.max.y - bb.min.y) };
+    } catch {
+      return { min: body.getAbsolutePosition().y-1, max: body.getAbsolutePosition().y+1, height: 2 };
+    }
+  }
+
+  function applyFirstPersonCulling(){
+    // Cull only the top slice (head). Everything else stays visible.
+    if (!avatarRoot) return;
+
+    const { min, height } = computeWorldHeightBounds();
+    const cutoffWorldY = min + height * (1.0 - FIRST_PERSON_HIDE_TOP_FRACTION);
+
+    for (const m of avatarMeshes){
+      try{
+        // world y of mesh center (approx; bbox is fine)
+        const b = m.getBoundingInfo().boundingBox;
+        const centerY = b.centerWorld.y;
+        // If center is above cutoff, hide (part of head/upper neck). Else show.
+        m.isVisible = centerY <= cutoffWorldY;
+      }catch{}
+    }
+  }
+
+  function showAllAvatar(){
+    for (const m of avatarMeshes){
+      try { m.isVisible = true; } catch {}
+    }
+  }
+
+  async function loadAvatar(){
+    if (!AVATAR.file) return;
+    try {
+      const folder = AVATAR.file.replace(/[^/]+$/, "");
+      const name   = AVATAR.file.split("/").pop();
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", folder, name, scene);
+      const root = res.meshes[0];
+      autoscaleAvatar(root);
+      root.parent = body;
+      root.position = new BABYLON.Vector3(0, AVATAR.meshYOffset, 0);
+      root.rotation = BABYLON.Vector3.Zero();
+
+      // Start idle anims if any
+      res.animationGroups?.forEach(g => { try { g.start(true); } catch {} });
+
+      avatarRoot = root;
+      collectMeshes(root);
+
+      // Always visible avatar; cull head only in 1P
+      if (isThird) showAllAvatar(); else applyFirstPersonCulling();
     } catch (e) {
-      warn("fetchJSON failed:", url, e);
-      return null;
+      console.warn("[rig] avatar load failed:", e);
     }
   }
 
-  // ---------- loader UI ----------
-  const Loader = (() => {
-    const box  = () => $("#loading-box");
-    const text = () => $("#loading-text");
-    const fill = () => $("#loading-fill");
-    let stepsDone = 0, stepsTotal = 0;
-    function show(){ const b=box(); if (b) b.style.display="flex"; }
-    function hide(){ const b=box(); if (b) b.style.display="none"; }
-    function label(s){ const t=text(); if (t) t.textContent = s || ""; }
-    function draw(){ const f=fill(); if (!f) return; f.style.width = (stepsTotal? (stepsDone/stepsTotal)*100 : 0).toFixed(1)+"%"; }
-    const queue = [];
-    function addStep(lbl, fn){ queue.push({lbl, fn}); stepsTotal = queue.length; }
-    async function run(){
-      show(); draw();
-      for (const s of queue){
-        label(s.lbl); draw();
-        try { await s.fn(); } catch(e){ warn("step failed:", s.lbl, e); }
-        stepsDone++; draw();
-      }
-      label("Finalizing…"); draw();
-      await new Promise(r=>setTimeout(r, 80));
-      hide();
-    }
-    function reset(){ queue.length=0; stepsDone=0; stepsTotal=0; draw(); }
-    return { addStep, run, reset, show, hide, label };
-  })();
-
-  // ---------- state ----------
-  let engine, scene;
-  let MAP_FILES = [];
-
-  // Expose for other modules (rig uses these if needed)
-  Object.defineProperties(window, {
-    ENGINE: { get(){ return engine; } },
-    SCENE:  { get(){ return scene;  } }
-  });
-
-  // ---------- map list / selector ----------
-  function populateMapSelector() {
-    const sel = $("#map-select");
-    if (!sel) return;
-    sel.innerHTML = MAP_FILES.length
-      ? MAP_FILES.map((m,i) => `<option value="${i}">${m.title || m.file}</option>`).join("")
-      : `<option value="-1">(no maps found)</option>`;
-    try {
-      const saved = localStorage.getItem("selectedMapIndex");
-      if (saved && MAP_FILES[+saved]) sel.value = saved;
-      else sel.value = "0";
-    } catch(_){ sel.value = "0"; }
-    sel.onchange = () => {
-      try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_){}
-    };
-  }
-
-  async function loadManifest() {
-    const j = await fetchJSON("./assets/models/map/maps.json");
-    if (Array.isArray(j)) MAP_FILES = j;
-    else if (j && Array.isArray(j.maps)) MAP_FILES = j.maps;
-
-    // Fallback to known files if manifest missing
-    if (!MAP_FILES.length) {
-      MAP_FILES = [
-        { file: "Abandoned_House.glb",      title: "Abandoned House", def: "Abandoned_House.config.js" },
-        { file: "furnished_house.glb",      title: "Furnished House", def: "furnished_house.js" },
-        { file: "jailhouse.glb",            title: "Jailhouse",       def: "jailhouse.config.js" },
-        { file: "apartment_floor_plan.glb", title: "Apartment",       def: "apartment_floor_plan.config.js" }
-      ];
-    }
-    populateMapSelector();
-  }
-
-  function getSelectedMap() {
-    const sel = $("#map-select");
-    const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value || "0", 10) || 0));
-    return MAP_FILES[idx];
-  }
-
-  // ---------- Babylon setup ----------
-  function startRenderLoop() {
-    if (!engine || !scene) return;
-    engine.runRenderLoop(() => {
-      // Render ONLY when there is a camera to avoid "No camera defined"
-      if (scene.activeCamera) scene.render();
-    });
-    window.addEventListener("resize", () => engine && engine.resize());
-  }
-
-  async function prepareEngineScene() {
-    const canvas = document.getElementById("renderCanvas");
-    if (!canvas) throw new Error("Missing #renderCanvas");
-    if (!window.BABYLON) throw new Error("BABYLON is not loaded yet");
-
-    engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
-    scene  = new BABYLON.Scene(engine);
-
-    // Hemi for gentle global light
-    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 0.35;
-
-    // Slight fog for night vibe
-    scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
-    scene.fogDensity = 0.0045;
-    scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
-
-    // kick the loop (safe)
-    startRenderLoop();
-  }
-
-  // ---------- map def loading ----------
-  async function tryLoadMapDef(defNameOrNull, mapFile) {
-    const baseNoExt = (mapFile || "").replace(/\.[^.]+$/, "");
-    const cands = [];
-    if (defNameOrNull) cands.push(`./assets/models/map/${defNameOrNull}`);
-    cands.push(`./assets/models/map/${baseNoExt}.config.js`);
-    cands.push(`./assets/models/map/${baseNoExt}.js`);
-
-    for (const c of cands) {
-      const ok = await loadScriptOnce(c);
-      if (ok && window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.scale || MAP_DEF.offset)) {
-        log("Loaded MAP_DEF:", c);
-        return true;
-      }
-    }
-    // Synthesize a minimal one
-    window.MAP_DEF = window.MAP_DEF || {};
-    MAP_DEF.file = mapFile || MAP_DEF.file || "";
-    MAP_DEF.scale = MAP_DEF.scale ?? 1;
-    MAP_DEF.rotationY = MAP_DEF.rotationY ?? 0;
-    MAP_DEF.offset = MAP_DEF.offset || { x:0,y:0,z:0 };
-    MAP_DEF.spawn  = MAP_DEF.spawn  || { x:0, y:1.8, z:0 };
-    warn("No MAP_DEF found; using synthesized fallback.");
-    return true;
-  }
-
-  function applyMapDefToRoot(root) {
-    if (!root || !window.MAP_DEF) return;
-    const d = MAP_DEF;
-    try {
-      // scaling
-      if (typeof d.scale === "number") {
-        root.scaling = new BABYLON.Vector3(d.scale, d.scale, d.scale);
-      }
-      // rotationY (degrees)
-      const yaw = (d.rotationY||0) * Math.PI/180;
-      root.rotation = new BABYLON.Vector3(0, yaw, 0);
-      // offset
-      if (d.offset) {
-        root.position.x = (d.offset.x||0);
-        root.position.y = (d.offset.y||0);
-        root.position.z = (d.offset.z||0);
-      }
-    } catch(e){ warn("applyMapDefToRoot failed", e); }
-  }
-
-  async function loadSelectedMap() {
-    const chosen  = getSelectedMap();
-    const mapFile = chosen?.file || "Abandoned_House.glb";
-
-    await tryLoadMapDef(chosen?.def, mapFile);
-
-    try {
-      const res = await BABYLON.SceneLoader.ImportMeshAsync(
-        "", "./assets/models/map/", mapFile, scene
-      );
-      const root = res.meshes[0] || null;
-      if (root) {
-        applyMapDefToRoot(root);
-        // collisions receiving
-        res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch(_){} });
-      }
-      log("Map imported:", mapFile);
-    } catch (e) {
-      warn("Map import failed, creating ground fallback:", e);
-      const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 200, height: 200 }, scene);
-      g.checkCollisions = true;
-    }
-  }
-
-  // ---------- spawn ----------
-  function placePlayerAtSpawn() {
-    const d = window.MAP_DEF || {};
-    const sp = d.spawn ? { x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0 } : { x:0, y:1.8, z:0 };
-
-    // Prefer PP.rig.body provided by the rig file
-    const rig = window.PP && PP.rig;
-    if (rig && rig.body) {
-      rig.body.position.set(sp.x, sp.y, sp.z);
-      if (rig.fpCam) rig.fpCam.position.copyFrom(rig.body.position);
-      if (rig.tpCam) rig.tpCam.target.copyFrom(rig.body.position);
-      log("Spawned rig at", sp);
-      return;
-    }
-
-    // Fallback: if a camera already exists, place it
-    const cam = scene.activeCamera;
-    if (cam) {
-      cam.position.set(sp.x, sp.y, sp.z);
-      try { cam.setTarget(new BABYLON.Vector3(sp.x, sp.y + 1, sp.z + 2)); } catch(_) {}
-      log("Spawned camera at", sp);
+  function syncCameraToBody(){
+    if (!camera || !body) return;
+    if (!isThird){
+      // 1P: camera at eyes
+      const base = body.getAbsolutePosition();
+      camera.position.set(base.x, base.y - (AVATAR.eyeY - 0.2) + AVATAR.eyeY, base.z);
+      // No look target force — pointer lock/mouse move drives rotation
+      // Keep head-culling up to date as you move/animate
+      applyFirstPersonCulling();
     } else {
-      // Try again a bit later if rig/camera arrives after bootstrap
-      setTimeout(placePlayerAtSpawn, 150);
+      // 3P: boom back & up from the body, look at eye height
+      const fwd = camera.getDirection(BABYLON.Vector3.Forward());
+      const back = fwd.scale(-CAM3.back);
+      const base = body.getAbsolutePosition().clone();
+      base.y = base.y - (AVATAR.eyeY - 0.2) + AVATAR.eyeY + CAM3.up;
+      camera.position.copyFrom(base.add(back));
+      camera.setTarget(base);
+      showAllAvatar();
     }
   }
 
-  function enablePointerLockOnce() {
+  function moveLoop(){
+    if (!ensureScene()) return void setTimeout(moveLoop, 200);
+
+    const flags = (PP.getMovementFlags?.() || PP.state?.controls || {});
+    const run = !!flags.running;
+    const spd = (run ? SPEEDS().run : SPEEDS().walk);
+
+    // Move in camera plane
+    const f = camera.getDirection(BABYLON.Vector3.Forward());
+    const r = camera.getDirection(BABYLON.Vector3.Right());
+    f.y = 0; r.y = 0; f.normalize(); r.normalize();
+
+    let dir = new BABYLON.Vector3(0,0,0);
+    if (flags.forward) dir.addInPlace(f);
+    if (flags.back)    dir.subtractInPlace(f);
+    if (flags.left)    dir.subtractInPlace(r);
+    if (flags.right)   dir.addInPlace(r);
+
+    if (dir.lengthSquared() > 1e-4){
+      dir.normalize();
+      dir.scaleInPlace(spd * (scene.getEngine().getDeltaTime() / 1000));
+      body.position.addInPlace(dir);
+
+      // Turn avatar toward camera facing (nice in 3P; harmless in 1P)
+      if (avatarRoot){
+        try {
+          const yaw = Math.atan2(f.x, f.z);
+          if (avatarRoot.rotationQuaternion) {
+            avatarRoot.rotationQuaternion.copyFrom(
+              BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, yaw)
+            );
+          } else {
+            avatarRoot.rotation = avatarRoot.rotation || BABYLON.Vector3.Zero();
+            avatarRoot.rotation.y = yaw;
+          }
+        } catch {}
+      }
+    }
+
+    // Keep the camera synced
+    syncCameraToBody();
+
+    // Optional simple footsteps by distance
+    if (!lastPos) lastPos = body.position.clone();
+    const d = BABYLON.Vector3.Distance(lastPos, body.position);
+    if (d > 0.6) {
+      lastPos.copyFrom(body.position);
+      if (typeof window.playStep === 'function') try { window.playStep(0.42); } catch {}
+    }
+
+    requestAnimationFrame(moveLoop);
+  }
+
+  function toggleView(){
+    isThird = !isThird;
+    syncCameraToBody();
+  }
+
+  function bindToggle(){
+    window.addEventListener("keydown", (e)=>{
+      if (e.code === "Backquote") { e.preventDefault(); toggleView(); }
+    }, true);
+  }
+
+  function attachPointerLock(){
     const canvas = document.getElementById("renderCanvas");
-    if (!canvas || !canvas.requestPointerLock) return;
-    function tryLock(){ if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch(_){ } } }
-    canvas.addEventListener("click", () => tryLock(), { passive:true });
-    setTimeout(tryLock, 250);
+    if (!canvas) return;
+    canvas.addEventListener("click", ()=>{
+      try {
+        if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+      } catch {}
+    });
   }
 
-  function toast(msg){
-    const t = $("#toast"); if (!t) { console.log(msg); return; }
-    t.textContent = msg; t.style.display = "block";
-    clearTimeout(toast._h); toast._h = setTimeout(() => { t.style.display = "none"; }, 2200);
+  function start(){
+    if (!ensureScene()) { setTimeout(start, 100); return; }
+    if (!body) body = makeBody();
+    bindToggle();
+    attachPointerLock();
+    loadAvatar();
+    syncCameraToBody();
+    moveLoop();
   }
 
-  // ---------- start pipeline ----------
-  let started = false;
-  async function startPipeline() {
-    if (started) return;
-    started = true;
-
-    const title = $("#title-screen");
-    if (title) title.style.display = "none";
-
-    Loader.reset(); Loader.label("Initializing…"); Loader.show();
-
-    try {
-      Loader.addStep("Loading map list…",    async () => await loadManifest());
-      Loader.addStep("Preparing engine…",    async () => await prepareEngineScene());
-      Loader.addStep("Loading selected map…",async () => await loadSelectedMap());
-      Loader.addStep("Placing player…",      async () => placePlayerAtSpawn());
-      Loader.addStep("Pointer lock…",        async () => enablePointerLockOnce());
-      await Loader.run();
-
-      // focus canvas
-      const canvas = document.getElementById("renderCanvas");
-      try { canvas?.focus?.(); } catch(_){}
-
-      // Let the rest of the app know we’re live
-      window.dispatchEvent(new CustomEvent("pp:start"));
-    } catch (err) {
-      warn("Boot failed:", err);
-      toast("Boot failed. See console for details.");
-      started = false; // allow retry
-      if (title) title.style.display = "flex";
-    }
-  }
-
-  // ---------- wire UI and early manifest load ----------
-  (function wireStart(){
-    const btn = $("#start-button");
-    if (btn) btn.addEventListener("click", (e)=>{ e.preventDefault(); startPipeline(); }, { passive: false, once:true });
-
-    // keyboard fallback (Enter/Space) on title
-    document.addEventListener("keydown", (e) => {
-      const onTitle = $("#title-screen") && $("#title-screen").style.display !== "none";
-      if (onTitle && (e.key === "Enter" || e.code === "Space")) { e.preventDefault(); startPipeline(); }
-    }, { passive: false });
-
-    // Preload manifest list for the selector (non-blocking)
-    window.addEventListener("DOMContentLoaded", () => { loadManifest().catch(()=>{}); });
-  })();
-
+  // Normal start
+  window.addEventListener("pp:start", start, { once: true });
+  // Late include / hot-reload
+  if (window.__PP_ALREADY_STARTED__) start();
 })();
