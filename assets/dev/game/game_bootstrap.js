@@ -34,14 +34,13 @@
   }
 
   async function loadManifest() {
-    // keep this minimal — only to populate the dropdown after start
     const j = await fetchJSON("./assets/models/map/maps.json");
     let items = [];
     if (Array.isArray(j)) items = j;
     else if (j && Array.isArray(j.maps)) items = j.maps;
 
+    // fallback list
     if (!items.length) {
-      // fallback list
       items = [
         { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.config.js" },
         { file: "furnished_house.glb",  title: "Furnished House",  def: "furnished_house.js" },
@@ -49,7 +48,7 @@
         { file: "apartment_floor_plan.glb", title: "Apartment",    def: "apartment_floor_plan.config.js" }
       ];
     }
-    // Populate if select exists (on title)
+    // populate selector if present
     const sel = $("#map-select");
     if (sel){
       sel.innerHTML = items.map((m,i)=> `<option value="${i}">${m.title || m.file}</option>`).join("");
@@ -66,6 +65,22 @@
     const sel = $("#map-select");
     const idx = Math.max(0, Math.min((maps.length-1)||0, parseInt(sel?.value||"0",10)||0));
     return maps[idx] || maps[0];
+  }
+
+  // --------------- safe global export ----------------
+  function safeExportGlobals() {
+    // Prefer PP.globals
+    const G = (window.PP = window.PP || {});
+    G.globals = G.globals || {};
+    G.globals.engine = engine;
+    G.globals.scene  = scene;
+    G.globals.camera = camera;
+
+    // Also try the traditional names, but don’t crash if they are read-only getters
+    try { window.ENGINE = engine; } catch { window.__ENGINE = engine; }
+    try { window.SCENE  = scene;  } catch { window.__SCENE  = scene;  }
+    // camera is usually writable, but guard anyway
+    try { window.camera = camera; } catch { window.__camera = camera; }
   }
 
   // --------------- Babylon create AFTER click ----------------
@@ -106,10 +121,8 @@
     scene.activeCamera = camera;
     camera.attachControl(canvas, true);
 
-    // export globals LATE
-    window.ENGINE = engine;
-    window.SCENE  = scene;
-    window.camera = camera;
+    // Export safely
+    safeExportGlobals();
 
     engine.runRenderLoop(()=> scene && scene.render());
     window.addEventListener("resize", ()=> engine && engine.resize());
@@ -161,7 +174,7 @@
   // --------------- Fallback Room (only if GLB fails) ----------------
   function buildFallbackRoom(){
     label("Building fallback room…"); setBar(45);
-    const w = 30;  // ~900 sq ft footprint (~30x30)
+    const w = 30;  // ~900 sq ft footprint (~30x30 m^2)
     const h = 3.2;
 
     const mat = new BABYLON.StandardMaterial("roomMat", scene);
@@ -180,11 +193,9 @@
     wallE.scaling.set(0.2,1,1); wallE.rotation.y = Math.PI/2; wallE.position.set(w/2,h/2,0);
     wallW.scaling.set(0.2,1,1); wallW.rotation.y = Math.PI/2; wallW.position.set(-w/2,h/2,0);
 
-    // Simple light
     const p = new BABYLON.PointLight("roomLight", new BABYLON.Vector3(0, h-0.4, 0), scene);
     p.intensity = 0.85;
 
-    // spawn
     camera.position.set(0, 1.8, 0);
     try{ camera.setTarget(new BABYLON.Vector3(0,1.8,2)); }catch(_){}
   }
@@ -231,7 +242,6 @@
   // --------------- Weather + systems kick ----------------
   function startSystems(){
     label("Finalizing…"); setBar(92);
-    // Start weather/audio/etc. (they bind to pp:start)
     window.dispatchEvent(new CustomEvent("pp:start"));
   }
 
@@ -239,7 +249,6 @@
   function revealUI(){
     label("Ready."); setBar(100);
     setTimeout(()=> hideLoader(), 120);
-    // belt stays hidden until after start; now show it
     if (belt()) belt().style.display = "flex";
     try { $("#renderCanvas")?.focus?.(); } catch(_){}
   }
@@ -249,24 +258,21 @@
     if (started) return;
     started = true;
 
-    // Title stays until loader shows; then remove title
-    showLoader();
+    showLoader(); // only now
 
-    let maps = [];
     try {
-      maps = await loadManifest(); setBar(15);
-      await createEngineScene();   setBar(25);
+      const maps = await loadManifest(); setBar(15);
+      await createEngineScene();         setBar(25);
       const meta = chosenMap(maps);
-      await importMap(meta);       setBar(60);
-      enforceSpawn();              setBar(75);
-      pointerLock();               setBar(85);
-      startSystems();              setBar(95);
-      revealUI();                  setBar(100);
+      await importMap(meta);             setBar(60);
+      enforceSpawn();                    setBar(75);
+      pointerLock();                     setBar(85);
+      startSystems();                    setBar(95);
+      revealUI();                        setBar(100);
     } catch (err){
       console.error("[bootstrap] fatal start error:", err);
       label("Boot failed. See console."); setBar(100);
     } finally {
-      // Remove title screen now (only after we showed loader to avoid pre-start rendering)
       try { $("#title-screen")?.remove(); } catch(_){}
     }
   }
@@ -275,11 +281,8 @@
   (function wireStartButton(){
     const btn = $("#start-button");
     if (!btn) return;
-    // Ensure belt is hidden before start
     if (belt()) belt().style.display = "none";
-    // Ensure loader is hidden before start
     hideLoader();
-
     btn.addEventListener("click", startGame, { once:true });
   })();
 })();
