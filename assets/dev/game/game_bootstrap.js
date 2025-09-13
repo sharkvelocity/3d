@@ -1,339 +1,224 @@
-/* File: assets/dev/game/game_bootstrap.js
-   Minimal, robust start pipeline for PhasmaPhoney.
-   - Safe with player_rig_controller_final.js (rig owns real cameras)
-   - Avoids "No camera defined" by using a temp camera until rig is ready
-*/
+/* game_bootstrap.js — robust map bootstrap for GitHub Pages */
 (function () {
-  "use strict";
-  if (window.__GameBootstrapV2__) return;
-  window.__GameBootstrapV2__ = true;
+  if (window.__GameBootstrapReady) return; window.__GameBootstrapReady = true;
 
-  // ---------- tiny utils ----------
-  const $ = (s) => document.querySelector(s);
-  const log  = (...a) => { try { console.log("[bootstrap]", ...a); } catch{} };
-  const warn = (...a) => { try { console.warn("[bootstrap]", ...a); } catch{} };
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  function docURL(path){ try { return new URL(path, document.baseURI).toString(); } catch { return path; } }
+  const $ = (s)=>document.querySelector(s);
+  const log=(...a)=>{ try{ console.log("[bootstrap]",...a);}catch{} };
+  const warn=(...a)=>{ try{ console.warn("[bootstrap]",...a);}catch{} };
 
+  function u(url){ try{ return new URL(url, document.baseURI).toString(); }catch{ return url; } }
   async function fetchJSON(url){
-    try {
-      const r = await fetch(docURL(url), { cache: "no-store" });
-      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+    try{
+      const r = await fetch(u(url), { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status+" "+r.statusText);
       return await r.json();
-    } catch (e) {
-      warn("fetchJSON failed:", url, e);
-      return null;
-    }
+    }catch(e){ warn("fetchJSON", url, e); return null; }
   }
-  function loadScriptOnce(path){
-    return new Promise((resolve) => {
-      const s = document.createElement("script");
-      s.src = docURL(path) + (path.includes("?") ? "" : `?v=${Date.now()}`);
-      s.async = true;
-      s.onload = () => resolve(true);
-      s.onerror = () => resolve(false);
-      document.head.appendChild(s);
-    });
+  async function headExists(path){
+    try{ const r = await fetch(u(path), { method:"HEAD", cache:"no-store" }); return r.ok; }catch{ return false; }
   }
 
-  // ---------- loader UI ----------
-  const Loader = (() => {
-    const box = () => $("#loading-box");
-    const txt = () => $("#loading-text");
-    const fill = () => $("#loading-fill");
-    let steps = [];
-    function show(){ const b=box(); if (b) b.style.display="flex"; }
-    function hide(){ const b=box(); if (b) b.style.display="none"; }
-    function label(s){ const t=txt(); if (t) t.textContent = s || ""; }
-    function progress(i, n){ const f=fill(); if (!f) return; const p = Math.max(0, Math.min(1, i/n||0)); f.style.width = (p*100).toFixed(1) + "%"; }
-    function reset(){ steps = []; progress(0,1); }
-    function addStep(lbl, fn){ steps.push({lbl, fn}); }
-    async function run(){
-      show(); progress(0, steps.length||1);
-      for (let i=0;i<steps.length;i++){
-        label(steps[i].lbl); progress(i, steps.length);
-        try { await steps[i].fn(); } catch (e){ warn("step failed:", steps[i].lbl, e); }
-      }
-      label("Finalizing…"); progress(steps.length, steps.length || 1);
-      await sleep(80);
-      hide();
-    }
-    return { addStep, run, reset, show, hide, label };
+  // ---- Loader UI ----
+  const Loader=(()=>{
+    const box=()=>$("#loading-box"), text=()=>$("#loading-text"), fill=()=>$("#loading-fill");
+    let i=0, n=0;
+    function show(){ const b=box(); if(b) b.style.display="flex"; }
+    function hide(){ const b=box(); if(b) b.style.display="none"; }
+    function label(s){ const t=text(); if(t) t.textContent=s||""; }
+    function draw(){ const f=fill(); if(f) f.style.width = (n? (i/n)*100 : 0).toFixed(1)+"%"; }
+    const steps=[];
+    function add(lbl,fn){ steps.push({lbl,fn}); n=steps.length; }
+    async function run(){ show(); draw(); for (const s of steps){ label(s.lbl); draw(); try{ await s.fn(); }catch(e){ warn("step", s.lbl, e);} i++; draw(); } label("Finalizing…"); await new Promise(r=>setTimeout(r,100)); hide(); steps.length=0; i=0; n=0; }
+    return { add, run, show, hide, label };
   })();
 
-  // ---------- bootstrap state ----------
-  let engine = null, scene = null, tempCam = null;
+  // ---- State ----
+  let engine, scene, camera;
   let MAP_FILES = [];
 
-  // ---------- map list / selector ----------
-  function populateMapSelector(){
-    const sel = $("#map-select");
-    if (!sel) return;
-    sel.innerHTML = MAP_FILES.length
-      ? MAP_FILES.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join("")
-      : `<option value="-1">(no maps found)</option>`;
-    try {
-      const saved = localStorage.getItem("selectedMapIndex");
-      if (saved && MAP_FILES[+saved]) sel.value = saved;
-      else sel.value = "0";
-    } catch { sel.value = "0"; }
-    sel.onchange = () => { try { localStorage.setItem("selectedMapIndex", sel.value); } catch{} };
-  }
-
+  // ---- Manifest / selector ----
   async function loadManifest(){
     const j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) MAP_FILES = j;
     else if (j && Array.isArray(j.maps)) MAP_FILES = j.maps;
 
+    // Fallback candidates (try both underscore and space names)
     if (!MAP_FILES.length){
-      // Fallback guesses (edit to your repo)
       MAP_FILES = [
-        { file: "Abandoned_House.glb",        title: "Abandoned House",      def: "Abandoned_House.config.js" },
-        { file: "furnished_house.glb",        title: "Furnished House",      def: "furnished_house.js" },
-        { file: "jailhouse.glb",              title: "Jailhouse",            def: "jailhouse.config.js" },
-        { file: "apartment_floor_plan.glb",   title: "Apartment",            def: "apartment_floor_plan.config.js" }
+        { file:"Abandoned_House.glb",        title:"Abandoned House", def:"Abandoned_House.config.js" },
+        { file:"Abandoned House.glb",        title:"Abandoned House", def:"Abandoned_House.config.js" },
+        { file:"furnished_house.glb",        title:"Furnished House", def:"furnished_house.js" },
+        { file:"Furnished House.glb",        title:"Furnished House", def:"furnished_house.js" },
+        { file:"jailhouse.glb",              title:"Jailhouse",       def:"jailhouse.config.js" },
+        { file:"apartment_floor_plan.glb",   title:"Apartment",       def:"apartment_floor_plan.config.js" }
       ];
     }
     populateMapSelector();
   }
 
-  function getSelectedMap(){
+  function populateMapSelector(){
+    const sel = $("#map-select"); if (!sel) return;
+    const opts = MAP_FILES.map((m,i)=> `<option value="${i}">${m.title || m.file}</option>`).join("");
+    sel.innerHTML = opts || `<option value="-1">(no maps found)</option>`;
+    try {
+      const saved = localStorage.getItem("selectedMapIndex");
+      if (saved && MAP_FILES[+saved]) sel.value = saved;
+      else sel.value = "0";
+    } catch { sel.value = "0"; }
+    sel.onchange = ()=> { try{ localStorage.setItem("selectedMapIndex", sel.value);}catch{} };
+  }
+
+  function chosenMap(){
     const sel = $("#map-select");
-    const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value||"0", 10) || 0));
+    const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value||"0",10)||0));
     return MAP_FILES[idx];
   }
 
-  // ---------- scene/engine ----------
+  // ---- Engine / Scene ----
   async function prepareEngineScene(){
-    const canvas = document.getElementById("renderCanvas");
-    if (!canvas) throw new Error("Missing #renderCanvas");
-    if (!window.BABYLON) throw new Error("BABYLON not loaded");
+    const canvas = $("#renderCanvas"); if (!canvas) throw new Error("Missing #renderCanvas");
+    if (!window.BABYLON) throw new Error("Babylon is missing");
 
     engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
     scene  = new BABYLON.Scene(engine);
 
-    // mild night fog
-    scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
+    scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
     scene.fogDensity = 0.0045;
-    scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
+    scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
-    // temp light
-    new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene).intensity = 0.35;
+    const light = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+    light.intensity = 0.35;
 
-    // TEMP CAMERA so we render before the rig swaps in real cameras
-    tempCam = new BABYLON.FreeCamera("tempCam", new BABYLON.Vector3(0, 2, -4), scene);
-    tempCam.setTarget(new BABYLON.Vector3(0,1.7,0));
-    tempCam.minZ = 0.1;
-    tempCam.attachControl(canvas, true);
+    camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
+    camera.minZ = 0.1; camera.inertia = 0;
+    camera.applyGravity = true; camera.checkCollisions = true;
+    camera.ellipsoid = new BABYLON.Vector3(0.35,0.9,0.35);
+    camera.ellipsoidOffset = new BABYLON.Vector3(0,0.4,0);
 
-    // expose for other modules
-    window.ENGINE = engine;
-    window.SCENE  = scene;
-    window.camera = tempCam;
+    camera.inputs.clear();
+    camera.inputs.addMouse();
+    camera.inputs.addKeyboard();
+    camera.attachControl(canvas, true);
 
-    engine.runRenderLoop(() => { if (scene) scene.render(); });
-    window.addEventListener("resize", () => engine && engine.resize());
+    engine.runRenderLoop(()=> scene && scene.render());
+    addEventListener("resize", ()=> engine && engine.resize());
   }
 
-  // ---------- MAP_DEF loading / application ----------
-  async function tryLoadMapDef(defNameOrNull, mapFile){
-    const base = (mapFile||"").replace(/\.[^.]+$/, "");
-    const candidates = [];
-    if (defNameOrNull) candidates.push(`./assets/models/map/${defNameOrNull}`);
-    candidates.push(`./assets/models/map/${base}.config.js`);
-    candidates.push(`./assets/models/map/${base}.js`);
+  // ---- MAP_DEF loading ----
+  async function tryLoadMapDef(defName, mapFile){
+    const baseNoExt = (mapFile||"").replace(/\.[^.]+$/, "");
+    const cands = [];
+    if (defName) cands.push(`./assets/models/map/${defName}`);
+    cands.push(`./assets/models/map/${baseNoExt}.config.js`);
+    cands.push(`./assets/models/map/${baseNoExt}.js`);
 
-    // clear any prior MAP_DEF
-    window.MAP_DEF = undefined;
-
-    for (const c of candidates){
-      const ok = await loadScriptOnce(c);
-      if (ok && window.MAP_DEF && typeof MAP_DEF === "object"){ log("MAP_DEF loaded:", c); return true; }
+    for (const c of cands){
+      const ok = await new Promise(res=>{ const s=document.createElement("script"); s.src=u(c)+`?v=${Date.now()}`; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); });
+      if (ok && window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.offset || MAP_DEF.scale)){ log("MAP_DEF:", c); return true; }
     }
-    // synthesize minimal def to keep going
-    warn("No MAP_DEF found; synthesizing fallback.");
-    window.MAP_DEF = {
-      file: mapFile||"",
-      scale: 1,
-      rotationY: 0,
-      offset: { x:0, y:0, z:0 },
-      spawn:  { x:0, y:1.8, z:0 }
-    };
+    // synthesize minimal def
+    window.MAP_DEF = window.MAP_DEF || {};
+    MAP_DEF.file = mapFile || MAP_DEF.file || "";
+    MAP_DEF.scale = MAP_DEF.scale ?? 1;
+    MAP_DEF.rotationY = MAP_DEF.rotationY ?? 0;
+    MAP_DEF.offset = MAP_DEF.offset || { x:0,y:0,z:0 };
+    MAP_DEF.spawn  = MAP_DEF.spawn  || { x:0, y:1.8, z:0 };
     return true;
   }
 
   function applyMapDefToRoot(root){
     if (!root || !window.MAP_DEF) return;
-    const d = MAP_DEF;
-    try {
-      // scale
-      if (typeof d.scale === "number") {
-        root.scaling = new BABYLON.Vector3(d.scale, d.scale, d.scale);
-      }
-      // rotationY in degrees
-      root.rotation = new BABYLON.Vector3(0, (d.rotationY||0) * Math.PI/180, 0);
-      // offset
-      if (d.offset){
-        root.position.x = d.offset.x||0;
-        root.position.y = d.offset.y||0;
-        root.position.z = d.offset.z||0;
-      }
-    } catch (e){ warn("applyMapDefToRoot failed", e); }
+    const d=MAP_DEF;
+    try{
+      if (typeof d.scale==="number") root.scaling = new BABYLON.Vector3(d.scale,d.scale,d.scale);
+      const yaw = (d.rotationY||0) * Math.PI/180;
+      root.rotation = new BABYLON.Vector3(0,yaw,0);
+      if (d.offset){ root.position.x=d.offset.x||0; root.position.y=d.offset.y||0; root.position.z=d.offset.z||0; }
+    }catch(e){ warn("applyMapDef", e); }
   }
 
   async function loadSelectedMap(){
-    const chosen = getSelectedMap();
-    const mapFile = chosen?.file || "Abandoned_House.glb";
+    const m = chosenMap();
+    const filesToTry = [];
 
-    await tryLoadMapDef(chosen?.def, mapFile);
+    // Try the manifest's path first
+    if (m?.file) filesToTry.push(m.file);
 
-    try {
-      const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", mapFile, scene);
+    // If filename has spaces/underscores, try both variants
+    if (m?.file && (m.file.includes("_") || m.file.includes(" "))){
+      filesToTry.push(m.file.replace(/_/g," "));
+      filesToTry.push(m.file.replace(/ /g,"_"));
+    }
+
+    // Ensure uniqueness
+    const seen = new Set(); const uniq = [];
+    for (const f of filesToTry){ const k=f.toLowerCase(); if (!seen.has(k)){ seen.add(k); uniq.push(f); } }
+
+    // Pick the first that actually exists (HEAD)
+    let chosen = null;
+    for (const f of uniq){
+      const rel = `./assets/models/map/${encodeURIComponent(f).replace(/%2F/gi,"/")}`;
+      if (await headExists(rel)){ chosen = f; break; }
+    }
+    if (!chosen){
+      warn("No map file found among:", uniq);
+      throw new Error("Map file missing on server");
+    }
+
+    await tryLoadMapDef(m?.def, chosen);
+
+    // Import the map
+    const path = "./assets/models/map/";
+    const file = chosen;
+    try{
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", path, file, scene);
       const root = res.meshes[0] || null;
       if (root){
         applyMapDefToRoot(root);
-        res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch{} });
+        res.meshes.forEach(me=>{ try{ me.checkCollisions=true; me.receiveShadows=true; }catch{} });
       }
-      log("Map imported:", mapFile);
-    } catch (e){
-      warn("Map import failed, creating ground fallback:", e);
-      BABYLON.MeshBuilder.CreateGround("fallback", { width: 240, height: 240 }, scene).checkCollisions = true;
+      log("Map imported:", file);
+    }catch(e){
+      warn("Import failed, fallback ground", e);
+      const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 200, height: 200 }, scene);
+      g.checkCollisions = true;
     }
   }
 
-  // ---------- spawn utilities ----------
-  function centerOf(poly){
-    if (!poly || !poly.length) return {x:0,z:0};
-    let x=0,z=0; for (const p of poly){ x += (p.x||0); z += (p.z||0); }
-    const n = poly.length; return { x:x/n, z:z/n };
-  }
-
-  function desiredSpawn(){
+  function setSpawn(){
+    if (!scene?.activeCamera) return;
     const d = window.MAP_DEF || {};
-    if (d.spawn && (typeof d.spawn.x === "number")){
-      return { x:d.spawn.x, y:d.spawn.y ?? 1.8, z:d.spawn.z };
-    }
-    if (Array.isArray(d.vanZone) && d.vanZone.length >= 3){
-      const c = centerOf(d.vanZone); return { x:c.x, y:1.8, z:c.z };
-    }
-    return { x:0, y:1.8, z:0 };
+    const sp = d.spawn ? { x:d.spawn.x||0, y:d.spawn.y||1.8, z:d.spawn.z||0 } : { x:0, y:1.8, z:0 };
+    scene.activeCamera.position.set(sp.x, sp.y, sp.z);
+    try{ scene.activeCamera.setTarget(new BABYLON.Vector3(sp.x, sp.y+1, sp.z+2)); }catch{}
   }
 
-  function desiredYaw(pos){
-    // if MAP_DEF has rotationY for "front" consider facing -Z after rotation; otherwise look toward origin
-    try {
-      const focus =
-        (window.PP && PP.CONFIG && PP.CONFIG.VAN && PP.CONFIG.VAN.POSITION) ||
-        new BABYLON.Vector3(0, pos.y, 0);
-      const dir = new BABYLON.Vector3(focus.x - pos.x, 0, focus.z - pos.z);
-      return Math.atan2(dir.x, dir.z); // Babylon LH yaw
-    } catch {
-      return 0;
-    }
+  function enablePointerLockOnce(){
+    const canvas = $("#renderCanvas");
+    if (!canvas?.requestPointerLock) return;
+    const tryLock = ()=>{ if (document.pointerLockElement !== canvas) { try{ canvas.requestPointerLock(); }catch{} } };
+    canvas.addEventListener("click", tryLock, { passive:true });
+    setTimeout(tryLock, 250);
   }
 
-  async function enforceSpawn(){
-    const pos = desiredSpawn();
-    const yaw = desiredYaw(pos);
-
-    // If rig exists, place body + align yaw
-    if (window.PP && PP.rig && PP.rig.body){
-      const b = PP.rig.body;
-      b.position.set(pos.x, pos.y, pos.z);
-      if (!b.rotation) b.rotation = new BABYLON.Vector3();
-      b.rotation.y = yaw;
-
-      // align FP cam height if active
-      try {
-        if (scene.activeCamera && scene.activeCamera.name === "playerFP"){
-          scene.activeCamera.position.copyFrom(b.position);
-        }
-      } catch {}
-      log("Spawned rig @", pos);
-      return;
-    }
-
-    // Fallback: move active camera
-    if (scene.activeCamera){
-      scene.activeCamera.position.set(pos.x, pos.y, pos.z);
-      try { scene.activeCamera.setTarget(new BABYLON.Vector3(pos.x, pos.y + 1, pos.z + 2)); } catch {}
-      log("Spawned camera @", pos);
-    }
-  }
-
-  function disposeTempIfRigReady(){
-    try {
-      if (tempCam && scene && scene.activeCamera && scene.activeCamera !== tempCam){
-        tempCam.detachControl();
-        tempCam.dispose();
-        tempCam = null;
-        log("Temp camera disposed.");
-      }
-    } catch {}
-  }
-
-  // ---------- pointer lock ----------
-  function pointerLockOnce(){
-    const canvas = document.getElementById("renderCanvas");
-    if (!canvas || !canvas.requestPointerLock) return;
-    if (document.pointerLockElement !== canvas){
-      try { canvas.requestPointerLock(); } catch {}
-    }
-  }
-
-  // ---------- start pipeline ----------
-  let started = false;
+  // ---- Start pipeline ----
   async function startPipeline(){
-    if (started) return; started = true;
-
-    // Hide title screen if still there
-    const title = $("#title-screen"); if (title) title.style.display = "none";
-
-    Loader.reset();
-    Loader.addStep("Loading map list…",  async () => { await loadManifest(); });
-    Loader.addStep("Preparing engine…",  async () => { await prepareEngineScene(); });
-    Loader.addStep("Loading selected map…", async () => { await loadSelectedMap(); });
-
-    // Wait for rig to appear (player_rig_controller_final attaches itself to scene)
-    Loader.addStep("Waiting for rig…", async () => {
-      const t0 = performance.now();
-      while (!(window.PP && PP.rig && PP.rig.body) && performance.now() - t0 < 4000){
-        await sleep(50);
-      }
-    });
-
-    Loader.addStep("Placing player…", async () => {
-      await enforceSpawn();
-      disposeTempIfRigReady();
-    });
-
-    Loader.addStep("Pointer lock…", async () => {
-      await sleep(150);
-      pointerLockOnce();
-    });
-
+    Loader.add("Loading map list…",    async ()=> await loadManifest());
+    Loader.add("Preparing engine…",    async ()=> await prepareEngineScene());
+    Loader.add("Loading selected map…",async ()=> await loadSelectedMap());
+    Loader.add("Placing player…",      async ()=> setSpawn());
+    Loader.add("Pointer lock…",        async ()=> enablePointerLockOnce());
     await Loader.run();
 
-    // Focus canvas
-    try { $("#renderCanvas")?.focus?.(); } catch {}
+    const canvas = $("#renderCanvas");
+    try{ canvas?.focus?.(); }catch{}
   }
 
-  // ---------- wiring ----------
-  // Start when your Start button fires pp:start (index.html already dispatches it)
-  window.addEventListener("pp:start", () => startPipeline(), { once:true });
+  // Wire the Start button
+  window.addEventListener("pp:start", ()=> {
+    startPipeline().catch(e=>{ warn("bootstrap failed:", e); });
+  }, { once:true });
 
-  // Also allow Enter/Space as an alternative "start" if the title is visible
-  document.addEventListener("keydown", (e) => {
-    if ((e.key === "Enter" || e.code === "Space") && !started){
-      e.preventDefault();
-      startPipeline();
-    }
-  }, { passive:false });
-
-  // Preload map list so the dropdown fills before pressing Start
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => { loadManifest().catch(()=>{}); }, { once:true });
-  } else {
-    loadManifest().catch(()=>{});
-  }
+  // Preload manifest so the dropdown has options on title screen
+  window.addEventListener("DOMContentLoaded", ()=> { loadManifest().catch(()=>{}); });
 })();
