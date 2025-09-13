@@ -1,11 +1,12 @@
-/* game_bootstrap.js — minimal, robust start flow for PhasmaPhoney
-   - Loads map manifest
-   - Imports GLB + matching MAP_DEF (*.config.js or *.js)
-   - Applies MAP_DEF {scale, rotationY, offset, spawn/vanZone}
-   - Enables pointer lock and HUD XYZ
-   - No external deps besides Babylon & page DOM
+/* game_bootstrap.js — engine+scene+map loader ONLY
+   - Waits for pp:start (index.html’s Start button dispatches it)
+   - Builds Engine + Scene, exposes ENGINE/SCENE globals
+   - Loads map manifest + selected map + MAP_DEF
+   - Applies MAP_DEF {scale, rotationY(deg), offset}
+   - Does NOT create a camera, pointer-lock, or spawn the player (rig owns those)
 */
 (function () {
+  "use strict";
   if (window.__GameBootstrapReady) return;
   window.__GameBootstrapReady = true;
 
@@ -47,10 +48,12 @@
     const text = () => $("#loading-text");
     const fill = () => $("#loading-fill");
     let stepsDone = 0, stepsTotal = 0;
+
     function show(){ const b=box(); if (b) b.style.display="flex"; }
     function hide(){ const b=box(); if (b) b.style.display="none"; }
     function label(s){ const t=text(); if (t) t.textContent = s || ""; }
     function draw(){ const f=fill(); if (!f) return; f.style.width = (stepsTotal? (stepsDone/stepsTotal)*100 : 0).toFixed(1)+"%"; }
+
     const queue = [];
     function addStep(lbl, fn){ queue.push({lbl, fn}); stepsTotal = queue.length; }
     async function run(){
@@ -61,7 +64,7 @@
         stepsDone++; draw();
       }
       label("Finalizing…"); draw();
-      await new Promise(r=>setTimeout(r, 100));
+      await new Promise(r=>setTimeout(r, 80));
       hide();
     }
     function reset(){ queue.length=0; stepsDone=0; stepsTotal=0; draw(); }
@@ -69,8 +72,16 @@
   })();
 
   // ---------- state ----------
-  let engine, scene, camera, hemi;
+  let ENGINE = null, SCENE = null;
   let MAP_FILES = [];
+
+  // Make globals readable for other modules (rig expects these)
+  function exposeGlobals() {
+    try {
+      window.ENGINE = ENGINE;
+      window.SCENE  = SCENE;
+    } catch {}
+  }
 
   // ---------- map list / selector ----------
   function populateMapSelector() {
@@ -90,18 +101,17 @@
   }
 
   async function loadManifest() {
-    // Prefer the real one in your repo
     const j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) MAP_FILES = j;
     else if (j && Array.isArray(j.maps)) MAP_FILES = j.maps;
 
-    // Fallback to files we know exist in your repo
+    // fallback options if manifest missing/empty
     if (!MAP_FILES.length) {
       MAP_FILES = [
-        { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.config.js" },
-        { file: "furnished_house.glb",  title: "Furnished House",  def: "furnished_house.js" },
-        { file: "jailhouse.glb",        title: "Jailhouse",        def: "jailhouse.config.js" },
-        { file: "apartment_floor_plan.glb", title: "Apartment",    def: "apartment_floor_plan.config.js" }
+        { file: "Abandoned_House.glb",       title: "Abandoned House", def: "Abandoned_House.config.js" },
+        { file: "furnished_house.glb",       title: "Furnished House", def: "furnished_house.js" },
+        { file: "jailhouse.glb",             title: "Jailhouse",       def: "jailhouse.config.js" },
+        { file: "apartment_floor_plan.glb",  title: "Apartment",       def: "apartment_floor_plan.config.js" }
       ];
     }
     populateMapSelector();
@@ -113,52 +123,31 @@
     return MAP_FILES[idx];
   }
 
-  // ---------- Babylon setup ----------
+  // ---------- Babylon setup (NO camera here) ----------
   async function prepareEngineScene() {
     const canvas = document.getElementById("renderCanvas");
     if (!canvas) throw new Error("Missing #renderCanvas");
     if (!window.BABYLON) throw new Error("BABYLON is not loaded yet");
 
-    engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
-    scene  = new BABYLON.Scene(engine);
+    ENGINE = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
+    SCENE  = new BABYLON.Scene(ENGINE);
 
     // Mild nighttime feel + collisions/gravity setup
-    scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
-    scene.fogDensity = 0.0045;
-    scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
+    SCENE.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
+    SCENE.fogDensity = 0.0045;
+    SCENE.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
 
-    hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), SCENE);
     hemi.intensity = 0.35;
 
-    camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
-    camera.minZ = 0.1;
-    camera.inertia = 0;
-    camera.applyGravity = true;
-    camera.checkCollisions = true;
-    camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
-    camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
+    // Basic run loop; camera will be provided by the rig later
+    ENGINE.runRenderLoop(() => SCENE && SCENE.render());
+    window.addEventListener("resize", () => ENGINE && ENGINE.resize());
 
-    // Ensure keyboard+mouse coexist, no legacy doubles
-    camera.inputs.clear();
-    camera.inputs.addMouse();
-    camera.inputs.addKeyboard();
-
-    camera.attachControl(canvas, true);
-    engine.runRenderLoop(() => scene && scene.render());
-    window.addEventListener("resize", () => engine && engine.resize());
-
-    // XYZ HUD on
-    try {
-      const hud = $("#hud-xyz"); if (hud) hud.style.display = "block";
-      scene.onBeforeRenderObservable.add(() => {
-        $("#hud-x") && ($("#hud-x").textContent = camera.position.x.toFixed(2));
-        $("#hud-y") && ($("#hud-y").textContent = camera.position.y.toFixed(2));
-        $("#hud-z") && ($("#hud-z").textContent = camera.position.z.toFixed(2));
-      });
-    } catch(_){}
+    exposeGlobals();
   }
 
-  // ---------- map def loading ----------
+  // ---------- MAP_DEF ----------
   async function tryLoadMapDef(defNameOrNull, mapFile) {
     const baseNoExt = (mapFile || "").replace(/\.[^.]+$/, "");
     const candidates = [];
@@ -168,16 +157,15 @@
 
     for (const c of candidates) {
       const ok = await loadScriptOnce(c);
-      if (ok && window.MAP_DEF && MAP_DEF.spawn) { log("Loaded MAP_DEF:", c); return true; }
+      if (ok && window.MAP_DEF) { log("Loaded MAP_DEF:", c); return true; }
     }
-    // As a last resort, synthesize a minimal one so the game keeps going
+    // synthesize minimal MAP_DEF so the scene still loads
     warn("No MAP_DEF found; synthesizing fallback.");
     window.MAP_DEF = window.MAP_DEF || {};
     MAP_DEF.file = mapFile || MAP_DEF.file || "";
     MAP_DEF.scale = MAP_DEF.scale ?? 1;
     MAP_DEF.rotationY = MAP_DEF.rotationY ?? 0;
     MAP_DEF.offset = MAP_DEF.offset || { x:0,y:0,z:0 };
-    MAP_DEF.spawn  = MAP_DEF.spawn  || { x:0, y:1.8, z:0 };
     return true;
   }
 
@@ -201,110 +189,66 @@
     } catch(e){ warn("applyMapDefToRoot failed", e); }
   }
 
+  // ---------- Map import (no camera/spawn here) ----------
   async function loadSelectedMap() {
     const chosen = getSelectedMap();
     const mapFile = chosen?.file || "Abandoned_House.glb";
 
     await tryLoadMapDef(chosen?.def, mapFile);
 
-    // Import
     try {
       const res = await BABYLON.SceneLoader.ImportMeshAsync(
         "",
         "./assets/models/map/",
         mapFile,
-        scene
+        SCENE
       );
       const root = res.meshes[0] || null;
       if (root) {
         applyMapDefToRoot(root);
-        // basic collisions receiving
+        // collisions & receives shadows
         res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch(_){} });
       }
       log("Map imported:", mapFile);
     } catch (e) {
       warn("Map import failed, creating ground fallback:", e);
-      const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 200, height: 200 }, scene);
+      const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 200, height: 200 }, SCENE);
       g.checkCollisions = true;
     }
   }
 
-  function centerOfPolygon2D(poly) {
-    if (!poly || !poly.length) return {x:0,z:0};
-    let x=0,z=0; for (const p of poly){ x += (p.x||0); z += (p.z||0); }
-    const n = poly.length || 1; return { x:x/n, z:z/n };
-  }
-
-  function enforceSpawn() {
-    if (!scene?.activeCamera) return;
-    const d = window.MAP_DEF || {};
-    const sp = d.spawn
-      ? {x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0}
-      : (Array.isArray(d.vanZone) && d.vanZone.length >= 3
-          ? (function(){ const c=centerOfPolygon2D(d.vanZone); return {x:c.x, y:1.8, z:c.z}; })()
-          : {x:0,y:1.8,z:0});
-
-    scene.activeCamera.position.set(sp.x, sp.y, sp.z);
-    // look slightly forward
-    try { scene.activeCamera.setTarget(new BABYLON.Vector3(sp.x, sp.y + 1, sp.z + 2)); } catch(_){}
-    log("Spawn enforced:", sp);
-  }
-
-  function enablePointerLockOnce() {
-    const canvas = document.getElementById("renderCanvas");
-    if (!canvas || !canvas.requestPointerLock) return;
-    let tried = false;
-    function lockTry(){ if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch(_){ } } }
-    canvas.addEventListener("click", () => lockTry(), { passive:true });
-    // Also try once after start
-    setTimeout(() => { if (!tried) { tried = true; lockTry(); } }, 250);
-  }
-
-  function toast(msg){
-    const t = $("#toast"); if (!t) { console.log(msg); return; }
-    t.textContent = msg; t.style.display = "block";
-    clearTimeout(toast._h); toast._h = setTimeout(() => { t.style.display = "none"; }, 2200);
-  }
-
-  // ---------- start flow ----------
+  // ---------- start flow (no pointer lock here) ----------
   let started = false;
-  async function safeStart(e) {
-    e?.preventDefault?.();
+  async function startPipeline() {
     if (started) return;
     started = true;
 
-    // Hide title
-    const title = $("#title-screen"); if (title) title.style.display = "none";
-
     Loader.reset(); Loader.label("Initializing…"); Loader.show();
-
     try {
-      Loader.addStep("Loading map list…", async () => await loadManifest());
-      Loader.addStep("Preparing engine…", async () => await prepareEngineScene());
+      Loader.addStep("Loading map list…",     async () => await loadManifest());
+      Loader.addStep("Preparing engine…",     async () => await prepareEngineScene());
       Loader.addStep("Loading selected map…", async () => await loadSelectedMap());
-      Loader.addStep("Placing player…", async () => enforceSpawn());
-      Loader.addStep("Pointer lock…", async () => enablePointerLockOnce());
       await Loader.run();
 
-      // Focus canvas
-      const canvas = document.getElementById("renderCanvas");
-      try { canvas?.focus?.(); } catch(_){}
+      // focus canvas (rig will request pointer lock in FPS)
+      try { document.getElementById("renderCanvas")?.focus?.(); } catch(_){}
+      log("Bootstrap complete. Handing off to PP.rig…");
     } catch (err) {
-      warn("Boot failed:", err);
-      toast("Boot failed. See console for details.");
+      warn("Bootstrap failed:", err);
+      const title = $("#title-screen"); if (title) title.style.display = "flex";
       started = false; // allow retry
-      if (title) title.style.display = "flex";
     }
   }
 
-  // ---------- wire UI and early manifest load ----------
-  (function wireStart(){
-    const btn = $("#start-button");
-    if (btn) btn.addEventListener("click", safeStart, { passive: false });
-    document.addEventListener("keydown", (e) => {
-      if (!started && (e.key === "Enter" || e.code === "Space")) { e.preventDefault(); safeStart(e); }
-    }, { passive: false });
+  // ---------- wiring ----------
+  // We do NOT bind the Start button here. index.html already dispatches pp:start after click.
+  // Just listen for pp:start and run the pipeline once.
+  window.addEventListener("pp:start", () => {
+    // hide title screen if still present (index already removes it, but safe)
+    const title = $("#title-screen"); if (title) title.style.display = "none";
+    startPipeline();
+  }, { once:true });
 
-    window.addEventListener("DOMContentLoaded", () => { loadManifest().catch(()=>{}); });
-  })();
+  // Preload manifest so the selector has options on first paint
+  window.addEventListener("DOMContentLoaded", () => { loadManifest().catch(()=>{}); });
 })();
