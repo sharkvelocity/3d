@@ -241,4 +241,3 @@
   // defer until Babylon scene exists
   (function wait(){ if (S()) buildRig(); else setTimeout(wait, 60); })();
 })();
-</script>
