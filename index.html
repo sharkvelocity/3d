@@ -133,14 +133,14 @@
   <div id="toast"></div>
 
   <!-- ===================== SCRIPT LOAD ORDER ===================== -->
-  <!-- 1) Core config/input (defines PP.CONFIG, keybinds/events) -->
+  <!-- 1) Core config/input -->
   <script src="./assets/dev/util/modular_settings.js"></script>
   <script src="./assets/dev/modular_bindings.js"></script>
 
-  <!-- 2) Audio core (HTMLAudio only; no Babylon.Sound needed) -->
+  <!-- 2) Audio core (HTMLAudio only; no Babylon.Sound) -->
   <script src="./assets/dev/modular_audio.js"></script>
 
-  <!-- 3) Runtime / player / utilities (creates scene/engine, rig, HUD helpers) -->
+  <!-- 3) Runtime / player / utilities -->
   <script src="./assets/dev/util/pp_runtime.js"></script>
   <script src="./assets/dev/util/player_rig_controller_final.js"></script>
   <script src="./assets/dev/util/moon.js"></script>
@@ -149,7 +149,7 @@
   <!-- 4) Weather (ambient only: Clear / Rainstorm / Bloodmoon / Snow) -->
   <script src="./assets/dev/util/weather.js"></script>
 
-  <!-- 5) Inventory & UI (belt, van, effects) -->
+  <!-- 5) Inventory & UI -->
   <script src="./assets/dev/game/inventory_system.js"></script>
   <script src="./assets/dev/ui/belt_manager.js"></script>
   <script src="./assets/dev/ui/van_ui.js"></script>
@@ -172,9 +172,8 @@
   <script src="./assets/dev/merge_patch.js"></script>
   <script src="./assets/dev/glue_patch.js"></script>
 
-  <!-- ===================== RUNTIME HOOKS (SMALL, NON-CONFLICTING) ===================== -->
-
-  <!-- Start: unlock audio, remove title, dispatch pp:start, request pointer lock once -->
+  <!-- ===================== RUNTIME HOOKS ===================== -->
+  <!-- Start: unlock audio, hide title, fire pp:start, request pointer lock once -->
   <script>
   (function wireStart(){
     const btn = document.getElementById('start-button');
@@ -184,66 +183,8 @@
       document.getElementById('title-screen')?.remove();
       window.dispatchEvent(new CustomEvent('pp:start'));
       try { document.getElementById('renderCanvas')?.requestPointerLock?.(); } catch {}
+      try { document.getElementById('renderCanvas')?.focus?.(); } catch {}
     }, { once:true });
-  })();
-  </script>
-
-  <!-- ENGINE/SCENE globals (read-only convenience) -->
-  <script>
-  (function ensureGlobals(){
-    function tryExport(){
-      try {
-        if (window.ENGINE && window.SCENE) { window.camera = window.SCENE.activeCamera || window.camera; return; }
-        const eng = BABYLON.EngineStore?.LastCreatedEngine || BABYLON.Engine?.LastCreatedEngine;
-        const scn = BABYLON.EngineStore?.LastCreatedScene  || BABYLON.Engine?.LastCreatedScene;
-        if (eng && scn){ window.ENGINE = eng; window.SCENE = scn; window.camera = scn.activeCamera || window.camera; return; }
-      } catch {}
-      setTimeout(tryExport, 50);
-    }
-    tryExport();
-  })();
-  </script>
-
-  <!-- Belt/icon leak guard (kept) -->
-  <script>
-  (function guardIconLeaks(){
-    const belt = () => document.getElementById('belt');
-    const hide = (img) => { img.style.display='none'; img.style.position='absolute'; img.style.left='-99999px'; img.style.top='-99999px'; };
-    document.querySelectorAll('img[src*="/assets/icons/"]').forEach(img=>{
-      if (!belt() || !belt().contains(img)) hide(img); else img.classList.add('item-icon');
-    });
-    new MutationObserver(muts=>{
-      for (const m of muts) for (const n of m.addedNodes){
-        if (n && n.tagName==='IMG' && (n.src||'').includes('/assets/icons/')){
-          if (!belt() || !belt().contains(n)) hide(n); else n.classList.add('item-icon');
-        }
-      }
-    }).observe(document.documentElement, {childList:true, subtree:true});
-  })();
-  </script>
-
-  <!-- HUD XYZ updater (reads whichever rig/camera is active) -->
-  <script>
-  (function hudXYZ(){
-    const el = document.getElementById('hud-xyz');
-    function S(){ return window.SCENE || BABYLON.Engine?.LastCreatedScene; }
-    function src(){
-      const s=S(); if (!s) return null;
-      return window.PP?.rig?.body ||
-             window.PP?.player?.body ||
-             s.__playerBody ||
-             s.getMeshByName?.('player_capsule') ||
-             s.activeCamera || null;
-    }
-    function posOf(o){
-      if (!o) return null;
-      try { return o.getAbsolutePosition?.() || o.position || null; } catch { return null; }
-    }
-    (function loop(){
-      const p = posOf(src());
-      if (el && p) el.textContent = `XYZ: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
-      requestAnimationFrame(loop);
-    })();
   })();
   </script>
 
