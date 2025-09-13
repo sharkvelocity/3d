@@ -1,5 +1,3 @@
-<!-- minimap_northup_xyz.js (drop-in replacement) -->
-<script>
 (function(){
   if (window.__PP_MINIMAP__) return; window.__PP_MINIMAP__ = true;
 
@@ -156,4 +154,3 @@
   }, { once:true });
 
 })();
-</script>
