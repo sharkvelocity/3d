@@ -1,210 +1,171 @@
 // File: assets/dev/ui/belt_manager.js
 (function(){
   "use strict";
-  if (window.__PP_BELT_V4__) return; window.__PP_BELT_V4__ = true;
+  if (window.__PP_BELT_V3__) return; window.__PP_BELT_V3__ = true;
 
   const PP = window.PP || (window.PP = {});
   PP.belt = PP.belt || {};
 
-  /* -------------------- Config -------------------- */
-  const SLOT_COUNT = 4;                      // 0..2 = user items (shown as 1..3), 3 = lighter (reserved)
+  // --- Config ---
+  const SLOT_COUNT = 4;            // 1-3 user items, 4 = lighter reserved
   const LIGHTER_ID = "lighter";
   const ICONS = (id)=> `./assets/icons/${id}.png`;
 
-  /* -------------------- State -------------------- */
+  // --- State ---
   const S = {
     slots: [
-      null, // idx 0 -> user slot #1
-      null, // idx 1 -> user slot #2
-      null, // idx 2 -> user slot #3
-      { id: LIGHTER_ID, name: "lighter", icon: ICONS(LIGHTER_ID), qty: 1, readonly: true } // idx 3 -> lighter
+      null, // 0 -> slot index 1
+      null, // 1 -> slot index 2
+      null, // 2 -> slot index 3
+      { id: LIGHTER_ID, name: "lighter", icon: ICONS(LIGHTER_ID), qty: 1, readonly: true }
     ],
-    active: 0,      // active slot index (0..3)
+    active: 0,
     el: null,
     mounted: false
   };
 
-  /* -------------------- Helpers -------------------- */
-  const $id = (id)=> document.getElementById(id);
-  const isInput = (el)=> !!el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA' || el.isContentEditable);
-
-  function emitWin(name, detail){ window.dispatchEvent(new CustomEvent(name, { detail })); }
-  function emitDoc(name, detail){ document.dispatchEvent(new CustomEvent(name, { detail })); }
-
+  // --- Utilities ---
+  function qs(id){ return document.getElementById(id); }
+  function emit(name, detail){ window.dispatchEvent(new CustomEvent(name, { detail })); }
   function slotLabel(item){
     if (!item) return "Empty";
-    const n = item.name || item.id || "item";
-    if (!item.readonly && typeof item.qty === "number") return `${n}\n(${item.qty})`;
-    return n;
+    const base = item.name || item.id;
+    if (typeof item.qty === "number" && item.qty >= 0 && !item.readonly){
+      return `${base}\n(${item.qty})`;
+    }
+    return base;
   }
 
-  function makeSlotNode(idx){
-    const node = document.createElement('div');
-    node.className = 'slot';
-    node.dataset.idx = String(idx);
-    if (!S.slots[idx]?.readonly){
-      node.addEventListener('click', ()=> selectSlot(idx));
-      node.style.cursor = 'pointer';
-    }else{
-      node.style.cursor = 'default';
+  function buildSlot(idx, item){
+    const wrap = document.createElement('div');
+    wrap.className = 'slot' + (idx === S.active ? ' active' : '');
+    wrap.dataset.idx = String(idx);
+
+    if (item && item.icon){
+      const img = document.createElement('img');
+      img.src = item.icon;
+      img.alt = item.name || item.id;
+      img.className = 'item-icon';
+      wrap.appendChild(img);
     }
+
     const label = document.createElement('div');
     label.className = 'label';
-    node.appendChild(label);
-    return node;
-  }
+    label.textContent = slotLabel(item);
+    wrap.appendChild(label);
 
-  function patchSlotNode(node, idx, item){
-    node.classList.toggle('active', idx === S.active);
-
-    // icon
-    let img = node.querySelector('img.item-icon');
-    if (item && item.icon){
-      if (!img){
-        img = document.createElement('img');
-        img.className = 'item-icon';
-        node.insertBefore(img, node.firstChild);
-      }
-      // avoid origin/path pitfalls on GH Pages: only set when different
-      if (!img.src.endsWith(item.icon)) {
-        img.src = item.icon;
-        img.alt = item.name || item.id || '';
-      }
-    } else if (img){
-      img.remove();
+    if (!item?.readonly){
+      wrap.addEventListener('click', ()=> selectSlot(idx));
     }
 
-    // label
-    let label = node.querySelector('.label');
-    if (!label){
-      label = document.createElement('div');
-      label.className = 'label';
-      node.appendChild(label);
-    }
-    const txt = slotLabel(item);
-    if (label.textContent !== txt) label.textContent = txt;
+    return wrap;
   }
 
   function renderBelt(){
-    if (!S.el) S.el = $id('belt');
+    if (!S.el) S.el = qs('belt');
     if (!S.el) return;
 
-    S.el.style.display = 'flex'; // force-visible
-
-    // ensure correct number of slot shells
     const need = SLOT_COUNT;
-    while (S.el.children.length < need) S.el.appendChild(makeSlotNode(S.el.children.length));
-    while (S.el.children.length > need) S.el.removeChild(S.el.lastChild);
+    const have = S.el.children.length;
 
-    // patch each
-    for (let i=0;i<need;i++){
-      patchSlotNode(S.el.children[i], i, S.slots[i]);
+    for (let i = have; i < need; i++){
+      S.el.appendChild(buildSlot(i, S.slots[i]));
     }
-  }
+    for (let i = have - 1; i >= need; i--){
+      S.el.removeChild(S.el.children[i]);
+    }
+    for (let i = 0; i < need; i++){
+      const node = S.el.children[i];
+      const item = S.slots[i];
 
-  function unequipPrev(){
-    const prev = S.slots[S.active];
-    if (prev && !prev.readonly){
-      emitWin('pp:tool:unequip', { id: prev.id, slot: S.active });
-    }
-  }
+      node.classList.toggle('active', i === S.active);
 
-  function equipCur(){
-    const cur = S.slots[S.active];
-    if (cur && !cur.readonly){
-      emitWin('pp:belt:select', { slot: S.active, id: cur.id });
-      emitWin('pp:tool:equip',  { id: cur.id, slot: S.active });
+      let img = node.querySelector('img.item-icon');
+      if (item && item.icon){
+        if (!img){
+          img = document.createElement('img');
+          img.className = 'item-icon';
+          node.insertBefore(img, node.firstChild);
+        }
+        if (img.getAttribute('src') !== item.icon){
+          img.src = item.icon;
+          img.alt = item.name || item.id || '';
+        }
+      } else if (img){
+        img.remove();
+      }
+
+      const label = node.querySelector('.label') || (()=>{ const d=document.createElement('div'); d.className='label'; node.appendChild(d); return d; })();
+      const txt = slotLabel(item);
+      if (label.textContent !== txt) label.textContent = txt;
     }
+
+    S.el.style.display = 'flex';
   }
 
   function selectSlot(idx){
     if (idx < 0 || idx >= SLOT_COUNT) return;
     if (S.active === idx) return;
 
-    unequipPrev();
+    const prevItem = S.slots[S.active];
+    if (prevItem && !prevItem.readonly){
+      emit('pp:tool:unequip', { id: prevItem.id, slot: S.active+1 });
+    }
+
     S.active = idx;
     renderBelt();
-    equipCur();
 
-    emitWin('pp:active-slot-changed', { slot: idx, item: S.slots[idx] });
+    const cur = S.slots[idx];
+    if (cur && !cur.readonly){
+      emit('pp:belt:select', { slot: idx+1, id: cur.id });
+      emit('pp:tool:equip',  { id: cur.id, slot: idx+1 });
+    }
   }
 
-  /* -------------------- Public API -------------------- */
+  // --- Public API ---
   PP.belt.getActiveIndex  = () => S.active;
-  PP.belt.getActiveItem   = () => S.slots[S.active] || null;
+  PP.belt.getActiveItem   = () => S.slots[S.active];
   PP.belt.getSlots        = () => S.slots.slice();
-  PP.belt.setSlot         = (idx, item)=>{ if (idx>=0 && idx<SLOT_COUNT){ S.slots[idx]=item||null; renderBelt(); } };
-  PP.belt.clearSlot       = (idx)=>{ if (idx>=0 && idx<SLOT_COUNT){ S.slots[idx]=null; renderBelt(); } };
+  PP.belt.setSlot         = (idx, item)=>{ S.slots[idx]=item||null; renderBelt(); };
+  PP.belt.clearSlot       = (idx)=>{ S.slots[idx]=null; renderBelt(); };
   PP.belt.consumeActive   = ()=>{
     const it=S.slots[S.active];
-    if (!it || it.readonly) return;
-    if (typeof it.qty === "number"){
+    if (!it||it.readonly) return;
+    if (typeof it.qty==='number'){
       it.qty = Math.max(0, it.qty-1);
-      if (it.qty===0) S.slots[S.active]=null;
+      if(it.qty===0) S.slots[S.active]=null;
       renderBelt();
     }
   };
-  PP.belt.applyLoadout = (items /* array of length >=3: objects or ids */)=>{
-    // Normalize to objects with id/name/icon
-    const toObj = (x)=> (x && typeof x === 'string')
-      ? { id:x, name:(PP.inventory?.META?.[x]?.name||x), icon:(PP.inventory?.META?.[x]?.icon||ICONS(x)) }
-      : (x || null);
 
-    for (let i=0;i<3;i++) S.slots[i] = toObj(items?.[i]) || null;
-
-    // ensure lighter stays intact
+  PP.belt.applyLoadout = (items /* [0..2] */)=>{
+    for (let i=0;i<3;i++) S.slots[i] = items[i] || null;
     if (!S.slots[3] || S.slots[3].id !== LIGHTER_ID){
       S.slots[3] = { id: LIGHTER_ID, name: "lighter", icon: ICONS(LIGHTER_ID), qty: 1, readonly: true };
     }
-
-    // keep current active slot if still valid; otherwise fallback to first non-null or 0
-    if (S.active > 3) S.active = 0;
-    if (!S.slots[S.active] || S.slots[S.active]?.readonly){
-      const first = [0,1,2].find(i => S.slots[i]);
-      S.active = (first ?? 0);
-    }
-
     renderBelt();
+    if (S.active > 3) S.active = 0;
   };
-  PP.belt.selectSlot = (idx)=> selectSlot(idx|0); // external control
-  PP.belt.show = ()=>{ if (!S.el) S.el = $id('belt'); if (S.el){ S.el.style.display='flex'; } };
 
-  /* -------------------- Key bindings -------------------- */
+  // Hotkeys 1..4 (does NOT hide or recreate belt)
   function bindKeys(){
-    const map = { Digit1:0, Digit2:1, Digit3:2, Digit4:3, Numpad1:0, Numpad2:1, Numpad3:2, Numpad4:3 };
-    // capture=true so we stop other listeners from swallowing or hiding the belt
     window.addEventListener('keydown', (e)=>{
-      // don't hijack when typing
-      if (isInput(e.target)) return;
+      const t = e.target;
+      if (t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.isContentEditable)) return;
 
-      const code = e.code || e.key;
-      if (code in map){
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-        selectSlot(map[code]);
+      const map = { Digit1:0, Digit2:1, Digit3:2, Digit4:3, Numpad1:0, Numpad2:1, Numpad3:2, Numpad4:3 };
+      const idx = map[e.code];
+      if (idx !== undefined){
+        e.preventDefault(); e.stopPropagation();
+        selectSlot(idx);
       }
     }, true);
   }
 
-  /* -------------------- Event wiring -------------------- */
-  // Keep belt in sync with inventory system (van applies loadout)
-  window.addEventListener('pp:van:loadout-changed', (ev)=>{
-    const items = (ev.detail?.loadout?.items || []).map(id => id || null);
-    // Belt expects objects or ids; we’ll pass ids to applyLoadout (it normalizes)
-    PP.belt.applyLoadout(items);
-  });
-
-  // Allow outside systems to force selection
-  window.addEventListener('pp:belt:force-select', (ev)=>{
-    const idx = ev.detail?.slot;
-    if (Number.isFinite(idx)) selectSlot(idx|0);
-  });
-
-  /* -------------------- Mount -------------------- */
+  // Mount
   function mount(){
     if (S.mounted) return;
-    S.el = $id('belt');
+    S.el = qs('belt');
     if (!S.el){
       const div = document.createElement('div'); div.id = 'belt';
       document.body.appendChild(div);
@@ -216,11 +177,8 @@
     bindKeys();
   }
 
-  // Mount when game starts
   window.addEventListener('pp:start', ()=> mount(), { once:true });
-
-  // Also mount on ready if the belt is already in DOM (dev reload safety)
-  if (document.readyState !== 'loading') { if ($id('belt')) mount(); }
-  else document.addEventListener('DOMContentLoaded', ()=>{ if ($id('belt')) mount(); });
+  if (document.readyState !== 'loading') { if (qs('belt')) mount(); }
+  else document.addEventListener('DOMContentLoaded', ()=>{ if (qs('belt')) mount(); });
 
 })();
