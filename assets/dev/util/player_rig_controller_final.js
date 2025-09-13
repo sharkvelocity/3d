@@ -1,243 +1,308 @@
-/* Player Rig — single source of truth
-   - ONE FPS camera + ONE optional TPS camera (toggle: V)
-   - Mouse works (Babylon mouse input; no custom deltas)
-   - Spawn from MAP_DEF.spawn or vanZone center; snap to ground
-   - Body + camera always stay in sync (no rubberband)
-   - No pointer-lock here (Start button already handles it)
-*/
-(function(){
-  if (window.__PP_RIG__) return; window.__PP_RIG__ = true;
+// File: assets/dev/util/player_rig_controller_final.js
+// Single-file rig + input system. No external bindings needed.
+(function () {
+  "use strict";
+  if (window.__PP_RIG_V4__) return; window.__PP_RIG_V4__ = true;
 
-  const PP = window.PP || (window.PP = {});
-  PP.rig = PP.rig || {};
-  const STATE = {
-    mode: "fps",       // 'fps' | 'tps'
-    speedWalk: 2.2,
-    speedRun:  4.0,
-    strideWalk: 1.25,  // for footsteps
-    strideRun:  0.85,
+  const PP = (window.PP = window.PP || {});
+  const TWO_PI = Math.PI * 2;
+
+  // ------- small helpers -------
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+  const nowMs = () => performance.now();
+  const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
+  const on = (t, n, f, o) => t.addEventListener(n, f, o);
+
+  function S() {
+    // get the current scene if available
+    return window.SCENE || BABYLON.EngineStore?.LastCreatedScene || BABYLON.Engine?.LastCreatedScene || null;
+  }
+
+  // ------- player rig -------
+  const Rig = {
+    scene: null,
+    canvas: null,
+    body: null,            // TransformNode (movement root)
+    fpCam: null,           // UniversalCamera (first person)
+    tpCam: null,           // ArcRotateCamera (third person)
+    mode: "fp",            // 'fp' | 'tp'
+    speeds: { walk: 2.7, run: 5.4, crouch: 1.4 }, // m/s
+    state: {
+      move: { f: false, b: false, l: false, r: false },
+      run: false,
+      crouch: false,
+      mouseLocked: false,
+      rightHeld: false,
+      pttLocal: false,
+      pttGlobal: false
+    },
+    lastStepDist: 0,
+    stepStride: { walk: 1.2, run: 0.8 },
+
+    init(scene) {
+      this.scene = scene || S();
+      if (!this.scene) return console.warn("[rig] no scene yet");
+
+      // body root
+      this.body = new BABYLON.TransformNode("playerBody", this.scene);
+      this.body.position = new BABYLON.Vector3(0, 1.8, 0);
+
+      // FIRST PERSON camera
+      this.fpCam = new BABYLON.UniversalCamera("playerFP", this.body.position.clone(), this.scene);
+      this.fpCam.minZ = 0.1;
+      this.fpCam.inertia = 0;
+      this.fpCam.angularSensibility = 800; // mouse look sensitivity
+      this.fpCam.checkCollisions = true;
+      this.fpCam.applyGravity = true;
+      this.fpCam.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
+      this.fpCam.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
+
+      // THIRD PERSON camera (orbiting the body)
+      this.tpCam = new BABYLON.ArcRotateCamera("playerTP",
+        Math.PI / 2, 1.05, 3.6, this.body.position, this.scene);
+      this.tpCam.lowerBetaLimit = 0.2;
+      this.tpCam.upperBetaLimit = Math.PI * 0.49;
+      this.tpCam.panningSensibility = 0;
+      this.tpCam.checkCollisions = true;
+      this.tpCam.attachControl(true);
+
+      // Start in FP mode
+      this.activate("fp");
+
+      // Follow the body (keep cameras aligned to body Yaw)
+      this.scene.onBeforeRenderObservable.add(() => this._tick());
+
+      // Try to export handles for other modules
+      this.scene.__playerBody = this.body;
+      window.PP.rig = this;
+    },
+
+    activate(mode) {
+      mode = mode === "tp" ? "tp" : "fp";
+      this.mode = mode;
+
+      if (mode === "fp") {
+        this._detachAll();
+        this.scene.activeCamera = this.fpCam;
+        this.fpCam.position = this.body.position.clone();
+        this.fpCam.attachControl(this._canvas(), true);
+      } else {
+        this._detachAll();
+        this.scene.activeCamera = this.tpCam;
+        this.tpCam.target = this.body.position;
+        this.tpCam.attachControl(this._canvas(), true);
+      }
+      // focus
+      try { this._canvas().focus(); } catch {}
+    },
+
+    toggleMode() {
+      this.activate(this.mode === "fp" ? "tp" : "fp");
+    },
+
+    _detachAll() {
+      try { this.fpCam.detachControl(); } catch {}
+      try { this.tpCam.detachControl(); } catch {}
+    },
+
+    _canvas() {
+      return this.canvas || (this.canvas = document.getElementById("renderCanvas"));
+    },
+
+    // movement integration each frame
+    _tick() {
+      const dt = this.scene.getEngine().getDeltaTime() / 1000; // seconds
+      if (!dt) return;
+
+      // Determine facing yaw: in FP use camera yaw, in TP use tpCam alpha around target
+      let yaw;
+      if (this.mode === "fp") {
+        // derive yaw from FP camera rotation
+        yaw = this.fpCam.rotation.y || 0;
+      } else {
+        // ArcRotate alpha is clockwise around Y
+        yaw = -this.tpCam.alpha + Math.PI / 2;
+      }
+
+      // WASD movement vector in local space
+      let x = 0, z = 0;
+      if (this.state.move.f) z += 1;
+      if (this.state.move.b) z -= 1;
+      if (this.state.move.l) x -= 1;
+      if (this.state.move.r) x += 1;
+
+      let moving = false;
+      if (x !== 0 || z !== 0) {
+        moving = true;
+        // normalize
+        const len = Math.hypot(x, z) || 1;
+        x /= len; z /= len;
+
+        // rotate by yaw to world space
+        const dx = x * Math.cos(yaw) - z * Math.sin(yaw);
+        const dz = x * Math.sin(yaw) + z * Math.cos(yaw);
+
+        // speed
+        const sp = this.state.crouch
+          ? this.speeds.crouch
+          : (this.state.run ? this.speeds.run : this.speeds.walk);
+
+        this.body.position.x += dx * sp * dt;
+        this.body.position.z += dz * sp * dt;
+
+        // keep cameras with body
+        if (this.mode === "fp") {
+          this.fpCam.position.copyFrom(this.body.position);
+        } else {
+          this.tpCam.target.copyFrom(this.body.position);
+        }
+
+        // footsteps (distance based)
+        this.lastStepDist += sp * dt;
+        const stride = this.state.run ? this.stepStride.run : this.stepStride.walk;
+        if (this.lastStepDist >= stride) {
+          this.lastStepDist = 0;
+          try { window.playStep && window.playStep(0.45); } catch {}
+        }
+      } else {
+        this.lastStepDist = 0;
+      }
+
+      // sync yaw of body with camera so other systems can use it
+      if (!this.body.rotation) this.body.rotation = new BABYLON.Vector3();
+      this.body.rotation.y = yaw;
+
+      // crouch height (simple)
+      const desiredY = this.state.crouch ? 1.2 : 1.8;
+      this.body.position.y = BABYLON.Scalar.Lerp(this.body.position.y, desiredY, clamp(12 * dt, 0, 1));
+      if (this.mode === "fp") this.fpCam.position.y = this.body.position.y;
+    }
   };
 
-  // --- helpers ---
-  function S(){ return window.SCENE || BABYLON.Engine?.LastCreatedScene || null; }
-  function E(){ return window.ENGINE || BABYLON.Engine?.LastCreatedEngine || null; }
-  const v3 = (x=0,y=0,z=0)=> new BABYLON.Vector3(x,y,z);
+  // ------- input wiring (baked here) -------
+  const Keys = Object.create(null);
+  const pressed = (code) => !!Keys[code];
 
-  function hudXYZAttach(cam){
-    try{
-      const hud = document.getElementById('hud-xyz');
-      if (!hud) return;
-      hud.style.display = 'block';
-      const x = document.getElementById('hud-x');
-      const y = document.getElementById('hud-y');
-      const z = document.getElementById('hud-z');
-      const scn = S();
-      scn.onBeforeRenderObservable.add(()=>{
-        const p = cam.position;
-        if (x) x.textContent = p.x.toFixed(2);
-        if (y) y.textContent = p.y.toFixed(2);
-        if (z) z.textContent = p.z.toFixed(2);
-      });
-    }catch{}
+  function pointerLockTry(canvas) {
+    if (!canvas || !canvas.requestPointerLock) return;
+    if (document.pointerLockElement !== canvas) {
+      try { canvas.requestPointerLock(); } catch {}
+    }
   }
 
-  // Ground snap via ray
-  function groundYAt(x,z,approxY=3){
-    const scn=S(); if(!scn) return null;
-    const from = new BABYLON.Vector3(x, approxY + 30, z);
-    const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,-1,0), 200);
-    const pick = scn.pickWithRay(ray, (m)=>{
-      if (!m) return false;
-      if (m.isPickable === false) return false;
-      const n=(m.name||'').toLowerCase();
-      if (/sky|atmo|cloud|probe|env|reflection/.test(n)) return false;
-      return true;
-    });
-    return (pick?.hit && pick.pickedPoint) ? pick.pickedPoint.y : null;
-  }
+  function setupInputs() {
+    const scene = S();
+    if (!scene) return setTimeout(setupInputs, 100);
 
-  function centerOfPolygon2D(poly){
-    if (!Array.isArray(poly) || poly.length === 0) return {x:0,z:0};
-    let sx=0, sz=0;
-    for (const p of poly){ sx += +p.x||0; sz += +p.z||0; }
-    const n = poly.length;
-    return { x: sx/n, z: sz/n };
-  }
+    // init rig once scene exists
+    Rig.init(scene);
 
-  function resolveSpawn(){
-    const d = window.MAP_DEF || {};
-    const camY = 1.8;
-    let sp;
-    if (d.spawn && typeof d.spawn === 'object'){
-      sp = { x:+d.spawn.x||0, y: (+d.spawn.y||camY), z:+d.spawn.z||0 };
-    } else if (Array.isArray(d.vanZone) && d.vanZone.length>=3){
-      const c = centerOfPolygon2D(d.vanZone);
-      sp = { x:c.x, y:camY, z:c.z };
-    } else {
-      sp = { x:0, y:camY, z:0 };
-    }
-    // ground snap
-    const gy = groundYAt(sp.x, sp.z, sp.y);
-    if (gy != null) sp.y = gy + 0.9;  // eye ~1.8 with ellipsoid offset
-    return sp;
-  }
+    const canvas = document.getElementById("renderCanvas");
 
-  function attachMouseKeyboard(cnv, cam){
-    // full reset to avoid double-input fights
-    cam.inputs.clear();
-    cam.inputs.addMouse();     // Babylon's built-in mouse look
-    cam.inputs.addKeyboard();  // WASD/Arrows for fallback
-    cam.attachControl(cnv, true);
-  }
+    // Mouse lock on click
+    on(canvas, "click", () => pointerLockTry(canvas), { passive: true });
 
-  // --- build rig once ---
-  function buildRig(){
-    const scn=S(); if (!scn) return setTimeout(buildRig, 100);
-    const eng=E(); if (!eng) return setTimeout(buildRig, 100);
-    const canvas = document.getElementById('renderCanvas');
-    if (!canvas) return setTimeout(buildRig, 100);
+    // Keyboard
+    on(window, "keydown", (e) => {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 
-    // Body (invisible, collision capsule for TPS target and consistency)
-    const body = scn.__playerBody || BABYLON.MeshBuilder.CreateCapsule('player_capsule',{
-      height:1.8, radius:0.35, tessellation:8, capSubdivisions:4
-    }, scn);
-    body.checkCollisions = true;
-    body.isPickable = false;
-    body.visibility = 0;
+      Keys[e.code] = true;
 
-    // FPS camera — authoritative for movement
-    const fps = scn.getCameraByName('FPCam') || new BABYLON.UniversalCamera('FPCam', v3(0,1.8,0), scn);
-    fps.minZ = 0.1;
-    fps.inertia = 0;
-    fps.applyGravity = true;
-    fps.checkCollisions = true;
-    fps.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
-    fps.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
+      // Movement
+      if (e.code === "KeyW" || e.code === "ArrowUp")    Rig.state.move.f = true;
+      if (e.code === "KeyS" || e.code === "ArrowDown")  Rig.state.move.b = true;
+      if (e.code === "KeyA" || e.code === "ArrowLeft")  Rig.state.move.l = true;
+      if (e.code === "KeyD" || e.code === "ArrowRight") Rig.state.move.r = true;
+      if (e.code === "ShiftLeft" || e.code === "ShiftRight") Rig.state.run = true;
 
-    attachMouseKeyboard(canvas, fps);
+      // Crouch
+      if (e.code === "KeyC") Rig.state.crouch = true;
 
-    // TPS (optional) — follows body; we don’t let ArcRotate control position directly
-    const tps = scn.getCameraByName('TPCam') || new BABYLON.ArcRotateCamera('TPCam', -Math.PI/2, 1.2, 3.6, body.position.clone(), scn);
-    tps.lowerBetaLimit=0.3;  tps.upperBetaLimit=1.45;
-    tps.lowerRadiusLimit=2.4; tps.upperRadiusLimit=7.5;
-    tps.wheelPrecision=60;
-    tps.lockedTarget = body;  // always target body
+      // Backquote ` -> toggle first/third
+      if (e.code === "Backquote") { e.preventDefault(); Rig.toggleMode(); }
 
-    // spawn
-    const sp = resolveSpawn();
-    body.position.set(sp.x, sp.y-1.4, sp.z); // body origin ~feet; FPS eye at 1.8
-    fps.position.set(sp.x, sp.y, sp.z);
-    scn.activeCamera = fps;
-    window.camera = fps;
+      // Actions (from your screenshots)
+      if (e.code === "KeyE") emit("pp:action", { type: "grab" });      // Grab / Interact key
+      if (e.code === "KeyG") emit("pp:action", { type: "drop" });      // Drop
+      if (e.code === "KeyF") emit("pp:action", { type: "place" });     // Place
+      if (e.code === "KeyQ") emit("pp:action", { type: "cycle" });     // Cycle
+      if (e.code === "KeyJ") emit("pp:action", { type: "journal" });   // Journal
 
-    hudXYZAttach(fps);
-
-    // movement (uses PP.controls flags if present, else keyboard fallback)
-    const flags = (PP.state = PP.state || {}).controls = (PP.state.controls || {
-      forward:false, back:false, left:false, right:false
-    });
-
-    // local fallback keys (non-capturing)
-    const localKeys = {w:0,a:0,s:0,d:0,run:false};
-    function kd(e){
-      const k=(e.key||'').toLowerCase();
-      if(k==='w')localKeys.w=1; if(k==='a')localKeys.a=1; if(k==='s')localKeys.s=1; if(k==='d')localKeys.d=1;
-      if(e.code==='ShiftLeft'||e.code==='ShiftRight') localKeys.run=true;
-      if(e.code==='KeyV') toggleView();  // toggle TPS/FPS
-    }
-    function ku(e){
-      const k=(e.key||'').toLowerCase();
-      if(k==='w')localKeys.w=0; if(k==='a')localKeys.a=0; if(k==='s')localKeys.s=0; if(k==='d')localKeys.d=0;
-      if(e.code==='ShiftLeft'||e.code==='ShiftRight') localKeys.run=false;
-    }
-    window.addEventListener('keydown', kd, {passive:true});
-    window.addEventListener('keyup',   ku, {passive:true});
-
-    function want(k){ return !!(flags[k]) || !!(localKeys[({forward:'w',back:'s',left:'a',right:'d'})[k]]); }
-    function running(){ return !!PP.state.running || !!localKeys.run; }
-
-    function forwardXZ(cam){
-      const f = cam.getFrontPosition(1).subtract(cam.position);
-      f.y = 0; if (f.length() > 1e-4) f.normalize();
-      return f;
-    }
-    function rightXZ(cam){
-      const f = forwardXZ(cam);
-      const r = BABYLON.Vector3.Cross(BABYLON.Axis.Y, f);
-      if (r.length() > 1e-4) r.normalize();
-      return r;
-    }
-
-    // Authoritative movement loop (applies to FPS camera only; TPS reads body)
-    scn.onBeforeRenderObservable.add(()=>{
-      // Ensure active camera stays synced with mode
-      if (STATE.mode === 'fps' && scn.activeCamera !== fps) scn.activeCamera = fps;
-      if (STATE.mode === 'tps' && scn.activeCamera !== tps) scn.activeCamera = tps;
-
-      // Drive FPS camera with collisions
-      const cam = fps;
-      let v = v3();
-      const fw = forwardXZ(cam), rt = rightXZ(cam);
-      if (want('forward')) v.addInPlace(fw);
-      if (want('back'))    v.addInPlace(fw.scale(-1));
-      if (want('right'))   v.addInPlace(rt);
-      if (want('left'))    v.addInPlace(rt.scale(-1));
-
-      const len = v.length();
-      if (len > 0){
-        v.scaleInPlace(1/len);
-        const dt = (E()?.getDeltaTime?.() || 16.7) / 1000;
-        const sp = (running()? STATE.speedRun : STATE.speedWalk) * dt;
-        const d = v.scale(sp);
-        try { cam.cameraDirection ? cam.cameraDirection.addInPlace(d) : cam.position.addInPlace(d); } catch {}
+      // T tap / hold (special vs headgear toggle)
+      if (e.code === "KeyT") {
+        // start measuring hold
+        Keys.__T_down_at = nowMs();
       }
 
-      // Keep body glued to FPS camera horizontally; snap Y from ground
-      body.position.x = fps.position.x;
-      body.position.z = fps.position.z;
-      const gy = groundYAt(body.position.x, body.position.z, fps.position.y);
-      if (gy != null) body.position.y = gy - 0.0; // keep capsule feet on ground
-
-      // TPS camera follows body via ArcRotate target — no rubberband
-      tps.target = body;
-    });
-
-    // Toggle view
-    function toggleView(){
-      if (STATE.mode === 'fps'){
-        // place TPS orbit around current body position
-        tps.target = body;
-        tps.radius = Math.min(Math.max(tps.radius||3.6, 3.0), 6.0);
-        tps.alpha  = -Math.PI/2;
-        tps.beta   = 1.2;
-        scn.activeCamera = tps;
-        STATE.mode = 'tps';
-      } else {
-        // snap FPS to body position
-        fps.position.copyFrom(body.position.add(new BABYLON.Vector3(0, 1.8, 0)));
-        scn.activeCamera = fps;
-        STATE.mode = 'fps';
+      // Push-to-talk
+      if (e.code === "KeyV" && !Rig.state.pttLocal) {
+        Rig.state.pttLocal = true; emit("pp:action", { type: "ptt_local" });
       }
-      window.camera = scn.activeCamera;
-      try { document.getElementById('renderCanvas')?.focus?.(); } catch {}
-    }
+      if (e.code === "KeyB" && !Rig.state.pttGlobal) {
+        Rig.state.pttGlobal = true; emit("pp:action", { type: "ptt_global" });
+      }
+    }, true);
 
-    PP.rig.body = body;
-    PP.rig.fps  = fps;
-    PP.rig.tps  = tps;
-    PP.rig.toggleView = toggleView;
+    on(window, "keyup", (e) => {
+      Keys[e.code] = false;
 
-    // expose a clean respawn you can call anytime
-    PP.rig.respawn = function(){
-      const sp = resolveSpawn();
-      body.position.set(sp.x, sp.y-1.4, sp.z);
-      fps.position.set(sp.x, sp.y, sp.z);
-    };
+      if (e.code === "KeyW" || e.code === "ArrowUp")    Rig.state.move.f = false;
+      if (e.code === "KeyS" || e.code === "ArrowDown")  Rig.state.move.b = false;
+      if (e.code === "KeyA" || e.code === "ArrowLeft")  Rig.state.move.l = false;
+      if (e.code === "KeyD" || e.code === "ArrowRight") Rig.state.move.r = false;
+      if (e.code === "ShiftLeft" || e.code === "ShiftRight") Rig.state.run = false;
 
-    // Recenter once at start if a “pp:start” is used by your Start button
-    window.addEventListener('pp:start', ()=> setTimeout(PP.rig.respawn, 50), { once:true });
+      if (e.code === "KeyC") Rig.state.crouch = false;
+
+      // T tap vs hold
+      if (e.code === "KeyT") {
+        const held = (nowMs() - (Keys.__T_down_at || 0));
+        delete Keys.__T_down_at;
+        if (held > 300) emit("pp:action", { type: "headgear" });
+        else emit("pp:action", { type: "special" });
+      }
+
+      // PTT end
+      if (e.code === "KeyV" && Rig.state.pttLocal)  { Rig.state.pttLocal = false;  emit("pp:action", { type: "ptt_local_end"  }); }
+      if (e.code === "KeyB" && Rig.state.pttGlobal) { Rig.state.pttGlobal = false; emit("pp:action", { type: "ptt_global_end" }); }
+    }, true);
+
+    // Mouse buttons
+    on(window, "mousedown", (e) => {
+      const btn = e.button;
+      if (btn === 0) { // left
+        emit("pp:action", { type: "interact" });
+      } else if (btn === 2) { // right
+        Rig.state.rightHeld = true;
+        emit("pp:action", { type: "use_hold" });
+      }
+    }, true);
+
+    on(window, "mouseup", (e) => {
+      const btn = e.button;
+      if (btn === 2) { // right
+        const wasHold = Rig.state.rightHeld;
+        Rig.state.rightHeld = false;
+        // short tap is 'use', otherwise end of hold
+        if (e.detail <= 1) emit("pp:action", { type: "use" });
+        emit("pp:action", { type: "use_hold_end" });
+      }
+    }, true);
+
+    // context menu off for right-button gameplay
+    on(window, "contextmenu", (e) => { e.preventDefault(); }, true);
+
+    // Pointer lock on pp:start too
+    on(window, "pp:start", () => setTimeout(() => pointerLockTry(canvas), 150), { once: true });
   }
 
-  // defer until Babylon scene exists
-  (function wait(){ if (S()) buildRig(); else setTimeout(wait, 60); })();
+  // boot when a scene exists or on start
+  if (document.readyState === "loading") {
+    on(document, "DOMContentLoaded", setupInputs, { once: true });
+  } else {
+    setupInputs();
+  }
+  on(window, "pp:start", setupInputs, { once: true });
+
 })();
