@@ -1,308 +1,311 @@
-// File: assets/dev/util/player_rig_controller_final.js
-// Single-file rig + input system. No external bindings needed.
+/* game_bootstrap.js — robust start flow for PhasmaPhoney
+   - Loads map manifest
+   - Imports GLB + matching MAP_DEF (*.config.js or *.js)
+   - Applies MAP_DEF {scale, rotationY, offset, spawn}
+   - Safe render loop (only renders when a camera exists)
+   - Spawns player (PP.rig.body preferred) at MAP_DEF.spawn
+*/
 (function () {
-  "use strict";
-  if (window.__PP_RIG_V4__) return; window.__PP_RIG_V4__ = true;
+  if (window.__GameBootstrapReady) return;
+  window.__GameBootstrapReady = true;
 
-  const PP = (window.PP = window.PP || {});
-  const TWO_PI = Math.PI * 2;
+  // ---------- tiny utils ----------
+  const $ = (s) => document.querySelector(s);
+  const log  = (...a) => { try { console.log("[bootstrap]", ...a); } catch(_){} };
+  const warn = (...a) => { try { console.warn("[bootstrap]", ...a); } catch(_){} };
 
-  // ------- small helpers -------
-  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-  const nowMs = () => performance.now();
-  const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
-  const on = (t, n, f, o) => t.addEventListener(n, f, o);
-
-  function S() {
-    // get the current scene if available
-    return window.SCENE || BABYLON.EngineStore?.LastCreatedScene || BABYLON.Engine?.LastCreatedScene || null;
+  function absUrl(path) {
+    try { return new URL(path, document.baseURI).toString(); }
+    catch (_){ return path; }
   }
 
-  // ------- player rig -------
-  const Rig = {
-    scene: null,
-    canvas: null,
-    body: null,            // TransformNode (movement root)
-    fpCam: null,           // UniversalCamera (first person)
-    tpCam: null,           // ArcRotateCamera (third person)
-    mode: "fp",            // 'fp' | 'tp'
-    speeds: { walk: 2.7, run: 5.4, crouch: 1.4 }, // m/s
-    state: {
-      move: { f: false, b: false, l: false, r: false },
-      run: false,
-      crouch: false,
-      mouseLocked: false,
-      rightHeld: false,
-      pttLocal: false,
-      pttGlobal: false
-    },
-    lastStepDist: 0,
-    stepStride: { walk: 1.2, run: 0.8 },
+  function loadScriptOnce(path) {
+    return new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = absUrl(path) + (path.includes("?") ? "" : `?v=${Date.now()}`);
+      s.async = true;
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+  }
 
-    init(scene) {
-      this.scene = scene || S();
-      if (!this.scene) return console.warn("[rig] no scene yet");
-
-      // body root
-      this.body = new BABYLON.TransformNode("playerBody", this.scene);
-      this.body.position = new BABYLON.Vector3(0, 1.8, 0);
-
-      // FIRST PERSON camera
-      this.fpCam = new BABYLON.UniversalCamera("playerFP", this.body.position.clone(), this.scene);
-      this.fpCam.minZ = 0.1;
-      this.fpCam.inertia = 0;
-      this.fpCam.angularSensibility = 800; // mouse look sensitivity
-      this.fpCam.checkCollisions = true;
-      this.fpCam.applyGravity = true;
-      this.fpCam.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
-      this.fpCam.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
-
-      // THIRD PERSON camera (orbiting the body)
-      this.tpCam = new BABYLON.ArcRotateCamera("playerTP",
-        Math.PI / 2, 1.05, 3.6, this.body.position, this.scene);
-      this.tpCam.lowerBetaLimit = 0.2;
-      this.tpCam.upperBetaLimit = Math.PI * 0.49;
-      this.tpCam.panningSensibility = 0;
-      this.tpCam.checkCollisions = true;
-      this.tpCam.attachControl(true);
-
-      // Start in FP mode
-      this.activate("fp");
-
-      // Follow the body (keep cameras aligned to body Yaw)
-      this.scene.onBeforeRenderObservable.add(() => this._tick());
-
-      // Try to export handles for other modules
-      this.scene.__playerBody = this.body;
-      window.PP.rig = this;
-    },
-
-    activate(mode) {
-      mode = mode === "tp" ? "tp" : "fp";
-      this.mode = mode;
-
-      if (mode === "fp") {
-        this._detachAll();
-        this.scene.activeCamera = this.fpCam;
-        this.fpCam.position = this.body.position.clone();
-        this.fpCam.attachControl(this._canvas(), true);
-      } else {
-        this._detachAll();
-        this.scene.activeCamera = this.tpCam;
-        this.tpCam.target = this.body.position;
-        this.tpCam.attachControl(this._canvas(), true);
-      }
-      // focus
-      try { this._canvas().focus(); } catch {}
-    },
-
-    toggleMode() {
-      this.activate(this.mode === "fp" ? "tp" : "fp");
-    },
-
-    _detachAll() {
-      try { this.fpCam.detachControl(); } catch {}
-      try { this.tpCam.detachControl(); } catch {}
-    },
-
-    _canvas() {
-      return this.canvas || (this.canvas = document.getElementById("renderCanvas"));
-    },
-
-    // movement integration each frame
-    _tick() {
-      const dt = this.scene.getEngine().getDeltaTime() / 1000; // seconds
-      if (!dt) return;
-
-      // Determine facing yaw: in FP use camera yaw, in TP use tpCam alpha around target
-      let yaw;
-      if (this.mode === "fp") {
-        // derive yaw from FP camera rotation
-        yaw = this.fpCam.rotation.y || 0;
-      } else {
-        // ArcRotate alpha is clockwise around Y
-        yaw = -this.tpCam.alpha + Math.PI / 2;
-      }
-
-      // WASD movement vector in local space
-      let x = 0, z = 0;
-      if (this.state.move.f) z += 1;
-      if (this.state.move.b) z -= 1;
-      if (this.state.move.l) x -= 1;
-      if (this.state.move.r) x += 1;
-
-      let moving = false;
-      if (x !== 0 || z !== 0) {
-        moving = true;
-        // normalize
-        const len = Math.hypot(x, z) || 1;
-        x /= len; z /= len;
-
-        // rotate by yaw to world space
-        const dx = x * Math.cos(yaw) - z * Math.sin(yaw);
-        const dz = x * Math.sin(yaw) + z * Math.cos(yaw);
-
-        // speed
-        const sp = this.state.crouch
-          ? this.speeds.crouch
-          : (this.state.run ? this.speeds.run : this.speeds.walk);
-
-        this.body.position.x += dx * sp * dt;
-        this.body.position.z += dz * sp * dt;
-
-        // keep cameras with body
-        if (this.mode === "fp") {
-          this.fpCam.position.copyFrom(this.body.position);
-        } else {
-          this.tpCam.target.copyFrom(this.body.position);
-        }
-
-        // footsteps (distance based)
-        this.lastStepDist += sp * dt;
-        const stride = this.state.run ? this.stepStride.run : this.stepStride.walk;
-        if (this.lastStepDist >= stride) {
-          this.lastStepDist = 0;
-          try { window.playStep && window.playStep(0.45); } catch {}
-        }
-      } else {
-        this.lastStepDist = 0;
-      }
-
-      // sync yaw of body with camera so other systems can use it
-      if (!this.body.rotation) this.body.rotation = new BABYLON.Vector3();
-      this.body.rotation.y = yaw;
-
-      // crouch height (simple)
-      const desiredY = this.state.crouch ? 1.2 : 1.8;
-      this.body.position.y = BABYLON.Scalar.Lerp(this.body.position.y, desiredY, clamp(12 * dt, 0, 1));
-      if (this.mode === "fp") this.fpCam.position.y = this.body.position.y;
-    }
-  };
-
-  // ------- input wiring (baked here) -------
-  const Keys = Object.create(null);
-  const pressed = (code) => !!Keys[code];
-
-  function pointerLockTry(canvas) {
-    if (!canvas || !canvas.requestPointerLock) return;
-    if (document.pointerLockElement !== canvas) {
-      try { canvas.requestPointerLock(); } catch {}
+  async function fetchJSON(url) {
+    try {
+      const r = await fetch(absUrl(url), { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status + " " + r.statusText);
+      return await r.json();
+    } catch (e) {
+      warn("fetchJSON failed:", url, e);
+      return null;
     }
   }
 
-  function setupInputs() {
-    const scene = S();
-    if (!scene) return setTimeout(setupInputs, 100);
+  // ---------- loader UI ----------
+  const Loader = (() => {
+    const box  = () => $("#loading-box");
+    const text = () => $("#loading-text");
+    const fill = () => $("#loading-fill");
+    let stepsDone = 0, stepsTotal = 0;
+    function show(){ const b=box(); if (b) b.style.display="flex"; }
+    function hide(){ const b=box(); if (b) b.style.display="none"; }
+    function label(s){ const t=text(); if (t) t.textContent = s || ""; }
+    function draw(){ const f=fill(); if (!f) return; f.style.width = (stepsTotal? (stepsDone/stepsTotal)*100 : 0).toFixed(1)+"%"; }
+    const queue = [];
+    function addStep(lbl, fn){ queue.push({lbl, fn}); stepsTotal = queue.length; }
+    async function run(){
+      show(); draw();
+      for (const s of queue){
+        label(s.lbl); draw();
+        try { await s.fn(); } catch(e){ warn("step failed:", s.lbl, e); }
+        stepsDone++; draw();
+      }
+      label("Finalizing…"); draw();
+      await new Promise(r=>setTimeout(r, 80));
+      hide();
+    }
+    function reset(){ queue.length=0; stepsDone=0; stepsTotal=0; draw(); }
+    return { addStep, run, reset, show, hide, label };
+  })();
 
-    // init rig once scene exists
-    Rig.init(scene);
+  // ---------- state ----------
+  let engine, scene;
+  let MAP_FILES = [];
 
+  // Expose for other modules (rig uses these if needed)
+  Object.defineProperties(window, {
+    ENGINE: { get(){ return engine; } },
+    SCENE:  { get(){ return scene;  } }
+  });
+
+  // ---------- map list / selector ----------
+  function populateMapSelector() {
+    const sel = $("#map-select");
+    if (!sel) return;
+    sel.innerHTML = MAP_FILES.length
+      ? MAP_FILES.map((m,i) => `<option value="${i}">${m.title || m.file}</option>`).join("")
+      : `<option value="-1">(no maps found)</option>`;
+    try {
+      const saved = localStorage.getItem("selectedMapIndex");
+      if (saved && MAP_FILES[+saved]) sel.value = saved;
+      else sel.value = "0";
+    } catch(_){ sel.value = "0"; }
+    sel.onchange = () => {
+      try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_){}
+    };
+  }
+
+  async function loadManifest() {
+    const j = await fetchJSON("./assets/models/map/maps.json");
+    if (Array.isArray(j)) MAP_FILES = j;
+    else if (j && Array.isArray(j.maps)) MAP_FILES = j.maps;
+
+    // Fallback to known files if manifest missing
+    if (!MAP_FILES.length) {
+      MAP_FILES = [
+        { file: "Abandoned_House.glb",      title: "Abandoned House", def: "Abandoned_House.config.js" },
+        { file: "furnished_house.glb",      title: "Furnished House", def: "furnished_house.js" },
+        { file: "jailhouse.glb",            title: "Jailhouse",       def: "jailhouse.config.js" },
+        { file: "apartment_floor_plan.glb", title: "Apartment",       def: "apartment_floor_plan.config.js" }
+      ];
+    }
+    populateMapSelector();
+  }
+
+  function getSelectedMap() {
+    const sel = $("#map-select");
+    const idx = Math.max(0, Math.min(MAP_FILES.length-1, parseInt(sel?.value || "0", 10) || 0));
+    return MAP_FILES[idx];
+  }
+
+  // ---------- Babylon setup ----------
+  function startRenderLoop() {
+    if (!engine || !scene) return;
+    engine.runRenderLoop(() => {
+      // Render ONLY when there is a camera to avoid "No camera defined"
+      if (scene.activeCamera) scene.render();
+    });
+    window.addEventListener("resize", () => engine && engine.resize());
+  }
+
+  async function prepareEngineScene() {
     const canvas = document.getElementById("renderCanvas");
+    if (!canvas) throw new Error("Missing #renderCanvas");
+    if (!window.BABYLON) throw new Error("BABYLON is not loaded yet");
 
-    // Mouse lock on click
-    on(canvas, "click", () => pointerLockTry(canvas), { passive: true });
+    engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
+    scene  = new BABYLON.Scene(engine);
 
-    // Keyboard
-    on(window, "keydown", (e) => {
-      const t = e.target;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    // Hemi for gentle global light
+    const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
+    hemi.intensity = 0.35;
 
-      Keys[e.code] = true;
+    // Slight fog for night vibe
+    scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
+    scene.fogDensity = 0.0045;
+    scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
 
-      // Movement
-      if (e.code === "KeyW" || e.code === "ArrowUp")    Rig.state.move.f = true;
-      if (e.code === "KeyS" || e.code === "ArrowDown")  Rig.state.move.b = true;
-      if (e.code === "KeyA" || e.code === "ArrowLeft")  Rig.state.move.l = true;
-      if (e.code === "KeyD" || e.code === "ArrowRight") Rig.state.move.r = true;
-      if (e.code === "ShiftLeft" || e.code === "ShiftRight") Rig.state.run = true;
-
-      // Crouch
-      if (e.code === "KeyC") Rig.state.crouch = true;
-
-      // Backquote ` -> toggle first/third
-      if (e.code === "Backquote") { e.preventDefault(); Rig.toggleMode(); }
-
-      // Actions (from your screenshots)
-      if (e.code === "KeyE") emit("pp:action", { type: "grab" });      // Grab / Interact key
-      if (e.code === "KeyG") emit("pp:action", { type: "drop" });      // Drop
-      if (e.code === "KeyF") emit("pp:action", { type: "place" });     // Place
-      if (e.code === "KeyQ") emit("pp:action", { type: "cycle" });     // Cycle
-      if (e.code === "KeyJ") emit("pp:action", { type: "journal" });   // Journal
-
-      // T tap / hold (special vs headgear toggle)
-      if (e.code === "KeyT") {
-        // start measuring hold
-        Keys.__T_down_at = nowMs();
-      }
-
-      // Push-to-talk
-      if (e.code === "KeyV" && !Rig.state.pttLocal) {
-        Rig.state.pttLocal = true; emit("pp:action", { type: "ptt_local" });
-      }
-      if (e.code === "KeyB" && !Rig.state.pttGlobal) {
-        Rig.state.pttGlobal = true; emit("pp:action", { type: "ptt_global" });
-      }
-    }, true);
-
-    on(window, "keyup", (e) => {
-      Keys[e.code] = false;
-
-      if (e.code === "KeyW" || e.code === "ArrowUp")    Rig.state.move.f = false;
-      if (e.code === "KeyS" || e.code === "ArrowDown")  Rig.state.move.b = false;
-      if (e.code === "KeyA" || e.code === "ArrowLeft")  Rig.state.move.l = false;
-      if (e.code === "KeyD" || e.code === "ArrowRight") Rig.state.move.r = false;
-      if (e.code === "ShiftLeft" || e.code === "ShiftRight") Rig.state.run = false;
-
-      if (e.code === "KeyC") Rig.state.crouch = false;
-
-      // T tap vs hold
-      if (e.code === "KeyT") {
-        const held = (nowMs() - (Keys.__T_down_at || 0));
-        delete Keys.__T_down_at;
-        if (held > 300) emit("pp:action", { type: "headgear" });
-        else emit("pp:action", { type: "special" });
-      }
-
-      // PTT end
-      if (e.code === "KeyV" && Rig.state.pttLocal)  { Rig.state.pttLocal = false;  emit("pp:action", { type: "ptt_local_end"  }); }
-      if (e.code === "KeyB" && Rig.state.pttGlobal) { Rig.state.pttGlobal = false; emit("pp:action", { type: "ptt_global_end" }); }
-    }, true);
-
-    // Mouse buttons
-    on(window, "mousedown", (e) => {
-      const btn = e.button;
-      if (btn === 0) { // left
-        emit("pp:action", { type: "interact" });
-      } else if (btn === 2) { // right
-        Rig.state.rightHeld = true;
-        emit("pp:action", { type: "use_hold" });
-      }
-    }, true);
-
-    on(window, "mouseup", (e) => {
-      const btn = e.button;
-      if (btn === 2) { // right
-        const wasHold = Rig.state.rightHeld;
-        Rig.state.rightHeld = false;
-        // short tap is 'use', otherwise end of hold
-        if (e.detail <= 1) emit("pp:action", { type: "use" });
-        emit("pp:action", { type: "use_hold_end" });
-      }
-    }, true);
-
-    // context menu off for right-button gameplay
-    on(window, "contextmenu", (e) => { e.preventDefault(); }, true);
-
-    // Pointer lock on pp:start too
-    on(window, "pp:start", () => setTimeout(() => pointerLockTry(canvas), 150), { once: true });
+    // kick the loop (safe)
+    startRenderLoop();
   }
 
-  // boot when a scene exists or on start
-  if (document.readyState === "loading") {
-    on(document, "DOMContentLoaded", setupInputs, { once: true });
-  } else {
-    setupInputs();
+  // ---------- map def loading ----------
+  async function tryLoadMapDef(defNameOrNull, mapFile) {
+    const baseNoExt = (mapFile || "").replace(/\.[^.]+$/, "");
+    const cands = [];
+    if (defNameOrNull) cands.push(`./assets/models/map/${defNameOrNull}`);
+    cands.push(`./assets/models/map/${baseNoExt}.config.js`);
+    cands.push(`./assets/models/map/${baseNoExt}.js`);
+
+    for (const c of cands) {
+      const ok = await loadScriptOnce(c);
+      if (ok && window.MAP_DEF && (MAP_DEF.spawn || MAP_DEF.scale || MAP_DEF.offset)) {
+        log("Loaded MAP_DEF:", c);
+        return true;
+      }
+    }
+    // Synthesize a minimal one
+    window.MAP_DEF = window.MAP_DEF || {};
+    MAP_DEF.file = mapFile || MAP_DEF.file || "";
+    MAP_DEF.scale = MAP_DEF.scale ?? 1;
+    MAP_DEF.rotationY = MAP_DEF.rotationY ?? 0;
+    MAP_DEF.offset = MAP_DEF.offset || { x:0,y:0,z:0 };
+    MAP_DEF.spawn  = MAP_DEF.spawn  || { x:0, y:1.8, z:0 };
+    warn("No MAP_DEF found; using synthesized fallback.");
+    return true;
   }
-  on(window, "pp:start", setupInputs, { once: true });
+
+  function applyMapDefToRoot(root) {
+    if (!root || !window.MAP_DEF) return;
+    const d = MAP_DEF;
+    try {
+      // scaling
+      if (typeof d.scale === "number") {
+        root.scaling = new BABYLON.Vector3(d.scale, d.scale, d.scale);
+      }
+      // rotationY (degrees)
+      const yaw = (d.rotationY||0) * Math.PI/180;
+      root.rotation = new BABYLON.Vector3(0, yaw, 0);
+      // offset
+      if (d.offset) {
+        root.position.x = (d.offset.x||0);
+        root.position.y = (d.offset.y||0);
+        root.position.z = (d.offset.z||0);
+      }
+    } catch(e){ warn("applyMapDefToRoot failed", e); }
+  }
+
+  async function loadSelectedMap() {
+    const chosen  = getSelectedMap();
+    const mapFile = chosen?.file || "Abandoned_House.glb";
+
+    await tryLoadMapDef(chosen?.def, mapFile);
+
+    try {
+      const res = await BABYLON.SceneLoader.ImportMeshAsync(
+        "", "./assets/models/map/", mapFile, scene
+      );
+      const root = res.meshes[0] || null;
+      if (root) {
+        applyMapDefToRoot(root);
+        // collisions receiving
+        res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch(_){} });
+      }
+      log("Map imported:", mapFile);
+    } catch (e) {
+      warn("Map import failed, creating ground fallback:", e);
+      const g = BABYLON.MeshBuilder.CreateGround("fallback", { width: 200, height: 200 }, scene);
+      g.checkCollisions = true;
+    }
+  }
+
+  // ---------- spawn ----------
+  function placePlayerAtSpawn() {
+    const d = window.MAP_DEF || {};
+    const sp = d.spawn ? { x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0 } : { x:0, y:1.8, z:0 };
+
+    // Prefer PP.rig.body provided by the rig file
+    const rig = window.PP && PP.rig;
+    if (rig && rig.body) {
+      rig.body.position.set(sp.x, sp.y, sp.z);
+      if (rig.fpCam) rig.fpCam.position.copyFrom(rig.body.position);
+      if (rig.tpCam) rig.tpCam.target.copyFrom(rig.body.position);
+      log("Spawned rig at", sp);
+      return;
+    }
+
+    // Fallback: if a camera already exists, place it
+    const cam = scene.activeCamera;
+    if (cam) {
+      cam.position.set(sp.x, sp.y, sp.z);
+      try { cam.setTarget(new BABYLON.Vector3(sp.x, sp.y + 1, sp.z + 2)); } catch(_) {}
+      log("Spawned camera at", sp);
+    } else {
+      // Try again a bit later if rig/camera arrives after bootstrap
+      setTimeout(placePlayerAtSpawn, 150);
+    }
+  }
+
+  function enablePointerLockOnce() {
+    const canvas = document.getElementById("renderCanvas");
+    if (!canvas || !canvas.requestPointerLock) return;
+    function tryLock(){ if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch(_){ } } }
+    canvas.addEventListener("click", () => tryLock(), { passive:true });
+    setTimeout(tryLock, 250);
+  }
+
+  function toast(msg){
+    const t = $("#toast"); if (!t) { console.log(msg); return; }
+    t.textContent = msg; t.style.display = "block";
+    clearTimeout(toast._h); toast._h = setTimeout(() => { t.style.display = "none"; }, 2200);
+  }
+
+  // ---------- start pipeline ----------
+  let started = false;
+  async function startPipeline() {
+    if (started) return;
+    started = true;
+
+    const title = $("#title-screen");
+    if (title) title.style.display = "none";
+
+    Loader.reset(); Loader.label("Initializing…"); Loader.show();
+
+    try {
+      Loader.addStep("Loading map list…",    async () => await loadManifest());
+      Loader.addStep("Preparing engine…",    async () => await prepareEngineScene());
+      Loader.addStep("Loading selected map…",async () => await loadSelectedMap());
+      Loader.addStep("Placing player…",      async () => placePlayerAtSpawn());
+      Loader.addStep("Pointer lock…",        async () => enablePointerLockOnce());
+      await Loader.run();
+
+      // focus canvas
+      const canvas = document.getElementById("renderCanvas");
+      try { canvas?.focus?.(); } catch(_){}
+
+      // Let the rest of the app know we’re live
+      window.dispatchEvent(new CustomEvent("pp:start"));
+    } catch (err) {
+      warn("Boot failed:", err);
+      toast("Boot failed. See console for details.");
+      started = false; // allow retry
+      if (title) title.style.display = "flex";
+    }
+  }
+
+  // ---------- wire UI and early manifest load ----------
+  (function wireStart(){
+    const btn = $("#start-button");
+    if (btn) btn.addEventListener("click", (e)=>{ e.preventDefault(); startPipeline(); }, { passive: false, once:true });
+
+    // keyboard fallback (Enter/Space) on title
+    document.addEventListener("keydown", (e) => {
+      const onTitle = $("#title-screen") && $("#title-screen").style.display !== "none";
+      if (onTitle && (e.key === "Enter" || e.code === "Space")) { e.preventDefault(); startPipeline(); }
+    }, { passive: false });
+
+    // Preload manifest list for the selector (non-blocking)
+    window.addEventListener("DOMContentLoaded", () => { loadManifest().catch(()=>{}); });
+  })();
 
 })();
