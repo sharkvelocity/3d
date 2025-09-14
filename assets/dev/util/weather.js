@@ -11,8 +11,8 @@
     state: "Clear",          // "Clear" | "Rainstorm" | "Bloodmoon" | "Snow"
     ready: false,
     sounds: { ambient:null, rain:null, snow:null, thunder:[] },
-    volBase: { ambient:0.7, rain:0.65, snow:0.5, thunder:0.9 },
-    volTarget: { ambient:0.0, rain:0.0, snow:0.0 },
+    volBase:  { ambient:0.7, rain:0.65, snow:0.5, thunder:0.9 },
+    volTarget:{ ambient:0.0, rain:0.0,  snow:0.0 },
     indoor: false,
     intensity: 1.0,
     nextLightningAt: Infinity,
@@ -36,14 +36,19 @@
     const s = scn();
     try {
       // CLEAR ambient bed (crickets) — ONLY for Clear
+      // (kept original filenames; if missing, falls back harmlessly)
       S.sounds.ambient = new BABYLON.Sound("amb", "./assets/audio/ambient.mp3", s, null,
         { loop:true, autoplay:false, volume:0.0, spatialSound:false });
 
       // Weather loops
       S.sounds.rain = new BABYLON.Sound("rain", "./assets/audio/rainstorm.mp3", s, null,
         { loop:true, autoplay:false, volume:0.0, spatialSound:false });
-      S.sounds.snow = new BABYLON.Sound("snow", "./assets/audio/snow.mp3", s, null,
-        { loop:true, autoplay:false, volume:0.0, spatialSound:false });
+
+      // If you don’t have snow.mp3 in the repo, this will just fail quietly and Snow will be silent.
+      try {
+        S.sounds.snow = new BABYLON.Sound("snow", "./assets/audio/snow.mp3", s, null,
+          { loop:true, autoplay:false, volume:0.0, spatialSound:false });
+      } catch(_){ S.sounds.snow = null; }
 
       // Thunder palette (Bloodmoon only)
       ["thunder_loud.mp3","thunder_rumble.mp3","thunder.mp3"].forEach((f,i)=>{
@@ -141,7 +146,7 @@
 
   function applyTargets(dt){
     if (!S.ready) return;
-    const muffle = S.indoor ? 0.35 : 1.0;
+    const muffle = S.indoor ? 0.35 : 1.0;        // ← indoor muffling (kept)
     const k = clamp(dt * 1.5, 0, 1);
     const tAmbient = S.volTarget.ambient;
     const tRain    = S.volTarget.rain * S.intensity * muffle;
@@ -150,7 +155,7 @@
     try {
       S.sounds.ambient?.setVolume( lerp(S.sounds.ambient.getVolume(), tAmbient, k) );
       S.sounds.rain?.setVolume(    lerp(S.sounds.rain.getVolume(),    tRain,    k) );
-      S.sounds.snow?.setVolume(    lerp(S.sounds.snow.getVolume(),    tSnow,    k) );
+      S.sounds.snow?.setVolume(    lerp(S.sounds.snow?.getVolume?.() ?? 0, tSnow, k) );
     } catch {}
 
     try { if (S.sounds.ambient && tAmbient > 0.02 && !S.sounds.ambient.isPlaying) S.sounds.ambient.play(); } catch {}
@@ -222,7 +227,7 @@
     if (isIn !== S._indoorLast){
       S._indoorLast = isIn;
       S.indoor = isIn;
-      Weather.set(S.state, { intensity:S.intensity }); // reapply volumes
+      Weather.set(S.state, { intensity:S.intensity }); // reapply volumes with muffle
     }
   }
   // ────────────────────────────────────────────────
@@ -257,7 +262,7 @@
       } else { // Snow
         S.volTarget.ambient = 0.0;
         S.volTarget.rain    = 0.0;
-        S.volTarget.snow    = S.volBase.snow;     // snow only
+        S.volTarget.snow    = S.sounds.snow ? S.volBase.snow : 0.0; // silent if snow loop missing
         S.nextLightningAt = Infinity;             // no lightning
       }
 
@@ -271,7 +276,7 @@
           const muffle = S.indoor ? 0.35 : 1.0;
           S.sounds.ambient?.setVolume(S.volTarget.ambient);
           S.sounds.rain?.setVolume(S.volTarget.rain * S.intensity * muffle);
-          S.sounds.snow?.setVolume(S.volTarget.snow * S.intensity * muffle);
+          S.sounds.snow?.setVolume?.(S.volTarget.snow * S.intensity * muffle);
 
           // start/stop loops immediately
           if (S.volTarget.ambient > 0.02 && !S.sounds.ambient.isPlaying) S.sounds.ambient.play();
@@ -280,8 +285,10 @@
           if (S.volTarget.rain > 0.02 && !S.sounds.rain.isPlaying) S.sounds.rain.play();
           else if (S.volTarget.rain <= 0.01 && S.sounds.rain?.isPlaying) S.sounds.rain.stop();
 
-          if (S.volTarget.snow > 0.02 && !S.sounds.snow.isPlaying) S.sounds.snow.play();
-          else if (S.volTarget.snow <= 0.01 && S.sounds.snow?.isPlaying) S.sounds.snow.stop();
+          if (S.sounds.snow){
+            if (S.volTarget.snow > 0.02 && !S.sounds.snow.isPlaying) S.sounds.snow.play();
+            else if (S.volTarget.snow <= 0.01 && S.sounds.snow?.isPlaying) S.sounds.snow.stop();
+          }
         }catch{}
       }
     },

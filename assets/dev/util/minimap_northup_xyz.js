@@ -1,106 +1,135 @@
-(function(){ 'use strict';
-  if (window.__minimapInstalled_v2) return; window.__minimapInstalled_v2 = true;
-  const S = ()=>window.SCENE||window.scene||(window.ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||null;
-  const whenReady = (cb)=>{ (function t(){const s=S(); if(s&&s.activeCamera){try{cb(s);}catch(_){ } return;} requestAnimationFrame(t); })(); };
-  const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
-  const VIEWPORT = { x: 0.02, y: 0.73, w: 0.24, h: 0.24 };
-  const HEIGHT   = 60;
-  const HALF_EXT = 55;
-  const Y_FALLBK = 1.35;
+/* File: assets/dev/util/minimap_northup_xyz.js
+   North-up minimap with toggle button. Also drives the XYZ HUD from player body.
+*/
+(function(){
+  if (window.__PP_MINIMAP_V3__) return; window.__PP_MINIMAP_V3__ = true;
 
-  function pickable(m){
-    if (m.isPickable === false) return false;
-    const n=(m.name||"").toLowerCase();
-    return n.includes("floor") || n.includes("ground") || n.includes("nav") || true;
-  }
+  const UI = {
+    btn: null,
+    wrap: null,
+    canvas: null,
+    open: false
+  };
 
-  function buildMinimap(scene){
-    const eng = scene.getEngine();
-    const mm = new BABYLON.FreeCamera("MiniMapCam", new BABYLON.Vector3(0, HEIGHT, 0), scene);
-    mm.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-    mm.orthoLeft=-HALF_EXT; mm.orthoRight=HALF_EXT; mm.orthoBottom=-HALF_EXT; mm.orthoTop=HALF_EXT;
-    mm.minZ = 0.1; mm.maxZ = 10000;
-    mm.rotation.set(Math.PI/2, 0, 0);
-    mm.rotationQuaternion = null;
-    mm.inputs.clear();
-    mm.viewport = new BABYLON.Viewport(VIEWPORT.x, VIEWPORT.y, VIEWPORT.w, VIEWPORT.h);
+  function S(){ return window.SCENE || window.__SCENE || BABYLON.EngineStore?.LastCreatedScene || null; }
 
-    scene.activeCameras = scene.activeCameras || [];
-    if (!scene.activeCameras.includes(scene.activeCamera)) scene.activeCameras.push(scene.activeCamera);
-    if (!scene.activeCameras.includes(mm)) scene.activeCameras.push(mm);
-
-    let W = eng.getRenderWidth(), H = eng.getRenderHeight();
-    const ui = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("MinimapUI", true, scene);
-
-    const frame = new BABYLON.GUI.Rectangle();
-    frame.thickness = 2; frame.color = "#00FFFF"; frame.background = "rgba(0,0,0,0.14)";
-    frame.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-    frame.verticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-
-    const dot = new BABYLON.GUI.Ellipse();
-    dot.width = "8px"; dot.height = "8px"; dot.thickness = 2; dot.color="#00FFFF"; dot.background="#00FFFF";
-    dot.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-    dot.verticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-
-    const label = new BABYLON.GUI.TextBlock();
-    label.color="#0ff"; label.fontSize=12; label.text="X:0  Y:0  Z:0";
-    label.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-    label.textVerticalAlignment   = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
-
-    function pxRect(){
-      W = eng.getRenderWidth(); H = eng.getRenderHeight();
-      const px = VIEWPORT.x * W, py = (1 - VIEWPORT.y - VIEWPORT.h) * H;
-      frame.left = px + "px"; frame.top = py + "px";
-      frame.width = (VIEWPORT.w * W) + "px"; frame.height = (VIEWPORT.h * H) + "px";
-    }
-    pxRect(); ui.addControl(frame); ui.addControl(dot); ui.addControl(label);
-    eng.onResizeObservable.add(pxRect);
-
-    function placeDotAtWorldXZ(x,z){
-      const px = VIEWPORT.x * W, py = (1 - VIEWPORT.y - VIEWPORT.h) * H;
-      const rw = VIEWPORT.w * W, rh = VIEWPORT.h * H;
-      const dx = (x - mm.position.x) / (2*HALF_EXT) + 0.5;
-      const dz = (-(z - mm.position.z)) / (2*HALF_EXT) + 0.5;
-      const nx = clamp(dx, 0, 1), ny = clamp(dz, 0, 1);
-      dot.left = (px + nx*rw - 4) + "px";
-      dot.top  = (py + ny*rh - 4) + "px";
-    }
-
-    scene.onBeforeRenderObservable.add(()=>{
-      mm.rotation.set(Math.PI/2, 0, 0);
-      mm.orthoLeft=-HALF_EXT; mm.orthoRight=HALF_EXT; mm.orthoBottom=-HALF_EXT; mm.orthoTop=HALF_EXT;
-      const body = scene.__playerBody || scene.getMeshByName("player_capsule");
-      if (body){
-        mm.position.x = body.position.x;
-        mm.position.z = body.position.z;
-        placeDotAtWorldXZ(body.position.x, body.position.z);
-        const x = body.position.x.toFixed(2), y = body.position.y.toFixed(2), z = body.position.z.toFixed(2);
-        const px = VIEWPORT.x * W, py = (1 - VIEWPORT.y - VIEWPORT.h) * H;
-        label.text = `X:${x}  Y:${y}  Z:${z}`;
-        label.left = (px + 6) + "px"; label.top  = (py + 6) + "px";
-      }
+  function ensureUI(){
+    if (UI.wrap) return;
+    const wrap = document.createElement('div');
+    Object.assign(wrap.style, {
+      position:'fixed', left:'10px', top:'10px', zIndex:8000,
+      display:'flex', flexDirection:'column', gap:'6px'
     });
 
-    scene.onPointerObservable.add((evt)=>{
-      if (evt.type !== BABYLON.PointerEventTypes.POINTERDOWN) return;
-      const x = scene.pointerX, y = scene.pointerY;
-      const nx = x/W, ny = 1 - y/H;
-      const v  = mm.viewport;
-      if (nx < v.x || nx > v.x + v.width || ny < v.y || ny > v.y + v.height) return;
-      const hit = scene.pick(x, y, pickable, false, mm);
-      if (hit && hit.hit && hit.pickedPoint){
-        const p = hit.pickedPoint.clone();
-        const groundRay = new BABYLON.Ray(new BABYLON.Vector3(p.x, p.y + 500, p.z), new BABYLON.Vector3(0,-1,0), 2000);
-        const g = scene.pickWithRay(groundRay, pickable);
-        const body = scene.__playerBody || scene.getMeshByName("player_capsule");
-        if (body){
-          body.position.x = p.x;
-          body.position.z = p.z;
-          body.position.y = g && g.hit ? (g.pickedPoint.y + 0.9) : 1.35;
+    const btn = document.createElement('button');
+    btn.textContent = 'Map';
+    Object.assign(btn.style, {
+      border:'1px solid transparent', borderRadius:'8px',
+      padding:'6px 10px', background:'#0b1518', color:'#9ef',
+      cursor:'pointer'
+    });
+    btn.addEventListener('click', toggle);
+
+    const cv = document.createElement('canvas');
+    cv.width = 220; cv.height = 220;
+    Object.assign(cv.style, {
+      display:'none',
+      width:'220px', height:'220px',
+      border:'none',
+      borderRadius:'50%',           // circular look
+      background:'rgba(0,0,0,0.45)',
+      boxShadow:'0 0 0 1px rgba(0,255,255,0.15) inset, 0 2px 12px rgba(0,0,0,0.5)'
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(cv);
+    document.body.appendChild(wrap);
+
+    UI.btn = btn; UI.wrap = wrap; UI.canvas = cv;
+  }
+
+  function toggle(){
+    UI.open = !UI.open;
+    UI.canvas.style.display = UI.open ? 'block' : 'none';
+  }
+
+  function playerPos(){
+    const body = window.PP?.rig?.body ||
+                 S()?.__playerBody ||
+                 S()?.getMeshByName?.('player_capsule') ||
+                 S()?.activeCamera || null;
+    if (!body) return null;
+    try { return body.getAbsolutePosition?.() || body.position || null; } catch { return null; }
+  }
+
+  // XYZ HUD updater (pulls from the same source)
+  function loopXYZ(){
+    const el = document.getElementById('hud-xyz');
+    if (!el) { requestAnimationFrame(loopXYZ); return; }
+    function tick(){
+      const p = playerPos();
+      if (p) el.textContent = `XYZ: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // Very lightweight map: north-up top-down with player dot + heading
+  function loopMap(){
+    const s = S();
+    const ctx = UI.canvas?.getContext('2d');
+    if (!s || !ctx){ requestAnimationFrame(loopMap); return; }
+
+    function tick(){
+      if (UI.open){
+        const w = UI.canvas.width, h = UI.canvas.height;
+        ctx.clearRect(0,0,w,h);
+
+        // subtle grid
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        for (let i=10;i<w;i+=20){ ctx.moveTo(i,0); ctx.lineTo(i,h); }
+        for (let j=10;j<h;j+=20){ ctx.moveTo(0,j); ctx.lineTo(w,j); }
+        ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,255,255,0.12)'; ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // player
+        const p = playerPos();
+        if (p){
+          // center dot
+          ctx.beginPath();
+          ctx.arc(w/2, h/2, 4, 0, Math.PI*2);
+          ctx.fillStyle = '#0ff'; ctx.fill();
+
+          // heading arrow (camera forward projected)
+          const cam = s.activeCamera || window.camera;
+          if (cam && cam.getDirection){
+            const f = cam.getDirection(BABYLON.Vector3.Forward()); f.y=0; f.normalize();
+            const len = 18;
+            ctx.beginPath();
+            ctx.moveTo(w/2, h/2);
+            ctx.lineTo(w/2 + f.x*len, h/2 + f.z*len);
+            ctx.lineWidth = 2; ctx.strokeStyle = '#8ff'; ctx.stroke();
+          }
         }
+
+        // 'N' indicator
+        ctx.font = '12px monospace';
+        ctx.fillStyle = '#9ef';
+        ctx.fillText('N', w/2 - 4, 14);
       }
-    });
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
   }
 
-  whenReady(buildMinimap);
+  function start(){
+    ensureUI();
+    loopXYZ();
+    loopMap();
+  }
+
+  // mount on start
+  window.addEventListener('pp:start', start, { once:true });
+  if (window.__PP_ALREADY_STARTED__) start();
 })();
