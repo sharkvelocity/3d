@@ -7,7 +7,7 @@
     offset: { x: 0, y: 0, z: 0 },
 
     // ✅ updated vanZone spawn
-    vanZone: { center: { x: 23.23, y: 2.0, z: -49.32 }, radius: 11 },
+    vanZone: { center: { x: 0, y: 0, z: 0 }, radius: 8 },
 
     rooms: []
   };
