@@ -1,5 +1,3 @@
-Here’s the complete, drop-in file for ./assets/dev/util/weather.js — finished from where you left off, with indoor muffling preserved, robust init/crossfade, and consistent UI/audio state.
-
 // ./assets/dev/util/weather.js
 // Single source of truth for ambience + weather.
 // Clear = crickets ambient only. Rainstorm = rain only.
