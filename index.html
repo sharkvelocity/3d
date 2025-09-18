@@ -137,63 +137,85 @@
  <!-- ===================== RUNTIME HOOKS ===================== -->
 <script>
 (function wireStart(){
-  const btn = document.getElementById('start-button');
-  if (!btn) return;
+    const btn = document.getElementById('start-button');
+    if (!btn) return;
 
-  btn.addEventListener('click', async function onStart(){
-    try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
+    btn.addEventListener('click', async function onStart(){
+        try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
 
-    document.getElementById('title-screen')?.remove();
-    window.__PP_ALREADY_STARTED__ = true;
-    window.dispatchEvent(new CustomEvent('pp:start'));
+        document.getElementById('title-screen')?.remove();
+        window.__PP_ALREADY_STARTED__ = true;
+        window.dispatchEvent(new CustomEvent('pp:start'));
 
-    const canvas = document.getElementById('renderCanvas');
-    try { canvas?.requestPointerLock?.(); } catch {}
-    try { canvas?.focus?.(); } catch {}
+        const canvas = document.getElementById('renderCanvas');
+        try { canvas?.requestPointerLock?.(); } catch {}
+        try { canvas?.focus?.(); } catch {}
 
-    // Wait for Babylon scene
-    let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-    while(!scene) {
-      await new Promise(r=>setTimeout(r,50));
-      scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-    }
+        // Wait for Babylon scene to exist
+        let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+        while(!scene) {
+            await new Promise(r => setTimeout(r, 50));
+            scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+        }
 
-    // Enable scene collisions
-    scene.collisionsEnabled = true;
+        // Enable collisions globally
+        scene.collisionsEnabled = true;
 
-    // Initialize Havok properly
-    const havokModule = await HavokPhysics(); // returns HK module
-    const havokPlugin = new BABYLON.HavokPlugin(havokModule);
-    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), havokPlugin);
+        // Load Havok physics
+        const havok = await HavokPhysics();
+        scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
-    // Load map meshes and enable collisions
-    if (window.MAP_DEF?.file) {
-      const mapPath = "./assets/models/maps/" + window.MAP_DEF.file;
-      BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
-        meshes.forEach(mesh=>{
-          mesh.checkCollisions = true;
-          mesh.isPickable = true;
-        });
-      });
-    }
+        // Import map
+        if (window.MAP_DEF?.file) {
+            const mapPath = "./assets/models/maps/" + window.MAP_DEF.file;
+            BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
+                
+                meshes.forEach(mesh => {
+                    mesh.isPickable = true;
+                    mesh.checkCollisions = true;
 
-    // Spawn player body
-    if (window.PP?.rig?.body) {
-      const sp = window.MAP_DEF?.spawn || {x:0, y:5, z:0};
-      const offsetY = window.MAP_DEF.offset?.y || 0;
-      window.PP.rig.body.position.set(sp.x, sp.y + offsetY, sp.z);
-    }
+                    // Give each mesh a static physics impostor
+                    mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                        mesh,
+                        BABYLON.PhysicsImpostor.MeshImpostor,
+                        { mass: 0, restitution: 0.1, friction: 0.8 },
+                        scene
+                    );
+                });
 
-    // Ensure player collisions if using camera
-    if (window.PP?.camera) {
-      const cam = window.PP.camera;
-      cam.checkCollisions = true;
-      cam.applyGravity = true;
-      cam.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
-      cam.ellipsoidOffset = new BABYLON.Vector3(0, 1, 0);
-    }
+                // Spawn player AFTER map is ready
+                if (window.PP?.rig?.body) {
+                    const sp = window.MAP_DEF?.spawn || {x:0, y:5, z:0};
+                    const offsetY = window.MAP_DEF.offset?.y || 0;
+                    const body = window.PP.rig.body;
+                    body.position.set(sp.x, sp.y + offsetY, sp.z);
 
-  }, { once:true });
+                    // Ensure player has a physics impostor
+                    if (!body.physicsImpostor) {
+                        body.physicsImpostor = new BABYLON.PhysicsImpostor(
+                            body,
+                            BABYLON.PhysicsImpostor.CapsuleImpostor,
+                            { mass: 80, restitution: 0, friction: 0.5 },
+                            scene
+                        );
+                    }
+                }
+
+                // Ensure camera collisions if needed
+                if (window.PP?.camera) {
+                    const cam = window.PP.camera;
+                    cam.checkCollisions = true;
+                    cam.applyGravity = true;
+                    cam.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
+                    cam.ellipsoidOffset = new BABYLON.Vector3(0, 1, 0);
+                }
+
+            }, null, function(scene, message, exception){
+                console.error("Error loading map:", message, exception);
+            });
+        }
+
+    }, { once:true });
 })();
 
       // Enable Babylon native collisions (optional for camera moveWithCollisions)
