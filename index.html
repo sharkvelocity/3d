@@ -1,149 +1,176 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- ===================== BOOT LOGGER ===================== -->
-  <script>
-  (function () {
-    if (window.BOOTLOG) return; 
-    const t0 = performance.timeOrigin || Date.now();
-    const pad = (n)=> (n<10?'0':'')+n;
-    function nowIso(){
+  <!-- === Boot Logger (place this FIRST in <head>) ========================= -->
+<script>
+(function () {
+  if (window.BOOTLOG) return; // idempotent
+  const t0 = performance.timeOrigin || Date.now();
+  const pad = (n)=> (n<10?'0':'')+n;
+  function nowIso(){
+    const d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' +
+           pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' +
+           String(d.getMilliseconds()).padStart(3,'0');
+  }
+  function relms(){ return +(performance.now().toFixed(3)); }
+
+  const entries = [];
+  function push(type, detail){
+    entries.push({ ts: nowIso(), rel_ms: relms(), type, detail });
+  }
+
+  // public API
+  const API = {
+    mark(label, extra){ push('mark', { label, ...(extra||{}) }); },
+    add(type, detail){ push(type, detail); },
+    all(){ return entries.slice(); },
+    text(){
+      return entries.map(e => {
+        return `[${e.ts} +${e.rel_ms.toFixed(3)}ms] ${e.type} ${JSON.stringify(e.detail||{})}`;
+      }).join('\n');
+    },
+    json(){ return JSON.stringify(entries, null, 2); },
+    download(fmt/*'txt'|'json'*/){
+      const ext = (fmt==='json'?'json':'txt');
+      const data = (ext==='json' ? API.json() : API.text());
+      const blob = new Blob([data], { type: (ext==='json'?'application/json':'text/plain') });
+      const a = document.createElement('a');
       const d = new Date();
-      return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' +
-             pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' +
-             String(d.getMilliseconds()).padStart(3,'0');
+      const fn = `bootlog-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+      a.href = URL.createObjectURL(blob);
+      a.download = fn;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 0);
     }
-    function relms(){ return +(performance.now().toFixed(3)); }
+  };
 
-    const entries = [];
-    function push(type, detail){
-      entries.push({ ts: nowIso(), rel_ms: relms(), type, detail });
-    }
+  window.BOOTLOG = API;
+  window.markBoot = API.mark; // convenience
 
-    const API = {
-      mark(label, extra){ push('mark', { label, ...(extra||{}) }); },
-      add(type, detail){ push(type, detail); },
-      all(){ return entries.slice(); },
-      text(){
-        return entries.map(e => `[${e.ts} +${e.rel_ms.toFixed(3)}ms] ${e.type} ${JSON.stringify(e.detail||{})}`).join('\n');
-      },
-      json(){ return JSON.stringify(entries, null, 2); },
-      download(fmt){
-        const ext = (fmt==='json'?'json':'txt');
-        const data = (ext==='json' ? API.json() : API.text());
-        const blob = new Blob([data], { type: (ext==='json'?'application/json':'text/plain') });
-        const a = document.createElement('a');
-        const d = new Date();
-        const fn = `bootlog-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
-        a.href = URL.createObjectURL(blob);
-        a.download = fn;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 0);
-      }
+  // Initial marker
+  API.mark('page-parse-start', { url: location.href });
+
+  // ---- Console capture ---------------------------------------------------
+  ['log','warn','error'].forEach(kind=>{
+    const orig = console[kind].bind(console);
+    console[kind] = function(...args){
+      try{ API.add('console:'+kind, { args: args.map(String) }); } catch(_){}
+      return orig(...args);
     };
+  });
 
-    window.BOOTLOG = API;
-    window.markBoot = API.mark;
-    API.mark('page-parse-start', { url: location.href });
-
-    ['log','warn','error'].forEach(kind=>{
-      const orig = console[kind].bind(console);
-      console[kind] = function(...args){
-        try{ API.add('console:'+kind, { args: args.map(String) }); } catch(_){}
-        return orig(...args);
-      };
+  // ---- Global error capture ---------------------------------------------
+  window.addEventListener('error', (e)=>{
+    API.add('window:error', {
+      message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno,
+      stack: (e.error && e.error.stack) || null
     });
+  }, true);
+  window.addEventListener('unhandledrejection', (e)=>{
+    API.add('window:unhandledrejection', { reason: (e.reason && (e.reason.stack||e.reason.message)) || String(e.reason) });
+  }, true);
 
-    window.addEventListener('error', (e)=> {
-      API.add('window:error', {
-        message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno,
-        stack: (e.error && e.error.stack) || null
+  // ---- DOM milestones ----------------------------------------------------
+  document.addEventListener('DOMContentLoaded', ()=> API.mark('DOMContentLoaded'));
+  window.addEventListener('load', ()=>{
+    API.mark('window-load');
+    try {
+      // capture resource timings (scripts, glb, audio, etc.)
+      const res = (performance.getEntriesByType && performance.getEntriesByType('resource')) || [];
+      API.add('perf:resources', res.map(r => ({
+        name:r.name, initiatorType:r.initiatorType, transferSize:r.transferSize,
+        duration: +r.duration.toFixed(2)
+      })));
+    } catch(_){}
+  });
+
+  // ---- Track <script> loading order (static tags) ------------------------
+  // Attach load/error to scripts that haven’t fired yet
+  Array.from(document.scripts || []).forEach(scr => {
+    if (!scr.src) return;
+    const src = scr.src;
+    const onLoad = ()=> API.add('script:load', { src });
+    const onErr  = ()=> API.add('script:error', { src });
+    scr.addEventListener('load',  onLoad, { once:true });
+    scr.addEventListener('error', onErr,  { once:true });
+    // Seen order (immediately)
+    API.add('script:seen', { src });
+  });
+
+  // ---- Observe Babylon milestones (polling) ------------------------------
+ (function pollBabylon(){
+  let seen = { BABYLON:false, engine:false, scene:false, camera:false };
+  function tick(){
+    if (!seen.BABYLON && window.BABYLON){
+      seen.BABYLON = true;
+      BOOTLOG.mark('BABYLON-present', {
+        version: window.BABYLON?.Engine?.Version || null
       });
-    }, true);
-
-    window.addEventListener('unhandledrejection', (e)=>{
-      API.add('window:unhandledrejection', { reason: (e.reason && (e.reason.stack||e.reason.message)) || String(e.reason) });
-    }, true);
-
-    document.addEventListener('DOMContentLoaded', ()=> API.mark('DOMContentLoaded'));
-    window.addEventListener('load', ()=>{
-      API.mark('window-load');
-      try {
-        const res = (performance.getEntriesByType && performance.getEntriesByType('resource')) || [];
-        API.add('perf:resources', res.map(r => ({
-          name:r.name, initiatorType:r.initiatorType, transferSize:r.transferSize,
-          duration: +r.duration.toFixed(2)
-        })));
-      } catch(_){}
-    });
-
-    Array.from(document.scripts || []).forEach(scr => {
-      if (!scr.src) return;
-      const src = scr.src;
-      const onLoad = ()=> API.add('script:load', { src });
-      const onErr  = ()=> API.add('script:error', { src });
-      scr.addEventListener('load',  onLoad, { once:true });
-      scr.addEventListener('error', onErr,  { once:true });
-      API.add('script:seen', { src });
-    });
-
-    (function pollBabylon(){
-      let seen = { BABYLON:false, engine:false, scene:false, camera:false };
-      function tick(){
-        if (!seen.BABYLON && window.BABYLON){
-          seen.BABYLON = true;
-          BOOTLOG.mark('BABYLON-present', { version: window.BABYLON?.Engine?.Version || null });
-        }
-        const eng = window.ENGINE || window.__ENGINE || window.BABYLON?.Engine?.LastCreatedEngine || null;
-        const scn = window.SCENE || window.__SCENE || window.BABYLON?.EngineStore?.LastCreatedScene || null;
-        const cam = window.camera || window.__camera || scn?.activeCamera || null;
-
-        if (!seen.engine && eng){ seen.engine = true; BOOTLOG.mark('engine-created'); }
-        if (!seen.scene  && scn){ seen.scene  = true; BOOTLOG.mark('scene-created'); }
-        if (!seen.camera && cam){ seen.camera = true; BOOTLOG.mark('camera-ready'); }
-
-        if (seen.BABYLON && seen.engine && seen.scene && seen.camera) return;
-        setTimeout(tick, 50);
-      }
-      tick();
-    })();
-
-    ['pp:start','pp:stage','pp:van:inventory-updated','pp:van:loadout-changed','pp:item:used','pp:item:placed','pp:headgear:flashlight']
-      .forEach(evName=>{
-        window.addEventListener(evName, (e)=> {
-          let d = e?.detail; try{ d = JSON.parse(JSON.stringify(d||{})); }catch(_){}
-          API.add('event:'+evName, d);
-        });
-      });
-
-    function addButton(){
-      const btn = document.createElement('button');
-      btn.textContent = 'Download Boot Log';
-      Object.assign(btn.style, {
-        position:'fixed', top:'8px', left:'8px', zIndex:2147483647,
-        padding:'6px 10px', font:'12px monospace',
-        border:'1px solid #066', borderRadius:'8px',
-        background:'#0b1518', color:'#9ef', cursor:'pointer', opacity:'0.85'
-      });
-      btn.title = 'Click to download boot log (.txt). Hold Shift for JSON.';
-      btn.addEventListener('click', (e)=> { BOOTLOG.download(e.shiftKey ? 'json' : 'txt'); });
-      document.addEventListener('keydown', (e)=>{
-        if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) { e.preventDefault(); BOOTLOG.download('txt'); }
-      });
-      document.body.appendChild(btn);
     }
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', addButton);
-    } else { addButton(); }
-  })();
-  </script>
+    const eng = window.ENGINE || window.__ENGINE ||
+                (window.BABYLON?.Engine?.LastCreatedEngine) || null;
+    const scn = window.SCENE || window.__SCENE ||
+                (window.BABYLON?.EngineStore?.LastCreatedScene) || null;
+    const cam = window.camera || window.__camera || scn?.activeCamera || null;
+
+    if (!seen.engine && eng){ seen.engine = true; BOOTLOG.mark('engine-created'); }
+    if (!seen.scene  && scn){ seen.scene  = true; BOOTLOG.mark('scene-created'); }
+    if (!seen.camera && cam){ seen.camera = true; BOOTLOG.mark('camera-ready'); }
+
+    if (seen.BABYLON && seen.engine && seen.scene && seen.camera) return;
+    setTimeout(tick, 50);
+  }
+  tick();
+})();
+
+  // ---- Listen to common game events -------------------------------------
+  ['pp:start','pp:stage','pp:van:inventory-updated','pp:van:loadout-changed','pp:item:used','pp:item:placed','pp:headgear:flashlight']
+    .forEach(evName=>{
+      window.addEventListener(evName, (e)=> {
+        let d = e?.detail; try{ d = JSON.parse(JSON.stringify(d||{})); }catch(_){}
+        API.add('event:'+evName, d);
+      });
+    });
+
+  // ---- Tiny UI to download the log --------------------------------------
+  function addButton(){
+    const btn = document.createElement('button');
+    btn.textContent = 'Download Boot Log';
+    Object.assign(btn.style, {
+      position:'fixed', top:'8px', left:'8px', zIndex: 2147483647,
+      padding:'6px 10px', font:'12px monospace',
+      border:'1px solid #066', borderRadius:'8px',
+      background:'#0b1518', color:'#9ef', cursor:'pointer', opacity:'0.85'
+    });
+    btn.title = 'Click to download boot log (.txt). Hold Shift for JSON.';
+    btn.addEventListener('click', (e)=> {
+      BOOTLOG.download(e.shiftKey ? 'json' : 'txt');
+    });
+    document.addEventListener('keydown', (e)=>{
+      // Ctrl+Shift+L also downloads text log
+      if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
+        e.preventDefault(); BOOTLOG.download('txt');
+      }
+    });
+    document.body.appendChild(btn);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', addButton);
+  } else {
+    addButton();
+  }
+
+})();
+</script>
+<!-- ===================================================================== -->
 
   <meta charset="utf-8" />
   <title>PhasmaPhoney — Build</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
-  <!-- ===================== BABYLON CORE ===================== -->
+  <!-- ========== Babylon core + loaders (engine FIRST) ========== -->
   <script src="./cdn/babylon.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
@@ -151,39 +178,65 @@
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+
+  <!-- Optional dev helpers -->
   <script src="./assets/index3/devtools.js?v=7.4.0"></script>
 
-  <!-- ===================== STYLES ===================== -->
   <style>
     html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
-    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; image-rendering:auto; }
+    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
 
-    /* Loading */
-    #loading-box{ position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(0,0,0,0.92); z-index:2147483000; color:#9ef; }
+    #loading-box{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(0,0,0,0.92); z-index:2147483000; color:#9ef; }
     #loading-logo{ width:240px; max-width:60vw; opacity:0.95; filter:drop-shadow(0 0 10px #0ff4); }
     #loading-text{ font-size:16px; letter-spacing:.3px; text-align:center; max-width:70vw; }
     #loading-bar{ width:64vw; max-width:720px; height:14px; border:1px solid #066; border-radius:10px; background:#071017; overflow:hidden; }
     #loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,#19f,#0ff); transition:width .15s ease; }
 
-    /* Title / start screen */
     #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; z-index:9999; }
     #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
     #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; }
     #map-wrap{ display:flex; gap:8px; align-items:center; color:#9ef; }
     #map-select{ background:#0b1518; color:#bff; border:1px solid #066; padding:8px; border-radius:8px; }
 
-    /* HUD / Belt / Action bar / Toast / Notebook - all original elements preserved */
+    #hud-bar{ position:fixed; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; }
+    .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; background:rgba(0,0,0,0.5); }
+    .sanity-wrap{ display:flex; align-items:center; gap:6px; padding:0 6px; }
+    #sanity-gauge{ width:170px; height:10px; border:1px solid #066; background:#061013; border-radius:8px; overflow:hidden; }
+    #sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
+
+    #hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; }
+
+    #belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:none; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+    .slot{ width:88px; height:64px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; user-select:none; }
+    .slot .label{ font-size:12px; color:#adf; text-align:center; line-height:1.1; padding:6px; }
+    .slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+
+    .hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
+    #action-bar { position:fixed; right:12px; bottom:18px; display:flex; gap:10px; z-index:6500; }
+
+    .touch-half { position:fixed; top:20vh; bottom:12vh; width:50vw; z-index:7000; touch-action:none; }
+    #touch-left { left:0; } #touch-right{ right:0; }
+    #mobile-sprint{ position:fixed; left:14px; bottom:18px; z-index:6500; display:none; }
+    #mobile-sprint button{ border:1px solid #066; background:#102; color:#9ef; padding:8px 12px; border-radius:10px; }
+
+    #notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#0ff; display:none; z-index:12000; padding:18px; overflow:auto; }
+
+    #toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+    #belt img.item-icon { max-width:60px; max-height:60px; image-rendering:crisp-edges; }
+    body > img[src*="/assets/icons/"] { display:none !important; position:absolute !important; left:-99999px !important; top:-99999px !important; }
+    #belt img[src*="/assets/icons/"] { display:inline-block !important; position:static !important; left:auto !important; top:auto !important; }
   </style>
 </head>
 <body>
-  <!-- ===================== LOADING ===================== -->
+  <!-- Loading -->
   <div id="loading-box" aria-live="polite">
     <img src="logo.png" alt="Logo" id="loading-logo">
     <div id="loading-text">Initializing…</div>
     <div id="loading-bar"><div id="loading-fill"></div></div>
   </div>
 
-  <!-- ===================== TITLE SCREEN ===================== -->
+  <!-- Title / Start -->
   <div id="title-screen">
     <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
     <button id="start-button">Start Investigation</button>
@@ -193,10 +246,10 @@
     </div>
   </div>
 
-  <!-- ===================== CANVAS ===================== -->
+  <!-- Canvas -->
   <canvas id="renderCanvas" tabindex="0"></canvas>
 
-  <!-- ===================== HUD ===================== -->
+  <!-- HUD -->
   <div id="hud-bar">
     <div class="chip">Weather: <span id="hud-weather">—</span></div>
     <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div>
@@ -208,12 +261,10 @@
   </div>
   <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
 
-  <!-- ===================== BELT ===================== -->
-  <div id="belt">
-    <!-- original slots / labels preserved from your HTML -->
-  </div>
+  <!-- Belt -->
+  <div id="belt"></div>
 
-  <!-- ===================== ACTIONS ===================== -->
+  <!-- Actions -->
   <div id="action-bar">
     <button id="btn-use" class="hud-btn">Use</button>
     <button id="btn-place" class="hud-btn">Place</button>
@@ -223,12 +274,12 @@
     <button id="btn-inspector" class="hud-btn">Inspector</button>
   </div>
 
-  <!-- ===================== TOUCH / MOBILE ===================== -->
+  <!-- Touch -->
   <div id="touch-left" class="touch-half"></div>
   <div id="touch-right" class="touch-half"></div>
   <div id="mobile-sprint"><button id="btn-sprint">Sprint: OFF</button></div>
 
-  <!-- ===================== NOTEBOOK ===================== -->
+  <!-- Notebook -->
   <div id="notebook-modal">
     <h2>Evidence</h2>
     <div id="evidence-list"></div>
@@ -239,7 +290,7 @@
     </div>
   </div>
 
-  <!-- ===================== TOAST ===================== -->
+  <!-- Toast -->
   <div id="toast"></div>
 
   <!-- ===================== SCRIPT LOAD ORDER ===================== -->
@@ -289,36 +340,29 @@
   <script src="./assets/dev/merge_patch.js"></script>
   <script src="./assets/dev/glue_patch.js"></script>
 
-  <!-- ===================== START BUTTON WIRING ===================== -->
-  <script>
-  (function wireStart(){
-    const btn = document.getElementById('start-button');
-    if (!btn) return;
-    btn.addEventListener('click', function onStart(){
-      try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
-      document.getElementById('title-screen')?.remove();
-      window.__PP_ALREADY_STARTED__ = true;
-      window.dispatchEvent(new CustomEvent('pp:start'));
+  <!-- ===================== RUNTIME HOOKS ===================== -->
+<script>
+(function wireStart(){
+  const btn = document.getElementById('start-button');
+  if (!btn) return;
+  btn.addEventListener('click', function onStart(){
+    try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
+    document.getElementById('title-screen')?.remove();
 
-      const c = document.getElementById('renderCanvas');
-      try { c?.requestPointerLock?.(); } catch {}
-      try { c?.focus?.(); } catch {}
-    }, { once:true });
-  })();
-  </script>
+    // NEW: mark as started so late modules (e.g. belt) can mount immediately
+    window.__PP_ALREADY_STARTED__ = true;
+    window.dispatchEvent(new CustomEvent('pp:start'));
 
-  <!-- ===================== DEV PANEL ===================== -->
+    const c = document.getElementById('renderCanvas');
+    try { c?.requestPointerLock?.(); } catch {}
+    try { c?.focus?.(); } catch {}
+  }, { once:true });
+})();
+</script>
+
+
+  <!-- Dev panel (stub) -->
   <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
   <div id="devtools-panel" style="display:none;"></div>
-  <script>
-    // Toggle dev panel with Esc
-    document.addEventListener('keydown', e => {
-      if (e.key === "Escape") {
-        const panel = document.getElementById('devtools-panel');
-        panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
-      }
-    });
-  </script>
 </body>
 </html>
-
