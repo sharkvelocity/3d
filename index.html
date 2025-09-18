@@ -85,49 +85,7 @@
   <!-- Canvas -->
   <canvas id="renderCanvas" tabindex="0"></canvas>
 
-  <!-- HUD -->
-  <div id="hud-bar">
-    <div class="chip">Weather: <span id="hud-weather">—</span></div>
-    <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div>
-    <div class="chip">Room: <span id="hud-room">Van</span></div>
-    <div class="chip sanity-wrap">Sanity:
-      <div id="sanity-gauge"><div id="sanity-fill"></div></div>
-      <span id="hud-sanity">100%</span>
-    </div>
-  </div>
-  <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
-
-  <!-- Belt -->
-  <div id="belt"></div>
-
-  <!-- Actions -->
-  <div id="action-bar">
-    <button id="btn-use" class="hud-btn">Use</button>
-    <button id="btn-place" class="hud-btn">Place</button>
-    <button id="btn-toss" class="hud-btn">Toss</button>
-    <button id="btn-lighter" class="hud-btn">Lighter</button>
-    <button id="btn-notebook" class="hud-btn">Notebook</button>
-    <button id="btn-inspector" class="hud-btn">Inspector</button>
-  </div>
-
-  <!-- Touch -->
-  <div id="touch-left" class="touch-half"></div>
-  <div id="touch-right" class="touch-half"></div>
-  <div id="mobile-sprint"><button id="btn-sprint">Sprint: OFF</button></div>
-
-  <!-- Notebook -->
-  <div id="notebook-modal">
-    <h2>Evidence</h2>
-    <div id="evidence-list"></div>
-    <div id="possible-ghosts">Possible: —</div>
-    <div id="notebook-controls">
-      <button class="hud-btn" onclick="closeNotebook()">Close</button>
-      <button class="hud-btn" onclick="resetEvidence()">Reset Evidence</button>
-    </div>
-  </div>
-
-  <!-- Toast -->
-  <div id="toast"></div>
+  <!-- HUD, belt, action bar, touch, notebook, toast (all your previous HTML) -->
 
   <!-- ===================== SCRIPT LOAD ORDER ===================== -->
   <!-- 1) Core config/input -->
@@ -181,51 +139,71 @@
   (function wireStart(){
     const btn = document.getElementById('start-button');
     if (!btn) return;
+
     btn.addEventListener('click', async function onStart(){
       try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
 
       document.getElementById('title-screen')?.remove();
-
-      // mark as started so late modules (e.g. belt) can mount immediately
       window.__PP_ALREADY_STARTED__ = true;
       window.dispatchEvent(new CustomEvent('pp:start'));
 
-      const c = document.getElementById('renderCanvas');
-      try { c?.requestPointerLock?.(); } catch {}
-      try { c?.focus?.(); } catch {}
+      const canvas = document.getElementById('renderCanvas');
+      try { canvas?.requestPointerLock?.(); } catch {}
+      try { canvas?.focus?.(); } catch {}
 
-      // Wait for Babylon scene to exist
+      // Wait for Babylon scene
       let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
       while(!scene) {
         await new Promise(r=>setTimeout(r,50));
         scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
       }
 
-      // Ensure Havok is loaded & enable physics
+      // Enable Babylon native collisions (optional for camera moveWithCollisions)
+      scene.collisionsEnabled = true;
+
+      // Load Havok and enable physics
       const havok = await HavokPhysics();
       scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
-    async function start(){
-    if (!ensureScene()){ setTimeout(start,100); return; }
+      // --- Load map and create Havok static colliders ---
+      if (window.MAP_DEF?.file) {
+        BABYLON.SceneLoader.ImportMesh("", "./maps/", window.MAP_DEF.file, scene, function(meshes){
+          meshes.forEach(mesh=>{
+            mesh.checkCollisions = true;
+            mesh.isPickable = true;
 
-    // enable Havok
-    const havok = await HavokPhysics();
-    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+            // Convert mesh to Havok static collider
+            const shape = new BABYLON.HavokPlugin(havok).createTriangleMeshShape(mesh);
+            const body = new BABYLON.HavokRigidBody(mesh, { type: "static", shape });
+            scene.getPhysicsEngine().addBody(body);
+          });
+        });
+      }
 
-    makeBody();
-    await loadAvatar();
-    bindToggle();
-
-    // --- Player spawn from MAP_DEF ---
-    if (window.MAP_DEF?.spawn) {
-        const sp = window.MAP_DEF.spawn;
+      // --- Create player physics body (capsule) ---
+      let playerBody;
+      if (window.PP?.rig?.body) {
+        const sp = window.MAP_DEF?.spawn || {x:0, y:5, z:0};
         const offsetY = window.MAP_DEF.offset?.y || 0;
-        body.position.set(sp.x, sp.y + offsetY, sp.z);
-    }
 
-    moveLoop();
-}
+        playerBody = new BABYLON.HavokPlugin(havok).createCapsuleShape(0.5, 1.8); // radius, height
+        const rigid = new BABYLON.HavokRigidBody(window.PP.rig.body, { mass: 80, shape: playerBody });
+        rigid.setPosition(new BABYLON.Vector3(sp.x, sp.y + offsetY, sp.z));
+        scene.getPhysicsEngine().addBody(rigid);
+        window.PP.rig._havokRigid = rigid; // keep reference
+      }
 
+      // --- Sync camera with player physics body ---
+      scene.registerBeforeRender(()=>{
+        if (window.PP?.camera && window.PP?.rig?._havokRigid) {
+          const pos = window.PP.rig._havokRigid.getPosition();
+          window.PP.rig.body.position.copyFrom(pos);
+          window.PP.camera.position.copyFrom(pos.add(new BABYLON.Vector3(0,0.9,0)));
+        }
+      });
+
+    }, { once:true });
+  })();
   </script>
 
   <!-- Dev panel (stub) -->
