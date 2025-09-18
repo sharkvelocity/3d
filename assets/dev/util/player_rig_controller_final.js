@@ -1,12 +1,11 @@
 /* File: assets/dev/util/player_rig_controller_final.js
    Player rig controller with Havok + raycast ground detection + PS5 controller
    ------------------------------------------------------------
-   - WASD movement, ` toggles 1P/3P
+   - WASD / PS5 movement, ` toggles 1P/3P
    - C toggles crouch (with crouched walk anim)
-   - Raycast keeps player anchored to ground
+   - Raycast keeps player anchored to ground with slopes
    - Havok handles collisions & gravity
-   - Slopes supported
-   - PS5 controller support
+   - Step sounds preserved
 */
 
 (function () {
@@ -21,12 +20,12 @@
     file: "./assets/models/player/player.glb",
     eyeY: 1.6,
     targetHeight: 1.75,
-    meshYOffset: 0.0
+    meshYOffset: 0.0,
+    spawn: new BABYLON.Vector3(-2.12, 0, -9.96)
   };
-  const SPAWN_POS = new BABYLON.Vector3(-2.12, 5, -9.96);
   const CAM3 = { back: 2.8, up: 1.25 };
   const SPEEDS = { walk: 1.8, run: 3.5, crouch: 1.0 };
-  const MAX_SLOPE = 45;
+  const MAX_SLOPE = 45; // degrees
 
   // ----- State ------------------------------------------------------------
   let scene, camera;
@@ -34,20 +33,20 @@
   let isThird = false, isCrouching = false;
   let animations = { idle: null, walk: null, crouchWalk: null };
   let currentAnim = null;
+  let lastPos = null;
 
   // Input flags
   const input = { forward:false, back:false, left:false, right:false, run:false };
 
-  // ----- Input Handlers ---------------------------------------------------
+  // ----- Keyboard input ---------------------------------------------------
   addEventListener("keydown", (e) => {
     if (e.code==="KeyW"||e.code==="ArrowUp") input.forward = true;
     if (e.code==="KeyS"||e.code==="ArrowDown") input.back = true;
     if (e.code==="KeyA"||e.code==="ArrowLeft") input.left = true;
     if (e.code==="KeyD"||e.code==="ArrowRight") input.right = true;
     if (e.code==="ShiftLeft"||e.code==="ShiftRight") input.run = true;
-    if (e.code==="KeyC") isCrouching = !isCrouching;
+    if (e.code==="KeyC") isCrouching = !isCrouching; // toggle crouch
   }, true);
-
   addEventListener("keyup", (e) => {
     if (e.code==="KeyW"||e.code==="ArrowUp") input.forward = false;
     if (e.code==="KeyS"||e.code==="ArrowDown") input.back = false;
@@ -56,20 +55,21 @@
     if (e.code==="ShiftLeft"||e.code==="ShiftRight") input.run = false;
   }, true);
 
+  // ----- Scene ------------------------------------------------------------
   function ensureScene(){
     scene = scene || window.SCENE || BABYLON.EngineStore?.LastCreatedScene;
     camera = scene?.activeCamera;
     return !!(scene && camera);
   }
 
-  // ----- Physics Capsule & Avatar ----------------------------------------
+  // ----- Physics Capsule --------------------------------------------------
   function makeBody(){
     body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule", {
       height: AVATAR.targetHeight,
       radius: 0.4
     }, scene);
     body.isVisible = false;
-    body.position.copyFrom(SPAWN_POS).add(new BABYLON.Vector3(0, AVATAR.targetHeight/2, 0));
+    body.position.copyFrom(AVATAR.spawn);
 
     body.physicsImpostor = new BABYLON.PhysicsAggregate(
       body,
@@ -81,6 +81,7 @@
     return body;
   }
 
+  // ----- Avatar -----------------------------------------------------------
   function normalizeAvatarScale(root){
     root.scaling.setAll(1);
     const bb = root.getHierarchyBoundingVectors();
@@ -88,7 +89,6 @@
     const scale = AVATAR.targetHeight / rawH;
     root.scaling.setAll(scale);
 
-    // feet at y=0
     const bb2 = root.getHierarchyBoundingVectors();
     root.position.y -= bb2.min.y;
 
@@ -102,6 +102,7 @@
     const root = res.meshes[0];
     normalizeAvatarScale(root);
 
+    // Save animations
     res.animationGroups.forEach(g => {
       if (/Idle/i.test(g.name)) animations.idle = g;
       if (/Walk/i.test(g.name)) animations.walk = g;
@@ -118,6 +119,7 @@
     currentAnim = animations[name];
   }
 
+  // ----- Camera -----------------------------------------------------------
   function syncCamera(){
     if (!camera || !body) return;
     const pos = body.position;
@@ -131,37 +133,42 @@
     }
   }
 
-  // ----- Ground Stick & Slopes -------------------------------------------
-  function stickToGround(moveDir) {
+  // ----- Raycast & slope handling -----------------------------------------
+  function stickToGround(moveDir){
     if (!body || !scene) return moveDir;
     const origin = body.position.add(new BABYLON.Vector3(0, 1, 0));
     const ray = new BABYLON.Ray(origin, BABYLON.Axis.Y.scale(-1), 4);
     const pick = scene.pickWithRay(ray, m => m.isPickable && m.name.includes("ground"));
-    if (!pick.hit) return moveDir;
 
-    const groundPoint = pick.pickedPoint;
-    const groundNormal = pick.getNormal(true);
-    body.position.y = groundPoint.y + AVATAR.targetHeight / 2;
+    if (pick.hit){
+      const groundPoint = pick.pickedPoint;
+      const groundNormal = pick.getNormal(true);
+      body.position.y = groundPoint.y + AVATAR.targetHeight/2;
 
-    if (moveDir.lengthSquared() > 0.001) {
-      const slopeAngle = Math.acos(BABYLON.Vector3.Dot(BABYLON.Axis.Y, groundNormal)) * (180/Math.PI);
-      if (slopeAngle <= MAX_SLOPE) {
-        const moveOnSlope = moveDir.subtract(groundNormal.scale(BABYLON.Vector3.Dot(moveDir, groundNormal)));
-        return moveOnSlope.normalize();
-      } else {
-        return BABYLON.Vector3.Zero();
+      if (moveDir.lengthSquared() > 0.001){
+        const slopeAngle = BABYLON.Vector3.GetAngleBetweenVectors(
+          BABYLON.Axis.Y, groundNormal, BABYLON.Vector3.Forward()
+        ) * (180/Math.PI);
+
+        if (slopeAngle <= MAX_SLOPE){
+          const moveOnSlope = moveDir.subtract(groundNormal.scale(BABYLON.Vector3.Dot(moveDir, groundNormal)));
+          return moveOnSlope.normalize();
+        } else {
+          return BABYLON.Vector3.Zero();
+        }
       }
     }
     return moveDir;
   }
 
-  // ----- Movement Loop ----------------------------------------------------
+  // ----- Movement ---------------------------------------------------------
   function moveLoop(){
     if (!ensureScene()) return void requestAnimationFrame(moveLoop);
-    const dt = scene.getEngine().getDeltaTime() / 1000;
 
-    const forward = camera.getDirection(BABYLON.Vector3.Forward()).normalize();
-    const right   = camera.getDirection(BABYLON.Vector3.Right()).normalize();
+    const dt = scene.getEngine().getDeltaTime() / 1000;
+    const forward = camera.getDirection(BABYLON.Vector3.Forward());
+    const right   = camera.getDirection(BABYLON.Vector3.Right());
+    forward.y = right.y = 0; forward.normalize(); right.normalize();
 
     let move = new BABYLON.Vector3(0,0,0);
     if (input.forward) move.addInPlace(forward);
@@ -169,14 +176,22 @@
     if (input.left) move.subtractInPlace(right);
     if (input.right) move.addInPlace(right);
 
-    if (move.lengthSquared() > 0.001) {
+    if (move.lengthSquared() > 0.001){
       move.normalize();
       const speed = isCrouching ? SPEEDS.crouch : (input.run ? SPEEDS.run : SPEEDS.walk);
       const slopeMove = stickToGround(move);
-      if (slopeMove.lengthSquared() > 0.001) {
+      if (slopeMove.lengthSquared() > 0.001){
         body.physicsImpostor.applyImpulse(slopeMove.scale(speed), body.getAbsolutePosition());
       }
       playAnim(isCrouching ? "crouchWalk" : "walk");
+
+      // Step sounds
+      if (!lastPos) lastPos = body.position.clone();
+      const d = BABYLON.Vector3.Distance(lastPos, body.position);
+      if (d > 0.6){
+        lastPos.copyFrom(body.position);
+        if (typeof window.playStep === "function") try { window.playStep(0.42); } catch {}
+      }
     } else {
       playAnim("idle");
       stickToGround(BABYLON.Vector3.Zero());
@@ -184,49 +199,49 @@
 
     stickToGround();
     syncCamera();
-    handleGamepadInput(dt);
+    handleGamepad();
     requestAnimationFrame(moveLoop);
   }
 
-  // ----- View Toggle ------------------------------------------------------
+  // ----- PS5 Controller ---------------------------------------------------
+  function handleGamepad(){
+    const pads = navigator.getGamepads?.();
+    if (!pads) return;
+    const pad = pads[0]; if (!pad) return;
+
+    const threshold = 0.2;
+    input.forward = pad.axes[1] < -threshold;
+    input.back    = pad.axes[1] > threshold;
+    input.left    = pad.axes[0] < -threshold;
+    input.right   = pad.axes[0] > threshold;
+    input.run     = pad.buttons[0].pressed; // Cross = run
+  }
+
+  // ----- View toggle ------------------------------------------------------
   function bindToggle(){
     addEventListener("keydown", (e)=>{
       if (e.code==="Backquote"){ e.preventDefault(); isThird = !isThird; }
     });
   }
 
-  // ----- Gamepad Support --------------------------------------------------
-  function handleGamepadInput(dt){
-    const gp = navigator.getGamepads()[0];
-    if (!gp) return;
-    const lx = gp.axes[0]; // left stick X
-    const ly = gp.axes[1]; // left stick Y
-    const run = gp.buttons[0]?.pressed; // X button as example run
-    const crouch = gp.buttons[1]?.pressed; // Circle button as example crouch
-
-    input.left  = lx < -0.2;
-    input.right = lx > 0.2;
-    input.forward = ly < -0.2;
-    input.back = ly > 0.2;
-    input.run = run;
-    if (crouch) isCrouching = !isCrouching;
-  }
-
   // ----- Start ------------------------------------------------------------
   async function start(){
     if (!ensureScene()){ setTimeout(start,100); return; }
 
+    // Enable Havok physics
     const havok = await HavokPhysics();
     scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
+    // Ensure ground is ready (pickable & physics impostor expected)
     makeBody();
-    // Snap to ground immediately
-    stickToGround(BABYLON.Vector3.Zero());
     await loadAvatar();
+    stickToGround(BABYLON.Vector3.Zero()); // snap to ground on spawn
+
     bindToggle();
     moveLoop();
   }
 
   window.addEventListener("pp:start", start, { once:true });
   if (window.__PP_ALREADY_STARTED__) start();
+
 })();
