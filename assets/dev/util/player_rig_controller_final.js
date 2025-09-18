@@ -63,13 +63,15 @@
   }
 
   // Create physics capsule for player
-  function makeBody(){
+function makeBody(){
     body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule", {
       height: AVATAR.targetHeight,
       radius: 0.4
     }, scene);
     body.isVisible = false;
-    body.position.set(0, AVATAR.targetHeight/2, 0);
+
+    // Set spawn position
+    body.position.set(-2.12, AVATAR.targetHeight/2, -9.96);
 
     body.physicsImpostor = new BABYLON.PhysicsAggregate(
       body,
@@ -80,6 +82,7 @@
     PP.rig.body = body;
     return body;
   }
+
 
   // Autoscale and attach avatar mesh
   function normalizeAvatarScale(root){
