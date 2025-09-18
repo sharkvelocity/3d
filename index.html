@@ -1,177 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- === Boot Logger (place this FIRST in <head>) ========================= -->
-<script>
-(function () {
-  if (window.BOOTLOG) return; // idempotent
-  const t0 = performance.timeOrigin || Date.now();
-  const pad = (n)=> (n<10?'0':'')+n;
-  function nowIso(){
-    const d = new Date();
-    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' +
-           pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' +
-           String(d.getMilliseconds()).padStart(3,'0');
-  }
-  function relms(){ return +(performance.now().toFixed(3)); }
-
-  const entries = [];
-  function push(type, detail){
-    entries.push({ ts: nowIso(), rel_ms: relms(), type, detail });
-  }
-
-  // public API
-  const API = {
-    mark(label, extra){ push('mark', { label, ...(extra||{}) }); },
-    add(type, detail){ push(type, detail); },
-    all(){ return entries.slice(); },
-    text(){
-      return entries.map(e => {
-        return `[${e.ts} +${e.rel_ms.toFixed(3)}ms] ${e.type} ${JSON.stringify(e.detail||{})}`;
-      }).join('\n');
-    },
-    json(){ return JSON.stringify(entries, null, 2); },
-    download(fmt/*'txt'|'json'*/){
-      const ext = (fmt==='json'?'json':'txt');
-      const data = (ext==='json' ? API.json() : API.text());
-      const blob = new Blob([data], { type: (ext==='json'?'application/json':'text/plain') });
-      const a = document.createElement('a');
-      const d = new Date();
-      const fn = `bootlog-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
-      a.href = URL.createObjectURL(blob);
-      a.download = fn;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 0);
-    }
-  };
-
-  window.BOOTLOG = API;
-  window.markBoot = API.mark; // convenience
-
-  // Initial marker
-  API.mark('page-parse-start', { url: location.href });
-
-  // ---- Console capture ---------------------------------------------------
-  ['log','warn','error'].forEach(kind=>{
-    const orig = console[kind].bind(console);
-    console[kind] = function(...args){
-      try{ API.add('console:'+kind, { args: args.map(String) }); } catch(_){}
-      return orig(...args);
-    };
-  });
-
-  // ---- Global error capture ---------------------------------------------
-  window.addEventListener('error', (e)=>{
-    API.add('window:error', {
-      message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno,
-      stack: (e.error && e.error.stack) || null
-    });
-  }, true);
-  window.addEventListener('unhandledrejection', (e)=>{
-    API.add('window:unhandledrejection', { reason: (e.reason && (e.reason.stack||e.reason.message)) || String(e.reason) });
-  }, true);
-
-  // ---- DOM milestones ----------------------------------------------------
-  document.addEventListener('DOMContentLoaded', ()=> API.mark('DOMContentLoaded'));
-  window.addEventListener('load', ()=>{
-    API.mark('window-load');
-    try {
-      // capture resource timings (scripts, glb, audio, etc.)
-      const res = (performance.getEntriesByType && performance.getEntriesByType('resource')) || [];
-      API.add('perf:resources', res.map(r => ({
-        name:r.name, initiatorType:r.initiatorType, transferSize:r.transferSize,
-        duration: +r.duration.toFixed(2)
-      })));
-    } catch(_){}
-  });
-
-  // ---- Track <script> loading order (static tags) ------------------------
-  // Attach load/error to scripts that haven’t fired yet
-  Array.from(document.scripts || []).forEach(scr => {
-    if (!scr.src) return;
-    const src = scr.src;
-    const onLoad = ()=> API.add('script:load', { src });
-    const onErr  = ()=> API.add('script:error', { src });
-    scr.addEventListener('load',  onLoad, { once:true });
-    scr.addEventListener('error', onErr,  { once:true });
-    // Seen order (immediately)
-    API.add('script:seen', { src });
-  });
-
-  // ---- Observe Babylon milestones (polling) ------------------------------
- (function pollBabylon(){
-  let seen = { BABYLON:false, engine:false, scene:false, camera:false };
-  function tick(){
-    if (!seen.BABYLON && window.BABYLON){
-      seen.BABYLON = true;
-      BOOTLOG.mark('BABYLON-present', {
-        version: window.BABYLON?.Engine?.Version || null
-      });
-    }
-    const eng = window.ENGINE || window.__ENGINE ||
-                (window.BABYLON?.Engine?.LastCreatedEngine) || null;
-    const scn = window.SCENE || window.__SCENE ||
-                (window.BABYLON?.EngineStore?.LastCreatedScene) || null;
-    const cam = window.camera || window.__camera || scn?.activeCamera || null;
-
-    if (!seen.engine && eng){ seen.engine = true; BOOTLOG.mark('engine-created'); }
-    if (!seen.scene  && scn){ seen.scene  = true; BOOTLOG.mark('scene-created'); }
-    if (!seen.camera && cam){ seen.camera = true; BOOTLOG.mark('camera-ready'); }
-
-    if (seen.BABYLON && seen.engine && seen.scene && seen.camera) return;
-    setTimeout(tick, 50);
-  }
-  tick();
-})();
-
-  // ---- Listen to common game events -------------------------------------
-  ['pp:start','pp:stage','pp:van:inventory-updated','pp:van:loadout-changed','pp:item:used','pp:item:placed','pp:headgear:flashlight']
-    .forEach(evName=>{
-      window.addEventListener(evName, (e)=> {
-        let d = e?.detail; try{ d = JSON.parse(JSON.stringify(d||{})); }catch(_){}
-        API.add('event:'+evName, d);
-      });
-    });
-
-  // ---- Tiny UI to download the log --------------------------------------
-  function addButton(){
-    const btn = document.createElement('button');
-    btn.textContent = 'Download Boot Log';
-    Object.assign(btn.style, {
-      position:'fixed', top:'8px', left:'8px', zIndex: 2147483647,
-      padding:'6px 10px', font:'12px monospace',
-      border:'1px solid #066', borderRadius:'8px',
-      background:'#0b1518', color:'#9ef', cursor:'pointer', opacity:'0.85'
-    });
-    btn.title = 'Click to download boot log (.txt). Hold Shift for JSON.';
-    btn.addEventListener('click', (e)=> {
-      BOOTLOG.download(e.shiftKey ? 'json' : 'txt');
-    });
-    document.addEventListener('keydown', (e)=>{
-      // Ctrl+Shift+L also downloads text log
-      if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
-        e.preventDefault(); BOOTLOG.download('txt');
-      }
-    });
-    document.body.appendChild(btn);
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', addButton);
-  } else {
-    addButton();
-  }
-
-})();
-</script>
-<!-- ===================================================================== -->
-
   <meta charset="utf-8" />
   <title>PhasmaPhoney — Build</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- ========== Babylon core + loaders (engine FIRST) ========== -->
   <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/havok/HavokPhysics_umd.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
   <script src="./cdn/draco_decoder_gltf.js"></script>
@@ -306,7 +142,6 @@
 
   <!-- 3) Runtime / rig / util -->
   <script src="./assets/dev/util/pp_runtime.js"></script>
-  <script src="./cdn/havok/HavokPhysics_umd.js"></script>
   <script src="./assets/dev/util/player_rig_controller_final.js"></script>
   <script src="./assets/dev/util/moon.js"></script>
   <script src="./assets/dev/util/minimap_northup_xyz.js"></script>
