@@ -177,28 +177,44 @@
   <script src="./assets/dev/glue_patch.js"></script>
 
   <!-- ===================== RUNTIME HOOKS ===================== -->
-<script>
-(function wireStart(){
-  const btn = document.getElementById('start-button');
-  if (!btn) return;
-  btn.addEventListener('click', function onStart(){
-    try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
-    document.getElementById('title-screen')?.remove();
+  <script>
+  (function wireStart(){
+    const btn = document.getElementById('start-button');
+    if (!btn) return;
+    btn.addEventListener('click', async function onStart(){
+      try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
 
-    // NEW: mark as started so late modules (e.g. belt) can mount immediately
-    window.__PP_ALREADY_STARTED__ = true;
-    window.dispatchEvent(new CustomEvent('pp:start'));
+      document.getElementById('title-screen')?.remove();
 
-    const c = document.getElementById('renderCanvas');
-    try { c?.requestPointerLock?.(); } catch {}
-    try { c?.focus?.(); } catch {}
-  }, { once:true });
-})();
-</script>
+      // mark as started so late modules (e.g. belt) can mount immediately
+      window.__PP_ALREADY_STARTED__ = true;
+      window.dispatchEvent(new CustomEvent('pp:start'));
 
+      const c = document.getElementById('renderCanvas');
+      try { c?.requestPointerLock?.(); } catch {}
+      try { c?.focus?.(); } catch {}
+
+      // Wait for Babylon scene to exist
+      let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+      while(!scene) {
+        await new Promise(r=>setTimeout(r,50));
+        scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+      }
+
+      // Ensure Havok is loaded & enable physics
+      const havok = await HavokPhysics();
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+
+      // Force player spawn position
+      if (window.PP?.rig?.body) {
+        window.PP.rig.body.position.set(-2.12,0,-9.96);
+      }
+    }, { once:true });
+  })();
+  </script>
 
   <!-- Dev panel (stub) -->
   <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
-  <div id="devtools-panel" style="display:none;"></div>
+  <div id="devtools-panel" style="display:none"></div>
 </body>
 </html>
