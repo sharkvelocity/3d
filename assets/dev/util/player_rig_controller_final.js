@@ -23,7 +23,7 @@
     targetHeight: 1.75,
     meshYOffset: 0.0
   };
-  const SPAWN_POS = new BABYLON.Vector3(-2.12, 0, -9.96);
+  const SPAWN_POS = new BABYLON.Vector3(-2.12, 5, -9.96);
   const CAM3 = { back: 2.8, up: 1.25 };
   const SPEEDS = { walk: 1.8, run: 3.5, crouch: 1.0 };
   const MAX_SLOPE = 45;
