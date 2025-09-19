@@ -113,11 +113,8 @@
     });
 
     UI.root.style.display = UI.open ? 'block' : 'none';
-    // Button visibility obeys proximity (inVan), but still usable via V key
     if (UI.btn){
-      const cls = UI.btn.classList;
-      if (cls.contains('hidden') && UI.inVan) cls.remove('hidden');
-      if (!cls.contains('hidden') && !UI.inVan) cls.add('hidden');
+      UI.btn.classList.toggle('hidden', !UI.inVan);
     }
   }
 
@@ -129,7 +126,6 @@
   function open(){
     UI.open = true;
     mount();
-    // ask for latest van + loadout
     window.dispatchEvent(new CustomEvent('pp:van:request-inventory'));
     render();
   }
@@ -156,94 +152,62 @@
   function injectButton(){
     if (UI.btn && UI.btn.isConnected) return;
     const bar = $('#action-bar');
-    if (bar){
-      const b = el('button', '', bar);
-      b.id = 'van-btn';
-      b.textContent = 'Van';
-      b.onclick = ()=> toggle();
-      UI.btn = b;
-    } else {
-      // fallback floating action button if no action bar exists
-      const b = el('button', '', document.body);
-      b.id = 'van-fab';
-      b.textContent = 'Van';
-      b.onclick = ()=> toggle();
-      UI.btn = b;
-    }
-    UI.btn.classList.add('hidden'); // hidden until near van
+    const b = el('button', '', bar || document.body);
+    b.id = bar ? 'van-btn' : 'van-fab';
+    b.textContent = 'Van';
+    b.onclick = ()=> toggle();
+    b.classList.add('hidden');
+    UI.btn = b;
   }
 
   // --------- Keybind: V toggles Van UI ----------
   window.addEventListener('keydown', (e)=>{
-    if (e.code === 'KeyV'){
-      e.preventDefault();
-      toggle();
-    }
+    if (e.code === 'KeyV'){ e.preventDefault(); toggle(); }
   }, true);
 
   // --------- Proximity detection (Van zone) ----------
-  function getScene(){ return window.SCENE || (window.ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null; }
-
-  function pointInPolygon2D(x, z, poly){
-    // ray-casting
+  function getScene(){ return window.SCENE || (window.ENGINE?.scenes?.[0]) || null; }
+  function pointInPolygon2D(x,z,poly){
     let inside = false;
-    for (let i=0, j=poly.length-1; i<poly.length; j=i++){
-      const xi = poly[i].x, zi = poly[i].z;
-      const xj = poly[j].x, zj = poly[j].z;
-      const intersect = ((zi > z) !== (zj > z)) && (x < (xj - xi) * (z - zi) / ((zj - zi) || 1e-9) + xi);
-      if (intersect) inside = !inside;
+    for (let i=0,j=poly.length-1;i<poly.length;j=i++){
+      const xi=poly[i].x, zi=poly[i].z, xj=poly[j].x, zj=poly[j].z;
+      if(((zi>z)!==(zj>z)) && (x<(xj-xi)*(z-zi)/((zj-zi)||1e-9)+xi)) inside=!inside;
     }
     return inside;
-    }
-
+  }
   function vanAnchor(){
-    // Primary: MAP_DEF.vanZone polygon
     const md = window.MAP_DEF || {};
-    if (Array.isArray(md.vanZone) && md.vanZone.length >= 3){
-      return { type:'poly', poly: md.vanZone.map(p=>({x: +p.x||0, z:+p.z||0})) };
+    if(Array.isArray(md.vanZone) && md.vanZone.length>=3){
+      return { type:'poly', poly: md.vanZone.map(p=>({x:+p.x||0, z:+p.z||0})) };
     }
-    // Try a named node in scene
     const s = getScene();
     const node = s?.getTransformNodeByName?.('Van_Spawn') || s?.getNodeByName?.('Van_Spawn');
-    if (node && node.getAbsolutePosition){
-      const p = node.getAbsolutePosition();
-      return { type:'point', x: p.x, z: p.z, r: 6.0 };
+    if(node && node.getAbsolutePosition){
+      const p=node.getAbsolutePosition();
+      return { type:'point', x:p.x, z:p.z, r:6.0 };
     }
-    // Fallback: MAP_DEF.spawn
-    if (md.spawn){
-      return { type:'point', x:+(md.spawn.x||0), z:+(md.spawn.z||0), r: 6.0 };
-    }
-    // Last resort: origin circle
-    return { type:'point', x:0, z:0, r: 6.0 };
+    if(md.spawn) return { type:'point', x:+(md.spawn.x||0), z:+(md.spawn.z||0), r:6.0 };
+    return { type:'point', x:0, z:0, r:6.0 };
   }
-
   function isInVan(pos){
-    const a = vanAnchor();
-    if (a.type === 'poly'){
-      return pointInPolygon2D(pos.x, pos.z, a.poly);
-    } else {
-      const dx = (pos.x - a.x), dz = (pos.z - a.z);
-      return (dx*dx + dz*dz) <= (a.r*a.r);
-    }
+    const a=vanAnchor();
+    if(a.type==='poly') return pointInPolygon2D(pos.x,pos.z,a.poly);
+    const dx=pos.x-a.x, dz=pos.z-a.z;
+    return (dx*dx+dz*dz)<=(a.r*a.r);
   }
 
   function proximityTick(){
-    const s = getScene();
-    const cam = s?.activeCamera;
-    if (cam && cam.position){
-      const here = cam.position;
-      const near = isInVan(here);
-      if (near !== UI.inVan){
-        UI.inVan = near;
-        // Show/hide button
-        if (UI.btn){
-          UI.btn.classList.toggle('hidden', !UI.inVan);
-        }
-        // Optional hint toast when entering
-        if (UI.inVan){
-          try {
-            const t = $('#toast');
-            if (t){ t.textContent = 'Press V or click Van to manage loadout'; t.style.display='block'; setTimeout(()=> t.style.display='none', 1600); }
+    const s=getScene();
+    const cam=s?.activeCamera;
+    if(cam?.position){
+      const near=isInVan(cam.position);
+      if(near!==UI.inVan){
+        UI.inVan=near;
+        if(UI.btn) UI.btn.classList.toggle('hidden', !UI.inVan);
+        if(UI.inVan){
+          try{
+            const t=$('#toast');
+            if(t){ t.textContent='Press V or click Van to manage loadout'; t.style.display='block'; setTimeout(()=>t.style.display='none',1600); }
           } catch{}
         }
       }
@@ -255,12 +219,8 @@
   window.addEventListener('pp:start', ()=>{
     mount();
     proximityTick();
-  }, { once:true });
+  }, {once:true});
+  if(document.readyState!=='loading'){ setTimeout(()=>{ mount(); proximityTick(); },0); }
+  else { document.addEventListener('DOMContentLoaded', ()=>{ mount(); proximityTick(); }); }
 
-  // If loaded after start, still mount
-  if (document.readyState !== 'loading'){
-    setTimeout(()=>{ mount(); proximityTick(); }, 0);
-  } else {
-    document.addEventListener('DOMContentLoaded', ()=>{ mount(); proximityTick(); });
-  }
 })();
