@@ -1,5 +1,5 @@
 // ./assets/dev/effects/effects_sanity_med.js
-// Applies infinite stamina 60s + 40% sanity over 30s (cap 100%).
+// Applies infinite stamina 10s + 40% sanity over 30s (cap 100%).
 (function(){
   "use strict";
 
@@ -7,7 +7,7 @@
 
   function applyEffects(){
     // Stamina boost (inform your player controller)
-    window.dispatchEvent(new CustomEvent('pp:player:stamina-boost', { detail:{ seconds:60 }}));
+    window.dispatchEvent(new CustomEvent('pp:player:stamina-boost', { detail:{ seconds:10 }}));
 
     // Sanity regen 40% over 30s → ~1.333%/s
     const total = 0.40, dur = 30, tick = 0.5;
