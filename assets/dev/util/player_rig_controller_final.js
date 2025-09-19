@@ -75,12 +75,14 @@
     body.isVisible = false;
     body.position.copyFrom(AVATAR.spawn);
 
-    body.physicsImpostor = new BABYLON.PhysicsAggregate(
-      body,
-      BABYLON.PhysicsShapeType.CAPSULE,
-      { mass: 70, restitution: 0.0, friction: 0.8 },
-      scene
-    );
+// Instead of PhysicsAggregate
+body.physicsImpostor = new BABYLON.PhysicsImpostor(
+  body,
+  BABYLON.PhysicsImpostor.CapsuleImpostor, // or Capsule
+  { mass: 70, restitution: 0, friction: 0.8 },
+  scene
+);
+
     PP.rig.body = body;
     return body;
   }
