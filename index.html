@@ -1,182 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- === Boot Logger (place this FIRST in <head>) ========================= -->
-<script>
-(function () {
-  if (window.BOOTLOG) return; // idempotent
-  const t0 = performance.timeOrigin || Date.now();
-  const pad = (n)=> (n<10?'0':'')+n;
-  function nowIso(){
-    const d = new Date();
-    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' +
-           pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' +
-           String(d.getMilliseconds()).padStart(3,'0');
-  }
-  function relms(){ return +(performance.now().toFixed(3)); }
-
-  const entries = [];
-  function push(type, detail){
-    entries.push({ ts: nowIso(), rel_ms: relms(), type, detail });
-  }
-
-  // public API
-  const API = {
-    mark(label, extra){ push('mark', { label, ...(extra||{}) }); },
-    add(type, detail){ push(type, detail); },
-    all(){ return entries.slice(); },
-    text(){
-      return entries.map(e => {
-        return `[${e.ts} +${e.rel_ms.toFixed(3)}ms] ${e.type} ${JSON.stringify(e.detail||{})}`;
-      }).join('\n');
-    },
-    json(){ return JSON.stringify(entries, null, 2); },
-    download(fmt/*'txt'|'json'*/){
-      const ext = (fmt==='json'?'json':'txt');
-      const data = (ext==='json' ? API.json() : API.text());
-      const blob = new Blob([data], { type: (ext==='json'?'application/json':'text/plain') });
-      const a = document.createElement('a');
-      const d = new Date();
-      const fn = `bootlog-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
-      a.href = URL.createObjectURL(blob);
-      a.download = fn;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 0);
-    }
-  };
-
-  window.BOOTLOG = API;
-  window.markBoot = API.mark; // convenience
-
-  // Initial marker
-  API.mark('page-parse-start', { url: location.href });
-
-  // ---- Console capture ---------------------------------------------------
-  ['log','warn','error'].forEach(kind=>{
-    const orig = console[kind].bind(console);
-    console[kind] = function(...args){
-      try{ API.add('console:'+kind, { args: args.map(String) }); } catch(_){}
-      return orig(...args);
-    };
-  });
-
-  // ---- Global error capture ---------------------------------------------
-  window.addEventListener('error', (e)=>{
-    API.add('window:error', {
-      message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno,
-      stack: (e.error && e.error.stack) || null
-    });
-  }, true);
-  window.addEventListener('unhandledrejection', (e)=>{
-    API.add('window:unhandledrejection', { reason: (e.reason && (e.reason.stack||e.reason.message)) || String(e.reason) });
-  }, true);
-
-  // ---- DOM milestones ----------------------------------------------------
-  document.addEventListener('DOMContentLoaded', ()=> API.mark('DOMContentLoaded'));
-  window.addEventListener('load', ()=>{
-    API.mark('window-load');
-    try {
-      // capture resource timings (scripts, glb, audio, etc.)
-      const res = (performance.getEntriesByType && performance.getEntriesByType('resource')) || [];
-      API.add('perf:resources', res.map(r => ({
-        name:r.name, initiatorType:r.initiatorType, transferSize:r.transferSize,
-        duration: +r.duration.toFixed(2)
-      })));
-    } catch(_){}
-  });
-
-  // ---- Track <script> loading order (static tags) ------------------------
-  // Attach load/error to scripts that haven’t fired yet
-  Array.from(document.scripts || []).forEach(scr => {
-    if (!scr.src) return;
-    const src = scr.src;
-    const onLoad = ()=> API.add('script:load', { src });
-    const onErr  = ()=> API.add('script:error', { src });
-    scr.addEventListener('load',  onLoad, { once:true });
-    scr.addEventListener('error', onErr,  { once:true });
-    // Seen order (immediately)
-    API.add('script:seen', { src });
-  });
-
-  // ---- Observe Babylon milestones (polling) ------------------------------
- (function pollBabylon(){
-  let seen = { BABYLON:false, engine:false, scene:false, camera:false };
-  function tick(){
-    if (!seen.BABYLON && window.BABYLON){
-      seen.BABYLON = true;
-      BOOTLOG.mark('BABYLON-present', {
-        version: window.BABYLON?.Engine?.Version || null
-      });
-    }
-    const eng = window.ENGINE || window.__ENGINE ||
-                (window.BABYLON?.Engine?.LastCreatedEngine) || null;
-    const scn = window.SCENE || window.__SCENE ||
-                (window.BABYLON?.EngineStore?.LastCreatedScene) || null;
-    const cam = window.camera || window.__camera || scn?.activeCamera || null;
-
-    if (!seen.engine && eng){ seen.engine = true; BOOTLOG.mark('engine-created'); }
-    if (!seen.scene  && scn){ seen.scene  = true; BOOTLOG.mark('scene-created'); }
-    if (!seen.camera && cam){ seen.camera = true; BOOTLOG.mark('camera-ready'); }
-
-    if (seen.BABYLON && seen.engine && seen.scene && seen.camera) return;
-    setTimeout(tick, 50);
-  }
-  tick();
-})();
-
-  // ---- Listen to common game events -------------------------------------
-  ['pp:start','pp:stage','pp:van:inventory-updated','pp:van:loadout-changed','pp:item:used','pp:item:placed','pp:headgear:flashlight']
-    .forEach(evName=>{
-      window.addEventListener(evName, (e)=> {
-        let d = e?.detail; try{ d = JSON.parse(JSON.stringify(d||{})); }catch(_){}
-        API.add('event:'+evName, d);
-      });
-    });
-
-  // ---- Tiny UI to download the log --------------------------------------
-  function addButton(){
-    const btn = document.createElement('button');
-    btn.textContent = 'Download Boot Log';
-    Object.assign(btn.style, {
-      position:'fixed', top:'8px', left:'8px', zIndex: 2147483647,
-      padding:'6px 10px', font:'12px monospace',
-      border:'1px solid #066', borderRadius:'8px',
-      background:'#0b1518', color:'#9ef', cursor:'pointer', opacity:'0.85'
-    });
-    btn.title = 'Click to download boot log (.txt). Hold Shift for JSON.';
-    btn.addEventListener('click', (e)=> {
-      BOOTLOG.download(e.shiftKey ? 'json' : 'txt');
-    });
-    document.addEventListener('keydown', (e)=>{
-      // Ctrl+Shift+L also downloads text log
-      if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
-        e.preventDefault(); BOOTLOG.download('txt');
-      }
-    });
-    document.body.appendChild(btn);
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', addButton);
-  } else {
-    addButton();
-  }
-
-})();
-</script>
-<!-- ===================================================================== -->
-
   <meta charset="utf-8" />
   <title>PhasmaPhoney — Build</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
   <!-- ========== Babylon core + loaders (engine FIRST) ========== -->
   <script src="./cdn/babylon.js"></script>
+  <script src="./cdn/havok/HavokPhysics_umd.js"></script>
   <script src="./cdn/earcut.min.js"></script>
   <script src="./cdn/meshopt_decoder.js"></script>
   <script src="./cdn/draco_decoder_gltf.js"></script>
   <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-  <script src="./cdn/havok/HavokPhysics_umd.js"></script>
   <script src="./cdn/gui/babylon.gui.min.js"></script>
   <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
@@ -250,49 +85,7 @@
   <!-- Canvas -->
   <canvas id="renderCanvas" tabindex="0"></canvas>
 
-  <!-- HUD -->
-  <div id="hud-bar">
-    <div class="chip">Weather: <span id="hud-weather">—</span></div>
-    <div class="chip">Hunt: <span id="hud-hunt">Calm</span></div>
-    <div class="chip">Room: <span id="hud-room">Van</span></div>
-    <div class="chip sanity-wrap">Sanity:
-      <div id="sanity-gauge"><div id="sanity-fill"></div></div>
-      <span id="hud-sanity">100%</span>
-    </div>
-  </div>
-  <div id="hud-xyz">XYZ: <span id="hud-x">0</span>, <span id="hud-y">0</span>, <span id="hud-z">0</span></div>
-
-  <!-- Belt -->
-  <div id="belt"></div>
-
-  <!-- Actions -->
-  <div id="action-bar">
-    <button id="btn-use" class="hud-btn">Use</button>
-    <button id="btn-place" class="hud-btn">Place</button>
-    <button id="btn-toss" class="hud-btn">Toss</button>
-    <button id="btn-lighter" class="hud-btn">Lighter</button>
-    <button id="btn-notebook" class="hud-btn">Notebook</button>
-    <button id="btn-inspector" class="hud-btn">Inspector</button>
-  </div>
-
-  <!-- Touch -->
-  <div id="touch-left" class="touch-half"></div>
-  <div id="touch-right" class="touch-half"></div>
-  <div id="mobile-sprint"><button id="btn-sprint">Sprint: OFF</button></div>
-
-  <!-- Notebook -->
-  <div id="notebook-modal">
-    <h2>Evidence</h2>
-    <div id="evidence-list"></div>
-    <div id="possible-ghosts">Possible: —</div>
-    <div id="notebook-controls">
-      <button class="hud-btn" onclick="closeNotebook()">Close</button>
-      <button class="hud-btn" onclick="resetEvidence()">Reset Evidence</button>
-    </div>
-  </div>
-
-  <!-- Toast -->
-  <div id="toast"></div>
+  <!-- HUD, belt, action bar, touch, notebook, toast (all your previous HTML) -->
 
   <!-- ===================== SCRIPT LOAD ORDER ===================== -->
   <!-- 1) Core config/input -->
@@ -341,29 +134,163 @@
   <script src="./assets/dev/merge_patch.js"></script>
   <script src="./assets/dev/glue_patch.js"></script>
 
-  <!-- ===================== RUNTIME HOOKS ===================== -->
+ <!-- ===================== RUNTIME HOOKS ===================== -->
 <script>
 (function wireStart(){
-  const btn = document.getElementById('start-button');
-  if (!btn) return;
-  btn.addEventListener('click', function onStart(){
-    try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
-    document.getElementById('title-screen')?.remove();
+    const btn = document.getElementById('start-button');
+    if (!btn) return;
 
-    // NEW: mark as started so late modules (e.g. belt) can mount immediately
-    window.__PP_ALREADY_STARTED__ = true;
-    window.dispatchEvent(new CustomEvent('pp:start'));
+    btn.addEventListener('click', async function onStart(){
+        try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
 
-    const c = document.getElementById('renderCanvas');
-    try { c?.requestPointerLock?.(); } catch {}
-    try { c?.focus?.(); } catch {}
-  }, { once:true });
+        document.getElementById('title-screen')?.remove();
+        window.__PP_ALREADY_STARTED__ = true;
+        window.dispatchEvent(new CustomEvent('pp:start'));
+
+        const canvas = document.getElementById('renderCanvas');
+        try { canvas?.requestPointerLock?.(); } catch {}
+        try { canvas?.focus?.(); } catch {}
+
+        // Wait for Babylon scene to exist
+        let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+        while(!scene) {
+            await new Promise(r => setTimeout(r, 50));
+            scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+        }
+
+        // Enable collisions globally
+        scene.collisionsEnabled = true;
+
+        // Load Havok physics
+        const havok = await HavokPhysics();
+        scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+
+        // Import map
+        if (window.MAP_DEF?.file) {
+            const mapPath = "./assets/models/maps/" + window.MAP_DEF.file;
+            BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
+                
+                meshes.forEach(mesh => {
+                    mesh.isPickable = true;
+                    mesh.checkCollisions = true;
+
+                    // Give each mesh a static physics impostor
+                    mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                        mesh,
+                        BABYLON.PhysicsImpostor.MeshImpostor,
+                        { mass: 0, restitution: 0.1, friction: 0.8 },
+                        scene
+                    );
+                });
+
+                // Spawn player AFTER map is ready
+                if (window.PP?.rig?.body) {
+                    const sp = window.MAP_DEF?.spawn || {x:0, y:5, z:0};
+                    const offsetY = window.MAP_DEF.offset?.y || 0;
+                    const body = window.PP.rig.body;
+                    body.position.set(sp.x, sp.y + offsetY, sp.z);
+
+                    // Ensure player has a physics impostor
+                    if (!body.physicsImpostor) {
+                        body.physicsImpostor = new BABYLON.PhysicsImpostor(
+                            body,
+                            BABYLON.PhysicsImpostor.CapsuleImpostor,
+                            { mass: 80, restitution: 0, friction: 0.5 },
+                            scene
+                        );
+                    }
+                }
+
+                // Ensure camera collisions if needed
+                if (window.PP?.camera) {
+                    const cam = window.PP.camera;
+                    cam.checkCollisions = true;
+                    cam.applyGravity = true;
+                    cam.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
+                    cam.ellipsoidOffset = new BABYLON.Vector3(0, 1, 0);
+                }
+
+            }, null, function(scene, message, exception){
+                console.error("Error loading map:", message, exception);
+            });
+        }
+
+    }, { once:true });
 })();
-</script>
 
+      // Enable Babylon native collisions (optional for camera moveWithCollisions)
+      scene.collisionsEnabled = true;
+
+      // Load Havok and enable physics
+      const havok = await HavokPhysics();
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+
+      // --- Load map and create Havok static colliders ---
+      if (window.MAP_DEF?.file) {
+        BABYLON.SceneLoader.ImportMesh("", "./maps/", window.MAP_DEF.file, scene, function(meshes){
+          meshes.forEach(mesh=>{
+            mesh.checkCollisions = true;
+            mesh.isPickable = true;
+
+            // Convert mesh to Havok static collider
+            const shape = new BABYLON.HavokPlugin(havok).createTriangleMeshShape(mesh);
+            const body = new BABYLON.HavokRigidBody(mesh, { type: "static", shape });
+            scene.getPhysicsEngine().addBody(body);
+          });
+        });
+      }
+// Create a skybox mesh
+    let skybox = BABYLON.Mesh.CreateBox("skyBox", 1000.0, scene);
+    let skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
+    skyboxMaterial.backFaceCulling = false;
+    skybox.material = skyboxMaterial;
+
+    // Animate turbidity for cloud movement effect
+    let animation = new BABYLON.Animation(
+        "cloudAnimation",
+        "turbidity",
+        30, // frames per second
+        BABYLON.Animation.ANIMATIONTYPE_FLOAT,
+        BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE
+    );
+
+    let keys = [];
+    keys.push({ frame: 0, value: 10 }); // Start with some turbidity
+    keys.push({ frame: 100, value: 50 }); // Increase turbidity for more clouds
+    keys.push({ frame: 200, value: 10 }); // Decrease turbidity
+
+    animation.setKeys(keys);
+    skyboxMaterial.animations.push(animation);
+
+    scene.beginAnimation(skyboxMaterial, 0, 200, true);
+      // --- Create player physics body (capsule) ---
+      let playerBody;
+      if (window.PP?.rig?.body) {
+        const sp = window.MAP_DEF?.spawn || {x:0, y:5, z:0};
+        const offsetY = window.MAP_DEF.offset?.y || 0;
+
+        playerBody = new BABYLON.HavokPlugin(havok).createCapsuleShape(0.5, 1.8); // radius, height
+        const rigid = new BABYLON.HavokRigidBody(window.PP.rig.body, { mass: 80, shape: playerBody });
+        rigid.setPosition(new BABYLON.Vector3(sp.x, sp.y + offsetY, sp.z));
+        scene.getPhysicsEngine().addBody(rigid);
+        window.PP.rig._havokRigid = rigid; // keep reference
+      }
+
+      // --- Sync camera with player physics body ---
+      scene.registerBeforeRender(()=>{
+        if (window.PP?.camera && window.PP?.rig?._havokRigid) {
+          const pos = window.PP.rig._havokRigid.getPosition();
+          window.PP.rig.body.position.copyFrom(pos);
+          window.PP.camera.position.copyFrom(pos.add(new BABYLON.Vector3(0,0.9,0)));
+        }
+      });
+
+    }, { once:true });
+  })();
+  </script>
 
   <!-- Dev panel (stub) -->
   <button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
-  <div id="devtools-panel" style="display:none;"></div>
+  <div id="devtools-panel" style="display:none"></div>
 </body>
 </html>
