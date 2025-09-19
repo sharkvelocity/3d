@@ -3,7 +3,41 @@
 // Clear = crickets ambient only. Rainstorm = rain only.
 // Bloodmoon = rain + distant red lightning + delayed thunder. Snow = snow only.
 // Preserves indoor muffling & adds robust init/crossfade so UI and audio never disagree.
-(function () {
+// Extended: spawns world-space particle systems for rain/snow, disposed on state change.
+(function () {:true }); 
+    },
+
+    // Optional: force stop all sounds & particles
+    dispose(){
+      try {
+        ST.sounds.ambient?.stop();
+        ST.sounds.rain?.stop();
+        ST.sounds.snow?.stop();
+        ST.sounds.thunder.forEach(s => s.stop());
+      } catch {}
+
+      disposeParticles();
+
+      if (ST._flashLight && !ST._flashLight.isDisposed()) ST._flashLight.dispose();
+      if (ST._flashLayer) {
+        try { ST._flashLayer.remove(); } catch {}
+        ST._flashLayer = null;
+      }
+
+      if (ST._loopCB){
+        const s = S();
+        if (s?.onBeforeRenderObservable) s.onBeforeRenderObservable.removeCallback(ST._loopCB);
+        ST._loopCB = null;
+      }
+
+      ST.started = false;
+      ST.ready = false;
+      console.log("[Weather] disposed");
+    }
+  };
+
+})();
+
   "use strict";
 
   // ───────────────────────── small utils
@@ -34,6 +68,10 @@
     // FX caches
     _flashLight: null,
     _flashLayer: null,
+
+    // Particle systems
+    _rainPS: null,
+    _snowPS: null,
 
     // indoor detect cadence
     _indoorLast: null,
@@ -72,6 +110,70 @@
     }
   }
 
+  // ───────────────────────── particles
+  function disposeParticles(){
+    try { ST._rainPS?.dispose(); } catch {}
+    try { ST._snowPS?.dispose(); } catch {}
+    ST._rainPS = null;
+    ST._snowPS = null;
+  }
+
+  function spawnRainParticles(){
+    const s=S(); if (!s) return;
+    disposeParticles();
+
+    const ps = new BABYLON.ParticleSystem("rainPS", 4000, s);
+    ps.particleTexture = new BABYLON.Texture("./assets/textures/raindrop.png", s);
+
+    ps.minEmitBox = new BABYLON.Vector3(-50, 40, -50);
+    ps.maxEmitBox = new BABYLON.Vector3( 50, 40,  50);
+    ps.emitRate = 3500;
+
+    ps.minSize = 0.05;
+    ps.maxSize = 0.15;
+    ps.minLifeTime = 0.8;
+    ps.maxLifeTime = 1.2;
+    ps.color1 = new BABYLON.Color4(0.7,0.7,1.0,0.7);
+    ps.color2 = new BABYLON.Color4(0.7,0.7,1.0,0.7);
+
+    ps.direction1 = new BABYLON.Vector3(0, -1, 0);
+    ps.direction2 = new BABYLON.Vector3(0, -1, 0);
+    ps.minEmitPower = 18;
+    ps.maxEmitPower = 22;
+    ps.updateSpeed = 0.01;
+
+    ps.start();
+    ST._rainPS = ps;
+  }
+
+  function spawnSnowParticles(){
+    const s=S(); if (!s) return;
+    disposeParticles();
+
+    const ps = new BABYLON.ParticleSystem("snowPS", 3000, s);
+    ps.particleTexture = new BABYLON.Texture("./assets/textures/snowflake.png", s);
+
+    ps.minEmitBox = new BABYLON.Vector3(-50, 40, -50);
+    ps.maxEmitBox = new BABYLON.Vector3( 50, 40,  50);
+    ps.emitRate = 2000;
+
+    ps.minSize = 0.2;
+    ps.maxSize = 0.4;
+    ps.minLifeTime = 2.5;
+    ps.maxLifeTime = 4.0;
+    ps.color1 = new BABYLON.Color4(1,1,1,0.9);
+    ps.color2 = new BABYLON.Color4(1,1,1,0.9);
+
+    ps.direction1 = new BABYLON.Vector3(-0.1,-1,-0.1);
+    ps.direction2 = new BABYLON.Vector3( 0.1,-1, 0.1);
+    ps.minEmitPower = 1;
+    ps.maxEmitPower = 2;
+    ps.updateSpeed = 0.02;
+
+    ps.start();
+    ST._snowPS = ps;
+  }
+
   // ───────────────────────── lightning/thunder (Bloodmoon)
   function scheduleBloodmoonLightning(){
     const now = performance.now()/1000;
@@ -95,14 +197,13 @@
       ST._flashLayer = layer;
     }
 
-    // distant red point light
     const c = cam();
     const camPos  = c?.globalPosition || c?.position || v3(0,1.7,0);
     const forward = c?.getDirection ? c.getDirection(BABYLON.Vector3.Forward()) : new BABYLON.Vector3(0,0,1);
     const up = BABYLON.Vector3.Up();
     const right = BABYLON.Vector3.Cross(forward, up).normalize();
     const az = Math.random()*Math.PI*2;
-    const dist = 120 + Math.random()*100;   // 120–220m
+    const dist = 120 + Math.random()*100;
     const dir2D = forward.scale(Math.cos(az)).add(right.scale(Math.sin(az))).normalize();
     const pos = camPos.add(dir2D.scale(dist)).add(new BABYLON.Vector3(0, 12 + Math.random()*8, 0));
 
@@ -114,11 +215,8 @@
       ST._flashLight.intensity = 0.0;
     } else {
       ST._flashLight.position.copyFrom(pos);
-      ST._flashLight.diffuse.set(0.8,0.1,0.1);
-      ST._flashLight.specular.set(0.8,0.1,0.1);
     }
 
-    // 1–2 very dim pulses + red overlay
     const pulses = 1 + (Math.random()<0.4 ? 1 : 0);
     let i = 0;
     const doPulse = () => {
@@ -131,7 +229,6 @@
       ST._flashLight.intensity = target;
       setTimeout(()=>{ ST._flashLight.intensity = 0; }, 120 + Math.random()*80);
 
-      // delayed thunder (simulate distance): 1.2–3.5s
       const thunderDelay = 1200 + Math.random()*2300;
       setTimeout(playThunder, thunderDelay);
 
@@ -155,7 +252,6 @@
   // ───────────────────────── indoor detection
   function isIndoorAt(pos){
     const s = S(); if (!s || !pos) return false;
-    // Van zone override → outdoor
     try{
       const V = window.PP?.CONFIG?.VAN;
       if (V && V.POSITION && typeof V.RADIUS === 'number') {
@@ -163,7 +259,6 @@
       }
     } catch {}
 
-    // Upward ray: hit roof/ceiling? then indoor
     const from = new BABYLON.Vector3(pos.x, pos.y + 0.5, pos.z);
     const ray  = new BABYLON.Ray(from, new BABYLON.Vector3(0,1,0), 12);
     const hit  = s.pickWithRay(ray, (m)=>{
@@ -188,27 +283,22 @@
     if (isIn !== ST._indoorLast){
       ST._indoorLast = isIn;
       ST.indoor = isIn;
-      Weather.set(ST.state, { intensity:ST.intensity, immediate:true }); // re-apply volumes consistently
+      Weather.set(ST.state, { intensity:ST.intensity, immediate:true });
     }
   }
 
   // ───────────────────────── crossfade + loop control
   function _ensureLoopState(){
-    // Start/stop loops solely based on target volumes,
-    // so UI label can never disagree with audible state.
     try {
       const tA = ST.volTarget.ambient, tR = ST.volTarget.rain, tS = ST.volTarget.snow;
-      // Ambient
       if (ST.sounds.ambient){
         if (tA > 0.02 && !ST.sounds.ambient.isPlaying) ST.sounds.ambient.play();
         if (tA <= 0.01 && ST.sounds.ambient.isPlaying) ST.sounds.ambient.stop();
       }
-      // Rain
       if (ST.sounds.rain){
         if (tR > 0.02 && !ST.sounds.rain.isPlaying) ST.sounds.rain.play();
         if (tR <= 0.01 && ST.sounds.rain.isPlaying) ST.sounds.rain.stop();
       }
-      // Snow
       if (ST.sounds.snow){
         if (tS > 0.02 && !ST.sounds.snow.isPlaying) ST.sounds.snow.play();
         if (tS <= 0.01 && ST.sounds.snow.isPlaying) ST.sounds.snow.stop();
@@ -225,7 +315,6 @@
     const tRain    = ST.volTarget.rain * ST.intensity * muffle;
     const tSnow    = ST.volTarget.snow * ST.intensity * muffle;
 
-    // track "now" for smooth fade (and to guard getVolume jitter)
     ST.volNow.ambient = lerp(ST.volNow.ambient, tAmbient, k);
     ST.volNow.rain    = lerp(ST.volNow.rain,    tRain,    k);
     ST.volNow.snow    = lerp(ST.volNow.snow,    tSnow,    k);
@@ -281,7 +370,8 @@
       ST.state = state;
       if (typeof opts.intensity === 'number') ST.intensity = clamp(opts.intensity, 0, 1);
 
-      // Assign target volumes for each regime & stop the others hard
+      disposeParticles();
+
       if (state === "Clear"){
         ST.volTarget.ambient = ST.volBase.ambient;
         ST.volTarget.rain    = 0.0;
@@ -292,23 +382,24 @@
         ST.volTarget.rain    = ST.volBase.rain;
         ST.volTarget.snow    = 0.0;
         ST.nextLightningAt = Infinity;
+        spawnRainParticles();
       } else if (state === "Bloodmoon"){
         ST.volTarget.ambient = 0.0;
         ST.volTarget.rain    = ST.volBase.rain;
         ST.volTarget.snow    = 0.0;
         scheduleBloodmoonLightning();
+        spawnRainParticles();
       } else { // Snow
         ST.volTarget.ambient = 0.0;
         ST.volTarget.rain    = 0.0;
         ST.volTarget.snow    = ST.volBase.snow;
         ST.nextLightningAt = Infinity;
+        spawnSnowParticles();
       }
 
-      // HUD sync now
       const hw = document.getElementById('hud-weather');
       if (hw) hw.textContent = ST.state + (ST.indoor ? " (Indoor)" : "");
 
-      // Immediate apply? (used on init or indoor flip)
       if (opts.immediate){
         try{
           ensureSounds();
@@ -340,30 +431,37 @@
         snow:    (v.snow    ?? ST.volBase.snow),
         thunder: (v.thunder ?? ST.volBase.thunder),
       });
-      Weather.set(ST.state, { intensity:ST.intensity, immediate:true });
+      Weather.set(ST.state, { intensity:ST.intensity, immediate:true }); 
     },
 
-    flashNow(){ if (ST.state==="Bloodmoon") { flashBloodmoon(); scheduleBloodmoonLightning(); } },
+    // Optional: force stop all sounds & particles
+    dispose(){
+      try {
+        ST.sounds.ambient?.stop();
+        ST.sounds.rain?.stop();
+        ST.sounds.snow?.stop();
+        ST.sounds.thunder.forEach(s => s.stop());
+      } catch {}
 
-    isRaining(){ return ST.state === "Rainstorm" || ST.state === "Bloodmoon"; },
+      disposeParticles();
 
-    update(){ /* driven by scene onBeforeRender */ },
+      if (ST._flashLight && !ST._flashLight.isDisposed()) ST._flashLight.dispose();
+      if (ST._flashLayer) {
+        try { ST._flashLayer.remove(); } catch {}
+        ST._flashLayer = null;
+      }
 
-    debugSet(next){ Weather.set(next, { immediate:true, intensity: ST.intensity }); }
+      if (ST._loopCB){
+        const s = S();
+        if (s?.onBeforeRenderObservable) s.onBeforeRenderObservable.removeCallback(ST._loopCB);
+        ST._loopCB = null;
+      }
+
+      ST.started = false;
+      ST.ready = false;
+      console.log("[Weather] disposed");
+    }
   };
 
-  // Start only after the user clicks Start Investigation — and when scene+camera exist
-  window.addEventListener('pp:start', ()=>{
-    (function boot(){
-      if (!S() || !cam()){ setTimeout(boot, 100); return; }
-      ensureSounds();
-      // choose initial weather (adjust as desired)
-      const r = Math.random();
-      // Clear 45%, Rainstorm 35%, Bloodmoon 10%, Snow 10%
-      const next = r < 0.45 ? "Clear" : r < 0.80 ? "Rainstorm" : r < 0.90 ? "Bloodmoon" : "Snow";
-      Weather.set(next, { immediate:true, intensity: 0.85 });
-      Weather.init();
-    })();
-  });
-
 })();
+
