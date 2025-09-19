@@ -4,40 +4,8 @@
 // Bloodmoon = rain + distant red lightning + delayed thunder. Snow = snow only.
 // Preserves indoor muffling & adds robust init/crossfade so UI and audio never disagree.
 // Extended: spawns world-space particle systems for rain/snow, disposed on state change.
-(function () {:true }); 
-    },
 
-    // Optional: force stop all sounds & particles
-    dispose(){
-      try {
-        ST.sounds.ambient?.stop();
-        ST.sounds.rain?.stop();
-        ST.sounds.snow?.stop();
-        ST.sounds.thunder.forEach(s => s.stop());
-      } catch {}
-
-      disposeParticles();
-
-      if (ST._flashLight && !ST._flashLight.isDisposed()) ST._flashLight.dispose();
-      if (ST._flashLayer) {
-        try { ST._flashLayer.remove(); } catch {}
-        ST._flashLayer = null;
-      }
-
-      if (ST._loopCB){
-        const s = S();
-        if (s?.onBeforeRenderObservable) s.onBeforeRenderObservable.removeCallback(ST._loopCB);
-        ST._loopCB = null;
-      }
-
-      ST.started = false;
-      ST.ready = false;
-      console.log("[Weather] disposed");
-    }
-  };
-
-})();
-
+(function () {
   "use strict";
 
   // ───────────────────────── small utils
@@ -85,7 +53,7 @@
     const s = S(); if (!s) return;
 
     try {
-      // CLEAR ambient bed (crickets) — ONLY for Clear
+      // CLEAR ambient bed (crickets)
       ST.sounds.ambient = new BABYLON.Sound("amb", "./assets/audio/ambient.mp3", s, null,
         { loop:true, autoplay:false, volume:0.0, spatialSound:false });
 
@@ -185,7 +153,6 @@
   function flashBloodmoon(){
     const s = S(); if (!s) return;
 
-    // subtle red overlay (created once)
     if (!ST._flashLayer){
       const layer = document.createElement('div');
       layer.id = 'flash-overlay-blood';
@@ -434,7 +401,6 @@
       Weather.set(ST.state, { intensity:ST.intensity, immediate:true }); 
     },
 
-    // Optional: force stop all sounds & particles
     dispose(){
       try {
         ST.sounds.ambient?.stop();
@@ -464,4 +430,3 @@
   };
 
 })();
-
