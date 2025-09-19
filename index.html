@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PhasmaPhoney — Build</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+
+<!-- Babylon Core + Loaders -->
+<script src="./cdn/babylon.js"></script>
+<script src="./cdn/havok/HavokPhysics_umd.js"></script>
+<script src="./cdn/earcut.min.js"></script>
+<script src="./cdn/meshopt_decoder.js"></script>
+<script src="./cdn/draco_decoder_gltf.js"></script>
+<script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+<script src="./cdn/gui/babylon.gui.min.js"></script>
+<script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+
+<!-- Optional Dev Helpers -->
+<script src="./assets/index3/devtools.js?v=7.4.0"></script>
+
+<style>
+html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
+#renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
+
+#loading-box{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(0,0,0,0.92); z-index:2147483000; color:#9ef; }
+#loading-logo{ width:240px; max-width:60vw; opacity:0.95; filter:drop-shadow(0 0 10px #0ff4); }
+#loading-text{ font-size:16px; letter-spacing:.3px; text-align:center; max-width:70vw; }
+#loading-bar{ width:64vw; max-width:720px; height:14px; border:1px solid #066; border-radius:10px; background:#071017; overflow:hidden; }
+#loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,#19f,#0ff); transition:width .15s ease; }
+
+#title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; z-index:9999; }
+#title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
+#start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; }
+#map-wrap{ display:flex; gap:8px; align-items:center; color:#9ef; }
+#map-select{ background:#0b1518; color:#bff; border:1px solid #066; padding:8px; border-radius:8px; }
+
+#hud-bar{ position:fixed; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; }
+.chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; background:rgba(0,0,0,0.5); }
+.sanity-wrap{ display:flex; align-items:center; gap:6px; padding:0 6px; }
+#sanity-gauge{ width:170px; height:10px; border:1px solid #066; background:#061013; border-radius:8px; overflow:hidden; }
+#sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
+
+#hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; }
+
+#belt{ position:fixed; left:50%; bottom:72px; transform:translateX(-50%); display:none; gap:12px; z-index:6000; align-items:center; background:rgba(0,0,0,0.55); border:1px solid #066; padding:8px 10px; border-radius:10px; }
+.slot{ width:88px; height:64px; display:flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid #0aa; background:rgba(0,20,20,0.6); position:relative; cursor:pointer; user-select:none; }
+.slot .label{ font-size:12px; color:#adf; text-align:center; line-height:1.1; padding:6px; }
+.slot.active{ outline:2px solid #0ff; box-shadow:0 0 12px rgba(0,255,255,0.45) inset; }
+
+.hud-btn{ border:1px solid #333; background:#181818; color:#ddd; padding:6px 10px; border-radius:8px; cursor:pointer; }
+#action-bar { position:fixed; right:12px; bottom:18px; display:flex; gap:10px; z-index:6500; }
+
+.touch-half { position:fixed; top:20vh; bottom:12vh; width:50vw; z-index:7000; touch-action:none; }
+#touch-left { left:0; } #touch-right{ right:0; }
+#mobile-sprint{ position:fixed; left:14px; bottom:18px; z-index:6500; display:none; }
+#mobile-sprint button{ border:1px solid #066; background:#102; color:#9ef; padding:8px 12px; border-radius:10px; }
+
+#notebook-modal{ position:fixed; inset:0; background:rgba(0,0,0,0.88); color:#0ff; display:none; z-index:12000; padding:18px; overflow:auto; }
+
+#toast{ position:fixed; left:50%; top:16px; transform:translateX(-50%); background:rgba(0,0,0,0.7); border:1px solid #066; border-radius:8px; padding:8px 12px; color:#0ff; z-index:10001; display:none; max-width:70vw; text-align:center; }
+
+#belt img.item-icon { max-width:60px; max-height:60px; image-rendering:crisp-edges; }
+body > img[src*="/assets/icons/"] { display:none !important; position:absolute !important; left:-99999px !important; top:-99999px !important; }
+#belt img[src*="/assets/icons/"] { display:inline-block !important; position:static !important; left:auto !important; top:auto !important; }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading-box" aria-live="polite">
+<img src="logo.png" alt="Logo" id="loading-logo">
+<div id="loading-text">Initializing…</div>
+<div id="loading-bar"><div id="loading-fill"></div></div>
+</div>
+
+<!-- Title / Start -->
+<div id="title-screen">
+<img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
+<button id="start-button">Start Investigation</button>
+<div id="map-wrap">
+<span>Map:</span>
+<select id="map-select"><option value="-1">(loading maps...)</option></select>
+</div>
+</div>
+
+<!-- Canvas -->
+<canvas id="renderCanvas" tabindex="0"></canvas>
+
+<!-- ===================== SCRIPTS ===================== -->
+
+<!-- 1) Core config/input -->
+<script src="./assets/dev/util/modular_settings.js"></script>
+<script src="./assets/dev/modular_bindings.js"></script>
+<script src="./assets/dev/util/pointer_lock_manager.js"></script>
+
+<!-- 2) Audio -->
+<script src="./assets/dev/modular_audio.js"></script>
+
+<!-- 3) Runtime / rig / util -->
+<script src="./assets/dev/util/pp_runtime.js"></script>
+<script src="./assets/dev/util/player_rig_controller_final.js"></script>
+<script src="./assets/dev/util/moon.js"></script>
+<script src="./assets/dev/util/minimap_northup_xyz.js"></script>
+
+<!-- 4) Weather -->
+<script src="./assets/dev/util/weather.js"></script>
+
+<!-- 5) Inventory & UI -->
+<script src="./assets/dev/game/inventory_system.js"></script>
+<script src="./assets/dev/ui/belt_manager.js"></script>
+<script src="./assets/dev/ui/van_ui.js"></script>
+<script src="./assets/dev/effects/effects_sanity_med.js"></script>
+<script src="./assets/dev/ui/hud_ui.js"></script>
+<script src="./assets/dev/ui/notebook_ui.js"></script>
+
+<!-- 6) Ghost systems -->
+<script src="./assets/dev/ghost/ghost_db.js"></script>
+<script src="./assets/dev/ghost/ghost_logic.js"></script>
+
+<!-- 7) Tools -->
+<script src="./assets/dev/tools/uv_prints.js"></script>
+<script src="./assets/dev/tools/salt_system.js"></script>
+<script src="./assets/dev/tools/spirit_box.js"></script>
+<script src="./assets/dev/tools/dots_system.js"></script>
+<script src="./assets/dev/tools/writing_book.js"></script>
+<script src="./assets/dev/tools/parabolic_mic.js"></script>
+<script src="./assets/dev/tools/door_system.js"></script>
+
+<!-- 8) Bootstrap / glue -->
+<script src="./assets/dev/game/game_bootstrap.js"></script>
+<script src="./assets/dev/merge_patch.js"></script>
+<script src="./assets/dev/glue_patch.js"></script>
+
+<!-- ===================== RUNTIME HOOKS ===================== -->
+<script>
+(function wireStart(){
+  const btn = document.getElementById('start-button');
+  if (!btn) return;
+  btn.addEventListener('click', async function onStart(){
+    try { window.PP?.audio?.init?.(); } catch(e){ console.warn('[audio.init] failed', e); }
+
+    document.getElementById('title-screen')?.remove();
+    window.__PP_ALREADY_STARTED__ = true;
+    window.dispatchEvent(new CustomEvent('pp:start'));
+
+    const canvas = document.getElementById('renderCanvas');
+    try { canvas?.requestPointerLock?.(); } catch {}
+    try { canvas?.focus?.(); } catch {}
+
+    // Wait for Babylon scene
+    let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+    while(!scene) { await new Promise(r=>setTimeout(r,50)); scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene; }
+
+    // Enable collisions
+    scene.collisionsEnabled = true;
+
+    // Load Havok physics
+    const havok = await HavokPhysics();
+    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+
+    // Load map
+    if (window.MAP_DEF?.file) {
+      BABYLON.SceneLoader.ImportMesh("", "./assets/models/map/", window.MAP_DEF.file, scene, function(meshes){
+        meshes.forEach(mesh=>{
+          mesh.checkCollisions = true;
+          mesh.isPickable = true;
+
+          // Tag doors separately
+          if(mesh.name.toLowerCase().includes("door")){
+            mesh.isPickable = true; // keep doors interactive
+          }
+        });
+      });
+    }
+
+    // Load doors separately if needed
+    if(window.MAP_DEF?.doors?.length){
+      window.MAP_DEF.doors.forEach(doorFile=>{
+        BABYLON.SceneLoader.ImportMesh("", "./assets/models/", doorFile, scene, (meshes)=>{
+          meshes.forEach(mesh=>{
+            mesh.checkCollisions = true;
+            mesh.isPickable = true;
+            mesh.actionManager = new BABYLON.ActionManager(scene);
+            mesh.actionManager.registerAction(
+              new BABYLON.ExecuteCodeAction(
+                BABYLON.ActionManager.OnPickTrigger,
+                () => {
+                  const open = mesh.rotation.y === 0;
+                  mesh.rotate(BABYLON.Axis.Y, open ? Math.PI/2 : -mesh.rotation.y, BABYLON.Space.LOCAL);
+                }
+              )
+            );
+          });
+        });
+      });
+    }
+
+    // Spawn player
+    if (window.PP?.rig?.body) {
+      const sp = window.MAP_DEF?.spawn || {x:0, y:5, z:0};
+      const offsetY = window.MAP_DEF.offset?.y || 0;
+      window.PP.rig.body.position.set(sp.x, sp.y + offsetY, sp.z);
+    }
+
+    // Player collisions
+    if (window.PP?.camera) {
+      const cam = window.PP.camera;
+      cam.checkCollisions = true;
+      cam.applyGravity = true;
+      cam.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
+      cam.ellipsoidOffset = new BABYLON.Vector3(0, 1, 0);
+    }
+
+    // Kill barrier
+    const killBarrier = BABYLON.MeshBuilder.CreateBox("killBarrier", {width:500, height:2, depth:500}, scene);
+    killBarrier.position.set(0, -10, 0); // below map
+    killBarrier.isVisible = false;
+    killBarrier.checkCollisions = true;
+    killBarrier.actionManager = new BABYLON.ActionManager(scene);
+    killBarrier.actionManager.registerAction(
+      new BABYLON.ExecuteCodeAction(
+        {trigger: BABYLON.ActionManager.OnIntersectionEnterTrigger, parameter: window.PP?.rig?.body},
+        () => {
+          const van = window.MAP_DEF?.vanSpawn || {x:0, y:5, z:0};
+          window.PP.rig.body.position.set(van.x, van.y, van.z);
+        }
+      )
+    );
+
+  }, { once:true });
+})();
+</script>
+
+<!-- Dev panel (stub) -->
+<button id="devtools-toggle" class="hud-btn" style="display:none;">Dev Tools</button>
+<div id="devtools-panel" style="display:none"></div>
+
+</body>
+</html>
