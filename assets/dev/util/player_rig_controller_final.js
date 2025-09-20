@@ -1,13 +1,5 @@
 /* File: assets/dev/util/player_rig_controller_final.js
    Player rig controller with Havok + raycast ground detection + PS5 controller
-   ------------------------------------------------------------
-   - WASD / PS5 movement, ` toggles 1P/3P
-   - C toggles crouch (with crouched walk anim)
-   - Raycast keeps player anchored to ground with slopes
-   - Havok handles collisions & gravity
-   - Slopes supported
-   - Step sounds preserved
-   - Invisible physics capsule (no box under player)
 */
 
 (function () {
@@ -74,27 +66,26 @@
     return new BABYLON.Vector3(0, AVATAR.eyeY, 0);
   }
 
- function makeBody(){
-    // Physics capsule mesh (invisible)
+  function makeBody(){
+    // Create invisible capsule mesh
     body = BABYLON.MeshBuilder.CreateCapsule("player_capsule", {
-        height: AVATAR.targetHeight,
-        radius: 0.4
+      height: AVATAR.targetHeight,
+      radius: 0.4
     }, scene);
-
-    body.isVisible = false; // hides the capsule
+    body.isVisible = false;
     body.position.copyFrom(getSpawnPosition());
 
+    // Add physics impostor
     body.physicsImpostor = new BABYLON.PhysicsImpostor(
-        body,
-        BABYLON.PhysicsImpostor.CapsuleImpostor,
-        { mass: 70, restitution: 0, friction: 0.8 },
-        scene
+      body,
+      BABYLON.PhysicsImpostor.CapsuleImpostor,
+      { mass: 70, restitution: 0, friction: 0.8 },
+      scene
     );
 
     PP.rig.body = body;
     return body;
-}
-
+  }
 
   // ----- Avatar -----------------------------------------------------------
   function normalizeAvatarScale(root){
@@ -117,11 +108,14 @@
     const root = res.meshes[0];
     normalizeAvatarScale(root);
 
-    res.animationGroups.forEach(g => {
-      if (/Idle/i.test(g.name)) animations.idle = g;
-      if (/Walk/i.test(g.name)) animations.walk = g;
-      if (/Crouch/i.test(g.name)) animations.crouchWalk = g;
-    });
+    if (res.animationGroups) {
+      res.animationGroups.forEach(g => {
+        if (!g) return;
+        if (/Idle/i.test(g.name)) animations.idle = g;
+        if (/Walk/i.test(g.name)) animations.walk = g;
+        if (/Crouch/i.test(g.name)) animations.crouchWalk = g;
+      });
+    }
 
     playAnim("idle");
   }
