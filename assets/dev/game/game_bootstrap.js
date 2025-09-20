@@ -50,6 +50,14 @@
     }
     return { reset, addStep, run, show, hide, label };
   })();
+// Randomize weather on start
+window.addEventListener("pp:start", () => {
+    const states = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
+    const chosen = states[Math.floor(Math.random() * states.length)];
+    Weather.init();           // ensure sounds and particles are ready
+    Weather.set(chosen, { intensity: 1.0, immediate: true });
+    console.log("[Weather] randomized to:", chosen);
+}, { once: true });
 
   // ---------- state ----------
   let engine = null, scene = null, camera = null;
