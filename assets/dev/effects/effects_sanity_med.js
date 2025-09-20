@@ -25,11 +25,13 @@
           } else {
             window.PP.state.sanity = clamp(s + perTick*100, 0, 100);
           }
-          const label = document.getElementById('hud-sanity');
-          if (label){
-            const v = window.PP.state.sanity <=1 ? Math.round(window.PP.state.sanity*100) : Math.round(window.PP.state.sanity);
-            label.textContent = v + '%';
-            document.getElementById('sanity-fill')?.style && (document.getElementById('sanity-fill').style.width = v + '%');
+
+          // Call HUD updater if available
+          if (typeof window.updateSanity === "function") {
+            const v = window.PP.state.sanity <= 1
+              ? Math.round(window.PP.state.sanity*100)
+              : Math.round(window.PP.state.sanity);
+            window.updateSanity(v);
           }
         }
       } catch {}
