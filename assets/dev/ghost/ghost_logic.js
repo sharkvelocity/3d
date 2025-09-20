@@ -1,4 +1,4 @@
-// ghost_logic.js
+// File: ./assets/dev/ghost/ghost_logic.js
 // Minimal, deterministic-safe ghost wander + events, integrates with EMF/DOTS/SpiritBox etc.
 
 (function(){
@@ -34,6 +34,13 @@
   let radioCooldown = 0;
   let wanderTarget = ghost.roomCenter.clone();
 
+  function triggerEMF(source, level){
+    window.EMF?.trigger?.(source, {
+      pos: ghost.position.clone(),
+      level
+    });
+  }
+
   function attachLoop(){
     const sc=S(); if (!sc) { setTimeout(attachLoop, 120); return; }
     const eng = sc.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
@@ -65,17 +72,34 @@
         if (!isShadeAndPlayerInRoom()){
           try{
             const r = Math.random();
-            if (r < 0.25) window.GhostAudio?.whisper?.();
-            else if (r < 0.55) window.GhostAudio?.doorCreak?.();
-            else if (r < 0.80) window.GhostAudio?.doorSlam?.();
-            else window.GhostAudio?.toss?.();
+            if (r < 0.25) {
+              window.GhostAudio?.whisper?.();
+              // whispers don’t trigger EMF
+            }
+            else if (r < 0.55) {
+              window.GhostAudio?.doorCreak?.();
+              triggerEMF('door', 2);
+            }
+            else if (r < 0.80) {
+              window.GhostAudio?.doorSlam?.();
+              triggerEMF('door', 3);
+            }
+            else {
+              window.GhostAudio?.toss?.();
+              triggerEMF('object', 2 + Math.floor(Math.random()*2)); // level 2–3
+            }
           }catch(_){}
         }
 
         try{
           const cam = sc.activeCamera;
           const d = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position) : 999;
-          if (d<6.0) window.EMFAudio?.extend?.(10+Math.random()*5);
+
+          // Proximity events can cause ambient EMF flickers
+          if (d < 6.0) {
+            triggerEMF('ghost_nearby', 2 + Math.floor(Math.random() * 2)); // 2–3
+          }
+
           const inRoom = (currentRoomName() && ghost.roomName && currentRoomName()===ghost.roomName);
           const radioChance = inRoom ? 0.45 : 0.12;
           if (radioCooldown<=0 && Math.random()<radioChance){
@@ -86,5 +110,20 @@
       }
     });
   }
+
   attachLoop();
+
+  // ---------------- Event hooks for EMF ----------------
+  // Hunt start
+  ghost.onHuntStart = function(){
+    triggerEMF('hunt_start', 3);
+    window.GhostAudio?.scream?.();
+  };
+
+  // Firelight extinguish
+  ghost.onFirelightExtinguish = function(){
+    triggerEMF('fire_extinguish', 2 + Math.floor(Math.random()*2));
+    window.GhostAudio?.fireExtinguish?.();
+  };
+
 })();
