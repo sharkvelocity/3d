@@ -7,6 +7,7 @@
    - Havok handles collisions & gravity
    - Slopes supported
    - Step sounds preserved
+   - PS5 controller fully mapped to actions
 */
 
 (function () {
@@ -24,7 +25,6 @@
     meshYOffset: 0.0,
     spawn: new BABYLON.Vector3(-2.12, 0, -9.96)
   };
-  const SPAWN_POS = new BABYLON.Vector3(-2.12, 0, -9.96);
   const CAM3 = { back: 2.8, up: 1.25 };
   const SPEEDS = { walk: 1.8, run: 3.5, crouch: 1.0 };
   const MAX_SLOPE = 45;
@@ -39,7 +39,7 @@
 
   // Input flags
   const input = { forward:false, back:false, left:false, right:false, run:false };
-  let lastCrouchPressed = false; // gamepad crouch toggle fix
+  let lastCrouchPressed = false; 
 
   // ----- Keyboard input ---------------------------------------------------
   addEventListener("keydown", (e) => {
@@ -75,13 +75,12 @@
     body.isVisible = false;
     body.position.copyFrom(AVATAR.spawn);
 
-// Instead of PhysicsAggregate
-body.physicsImpostor = new BABYLON.PhysicsImpostor(
-  body,
-  BABYLON.PhysicsImpostor.CapsuleImpostor, // or Capsule
-  { mass: 70, restitution: 0, friction: 0.8 },
-  scene
-);
+    body.physicsImpostor = new BABYLON.PhysicsImpostor(
+      body,
+      BABYLON.PhysicsImpostor.CapsuleImpostor,
+      { mass: 70, restitution: 0, friction: 0.8 },
+      scene
+    );
 
     PP.rig.body = body;
     return body;
@@ -95,7 +94,6 @@ body.physicsImpostor = new BABYLON.PhysicsImpostor(
     const scale = AVATAR.targetHeight / rawH;
     root.scaling.setAll(scale);
 
-    // feet at y=0
     const bb2 = root.getHierarchyBoundingVectors();
     root.position.y -= bb2.min.y;
 
@@ -189,7 +187,6 @@ body.physicsImpostor = new BABYLON.PhysicsImpostor(
       }
       playAnim(isCrouching ? "crouchWalk" : "walk");
 
-      // Step sounds
       if (!lastPos) lastPos = body.position.clone();
       const d = BABYLON.Vector3.Distance(lastPos, body.position);
       if (d > 0.6){
@@ -214,16 +211,57 @@ body.physicsImpostor = new BABYLON.PhysicsImpostor(
     const pad = pads[0]; if (!pad) return;
 
     const threshold = 0.2;
-    input.forward = pad.axes[1] < -threshold;
-    input.back    = pad.axes[1] > threshold;
-    input.left    = pad.axes[0] < -threshold;
-    input.right   = pad.axes[0] > threshold;
-    input.run     = pad.buttons[0].pressed; // Cross = run
+    const lx = pad.axes[0]; // left stick X
+    const ly = pad.axes[1]; // left stick Y
+    input.forward = ly < -threshold;
+    input.back    = ly > threshold;
+    input.left    = lx < -threshold;
+    input.right   = lx > threshold;
 
-    // Toggle crouch only on button press
-    if(pad.buttons[1].pressed && !lastCrouchPressed){
-        isCrouching = !isCrouching;
+    // Buttons mapping
+    const L1 = pad.buttons[4].pressed;
+    const L2 = pad.buttons[6].value > 0.1;
+    const R1 = pad.buttons[5].pressed;
+    const R2 = pad.buttons[7].value > 0.1;
+    const X  = pad.buttons[0].pressed;
+    const Circle = pad.buttons[1].pressed;
+    const Triangle = pad.buttons[3].pressed;
+    const Square = pad.buttons[2].pressed;
+    const dUp = pad.buttons[12].pressed;
+    const dDown = pad.buttons[13].pressed;
+    const dLeft = pad.buttons[14].pressed;
+    const dRight = pad.buttons[15].pressed;
+
+    input.run = L1;
+
+    if(L2 && window.PP?.inventory?.heldItem) window.PP.inventory.placeHeld();
+    if(R1 && window.PP?.notebook?.isOpen) window.PP.notebook.nextPage();
+    if(R2 && window.PP?.interact) window.PP.interact.tryHoldInteract();
+
+    if(X && !PP.rig._xPressedLast){
+      if(PP.inventory?.heldItem) PP.inventory.useHeldItem();
+      else if(PP.van?.active) PP.van.selectItem();
+      else if(PP.guessGhost) PP.guessGhost();
     }
+    PP.rig._xPressedLast = X;
+
+    if(Circle && !PP.rig._circleLast){
+      if(PP.inventory?.heldItem) PP.inventory.tossHeldItem();
+      else if(PP.van?.active) PP.van.close();
+      else if(PP.notebook?.isOpen) PP.notebook.close();
+    }
+    PP.rig._circleLast = Circle;
+
+    if(Triangle && !PP.rig._triangleLast) PP.inventory?.cycleItem();
+    PP.rig._triangleLast = Triangle;
+
+    if(Square && !PP.rig._squareLast) PP.interact?.pickupNearby();
+    PP.rig._squareLast = Square;
+
+    if(dDown && !PP.rig._dDownLast) PP.inventory?.toggleFlashlight();
+    PP.rig._dDownLast = dDown;
+
+    if(pad.buttons[1].pressed && !lastCrouchPressed) isCrouching = !isCrouching;
     lastCrouchPressed = pad.buttons[1].pressed;
   }
 
@@ -244,7 +282,7 @@ body.physicsImpostor = new BABYLON.PhysicsImpostor(
     makeBody();
     stickToGround(BABYLON.Vector3.Zero());
     await loadAvatar();
-    stickToGround(BABYLON.Vector3.Zero()); // snap to ground on spawn
+    stickToGround(BABYLON.Vector3.Zero());
 
     bindToggle();
     moveLoop();
