@@ -7,6 +7,7 @@
    - Havok handles collisions & gravity
    - Slopes supported
    - Step sounds preserved
+   - Invisible physics capsule (no box under player)
 */
 
 (function () {
@@ -74,30 +75,15 @@
   }
 
   function makeBody(){
-    body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule", {
-      height: AVATAR.targetHeight,
-      radius: 0.4
-    }, scene);
-    body.isVisible = false;
+    // Invisible physics capsule
+    body = new BABYLON.TransformNode("player_body", scene);
     body.position.copyFrom(getSpawnPosition());
 
-    // --- ensure physics engine exists ---
-    if (!scene.physicsEngine) {
-        const havokPlugin = scene.getPhysicsPlugin() || new BABYLON.HavokPlugin(true, HavokPhysics());
-        scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), havokPlugin);
-        console.log("[Physics] Engine initialized");
-    }
-
-    // --- dispose previous impostor safely ---
-    if (body.physicsImpostor){
-        try { body.physicsImpostor.dispose(); } catch(e){ console.warn(e); }
-    }
-
     body.physicsImpostor = new BABYLON.PhysicsImpostor(
-      body,
-      BABYLON.PhysicsImpostor.CapsuleImpostor,
-      { mass: 70, restitution: 0, friction: 0.8 },
-      scene
+        body,
+        BABYLON.PhysicsImpostor.CapsuleImpostor,
+        { mass: 70, restitution: 0, friction: 0.8 },
+        scene
     );
 
     PP.rig.body = body;
@@ -252,10 +238,8 @@
   async function start(){
     if (!ensureScene()){ setTimeout(start,100); return; }
 
-    const havok = await HavokPhysics(); // ensure Havok lib is loaded
-    if (!scene.physicsEngine){
-        scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
-    }
+    const havok = await HavokPhysics();
+    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
     makeBody();
     stickToGround(BABYLON.Vector3.Zero());
