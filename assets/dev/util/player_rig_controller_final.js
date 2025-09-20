@@ -1,12 +1,12 @@
-/* File: assets/dev/util/player_rig_controller_fixed.js
-   Player rig controller with proper collision, WASD + PS5 support
+/* File: assets/dev/util/player_rig_controller_final.js
+   Player rig controller with Havok + raycast ground detection + PS5 controller
    ------------------------------------------------------------
    - WASD / PS5 movement, ` toggles 1P/3P
    - C toggles crouch (with crouched walk anim)
-   - Ground detection with raycast & slopes
-   - Physics capsule correctly positioned on map
-   - No floating square under player
-   - Step sounds
+   - Raycast keeps player anchored to ground with slopes
+   - Havok handles collisions & gravity
+   - Slopes supported
+   - Step sounds preserved
 */
 
 (function () {
@@ -35,41 +35,37 @@
   let currentAnim = null;
   let lastPos = null;
 
+  // Input flags
   const input = { forward:false, back:false, left:false, right:false, run:false };
   let lastCrouchPressed = false;
 
   // ----- Keyboard input ---------------------------------------------------
-  const KEY_MAP = { 
-    "KeyW": "forward", "ArrowUp":"forward",
-    "KeyS":"back", "ArrowDown":"back",
-    "KeyA":"left", "ArrowLeft":"left",
-    "KeyD":"right","ArrowRight":"right",
-    "ShiftLeft":"run","ShiftRight":"run"
-  };
+  addEventListener("keydown", (e) => {
+    if (e.code==="KeyW"||e.code==="ArrowUp") input.forward = true;
+    if (e.code==="KeyS"||e.code==="ArrowDown") input.back = true;
+    if (e.code==="KeyA"||e.code==="ArrowLeft") input.left = true;
+    if (e.code==="KeyD"||e.code==="ArrowRight") input.right = true;
+    if (e.code==="ShiftLeft"||e.code==="ShiftRight") input.run = true;
+    if (e.code==="KeyC" && !lastCrouchPressed) { isCrouching = !isCrouching; lastCrouchPressed = true; }
+  }, true);
 
-  addEventListener("keydown", e => {
-    if (KEY_MAP[e.code]) input[KEY_MAP[e.code]] = true;
-    if (e.code === "KeyC") isCrouching = !isCrouching;
-    if (e.code === "Backquote") isThird = !isThird;
-  });
-
-  addEventListener("keyup", e => {
-    if (KEY_MAP[e.code]) input[KEY_MAP[e.code]] = false;
-  });
+  addEventListener("keyup", (e) => {
+    if (e.code==="KeyW"||e.code==="ArrowUp") input.forward = false;
+    if (e.code==="KeyS"||e.code==="ArrowDown") input.back = false;
+    if (e.code==="KeyA"||e.code==="ArrowLeft") input.left = false;
+    if (e.code==="KeyD"||e.code==="ArrowRight") input.right = false;
+    if (e.code==="ShiftLeft"||e.code==="ShiftRight") input.run = false;
+    if (e.code==="KeyC") lastCrouchPressed = false;
+  }, true);
 
   // ----- Scene ------------------------------------------------------------
   function ensureScene(){
     scene = scene || window.SCENE || BABYLON.EngineStore?.LastCreatedScene;
     camera = scene?.activeCamera;
-    // Detach Babylon default keyboard controls
-    if (camera?.inputs) {
-      camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
-      camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
-    }
     return !!(scene && camera);
   }
 
-  // ----- Spawn position ---------------------------------------------------
+  // ----- Physics Capsule --------------------------------------------------
   function getSpawnPosition() {
     if (window.MAP_DEF?.spawn) {
         const sp = window.MAP_DEF.spawn;
@@ -78,12 +74,22 @@
     return new BABYLON.Vector3(0, AVATAR.eyeY, 0);
   }
 
-  // ----- Physics Capsule --------------------------------------------------
-  function makeBody(){
+  async function makeBody() {
     if (!scene) return;
 
-    // Dispose existing
-    if (body && !body.isDisposed()) body.dispose();
+    // Ensure Havok plugin is ready
+    if (!scene.isPhysicsEnabled()) {
+      const havok = await HavokPhysics();
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+    }
+
+    // Dispose old body safely
+    if (body && !body.isDisposed()) {
+      try {
+        if (body.physicsImpostor) body.physicsImpostor.dispose();
+        body.dispose();
+      } catch {}
+    }
 
     body = BABYLON.MeshBuilder.CreateCapsule("player_capsule", {
       height: AVATAR.targetHeight,
@@ -155,19 +161,16 @@
     }
   }
 
-  // ----- Ground Detection -----------------------------------------------
+  // ----- Raycast & slope handling -----------------------------------------
   function stickToGround(moveDir){
     if (!body || !scene) return moveDir;
-
-    const origin = body.position.add(new BABYLON.Vector3(0, 0.5, 0));
+    const origin = body.position.add(new BABYLON.Vector3(0, 1, 0));
     const ray = new BABYLON.Ray(origin, BABYLON.Axis.Y.scale(-1), 4);
     const pick = scene.pickWithRay(ray, m => m.isPickable && m.name.includes("ground"));
-
     if (!pick.hit) return moveDir;
 
     const groundPoint = pick.pickedPoint;
     const groundNormal = pick.getNormal(true);
-
     body.position.y = groundPoint.y + AVATAR.targetHeight/2;
 
     if (moveDir && moveDir.lengthSquared() > 0.001){
@@ -185,11 +188,11 @@
     return moveDir || BABYLON.Vector3.Zero();
   }
 
-  // ----- Movement Loop ---------------------------------------------------
+  // ----- Movement ---------------------------------------------------------
   function moveLoop(){
     if (!ensureScene()) return void requestAnimationFrame(moveLoop);
-
     const dt = scene.getEngine().getDeltaTime() / 1000;
+
     const forward = camera.getDirection(BABYLON.Vector3.Forward()).normalize();
     const right   = camera.getDirection(BABYLON.Vector3.Right()).normalize();
 
@@ -222,7 +225,6 @@
     stickToGround();
     syncCamera();
     handleGamepad();
-
     requestAnimationFrame(moveLoop);
   }
 
@@ -237,26 +239,31 @@
     input.back    = pad.axes[1] > threshold;
     input.left    = pad.axes[0] < -threshold;
     input.right   = pad.axes[0] > threshold;
-    input.run     = pad.buttons[0]?.pressed;
+    input.run     = pad.buttons[0].pressed;
 
-    if(pad.buttons[1]?.pressed && !lastCrouchPressed){
+    if(pad.buttons[1].pressed && !lastCrouchPressed){
         isCrouching = !isCrouching;
     }
-    lastCrouchPressed = pad.buttons[1]?.pressed;
+    lastCrouchPressed = pad.buttons[1].pressed;
+  }
+
+  // ----- View toggle ------------------------------------------------------
+  function bindToggle(){
+    addEventListener("keydown", (e)=>{
+      if (e.code==="Backquote"){ e.preventDefault(); isThird = !isThird; }
+    });
   }
 
   // ----- Start ------------------------------------------------------------
   async function start(){
     if (!ensureScene()){ setTimeout(start,100); return; }
 
-    const havok = await HavokPhysics();
-    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
-
-    makeBody();
+    await makeBody();
     stickToGround(BABYLON.Vector3.Zero());
     await loadAvatar();
     stickToGround(BABYLON.Vector3.Zero());
 
+    bindToggle();
     moveLoop();
   }
 
