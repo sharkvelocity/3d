@@ -7,7 +7,6 @@
    - Havok handles collisions & gravity
    - Slopes supported
    - Step sounds preserved
-   - PS5 controller fully mapped to actions
 */
 
 (function () {
@@ -22,8 +21,7 @@
     file: "./assets/models/player/player.glb",
     eyeY: 1.6,
     targetHeight: 1.75,
-    meshYOffset: 0.0,
-    spawn: new BABYLON.Vector3(-2.12, 0, -9.96)
+    meshYOffset: 0.0
   };
   const CAM3 = { back: 2.8, up: 1.25 };
   const SPEEDS = { walk: 1.8, run: 3.5, crouch: 1.0 };
@@ -39,7 +37,7 @@
 
   // Input flags
   const input = { forward:false, back:false, left:false, right:false, run:false };
-  let lastCrouchPressed = false; 
+  let lastCrouchPressed = false;
 
   // ----- Keyboard input ---------------------------------------------------
   addEventListener("keydown", (e) => {
@@ -67,13 +65,21 @@
   }
 
   // ----- Physics Capsule --------------------------------------------------
+  function getSpawnPosition() {
+    if (window.MAP_DEF?.spawn) {
+        const sp = window.MAP_DEF.spawn;
+        return new BABYLON.Vector3(sp.x || 0, sp.y || AVATAR.eyeY, sp.z || 0);
+    }
+    return new BABYLON.Vector3(0, AVATAR.eyeY, 0);
+  }
+
   function makeBody(){
     body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule", {
       height: AVATAR.targetHeight,
       radius: 0.4
     }, scene);
     body.isVisible = false;
-    body.position.copyFrom(AVATAR.spawn);
+    body.position.copyFrom(getSpawnPosition());
 
     body.physicsImpostor = new BABYLON.PhysicsImpostor(
       body,
@@ -149,7 +155,7 @@
     const groundNormal = pick.getNormal(true);
     body.position.y = groundPoint.y + AVATAR.targetHeight/2;
 
-    if (moveDir.lengthSquared() > 0.001){
+    if (moveDir && moveDir.lengthSquared() > 0.001){
       const slopeAngle = BABYLON.Vector3.GetAngleBetweenVectors(
         BABYLON.Axis.Y, groundNormal, BABYLON.Vector3.Forward()
       ) * (180/Math.PI);
@@ -161,7 +167,7 @@
         return BABYLON.Vector3.Zero();
       }
     }
-    return moveDir;
+    return moveDir || BABYLON.Vector3.Zero();
   }
 
   // ----- Movement ---------------------------------------------------------
@@ -211,57 +217,15 @@
     const pad = pads[0]; if (!pad) return;
 
     const threshold = 0.2;
-    const lx = pad.axes[0]; // left stick X
-    const ly = pad.axes[1]; // left stick Y
-    input.forward = ly < -threshold;
-    input.back    = ly > threshold;
-    input.left    = lx < -threshold;
-    input.right   = lx > threshold;
+    input.forward = pad.axes[1] < -threshold;
+    input.back    = pad.axes[1] > threshold;
+    input.left    = pad.axes[0] < -threshold;
+    input.right   = pad.axes[0] > threshold;
+    input.run     = pad.buttons[0].pressed;
 
-    // Buttons mapping
-    const L1 = pad.buttons[4].pressed;
-    const L2 = pad.buttons[6].value > 0.1;
-    const R1 = pad.buttons[5].pressed;
-    const R2 = pad.buttons[7].value > 0.1;
-    const X  = pad.buttons[0].pressed;
-    const Circle = pad.buttons[1].pressed;
-    const Triangle = pad.buttons[3].pressed;
-    const Square = pad.buttons[2].pressed;
-    const dUp = pad.buttons[12].pressed;
-    const dDown = pad.buttons[13].pressed;
-    const dLeft = pad.buttons[14].pressed;
-    const dRight = pad.buttons[15].pressed;
-
-    input.run = L1;
-
-    if(L2 && window.PP?.inventory?.heldItem) window.PP.inventory.placeHeld();
-    if(R1 && window.PP?.notebook?.isOpen) window.PP.notebook.nextPage();
-    if(R2 && window.PP?.interact) window.PP.interact.tryHoldInteract();
-
-    if(X && !PP.rig._xPressedLast){
-      if(PP.inventory?.heldItem) PP.inventory.useHeldItem();
-      else if(PP.van?.active) PP.van.selectItem();
-      else if(PP.guessGhost) PP.guessGhost();
+    if(pad.buttons[1].pressed && !lastCrouchPressed){
+        isCrouching = !isCrouching;
     }
-    PP.rig._xPressedLast = X;
-
-    if(Circle && !PP.rig._circleLast){
-      if(PP.inventory?.heldItem) PP.inventory.tossHeldItem();
-      else if(PP.van?.active) PP.van.close();
-      else if(PP.notebook?.isOpen) PP.notebook.close();
-    }
-    PP.rig._circleLast = Circle;
-
-    if(Triangle && !PP.rig._triangleLast) PP.inventory?.cycleItem();
-    PP.rig._triangleLast = Triangle;
-
-    if(Square && !PP.rig._squareLast) PP.interact?.pickupNearby();
-    PP.rig._squareLast = Square;
-
-    if(dDown && !PP.rig._dDownLast) PP.inventory?.toggleFlashlight();
-    PP.rig._dDownLast = dDown;
-
-    if(pad.buttons[1].pressed && !lastCrouchPressed) isCrouching = !isCrouching;
     lastCrouchPressed = pad.buttons[1].pressed;
   }
 
