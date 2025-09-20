@@ -41,7 +41,7 @@
     if(e.code==="KeyA") input.left=true;
     if(e.code==="KeyD") input.right=true;
     if(e.code==="ShiftLeft"||e.code==="ShiftRight") input.run=true;
-    if(e.code==="KeyC" && !lastCrouchPressed){ isCrouching = !isCrouching; }
+    if(e.code==="KeyC" && !lastCrouchPressed){ isCrouching = !isCrouching; lastCrouchPressed=true; }
     if(e.code==="Backquote"){ isThird = !isThird; e.preventDefault(); }
   },true);
 
@@ -71,7 +71,6 @@
   }
 
   function makeBody(){
-    // Capsule is invisible; physics-only, no giant box
     body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule",{
       height: AVATAR.targetHeight,
       radius:0.35
@@ -117,6 +116,7 @@
     avatarRoot=root;
     avatarMeshes=root.getChildMeshes();
     avatarRoot.parent=body;
+    avatarRoot.isVisible = true;
   }
 
   function playAnim(name){
@@ -140,11 +140,11 @@
   }
 
   function stickToGround(moveDir){
-    if(!body || !scene) return moveDir;
+    if(!body || !scene) return moveDir||BABYLON.Vector3.Zero();
     const origin=body.position.add(new BABYLON.Vector3(0,1,0));
     const ray=new BABYLON.Ray(origin, BABYLON.Axis.Y.scale(-1), 4);
     const pick=scene.pickWithRay(ray, m=>m.isPickable && m.name.toLowerCase().includes("ground"));
-    if(!pick.hit) return moveDir;
+    if(!pick.hit) return moveDir||BABYLON.Vector3.Zero();
 
     const groundPoint=pick.pickedPoint;
     const groundNormal=pick.getNormal(true);
@@ -217,12 +217,20 @@
   async function start(){
     if(!ensureScene()){ setTimeout(start,100); return; }
 
+    // Wait for Havok physics engine
     const havok = await HavokPhysics();
-    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+    if(!scene.getPhysicsEngine()) {
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+    }
 
     makeBody();
-    stickToGround(BABYLON.Vector3.Zero());
+    body.physicsImpostor.sleep(); // prevent jitter
+    body.isVisible = false;
+
     await loadAvatar();
+    avatarRoot.isVisible = true;
+    avatarRoot.parent = body;
+
     stickToGround(BABYLON.Vector3.Zero());
 
     moveLoop();
