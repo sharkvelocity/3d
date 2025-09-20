@@ -1,8 +1,9 @@
-/* game_bootstrap.js — robust start flow (single engine, single map)
+/* game_bootstrap.js — robust start flow with player rig integration
    - Populates map dropdown from assets/models/map/maps.json
    - Waits for Start to create engine/scene and then import the selected map
    - Ensures no double-start, no duplicate fallback ground
    - Disposes fallback if the real map succeeds
+   - Integrates player rig fully (WASD, PS5, camera, animations)
 */
 (function () {
   "use strict";
@@ -60,13 +61,11 @@
 
   // ---------- map list / selector ----------
   async function loadManifest() {
-    // Expected at this path; adjust if your repo differs
     let j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) manifest = j;
     else if (j && Array.isArray(j.maps)) manifest = j.maps;
 
     if (!manifest.length) {
-      // Fallback list — only used if file missing
       manifest = [
         { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.config.js" },
         { file: "furnished_house.glb",  title: "Furnished House",  def: "furnished_house.js" },
@@ -104,7 +103,7 @@
 
   // ---------- engine + scene ----------
   function createEngineScene(){
-    if (engine && scene) return; // idempotent
+    if (engine && scene) return;
     const canvas = $("#renderCanvas");
     if (!canvas) throw new Error("Missing #renderCanvas");
     if (!window.BABYLON) throw new Error("BABYLON is not loaded");
@@ -112,7 +111,6 @@
     engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
     scene  = new BABYLON.Scene(engine);
 
-    // Night-ish feel + collisions/gravity
     scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
     scene.fogDensity = 0.0045;
     scene.fogColor   = new BABYLON.Color3(0.02,0.03,0.05);
@@ -120,24 +118,15 @@
     hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
     hemi.intensity = 0.35;
 
+    // Camera is only placeholder; player rig will control camera
     camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
     camera.minZ = 0.1;
-    camera.inertia = 0;
-    camera.applyGravity = true;
-    camera.checkCollisions = true;
-    camera.ellipsoid = new BABYLON.Vector3(0.35, 0.9, 0.35);
-    camera.ellipsoidOffset = new BABYLON.Vector3(0, 0.4, 0);
 
+    // Disable default Babylon inputs
     camera.inputs.clear();
-    camera.inputs.addMouse();
-    camera.inputs.addKeyboard();
 
-    camera.attachControl(canvas, true);
-
-    // Export for other modules
     window.ENGINE = engine; window.SCENE = scene; window.camera = camera;
 
-    // Render loop
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
     mark("engine+scene-created");
@@ -155,7 +144,6 @@
       const ok = await loadScriptOnce(c);
       if (ok && window.MAP_DEF) return true;
     }
-    // Minimal synthesized def to keep going
     window.MAP_DEF = window.MAP_DEF || {};
     MAP_DEF.file = mapFile || MAP_DEF.file || "";
     MAP_DEF.scale = MAP_DEF.scale ?? 1;
@@ -198,7 +186,6 @@
     const chosen = getSelectedMap();
     const mapFile = chosen?.file || "Abandoned_House.glb";
 
-    // clear previous import/fallback
     try { if (mapRoot && !mapRoot.isDisposed()) mapRoot.dispose(false, true); } catch{}
     mapRoot = null;
     try { if (fallbackGround && !fallbackGround.isDisposed()) { fallbackGround.dispose(false, true); fallbackGround = null; } } catch{}
@@ -211,7 +198,6 @@
       );
       mapRoot = res.meshes[0] || null;
 
-      // Apply MAP_DEF + enable collisions
       if (mapRoot) {
         applyMapDefToRoot(mapRoot);
         res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch(_){} });
@@ -223,27 +209,25 @@
 
     } catch (e) {
       warn("Map import failed, creating fallback ground:", e);
-      // 30x30 meters ~ 900 sqft (1m ~ 3.28ft → 30m ≈ 98.4ft side ≈ 9680 sqft; use 28.4m for ~900 sqft square)
-      // User asked 900 square feet room; that’s ~ 28.4ft x 28.4ft → 8.66m x 8.66m.
-      // But earlier asked “900 square feet by 900 square feet” (huge). We’ll honor ~900 sqft room:
-      const sideM = 8.66; // ≈ 28.4ft
+      const sideM = 50;
       fallbackGround = BABYLON.MeshBuilder.CreateGround("fallback_ground",
         { width: sideM, height: sideM, subdivisions: 1 }, scene);
       fallbackGround.checkCollisions = true;
+      fallbackGround.position.y = 0;
       enforceSpawn();
     }
   }
 
   // ---------- spawn ----------
   function enforceSpawn(){
-    if (!scene?.activeCamera) return;
+    if (!scene) return;
     const d = window.MAP_DEF || {};
     const sp = d.spawn
       ? {x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0}
       : {x:0,y:1.8,z:0};
 
-    scene.activeCamera.position.set(sp.x, sp.y, sp.z);
-    try { scene.activeCamera.setTarget(new BABYLON.Vector3(sp.x, sp.y + 1, sp.z + 2)); } catch(_){}
+    // Let player rig handle camera position; we just store spawn
+    window.__PP_SPAWN = new BABYLON.Vector3(sp.x, sp.y, sp.z);
   }
 
   // ---------- pointer lock helpers ----------
@@ -251,9 +235,8 @@
     const canvas = $("#renderCanvas");
     if (!canvas) return;
     const lock = ()=>{ if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch{} } };
-    // Re-lock on click, but let your UI release it (Notebook/Van can call exitPointerLock)
     canvas.addEventListener("click", lock);
-    setTimeout(lock, 200); // first try shortly after start
+    setTimeout(lock, 200);
   }
 
   // ---------- Start button flow ----------
@@ -265,30 +248,27 @@
       Loader.reset();
       Loader.addStep("Preparing engine…", async ()=> { createEngineScene(); });
       Loader.addStep("Loading map…",       async ()=> { await importSelectedMap(); });
+      Loader.addStep("Loading player rig…", async ()=> { 
+          await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
+      });
       Loader.addStep("Finalizing…",        async ()=> { enablePointerLockOnce(); });
       await Loader.run();
 
-      // Broadcast start for subsystems (inventory, weather, etc.)
       window.dispatchEvent(new CustomEvent("pp:start"));
-      // Focus canvas
       try { $("#renderCanvas")?.focus?.(); } catch{}
 
     } catch (err) {
       warn("fatal start error:", err);
       try { window.BOOTLOG?.add?.("fatal", { err: String(err) }); } catch(_){}
-      // Allow retry
       started = false;
       if (title) title.style.display = "flex";
       alert("Boot failed. Check console for details.");
     }
   }
 
-  // ---------- wire UI and early manifest load ----------
   (function wire(){
     const btn = $("#start-button");
     if (btn) btn.addEventListener("click", startGame, { passive: false });
-
-    // Preload manifest so dropdown is ready before start
     if (document.readyState === "loading"){
       document.addEventListener("DOMContentLoaded", ()=> loadManifest());
     } else {
