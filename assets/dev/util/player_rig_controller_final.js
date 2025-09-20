@@ -74,9 +74,14 @@
     return new BABYLON.Vector3(0, AVATAR.eyeY, 0);
   }
 
-  function makeBody(){
-    // Invisible physics capsule
-    body = new BABYLON.TransformNode("player_body", scene);
+ function makeBody(){
+    // Physics capsule mesh (invisible)
+    body = BABYLON.MeshBuilder.CreateCapsule("player_capsule", {
+        height: AVATAR.targetHeight,
+        radius: 0.4
+    }, scene);
+
+    body.isVisible = false; // hides the capsule
     body.position.copyFrom(getSpawnPosition());
 
     body.physicsImpostor = new BABYLON.PhysicsImpostor(
@@ -88,7 +93,8 @@
 
     PP.rig.body = body;
     return body;
-  }
+}
+
 
   // ----- Avatar -----------------------------------------------------------
   function normalizeAvatarScale(root){
