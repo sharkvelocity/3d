@@ -4,6 +4,7 @@
    - Ensures no double-start, no duplicate fallback ground
    - Disposes fallback if the real map succeeds
    - Integrates player rig fully (WASD, PS5, camera, animations)
+   - Fully integrates PP.audio.weather system
 */
 (function () {
   "use strict";
@@ -50,15 +51,6 @@
     }
     return { reset, addStep, run, show, hide, label };
   })();
-
-  // Randomize weather on start
-  window.addEventListener("pp:start", () => {
-    const states = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
-    const chosen = states[Math.floor(Math.random() * states.length)];
-    Weather.init();           // ensure sounds and particles are ready
-    Weather.set(chosen, { intensity: 1.0, immediate: true });
-    console.log("[Weather] randomized to:", chosen);
-  }, { once: true });
 
   // ---------- state ----------
   let engine = null, scene = null, camera = null;
@@ -119,6 +111,7 @@
 
     engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
     scene  = new BABYLON.Scene(engine);
+    window.SCENE = scene; // global for weather
 
     scene.fogMode    = BABYLON.Scene.FOGMODE_EXP2;
     scene.fogDensity = 0.0045;
@@ -127,14 +120,12 @@
     hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
     hemi.intensity = 0.35;
 
-    // Camera is only placeholder; player rig will control camera
+    // Camera placeholder; player rig controls camera
     camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
     camera.minZ = 0.1;
-
-    // Disable default Babylon inputs
     camera.inputs.clear();
 
-    window.ENGINE = engine; window.SCENE = scene; window.camera = camera;
+    window.ENGINE = engine; window.camera = camera;
 
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
@@ -166,9 +157,7 @@
     if (!root || !window.MAP_DEF) return;
     const d = MAP_DEF;
     try {
-      if (typeof d.scale === "number"){
-        root.scaling.set(d.scale, d.scale, d.scale);
-      }
+      if (typeof d.scale === "number") root.scaling.set(d.scale, d.scale, d.scale);
       const yaw = (d.rotationY||0) * Math.PI/180;
       root.rotation.set(0, yaw, 0);
       if (d.offset){
@@ -231,11 +220,7 @@
   function enforceSpawn(){
     if (!scene) return;
     const d = window.MAP_DEF || {};
-    const sp = d.spawn
-      ? {x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0}
-      : {x:0,y:1.8,z:0};
-
-    // Let player rig handle camera position; we just store spawn
+    const sp = d.spawn ? {x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0} : {x:0,y:1.8,z:0};
     window.__PP_SPAWN = new BABYLON.Vector3(sp.x, sp.y, sp.z);
   }
 
@@ -248,73 +233,81 @@
     setTimeout(lock, 200);
   }
 
- // --- startGame with loader + rig ready sync ---
-async function startGame(){
-  if (started) return;
-  started = true;
+  // ---------- startGame with loader + rig + weather ----------
+  async function startGame(){
+    if (started) return;
+    started = true;
 
-  const title = document.querySelector("#title-screen");
-  if (title) title.style.display = "none";
+    const title = document.querySelector("#title-screen");
+    if (title) title.style.display = "none";
 
-  console.log("[bootstrap] Starting game…");
+    console.log("[bootstrap] Starting game…");
 
-  try {
-    Loader.reset();
-    Loader.addStep("Preparing engine…", async () => {
-      createEngineScene();
-    });
-    Loader.addStep("Loading map…", async () => {
-      await importSelectedMap();
-    });
-    Loader.addStep("Loading player rig…", async () => {
-  await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
-  await new Promise((resolve) => {
-    if (window.PP?.rigReady) return resolve();
-    document.addEventListener("pp:rig-ready", resolve, { once: true });
-  });
-  console.log("[bootstrap] Player rig ready");
+    try {
+      Loader.reset();
+      Loader.addStep("Preparing engine…", async () => { createEngineScene(); });
 
-  // 🔧 Explicitly attach scene camera to rig
-  if (scene && scene.activeCamera && window.PP?.rig?.body) {
-    scene.activeCamera.lockedTarget = window.PP.rig.body;
-    console.log("[bootstrap] Camera locked to player rig body");
+      Loader.addStep("Loading map…", async () => { await importSelectedMap(); });
+
+      Loader.addStep("Loading player rig…", async () => {
+        await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
+        await new Promise((resolve) => {
+          if (window.PP?.rigReady) return resolve();
+          document.addEventListener("pp:rig-ready", resolve, { once: true });
+        });
+        console.log("[bootstrap] Player rig ready");
+
+        // Lock camera to rig body
+        if (scene && scene.activeCamera && window.PP?.rig?.body) {
+          scene.activeCamera.lockedTarget = window.PP.rig.body;
+          console.log("[bootstrap] Camera locked to player rig body");
+        }
+      });
+
+      Loader.addStep("Initializing weather…", async () => {
+        if (window.PP?.audio?.weather && scene) {
+          // Set default Clear weather
+          PP.audio.weather.set("Clear", scene);
+          console.log("[bootstrap] Weather system initialized");
+        }
+      });
+
+      Loader.addStep("Finalizing…", async () => {
+        if (window.__PP_SPAWN) scene.activeCamera.position.copyFrom(window.__PP_SPAWN);
+        else scene.activeCamera.position.set(0, 1.8, 0);
+
+        if (!scene.lights || scene.lights.length === 0) {
+          const hemi = new BABYLON.HemisphericLight("tempLight", new BABYLON.Vector3(0,1,0), scene);
+          hemi.intensity = 1.0;
+        }
+
+        enablePointerLockOnce();
+      });
+
+      await Loader.run();
+
+      // Randomize weather AFTER everything is ready
+      window.dispatchEvent(new CustomEvent("pp:start"));
+      const states = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
+      const chosen = states[Math.floor(Math.random() * states.length)];
+      if (window.PP?.audio?.weather) PP.audio.weather.set(chosen, scene);
+      console.log("[Weather] randomized to:", chosen);
+
+      console.log("[bootstrap] Game started successfully.");
+      try { $("#renderCanvas")?.focus?.(); } catch{}
+
+    } catch (err) {
+      console.error("[bootstrap] Error starting game:", err);
+      started = false;
+      if (title) title.style.display = "flex";
+      alert("Boot failed. Check console for details.");
+    }
   }
-});
-    Loader.addStep("Finalizing…", async () => {
-      // attach camera to spawn
-      if (window.__PP_SPAWN) {
-        scene.activeCamera.position.copyFrom(window.__PP_SPAWN);
-        console.log("[bootstrap] Camera moved to spawn", scene.activeCamera.position);
-      } else {
-        scene.activeCamera.position.set(0, 1.8, 0);
-        console.log("[bootstrap] Camera fallback position", scene.activeCamera.position);
-      }
 
-      // add safety light if needed
-      if (!scene.lights || scene.lights.length === 0) {
-        const hemi = new BABYLON.HemisphericLight("tempLight", new BABYLON.Vector3(0,1,0), scene);
-        hemi.intensity = 1.0;
-        console.log("[bootstrap] Added fallback hemispheric light");
-      }
-
-      enablePointerLockOnce();
-    });
-
-    await Loader.run();
-
-    window.dispatchEvent(new CustomEvent("pp:start"));
-    console.log("[bootstrap] Game started successfully.");
-    try { $("#renderCanvas")?.focus?.(); } catch{}
-
-  } catch (err) {
-    console.error("[bootstrap] Error starting game:", err);
-    started = false;
-    if (title) title.style.display = "flex";
-    alert("Boot failed. Check console for details.");
-  }
-}
-   document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", () => {
     loadManifest().catch(e => console.error("Failed to load map manifest:", e));
-});
+  });
 
-})(); // closes the IIFE
+  window.startGame = startGame;
+
+})();
