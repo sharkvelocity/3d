@@ -92,42 +92,49 @@
   // ────── Lightning ──────
   function scheduleLightning(){ ST.nextLightningAt = performance.now()/1000 + (18+Math.random()*24)*(0.85+Math.random()*0.3); }
 
-  function flashBloodmoon(){
-    const s=S(); if(!s) return;
-    if(!ST._flashLayer){
-      const layer = document.createElement('div');
-      layer.id='flash-overlay-blood';
-      Object.assign(layer.style,{position:'fixed',inset:'0',pointerEvents:'none',background:'#f003',opacity:'0',transition:'opacity 80ms linear',zIndex:'5000'});
-      document.body.appendChild(layer); ST._flashLayer=layer;
-    }
+// ────── Bloodmoon Lightning / Flash (Babylon 3D version) ──────
+function flashBloodmoon(){
+  const s = S(); if(!s) return;
+  const c = cam(); if(!c?.position) return;
 
-    const c=cam();
-    const camPos=c?.globalPosition||c?.position||v3(0,1.7,0);
-    const forward=c?.getDirection?c.getDirection(BABYLON.Vector3.Forward()):v3(0,0,1);
-    const up=v3(0,1,0); const right=BABYLON.Vector3.Cross(forward,up).normalize();
-    const az=Math.random()*Math.PI*2; const dist=120+Math.random()*100;
-    const dir2D = forward.scale(Math.cos(az)).add(right.scale(Math.sin(az))).normalize();
-    const pos = camPos.add(dir2D.scale(dist)).add(v3(0,12+Math.random()*8,0));
-
-    if(!ST._flashLight || ST._flashLight.isDisposed()){
-      ST._flashLight = new BABYLON.PointLight("blood_flash",pos,s);
-      ST._flashLight.range=250;
-      ST._flashLight.diffuse=new BABYLON.Color3(0.8,0.1,0.1);
-      ST._flashLight.specular=ST._flashLight.diffuse;
-      ST._flashLight.intensity=0;
-    } else ST._flashLight.position.copyFrom(pos);
-
-    const pulses = 1 + (Math.random()<0.4?1:0); let i=0;
-    const doPulse=()=>{
-      if(i++>=pulses) return;
-      ST._flashLayer.style.opacity='0.18';
-      setTimeout(()=>ST._flashLayer.style.opacity='0',100+Math.random()*60);
-      ST._flashLight.intensity=0.6+Math.random()*0.4;
-      setTimeout(()=>ST._flashLight.intensity=0,120+Math.random()*80);
-      setTimeout(playThunder,1200+Math.random()*2300);
-      if(i<pulses) setTimeout(doPulse,100+Math.random()*140);
-    }; doPulse();
+  // Create glow layer for flash effect
+  if(!ST._glowLayer){
+    ST._glowLayer = new BABYLON.GlowLayer("bloodmoonGlow", s, { intensity: 0.25 });
+    ST._glowLayer.blurKernelSize = 64;
+    ST._glowLayer.customEmissiveColorSelector = (mesh, subMesh, material, result) => {
+      result.set(0.8,0.1,0.1,1);
+    };
   }
+
+  // Create point light if missing
+  if(!ST._flashLight || ST._flashLight.isDisposed()){
+    ST._flashLight = new BABYLON.PointLight("blood_flash", c.position.add(new BABYLON.Vector3(0,10,0)), s);
+    ST._flashLight.range = 250;
+    ST._flashLight.diffuse = new BABYLON.Color3(0.8,0.1,0.1);
+    ST._flashLight.specular = ST._flashLight.diffuse;
+    ST._flashLight.intensity = 0;
+  }
+
+  const pulses = 1 + (Math.random()<0.4?1:0); let i=0;
+  const doPulse = () => {
+    if(i++ >= pulses) return;
+
+    // Position light randomly around camera
+    const dir = new BABYLON.Vector3(Math.random()-0.5,0,Math.random()-0.5).normalize().scale(80+Math.random()*40);
+    ST._flashLight.position = c.position.add(dir).add(new BABYLON.Vector3(0,12+Math.random()*8,0));
+
+    // Pulse intensity
+    ST._flashLight.intensity = 0.6 + Math.random()*0.4;
+    setTimeout(()=>{ if(ST._flashLight) ST._flashLight.intensity = 0; }, 120 + Math.random()*80);
+
+    // Schedule thunder
+    setTimeout(playThunder, 1200 + Math.random()*2300);
+
+    if(i<pulses) setTimeout(doPulse, 100 + Math.random()*140);
+  };
+  doPulse();
+}
+
 
   function playThunder(){
     if(!ST.sounds.thunder?.length) return;
