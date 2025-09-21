@@ -172,23 +172,20 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
       try { canvas?.requestPointerLock?.(); } catch {}
       try { canvas?.focus?.(); } catch {}
 
-      // Engine and scene
-      const engine = window.ENGINE || new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
-      window.ENGINE = engine;
-
+      // Wait for Babylon scene to exist
       let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
       while(!scene) {
         await new Promise(r => setTimeout(r, 50));
         scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
       }
-      window.scene = scene;
+      window.scene = scene; // global
 
       if (loadingFill) loadingFill.style.width = '10%';
 
       // Enable collisions
       scene.collisionsEnabled = true;
 
-      // Physics
+      // Physics (Havok)
       const havok = await HavokPhysics();
       scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
@@ -199,6 +196,7 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
       const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
       skyboxMaterial.backFaceCulling = false;
       skybox.material = skyboxMaterial;
+
       skyboxMaterial.animations ??= [];
       const anim = new BABYLON.Animation(
         "cloudAnim",
@@ -207,31 +205,22 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
         BABYLON.Animation.ANIMATIONTYPE_FLOAT,
         BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE
       );
-      anim.setKeys([{ frame:0, value:10 },{ frame:100, value:50 },{ frame:200, value:10 }]);
+      anim.setKeys([{frame:0,value:10},{frame:100,value:50},{frame:200,value:10}]);
       skyboxMaterial.animations.push(anim);
       scene.beginAnimation(skyboxMaterial, 0, 200, true);
 
       if (loadingFill) loadingFill.style.width = '50%';
 
-      // Camera setup (spawn behind player)
-      if (!scene.activeCamera) {
-        const cam = new BABYLON.UniversalCamera("cam", new BABYLON.Vector3(0,5,-5), scene);
-        cam.setTarget(new BABYLON.Vector3(0,1,0));
-        cam.attachControl(canvas, true);
-        scene.activeCamera = cam;
-      }
-
-      // Import map
+      // Map import
       if (window.MAP_DEF?.file) {
         const mapPath = "./assets/models/map/" + window.MAP_DEF.file;
         BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
-          // Ensure collisions and physics
           meshes.forEach(mesh=>{
             mesh.isPickable = true;
             mesh.checkCollisions = true;
-            mesh.scaling = new BABYLON.Vector3(1,1,1); // adjust if needed
 
-            if (!mesh.physicsImpostor) {
+            // Havok-safe physics
+            if (!mesh.physicsImpostor){
               mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                 mesh,
                 BABYLON.PhysicsImpostor.MeshImpostor,
@@ -248,40 +237,38 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
             const sp = window.MAP_DEF?.spawn || {x:0,y:5,z:0};
             window.PP.rig.body.position.set(sp.x, sp.y, sp.z);
 
-            // Delay physics assignment to prevent instant fall
-            setTimeout(()=>{
-              if (!window.PP.rig.body.physicsImpostor){
-                window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
-                  window.PP.rig.body,
-                  BABYLON.PhysicsImpostor.CapsuleImpostor,
-                  { mass:80, restitution:0, friction:0.5 },
-                  scene
-                );
-              }
-            }, 100);
-
-            // Camera follow player
-            if (scene.activeCamera) {
-              scene.activeCamera.position = window.PP.rig.body.position.add(new BABYLON.Vector3(0, 1.6, -5));
-              scene.activeCamera.setTarget(window.PP.rig.body.position.add(new BABYLON.Vector3(0,1,0)));
+            if (!window.PP.rig.body.physicsImpostor){
+              window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
+                window.PP.rig.body,
+                BABYLON.PhysicsImpostor.CapsuleImpostor,
+                { mass: 80, restitution:0, friction:0.5 },
+                scene
+              );
             }
           }
 
           if (loadingFill) loadingFill.style.width = '100%';
 
-          // Hide loading box
-          setTimeout(() => {
-            if (loadingBox) loadingBox.style.display = 'none';
-          }, 400);
+          setTimeout(()=>{ if (loadingBox) loadingBox.style.display='none'; }, 400);
 
         }, null, function(scene,msg,ex){
           console.error("Error loading map:", msg, ex);
         });
       }
 
-      // Canvas resize handler
-      window.addEventListener('resize', ()=>engine?.resize());
-      engine?.resize();
+      // -----------------------------
+      // Havok-safe audio patch
+      // -----------------------------
+      if (!PP.audio.play){
+        PP.audio.play = function(name){
+          if (PP.audio.sfx?.play) PP.audio.sfx.play(name);
+        };
+      }
+
+      // -----------------------------
+      // Flame shader loader path
+      // -----------------------------
+      window.FLAME_SHADER_PATH = "./assets/dev/game/flame.fragment.fx";
 
     } catch(e){
       console.error("Start button error:", e);
@@ -289,7 +276,5 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
   }, {once:true});
 })();
 </script>
-
-
 </body>
 </html>
