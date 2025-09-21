@@ -248,42 +248,63 @@
     setTimeout(lock, 200);
   }
 
-  // ---------- Start button flow ----------
-  async function startGame(){
-    if (started) return;
-    started = true;
-    $("#title-screen")?.style.display="none";
+ // --- startGame with loader + rig ready sync ---
+async function startGame(){
+  if (started) return;
+  started = true;
 
-    try {
-      Loader.reset();
-      Loader.addStep("Preparing engine…", async ()=> { createEngineScene(); });
-      Loader.addStep("Loading map…",       async ()=> { await importSelectedMap(); });
-      Loader.addStep("Loading player rig…", async ()=> { 
-          await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
+  const title = document.querySelector("#title-screen");
+  if (title) title.style.display = "none";
+
+  console.log("[bootstrap] Starting game…");
+
+  try {
+    Loader.reset();
+    Loader.addStep("Preparing engine…", async () => {
+      createEngineScene();
+    });
+    Loader.addStep("Loading map…", async () => {
+      await importSelectedMap();
+    });
+    Loader.addStep("Loading player rig…", async () => {
+      await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
+      // wait until rig signals ready
+      await new Promise((resolve) => {
+        if (window.PP?.rigReady) return resolve();
+        document.addEventListener("pp:rig-ready", resolve, { once: true });
       });
-      Loader.addStep("Finalizing…",        async ()=> { enablePointerLockOnce(); });
-      await Loader.run();
+      console.log("[bootstrap] Player rig ready");
+    });
+    Loader.addStep("Finalizing…", async () => {
+      // attach camera to spawn
+      if (window.__PP_SPAWN) {
+        scene.activeCamera.position.copyFrom(window.__PP_SPAWN);
+        console.log("[bootstrap] Camera moved to spawn", scene.activeCamera.position);
+      } else {
+        scene.activeCamera.position.set(0, 1.8, 0);
+        console.log("[bootstrap] Camera fallback position", scene.activeCamera.position);
+      }
 
-      window.dispatchEvent(new CustomEvent("pp:start"));
-      try { $("#renderCanvas")?.focus?.(); } catch{}
+      // add safety light if needed
+      if (!scene.lights || scene.lights.length === 0) {
+        const hemi = new BABYLON.HemisphericLight("tempLight", new BABYLON.Vector3(0,1,0), scene);
+        hemi.intensity = 1.0;
+        console.log("[bootstrap] Added fallback hemispheric light");
+      }
 
-    } catch (err) {
-      warn("fatal start error:", err);
-      try { window.BOOTLOG?.add?.("fatal", { err: String(err) }); } catch(_){}
-      started = false;
-      $("#title-screen")?.style.display = "flex";
-      alert("Boot failed. Check console for details.");
-    }
+      enablePointerLockOnce();
+    });
+
+    await Loader.run();
+
+    window.dispatchEvent(new CustomEvent("pp:start"));
+    console.log("[bootstrap] Game started successfully.");
+    try { $("#renderCanvas")?.focus?.(); } catch{}
+
+  } catch (err) {
+    console.error("[bootstrap] Error starting game:", err);
+    started = false;
+    if (title) title.style.display = "flex";
+    alert("Boot failed. Check console for details.");
   }
-
-  (function wire(){
-    const btn = $("#start-button");
-    if (btn) btn.addEventListener("click", startGame, { passive: false });
-    if (document.readyState === "loading"){
-      document.addEventListener("DOMContentLoaded", ()=> loadManifest());
-    } else {
-      loadManifest();
-    }
-  })();
-
-})();
+}
