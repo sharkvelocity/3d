@@ -1,13 +1,15 @@
-// ghost_logic.js
-// Full deterministic-safe ghost logic for PhasmaPhoney
-// Includes: wander, event triggers, map constraints, room-aware movement
-
+/* ghost_logic.js — full ghost behavior with map constraints integration
+   - Babylon.js compatible
+   - Wander AI respecting rooms, doors, walls
+   - Event triggers: EMF, GhostWriting, PlateThrow, etc.
+   - Respects Goryo/favorite room rules
+   - Integrates with MapGenerator.rooms for procedural/randomized houses
+*/
 (function(){
 "use strict";
 if(window.__GhostLogicReady) return;
 window.__GhostLogicReady = true;
 
-// ---------- Scene Helper ----------
 const S = () => window.scene || BABYLON.Engine?.LastCreatedScene;
 
 // ---------- Ghost Base ----------
@@ -20,33 +22,20 @@ ghost.roomName = ghost.roomName || "";
 ghost.nearPlayer = false;
 ghost.visible = false;
 
-// ---------- Map & Room Helpers ----------
+// ---------- Helpers ----------
 const currentRoomName = () => {
     try { return typeof window.currentRoomName === "function" ? window.currentRoomName() : ""; }
     catch { return ""; }
 };
 
-// Check if ghost can occupy position based on walls and doors
-function isValidPosition(pos){
-    if(!window.MAP_DEF || !window.MAP_DEF.rooms) return true;
+const isShadeAndPlayerInRoom = () => {
     try {
-        // Ghost cannot go outside rooms' boundaries
-        for(const room of MAP_DEF.rooms){
-            if(!room.bounds) continue;
-            const b = room.bounds; // {min:{x,y,z}, max:{x,y,z}}
-            if(pos.x >= b.min.x && pos.x <= b.max.x &&
-               pos.y >= b.min.y && pos.y <= b.max.y &&
-               pos.z >= b.min.z && pos.z <= b.max.z){
-                // Found containing room
-                if(room.type === "frontDoor") return false; // front door not open for ghost
-                return true;
-            }
-        }
-        return false;
-    } catch { return true; }
-}
+        const isShade = (ghost?.type||"").toLowerCase() === "shade";
+        const sameRoom = ghost.roomName && currentRoomName() === ghost.roomName;
+        return isShade && sameRoom;
+    } catch { return false; }
+};
 
-// ---------- Player Proximity ----------
 const playerNear = (pos, range=6.0) => {
     try {
         const cam = S()?.activeCamera;
@@ -55,7 +44,6 @@ const playerNear = (pos, range=6.0) => {
     } catch { return false; }
 };
 
-// ---------- Evidence / Event Triggers ----------
 const triggerEMF = (level, pos) => {
     if(!window.EMF?.trigger) return;
     if(playerNear(pos)) window.EMF.trigger(level, pos);
@@ -64,6 +52,7 @@ const triggerEMF = (level, pos) => {
 const evidence = ghost.evidence || [];
 const hasEvidence = ev => evidence.includes(ev);
 
+// ---------- Event Handlers ----------
 const onSaltWalk        = pos => triggerEMF(1, pos);
 const onBookThrow       = pos => { if(!hasEvidence("GhostWriting")) triggerEMF(1 + Math.floor(Math.random()*2), pos); };
 const onBookWrite       = pos => { if(hasEvidence("GhostWriting")) triggerEMF(2 + Math.floor(Math.random()*3), pos); };
@@ -72,35 +61,36 @@ const onCrossBurn       = pos => triggerEMF(3 + Math.floor(Math.random()*2), pos
 const onBreakerInteract = pos => triggerEMF(4 + Math.floor(Math.random()*2), pos);
 const onObjectInteract  = (pos, baseLevel=1) => triggerEMF(baseLevel + Math.floor(Math.random()*2), pos);
 
-// ---------- Wander Loop ----------
+// ---------- Map Constraint Helpers ----------
+const getRoomByName = (name) => {
+    if(!window.MapGenerator || !MapGenerator.rooms) return null;
+    return MapGenerator.rooms.find(r=>r.name===name) || null;
+};
+
+// Check if position is inside room boundaries (walls)
+const isPositionInsideRoom = (pos, room) => {
+    if(!room || !room.bounds) return false;
+    const b = room.bounds; // {min:{x,y,z}, max:{x,y,z}}
+    return pos.x >= b.min.x && pos.x <= b.max.x &&
+           pos.z >= b.min.z && pos.z <= b.max.z;
+};
+
+// Pick a valid random position in room respecting door constraints
+const randomPositionInRoom = (room) => {
+    if(!room || !room.bounds) return ghost.position.clone();
+    const b = room.bounds;
+    const x = b.min.x + Math.random() * (b.max.x - b.min.x);
+    const z = b.min.z + Math.random() * (b.max.z - b.min.z);
+    const y = 0;
+    return new BABYLON.Vector3(x, y, z);
+};
+
+// ---------- Wander Setup ----------
 let t = 0, nextEvent = 10 + Math.random()*10;
 let radioCooldown = 0;
 let wanderTarget = ghost.roomCenter.clone();
 
-// Choose a random position within the ghost's allowed rooms
-function pickWanderTarget(){
-    if(!window.MAP_DEF?.rooms) return ghost.roomCenter.clone();
-    const rooms = MAP_DEF.rooms.filter(r => r.type !== "frontDoor");
-    if(!rooms.length) return ghost.roomCenter.clone();
-    const room = rooms[Math.floor(Math.random()*rooms.length)];
-    const b = room.bounds;
-    let attempt = 0;
-    let pos = new BABYLON.Vector3();
-    do {
-        pos.x = b.min.x + Math.random() * (b.max.x - b.min.x);
-        pos.y = b.min.y; // ground-level
-        pos.z = b.min.z + Math.random() * (b.max.z - b.min.z);
-        attempt++;
-    } while(!isValidPosition(pos) && attempt < 20);
-    ghost.roomName = room.name || "";
-    ghost.roomCenter = new BABYLON.Vector3(
-        (b.min.x+b.max.x)/2,
-        (b.min.y+b.max.y)/2,
-        (b.min.z+b.max.z)/2
-    );
-    return pos;
-}
-
+// ---------- Wander Loop ----------
 const attachLoop = () => {
     const sc = S();
     if(!sc){ setTimeout(attachLoop, 120); return; }
@@ -111,33 +101,47 @@ const attachLoop = () => {
         t += dt;
         if(radioCooldown > 0) radioCooldown -= dt;
 
-        // small wandering
-        if(Math.random() < 0.01 || BABYLON.Vector3.Distance(wanderTarget, ghost.position) < 0.1){
-            wanderTarget = pickWanderTarget();
+        // ---------- Select new wander target ----------
+        if(Math.random() < 0.01){
+            const room = getRoomByName(ghost.roomName);
+            if(room){
+                wanderTarget = randomPositionInRoom(room);
+            } else {
+                const rooms = MapGenerator?.rooms || [];
+                if(rooms.length) {
+                    const rndRoom = rooms[Math.floor(Math.random()*rooms.length)];
+                    ghost.roomName = rndRoom.name;
+                    ghost.roomCenter = rndRoom.center.clone();
+                    wanderTarget = randomPositionInRoom(rndRoom);
+                }
+            }
         }
 
-        // move ghost toward wanderTarget
+        // ---------- Move ghost ----------
         const dir = wanderTarget.subtract(ghost.position);
         dir.y = 0;
         const L = dir.length();
         const speed = 0.6;
-        if(L > 0.01){
-            const step = dir.normalize().scale(Math.min(L, dt*speed));
-            const nextPos = ghost.position.add(step);
-            if(isValidPosition(nextPos)) ghost.position.copyFrom(nextPos);
+        if(L > 0.01) ghost.position.addInPlace(dir.normalize().scale(Math.min(L, dt*speed)));
+
+        // ---------- Constrain to room boundaries ----------
+        const room = getRoomByName(ghost.roomName);
+        if(room && !isPositionInsideRoom(ghost.position, room)){
+            // Snap back to center if outside
+            ghost.position.copyFrom(room.center);
         }
 
-        // near player
+        // ---------- Near player ----------
         try{
             const cam = sc.activeCamera;
             ghost.nearPlayer = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position) < 5.0 : false;
         } catch{}
 
-        // periodic events
+        // ---------- Periodic events ----------
         if(t >= nextEvent){
             t = 0; nextEvent = 8 + Math.random()*12;
 
-            if(!((ghost?.type||"").toLowerCase() === "shade" && currentRoomName() === ghost.roomName)){
+            if(!isShadeAndPlayerInRoom()){
                 try{
                     const r = Math.random();
                     if(r < 0.25) window.GhostAudio?.whisper?.();
