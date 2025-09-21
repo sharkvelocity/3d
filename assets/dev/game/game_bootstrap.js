@@ -267,13 +267,20 @@ async function startGame(){
       await importSelectedMap();
     });
     Loader.addStep("Loading player rig…", async () => {
-      await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
-      // wait until rig signals ready
-      await new Promise((resolve) => {
-        if (window.PP?.rigReady) return resolve();
-        document.addEventListener("pp:rig-ready", resolve, { once: true });
-      });
-      console.log("[bootstrap] Player rig ready");
+  await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
+  await new Promise((resolve) => {
+    if (window.PP?.rigReady) return resolve();
+    document.addEventListener("pp:rig-ready", resolve, { once: true });
+  });
+  console.log("[bootstrap] Player rig ready");
+
+  // 🔧 Explicitly attach scene camera to rig
+  if (scene && scene.activeCamera && window.PP?.rig?.body) {
+    scene.activeCamera.lockedTarget = window.PP.rig.body;
+    console.log("[bootstrap] Camera locked to player rig body");
+  }
+});
+
     });
     Loader.addStep("Finalizing…", async () => {
       // attach camera to spawn
