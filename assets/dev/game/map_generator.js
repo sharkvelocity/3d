@@ -144,23 +144,21 @@ window.MapGenerator = {
             this.createRoomMesh(r);
         }
 
-        // spawn doors
-        if(!this.doorMesh) await this.loadDoorMesh();
-        if(this.doorMesh){
-            for(const r of this.rooms){
-                r.doors.forEach(d=>{
-                    const dm = this.doorMesh.clone(r.name+"_door");
-                    dm.isVisible = true;
-                    dm.position.set(r.position.x + d.x, 1, r.position.z + d.z);
-                    dm.checkCollisions = true;
-                });
-            }
-        }
-
-        // place player at van location
-        if(window.__PP_SPAWN){
-            const sp = window.__PP_SPAWN;
-            sp.x = -3; sp.y = 1.8; sp.z = -5;
-        }
+      // spawn doors
+if(!this.doorMesh) await this.loadDoorMesh();
+if(this.doorMesh){
+    for(const r of this.rooms){
+        r.doors.forEach(d=>{
+            const dm = this.doorMesh.clone(r.name+"_door");
+            dm.isVisible = true;
+            dm.position.set(r.position.x + d.x, 1, r.position.z + d.z);
+            dm.checkCollisions = true;
+        });
     }
-})();
+}
+// place player at van location
+if(window.__PP_SPAWN){
+    const sp = window.__PP_SPAWN;
+    sp.x = -3; sp.y = 1.8; sp.z = -5;
+}
+})(); // <-- only one closing brace here, matches the IIFE
