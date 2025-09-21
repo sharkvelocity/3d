@@ -185,15 +185,14 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
       // Enable collisions
       scene.collisionsEnabled = true;
 
-      // Initialize Havok physics
+      // Physics
       const havok = await HavokPhysics();
-      const havokPlugin = new BABYLON.HavokPlugin(true, havok);
-      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), havokPlugin);
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
       if (loadingFill) loadingFill.style.width = '30%';
 
       // Skybox
-      const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", {size:1000}, scene);
+      const skybox = BABYLON.Mesh.CreateBox("skyBox", 1000.0, scene);
       const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
       skyboxMaterial.backFaceCulling = false;
       skybox.material = skyboxMaterial;
@@ -223,12 +222,13 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
       if (window.MAP_DEF?.file) {
         const mapPath = "./assets/models/map/" + window.MAP_DEF.file;
         BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
-          meshes.forEach(mesh=>{
-            mesh.isPickable = true;
-            mesh.checkCollisions = true;
 
-            // Assign physics impostor safely
-            try {
+          // Delay physics impostor assignment to avoid white screen
+          setTimeout(()=>{
+            meshes.forEach(mesh=>{
+              mesh.isPickable = true;
+              mesh.checkCollisions = true;
+
               if (!mesh.physicsImpostor) {
                 mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
                   mesh,
@@ -237,10 +237,8 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
                   scene
                 );
               }
-            } catch(e){
-              console.warn("Skipping physics impostor for mesh:", mesh.name, e);
-            }
-          });
+            });
+          }, 50);
 
           if (loadingFill) loadingFill.style.width = '80%';
 
@@ -249,34 +247,41 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
             const sp = window.MAP_DEF?.spawn || {x:0,y:5,z:0};
             window.PP.rig.body.position.set(sp.x, sp.y, sp.z);
 
-            try {
-              if (!window.PP.rig.body.physicsImpostor){
-                window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
-                  window.PP.rig.body,
-                  BABYLON.PhysicsImpostor.CapsuleImpostor,
-                  { mass: 80, restitution:0, friction:0.5 },
-                  scene
-                );
-              }
-            } catch(e){
-              console.warn("Skipping physics impostor for player rig:", e);
+            if (!window.PP.rig.body.physicsImpostor){
+              window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
+                window.PP.rig.body,
+                BABYLON.PhysicsImpostor.CapsuleImpostor,
+                { mass: 80, restitution:0, friction:0.5 },
+                scene
+              );
             }
           }
 
           if (loadingFill) loadingFill.style.width = '100%';
-          setTimeout(()=>{ if (loadingBox) loadingBox.style.display='none'; }, 400);
+
+          // Hide loading box after short delay
+          setTimeout(() => {
+            if (loadingBox) loadingBox.style.display = 'none';
+          }, 400);
 
         }, null, function(scene,msg,ex){
           console.error("Error loading map:", msg, ex);
         });
       }
+
+      // Ensure there is a camera (prevent white screen)
+      if (!scene.activeCamera) {
+        const cam = new BABYLON.UniversalCamera("cam", new BABYLON.Vector3(0,2,-5), scene);
+        cam.setTarget(new BABYLON.Vector3(0,1,0));
+        cam.attachControl(canvas, true);
+      }
+
     } catch(e){
       console.error("Start button error:", e);
     }
   }, {once:true});
 })();
 </script>
-
 
 
 </body>
