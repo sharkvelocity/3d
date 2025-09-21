@@ -224,3 +224,4 @@
   window.PP.rigReady = true;
   document.dispatchEvent(new Event("pp:rig-ready"));
 }
+})();
