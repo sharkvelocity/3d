@@ -1,153 +1,207 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>PhasmaPhoney — Build</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<meta charset="utf-8" />
+<title>PhasmaPhoney — Build</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
 
-  <!-- Babylon core + loaders -->
-  <script src="./cdn/babylon.js"></script>
-  <script src="./cdn/havok/HavokPhysics_umd.js"></script>
-  <script src="./cdn/earcut.min.js"></script>
-  <script src="./cdn/materialsLibrary/babylon.skyMaterial.min.js"></script>
-  <script src="./cdn/meshopt_decoder.js"></script>
-  <script src="./cdn/draco_decoder_gltf.js"></script>
-  <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-  <script src="./cdn/gui/babylon.gui.min.js"></script>
-  <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
+<!-- ========== Babylon core + loaders ========== -->
+<script src="./cdn/babylon.js"></script>
+<script src="./cdn/havok/HavokPhysics_umd.js"></script>
+<script src="./cdn/earcut.min.js"></script>
+<script src="./cdn/materialsLibrary/babylon.skyMaterial.min.js"></script>
+<script src="./cdn/meshopt_decoder.js"></script>
+<script src="./cdn/draco_decoder_gltf.js"></script>
+<script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
+<script src="./cdn/gui/babylon.gui.min.js"></script>
+<script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
 
-  <!-- Dev helpers -->
-  <script src="./assets/index3/devtools.js?v=7.4.0"></script>
+<style>
+html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
+#renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
+#loading-box{ position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(0,0,0,0.92); z-index:2147483000; color:#9ef; }
+#loading-logo{ width:240px; max-width:60vw; opacity:0.95; filter:drop-shadow(0 0 10px #0ff4); }
+#loading-text{ font-size:16px; letter-spacing:.3px; text-align:center; max-width:70vw; }
+#loading-bar{ width:64vw; max-width:720px; height:14px; border:1px solid #066; border-radius:10px; background:#071017; overflow:hidden; }
+#loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,#19f,#0ff); transition:width .15s ease; }
 
-  <style>
-    html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
-    #renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
+#title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; z-index:9999; }
+#title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
+#start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; }
 
-    #loading-box{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(0,0,0,0.92); z-index:2147483000; color:#9ef; }
-    #loading-logo{ width:240px; max-width:60vw; opacity:0.95; filter:drop-shadow(0 0 10px #0ff4); }
-    #loading-text{ font-size:16px; letter-spacing:.3px; text-align:center; max-width:70vw; }
-    #loading-bar{ width:64vw; max-width:720px; height:14px; border:1px solid #066; border-radius:10px; background:#071017; overflow:hidden; }
-    #loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,#19f,#0ff); transition:width .15s ease; }
-
-    #title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; z-index:9999; }
-    #title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
-    #start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; }
-    #map-wrap{ display:flex; gap:8px; align-items:center; color:#9ef; }
-    #map-select{ background:#0b1518; color:#bff; border:1px solid #066; padding:8px; border-radius:8px; }
-
-    /* HUD + inventory simplified for brevity */
-    #hud-bar{ position:fixed; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; }
-    .chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; background:rgba(0,0,0,0.5); }
-    #sanity-gauge{ width:170px; height:10px; border:1px solid #066; background:#061013; border-radius:8px; overflow:hidden; }
-    #sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
-    #hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; }
-  </style>
+#hud-overlay{ position:fixed; inset:0; pointer-events:none; z-index:6000; }
+#hud-bar{ position:fixed; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; }
+.chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; background:rgba(0,0,0,0.5); }
+.sanity-wrap{ display:flex; align-items:center; gap:6px; padding:0 6px; }
+#sanity-gauge{ width:170px; height:10px; border:1px solid #066; background:#061013; border-radius:8px; overflow:hidden; }
+#sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
+#sanity-text{ margin-left:6px; }
+#hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; }
+</style>
 </head>
 <body>
-  <!-- Loading -->
-  <div id="loading-box" aria-live="polite">
-    <img src="logo.png" alt="Logo" id="loading-logo">
-    <div id="loading-text">Initializing…</div>
-    <div id="loading-bar"><div id="loading-fill"></div></div>
-  </div>
 
-  <!-- Title / Start -->
-  <div id="title-screen">
-    <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-    <button id="start-button">Start Investigation</button>
-    <div id="map-wrap">
-      <span>Map:</span>
-      <select id="map-select"><option value="-1">(loading maps...)</option></select>
+<!-- Loading -->
+<div id="loading-box" aria-live="polite">
+  <img src="logo.png" alt="Logo" id="loading-logo">
+  <div id="loading-text">Initializing…</div>
+  <div id="loading-bar"><div id="loading-fill"></div></div>
+</div>
+
+<!-- Title / Start -->
+<div id="title-screen">
+  <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
+  <button id="start-button">Start Investigation</button>
+  <div id="map-wrap">
+    <span>Map:</span>
+    <select id="map-select"><option value="-1">(loading maps...)</option></select>
+  </div>
+</div>
+
+<!-- Canvas -->
+<canvas id="renderCanvas" tabindex="0"></canvas>
+
+<!-- HUD Overlay -->
+<div id="hud-overlay">
+  <div id="hud-bar">
+    <div class="chip sanity-wrap">
+      <span>Sanity:</span>
+      <div id="sanity-gauge"><div id="sanity-fill"></div></div>
+      <span id="sanity-text">100%</span>
     </div>
+    <div class="chip">Weather: <span id="hud-weather">Clear</span></div>
+    <div class="chip">Temp: <span id="hud-temp">20°C</span></div>
   </div>
+  <div id="hud-xyz">XYZ: <span id="hud-pos">0,0,0</span></div>
+</div>
 
-  <!-- Canvas -->
-  <canvas id="renderCanvas" tabindex="0"></canvas>
+<!-- ===================== SCRIPT LOAD ORDER ===================== -->
+<script src="./assets/dev/util/modular_settings.js"></script>
+<script src="./assets/dev/modular_bindings.js"></script>
+<script src="./assets/dev/util/pointer_lock_manager.js"></script>
+<script src="./assets/dev/modular_audio.js"></script>
+<script src="./assets/dev/util/pp_runtime.js"></script>
+<script src="./assets/dev/util/player_rig_controller_final.js"></script>
+<script src="./assets/dev/util/moon.js"></script>
+<script src="./assets/dev/util/minimap_northup_xyz.js"></script>
+<script src="./assets/dev/util/reticle.js"></script>
+<script src="./assets/dev/util/ghost_cam.js"></script>
+<script src="./assets/dev/util/weather.js"></script>
+<script src="./assets/dev/util/weather_glue.js"></script>
+<script src="./assets/dev/game/inventory_system.js"></script>
+<script src="./assets/dev/ui/belt_manager.js"></script>
+<script src="./assets/dev/ui/van_ui.js"></script>
+<script src="./assets/dev/effects/effects_sanity_med.js"></script>
+<script src="./assets/dev/ui/hud_ui.js"></script>
+<script src="./assets/dev/ui/notebook_ui.js"></script>
+<script src="./assets/dev/ghost/ghost_db.js"></script>
+<script src="./assets/dev/ghost/ghost_logic.js"></script>
+<script src="./assets/dev/tools/uv_prints.js"></script>
+<script src="./assets/dev/tools/salt_system.js"></script>
+<script src="./assets/dev/tools/spirit_box.js"></script>
+<script src="./assets/dev/tools/dots_system.js"></script>
+<script src="./assets/dev/tools/writing_book.js"></script>
+<script src="./assets/dev/tools/parabolic_mic.js"></script>
+<script src="./assets/dev/tools/emf.js"></script>
+<script src="./assets/dev/game/game_bootstrap.js"></script>
+<script src="./assets/dev/merge_patch.js"></script>
+<script src="./assets/dev/glue_patch.js"></script>
 
-  <!-- ===================== SCRIPTS ===================== -->
-  <!-- Core utils -->
-  <script src="./assets/dev/util/modular_settings.js"></script>
-  <script src="./assets/dev/modular_bindings.js"></script>
-  <script src="./assets/dev/util/pointer_lock_manager.js"></script>
-  <script src="./assets/dev/modular_audio.js"></script>
-  <script src="./assets/dev/util/pp_runtime.js"></script>
-  <script src="./assets/dev/util/player_rig_controller_final.js"></script>
-  <script src="./assets/dev/util/moon.js"></script>
-  <script src="./assets/dev/util/minimap_northup_xyz.js"></script>
-  <script src="./assets/dev/util/reticle.js"></script>
-  <script src="./assets/dev/util/ghost_cam.js"></script>
-  <script src="./assets/dev/util/weather.js"></script>
-  <script src="./assets/dev/util/weather_glue.js"></script>
+<!-- ===================== HUD INIT ===================== -->
+<script>
+(function(){
+  const sanityFill = document.getElementById("sanity-fill");
+  const sanityText = document.getElementById("sanity-text");
+  const hudPos = document.getElementById("hud-pos");
+  const hudWeather = document.getElementById("hud-weather");
+  const hudTemp = document.getElementById("hud-temp");
 
-  <!-- Game systems -->
-  <script src="./assets/dev/game/inventory_system.js"></script>
-  <script src="./assets/dev/ui/belt_manager.js"></script>
-  <script src="./assets/dev/ui/van_ui.js"></script>
-  <script src="./assets/dev/effects/effects_sanity_med.js"></script>
-  <script src="./assets/dev/ui/hud_ui.js"></script>
-  <script src="./assets/dev/ui/notebook_ui.js"></script>
-  <script src="./assets/dev/ghost/ghost_db.js"></script>
-  <script src="./assets/dev/ghost/ghost_logic.js"></script>
-  <script src="./assets/dev/tools/uv_prints.js"></script>
-  <script src="./assets/dev/tools/salt_system.js"></script>
-  <script src="./assets/dev/tools/spirit_box.js"></script>
-  <script src="./assets/dev/tools/dots_system.js"></script>
-  <script src="./assets/dev/tools/writing_book.js"></script>
-  <script src="./assets/dev/tools/parabolic_mic.js"></script>
-  <script src="./assets/dev/tools/emf.js"></script>
+  window.updateSanity = function(value){
+    if (!sanityFill || !sanityText) return;
+    const clamped = Math.max(0, Math.min(100, value));
+    sanityFill.style.width = clamped + "%";
+    sanityFill.style.background = clamped > 50 ? "#0f0" : (clamped > 25 ? "#ff0" : "#f00");
+    sanityText.textContent = clamped + "%";
+  };
 
-  <!-- Bootstrap -->
-  <script src="./assets/dev/game/game_bootstrap.js"></script>
-  <script src="./assets/dev/merge_patch.js"></script>
-  <script src="./assets/dev/glue_patch.js"></script>
+  window.updatePlayerPos = function(x,y,z){
+    if (!hudPos) return;
+    hudPos.textContent = x.toFixed(1)+","+y.toFixed(1)+","+z.toFixed(1);
+  };
 
-  <!-- ===================== START BUTTON HOOK ===================== -->
-  <script>
-  document.getElementById('start-button')?.addEventListener('click',()=>{
-    const btn = document.getElementById('start-button');
-    btn.disabled = true;
+  window.updateWeather = function(type,temp){
+    if (hudWeather) hudWeather.textContent = type;
+    if (hudTemp) hudTemp.textContent = temp+"°C";
+  };
 
-    // Start bootstrap (handles loader, engine, map, rig, camera, collisions)
-    if (window.startGame) window.startGame();
+  // init defaults
+  setTimeout(()=>{ window.updateSanity(100); window.updateWeather("Clear",20); }, 0);
+})();
+</script>
 
-    // Remove title screen after small delay for fade
-    setTimeout(()=>document.getElementById('title-screen')?.remove(),200);
+<!-- ===================== START BUTTON + BOOTSTRAP ===================== -->
+<script>
+(async function(){
+  const btn = document.getElementById('start-button');
+  if (!btn) return;
 
-    // Unlock pointer & focus canvas
+  btn.addEventListener('click', async function onStart(){
+    document.getElementById('title-screen')?.remove();
+    window.__PP_ALREADY_STARTED__ = true;
+    window.dispatchEvent(new CustomEvent('pp:start'));
+
     const canvas = document.getElementById('renderCanvas');
-    canvas?.requestPointerLock?.();
-    canvas?.focus?.();
-  });
-  </script>
+    try { canvas?.requestPointerLock?.(); } catch {}
+    try { canvas?.focus?.(); } catch {}
 
-  <!-- ===================== HUD UPDATE HELPERS ===================== -->
-  <script>
-  (function(){
-    const sanityFill = document.getElementById("sanity-fill");
-    const sanityText = document.getElementById("sanity-text");
-    const hudPos = document.getElementById("hud-pos");
-    const hudWeather = document.getElementById("hud-weather");
-    const hudTemp = document.getElementById("hud-temp");
+    // Wait for Babylon scene
+    let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+    while(!scene) {
+      await new Promise(r => setTimeout(r, 50));
+      scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+    }
 
-    window.updateSanity = function(v){
-      const clamped = Math.max(0, Math.min(100, v));
-      sanityFill.style.width = clamped + "%";
-      sanityFill.style.background = clamped>50?"#0f0":(clamped>25?"#ff0":"#f00");
-      sanityText.textContent = clamped+"%";
-    };
+    // Enable collisions
+    scene.collisionsEnabled = true;
 
-    window.updatePlayerPos = function(x,y,z){
-      hudPos.textContent = x.toFixed(1)+","+y.toFixed(1)+","+z.toFixed(1);
-    };
+    // Physics
+    const havok = await HavokPhysics();
+    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
-    window.updateWeather = function(type,temp){
-      hudWeather.textContent = type;
-      hudTemp.textContent = temp+"°C";
-    };
+    // Skybox
+    const skybox = BABYLON.Mesh.CreateBox("skyBox", 1000.0, scene);
+    const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
+    skyboxMaterial.backFaceCulling = false;
+    skybox.material = skyboxMaterial;
 
-    updateSanity(100);
-    updateWeather("Clear",20);
-  })();
-  </script>
+    const anim = new BABYLON.Animation("cloudAnim", "turbidity", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+    anim.setKeys([{frame:0,value:10},{frame:100,value:50},{frame:200,value:10}]);
+    skyboxMaterial.animations.push(anim);
+    scene.beginAnimation(skyboxMaterial, 0, 200, true);
+
+    // Import map
+    if (window.MAP_DEF?.file) {
+      const mapPath = "./assets/models/map/" + window.MAP_DEF.file;
+      BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
+        meshes.forEach(mesh=>{
+          mesh.isPickable = true;
+          mesh.checkCollisions = true;
+          mesh.physicsImpostor = new BABYLON.PhysicsImpostor(mesh, BABYLON.PhysicsImpostor.MeshImpostor, { mass: 0, restitution: 0.1, friction: 0.8 }, scene);
+        });
+
+        if (window.PP?.rig?.body){
+          const sp = window.MAP_DEF?.spawn || {x:0,y:5,z:0};
+          window.PP.rig.body.position.set(sp.x, sp.y, sp.z);
+          if (!window.PP.rig.body.physicsImpostor){
+            window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(window.PP.rig.body, BABYLON.PhysicsImpostor.CapsuleImpostor, { mass: 80, restitution:0, friction:0.5 }, scene);
+          }
+        }
+
+      }, null, function(scene,msg,ex){ console.error("Error loading map:", msg, ex); });
+    }
+  }, {once:true});
+})();
+</script>
+
 </body>
 </html>
