@@ -150,102 +150,120 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
   if (!btn) return;
 
   btn.addEventListener('click', async function onStart(){
-    // Remove title screen
-    document.getElementById('title-screen')?.remove();
+    try {
+      // Remove title screen
+      document.getElementById('title-screen')?.remove();
 
-    // Show loading UI
-    if (loadingBox) loadingBox.style.display = 'flex';
-    if (loadingFill) loadingFill.style.width = '0%';
+      // Show loading UI
+      if (loadingBox) loadingBox.style.display = 'flex';
+      if (loadingFill) loadingFill.style.width = '0%';
 
-    window.__PP_ALREADY_STARTED__ = true;
-    window.dispatchEvent(new CustomEvent('pp:start'));
+      window.__PP_ALREADY_STARTED__ = true;
+      window.dispatchEvent(new CustomEvent('pp:start'));
 
-    const canvas = document.getElementById('renderCanvas');
-    try { canvas?.requestPointerLock?.(); } catch {}
-    try { canvas?.focus?.(); } catch {}
+      const canvas = document.getElementById('renderCanvas');
+      try { canvas?.requestPointerLock?.(); } catch {}
+      try { canvas?.focus?.(); } catch {}
 
-    // Wait for Babylon scene
-    let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-    while(!scene) {
-      await new Promise(r => setTimeout(r, 50));
-      scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-    }
-    window.scene = scene; // make global for weather + others
+      // Wait for Babylon scene to exist
+      let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+      while(!scene) {
+        await new Promise(r => setTimeout(r, 50));
+        scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
+      }
+      window.scene = scene; // make global
 
-    // Progress: 10%
-    if (loadingFill) loadingFill.style.width = '10%';
+      if (loadingFill) loadingFill.style.width = '10%';
 
-    // Enable collisions
-    scene.collisionsEnabled = true;
+      // Enable collisions
+      scene.collisionsEnabled = true;
 
-    // Physics
-    const havok = await HavokPhysics();
-    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+      // Physics
+      const havok = await HavokPhysics();
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
 
-    // Progress: 30%
-    if (loadingFill) loadingFill.style.width = '30%';
+      if (loadingFill) loadingFill.style.width = '30%';
 
-    // Skybox
-    const skybox = BABYLON.Mesh.CreateBox("skyBox", 1000.0, scene);
-    const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
-    skyboxMaterial.backFaceCulling = false;
-    skybox.material = skyboxMaterial;
-    const anim = new BABYLON.Animation("cloudAnim", "turbidity", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
-    anim.setKeys([{frame:0,value:10},{frame:100,value:50},{frame:200,value:10}]);
-    skyboxMaterial.animations.push(anim);
-    scene.beginAnimation(skyboxMaterial, 0, 200, true);
+      // Skybox
+      const skybox = BABYLON.Mesh.CreateBox("skyBox", 1000.0, scene);
+      const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
+      skyboxMaterial.backFaceCulling = false;
+      skybox.material = skyboxMaterial;
 
-    // Progress: 50%
-    if (loadingFill) loadingFill.style.width = '50%';
+      // Ensure animations array exists
+      skyboxMaterial.animations ??= [];
 
-    // Import map
-    if (window.MAP_DEF?.file) {
-      const mapPath = "./assets/models/map/" + window.MAP_DEF.file;
-      BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
-        meshes.forEach(mesh=>{
-          mesh.isPickable = true;
-          mesh.checkCollisions = true;
-          mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-            mesh,
-            BABYLON.PhysicsImpostor.MeshImpostor,
-            { mass: 0, restitution: 0.1, friction: 0.8 },
-            scene
-          );
-        });
+      const anim = new BABYLON.Animation(
+        "cloudAnim",
+        "turbidity",
+        30,
+        BABYLON.Animation.ANIMATIONTYPE_FLOAT,
+        BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE
+      );
+      anim.setKeys([
+        { frame:0, value:10 },
+        { frame:100, value:50 },
+        { frame:200, value:10 }
+      ]);
 
-        // Progress: 80%
-        if (loadingFill) loadingFill.style.width = '80%';
+      skyboxMaterial.animations.push(anim);
+      scene.beginAnimation(skyboxMaterial, 0, 200, true);
 
-        // Position player rig
-        if (window.PP?.rig?.body){
-          const sp = window.MAP_DEF?.spawn || {x:0,y:5,z:0};
-          window.PP.rig.body.position.set(sp.x, sp.y, sp.z);
+      if (loadingFill) loadingFill.style.width = '50%';
 
-          if (!window.PP.rig.body.physicsImpostor){
-            window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
-              window.PP.rig.body,
-              BABYLON.PhysicsImpostor.CapsuleImpostor,
-              { mass: 80, restitution:0, friction:0.5 },
-              scene
-            );
+      // Import map
+      if (window.MAP_DEF?.file) {
+        const mapPath = "./assets/models/map/" + window.MAP_DEF.file;
+        BABYLON.SceneLoader.ImportMesh("", mapPath, "", scene, function(meshes){
+          meshes.forEach(mesh=>{
+            mesh.isPickable = true;
+            mesh.checkCollisions = true;
+
+            if (!mesh.physicsImpostor) {
+              mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                mesh,
+                BABYLON.PhysicsImpostor.MeshImpostor,
+                { mass:0, restitution:0.1, friction:0.8 },
+                scene
+              );
+            }
+          });
+
+          if (loadingFill) loadingFill.style.width = '80%';
+
+          // Position player rig
+          if (window.PP?.rig?.body){
+            const sp = window.MAP_DEF?.spawn || {x:0,y:5,z:0};
+            window.PP.rig.body.position.set(sp.x, sp.y, sp.z);
+
+            if (!window.PP.rig.body.physicsImpostor){
+              window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
+                window.PP.rig.body,
+                BABYLON.PhysicsImpostor.CapsuleImpostor,
+                { mass: 80, restitution:0, friction:0.5 },
+                scene
+              );
+            }
           }
-        }
 
-        // Progress: 100%
-        if (loadingFill) loadingFill.style.width = '100%';
+          if (loadingFill) loadingFill.style.width = '100%';
 
-        // Hide loading box after short delay
-        setTimeout(() => {
-          if (loadingBox) loadingBox.style.display = 'none';
-        }, 400);
+          // Hide loading box after short delay
+          setTimeout(() => {
+            if (loadingBox) loadingBox.style.display = 'none';
+          }, 400);
 
-      }, null, function(scene,msg,ex){
-        console.error("Error loading map:", msg, ex);
-      });
+        }, null, function(scene,msg,ex){
+          console.error("Error loading map:", msg, ex);
+        });
+      }
+    } catch(e){
+      console.error("Start button error:", e);
     }
   }, {once:true});
 })();
 </script>
+
 
 </body>
 </html>
