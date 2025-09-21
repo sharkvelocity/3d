@@ -209,18 +209,19 @@
     requestAnimationFrame(moveLoop);
   }
 
-  async function start(){
-    if(!ensureScene()){ setTimeout(start,100); return; }
-    const havok = await HavokPhysics();
-    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
-    makeBody();
-    stickToGround(BABYLON.Vector3.Zero());
-    await loadAvatar();
-    stickToGround(BABYLON.Vector3.Zero());
-    moveLoop();
-  }
+ async function start(){
+  if(!ensureScene()){ setTimeout(start,100); return; }
+  const havok = await HavokPhysics();
+  scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+  makeBody();
+  stickToGround(BABYLON.Vector3.Zero());
+  await loadAvatar();
+  stickToGround(BABYLON.Vector3.Zero());
+  moveLoop();
 
-  window.addEventListener("pp:start", start, { once:true });
-  if(window.__PP_ALREADY_STARTED__) start();
-
+  // ✅ Signal bootstrap that the rig is ready
+  window.PP = window.PP || {};
+  window.PP.rigReady = true;
+  document.dispatchEvent(new Event("pp:rig-ready"));
+}
 })();

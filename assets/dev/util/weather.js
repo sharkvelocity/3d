@@ -250,3 +250,26 @@
   };
 
 })();
+(function subtleThunderPatch(){
+  if(!window.Weather) return;
+
+  // Hook into the main tick for Rainstorm to play random thunder occasionally
+  const originalTick = Weather._loopCB || (()=>{});
+  Weather._loopCB = function(...args){
+    originalTick(...args);
+
+    // Only during Rainstorm
+    if(Weather && Weather.set && Weather._state==="Rainstorm" && Math.random()<0.002){
+      // Play one of the thunder sounds subtly
+      try {
+        const ST = window.Weather.ST || window.ST || {}; // access state
+        if(ST.sounds?.thunder?.length){
+          const pick=Math.random();
+          const snd = pick<0.2?ST.sounds.thunder[0]:pick<0.7?ST.sounds.thunder[1]:ST.sounds.thunder[2];
+          snd.setVolume((ST.volBase?.thunder||0.9)*(0.35 + Math.random()*0.25));
+          snd.play();
+        }
+      } catch(e){ console.warn("Random thunder patch failed",e); }
+    }
+  };
+})();
