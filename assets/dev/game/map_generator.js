@@ -1,142 +1,118 @@
-// ./assets/dev/game/map_generator.js
-// Procedural, seed-based map generator for PhasmaPhoney
+// map_generator.js — Babylon.js random seed-based house generator
 (function(){
   "use strict";
   if(window.__MapGeneratorReady) return;
   window.__MapGeneratorReady = true;
 
-  const MapGenerator = window.MapGenerator = {};
+  const MapGenerator = window.MapGenerator = window.MapGenerator || {};
+  
+  MapGenerator.roomBounds = {}; // will store {min:Vector3, max:Vector3} for each room
 
-  // ---------------- Random Utility ----------------
-  let seed = 0;
-  const random = () => {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  };
-  const randInt = (min,max) => Math.floor(random()*(max-min+1))+min;
+  // Example: grid size per square
+  const SQUARE_SIZE = 4;
 
-  // ---------------- Room Definitions ----------------
-  const ROOM_TYPES = {
-    foyer:   {w:1,h:1,fixed:true,doors:['front']},
-    living:  {w:2,h:2,fixed:true,doors:['door']},
-    kitchen: {w:2,h:1,fixed:true,doors:['open']},
-    dining:  {w:2,h:1,fixed:true,doors:['open']},
-    garage1: {w:2,h:1,fixed:true,doors:['door'],car:1},
-    garage2: {w:2,h:2,fixed:true,doors:['door'],car:2,utility:true},
-    bathroom: {w:1,h:1,doors:['door']},
-    bedroom:  {w:randInt(2,4),h:randInt(2,4),doors:['door']},
-    closet:   {w:1,h:1,doors:[]}
-  };
+  // Room definitions
+  const ROOM_TYPES = [
+    {name:"Foyer", fixed:true},
+    {name:"Garage", fixed:true},
+    {name:"Kitchen", fixed:true},
+    {name:"Dining", fixed:true},
+    {name:"Living", fixed:false},
+    {name:"Bedroom", fixed:false},
+    {name:"Bathroom", fixed:false}
+  ];
 
-  // ---------------- Map State ----------------
-  MapGenerator.map = [];
-  MapGenerator.rooms = [];
-  MapGenerator.roomAnchors = {};
+  // Minimal random integer helper
+  function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
 
-  // ---------------- Helpers ----------------
-  const overlaps = (x,y,w,h) => {
-    return MapGenerator.rooms.some(r=>{
-      return !(x+r.w<=r.x || x>=r.x+r.w || y+r.h<=r.y || y>=r.y+r.h);
-    });
-  };
+  // Generate a house layout
+  MapGenerator.generate = function(seed=Date.now()){
+    // seedable random
+    let rng = mulberry32(seed);
 
-  const addRoom = (type,x,y,w,h,name) => {
-    MapGenerator.rooms.push({type,name,x,y,w,h,doors:ROOM_TYPES[type].doors.slice()});
-  };
+    const rooms = [];
+    MapGenerator.roomBounds = {}; // reset
 
-  MapGenerator.getRoomCenter = (name) => {
-    const r = MapGenerator.rooms.find(r=>r.name===name);
-    if(!r) return new BABYLON.Vector3(0,0,0);
-    return new BABYLON.Vector3(r.x + r.w/2,0,r.y + r.h/2);
-  };
+    // -----------------------
+    // Foyer — always front
+    const foyerPos = new BABYLON.Vector3(0,0,0);
+    const foyerSize = new BABYLON.Vector3(1*SQUARE_SIZE,0,1*SQUARE_SIZE);
+    rooms.push({name:"Foyer", pos:foyerPos, size:foyerSize});
+    MapGenerator.roomBounds["Foyer"] = {
+      min: foyerPos.clone(),
+      max: foyerPos.add(foyerSize)
+    };
+    MapGenerator.frontDoorRoom = MapGenerator.roomBounds["Foyer"];
 
-  MapGenerator.getVanRoom = () => MapGenerator.rooms.find(r=>r.type==='van') || MapGenerator.rooms.find(r=>r.type==='foyer');
+    // -----------------------
+    // Garage — fixed side
+    const garageWidth = 2*SQUARE_SIZE;
+    const garageDepth = 2*SQUARE_SIZE;
+    const garagePos = new BABYLON.Vector3(-garageWidth,0,SQUARE_SIZE); // left side of house
+    const garageSize = new BABYLON.Vector3(garageWidth,0,garageDepth);
+    rooms.push({name:"Garage", pos:garagePos, size:garageSize});
+    MapGenerator.roomBounds["Garage"] = {
+      min: garagePos.clone(),
+      max: garagePos.add(garageSize)
+    };
 
-  MapGenerator.getRandomGhostRoom = () => {
-    const candidates = MapGenerator.rooms.filter(r=>!['foyer','garage1','garage2'].includes(r.type));
-    return candidates.length ? candidates[randInt(0,candidates.length-1)].name : 'living';
-  };
+    // -----------------------
+    // Kitchen + Dining (connected)
+    const kitchenPos = new BABYLON.Vector3(SQUARE_SIZE,0,SQUARE_SIZE*2);
+    const kitchenSize = new BABYLON.Vector3(2*SQUARE_SIZE,0,SQUARE_SIZE);
+    const diningPos = kitchenPos.add(new BABYLON.Vector3(0,0,SQUARE_SIZE)); // attached behind kitchen
+    const diningSize = new BABYLON.Vector3(2*SQUARE_SIZE,0,SQUARE_SIZE);
+    rooms.push({name:"Kitchen", pos:kitchenPos, size:kitchenSize});
+    rooms.push({name:"Dining", pos:diningPos, size:diningSize});
+    MapGenerator.roomBounds["Kitchen"] = {min:kitchenPos.clone(), max:kitchenPos.add(kitchenSize)};
+    MapGenerator.roomBounds["Dining"] = {min:diningPos.clone(), max:diningPos.add(diningSize)};
 
-  // ---------------- Room Placement ----------------
-  const placeRooms = () => {
-    MapGenerator.rooms.length=0;
+    // -----------------------
+    // Living room — 4 squares
+    const livingPos = new BABYLON.Vector3(SQUARE_SIZE,0,0);
+    const livingSize = new BABYLON.Vector3(2*SQUARE_SIZE,0,2*SQUARE_SIZE);
+    rooms.push({name:"Living", pos:livingPos, size:livingSize});
+    MapGenerator.roomBounds["Living"] = {min:livingPos.clone(), max:livingPos.add(livingSize)};
 
-    // Front door/foyer fixed
-    addRoom('foyer',0,0,1,1,'foyer');
-
-    // Garage fixed on front side
-    addRoom(randInt(0,1)?'garage1':'garage2',3,0,ROOM_TYPES.garage1.w,ROOM_TYPES.garage1.h,'garage');
-
-    // Kitchen + dining together
-    addRoom('kitchen',0,1,2,1,'kitchen');
-    addRoom('dining',2,1,2,1,'dining');
-
-    // Living room fixed size 2x2 anywhere behind front
-    let lx=0,lz=2;
-    addRoom('living',lx,lz,2,2,'living');
-
-    // Bathrooms: 1-3, cannot touch each other, cannot touch garage/kitchen
-    const bCount = randInt(1,3);
-    for(let i=0;i<bCount;i++){
-      let placed=false;
-      for(let tries=0;tries<50;tries++){
-        const x=randInt(0,4), y=randInt(2,4);
-        if(!overlaps(x,y,1,1)){
-          addRoom('bathroom',x,y,1,1,'bathroom'+i);
-          placed=true; break;
-        }
-      }
-      if(!placed) console.warn("Failed to place bathroom "+i);
-    }
-
+    // -----------------------
     // Bedrooms 1-3
-    const bedCount = randInt(1,3);
-    for(let i=0;i<bedCount;i++){
-      let placed=false;
-      for(let tries=0;tries<50;tries++){
-        const w=randInt(2,4), h=randInt(2,4);
-        const x=randInt(0,6-w), y=randInt(2,6-h);
-        if(!overlaps(x,y,w,h)){
-          addRoom('bedroom',x,y,w,h,'bedroom'+i);
-          // optional closet inside
-          addRoom('closet',x,y,1,1,'closet'+i);
-          placed=true; break;
-        }
-      }
-      if(!placed) console.warn("Failed to place bedroom "+i);
-    }
-  };
-
-  // ---------------- Generate Map ----------------
-  MapGenerator.generate = async ({seed:inputSeed, attachToScene})=>{
-    seed = inputSeed || Date.now();
-    placeRooms();
-
-    if(!attachToScene) return;
-
-    // Clear existing meshes
-    attachToScene.meshes.slice().forEach(m=>{
-      if(!m.name.startsWith('skyBox')) m.dispose();
-    });
-
-    // Build primitives for rooms
-    MapGenerator.rooms.forEach(r=>{
-      const mesh = BABYLON.MeshBuilder.CreateBox(r.name,{width:r.w,depth:r.h,height:2},attachToScene);
-      mesh.position.set(r.x+r.w/2,1,r.y+r.h/2);
-      mesh.metadata={type:r.type};
-      mesh.material = new BABYLON.StandardMaterial("mat_"+r.name,attachToScene);
-      mesh.material.diffuseColor = new BABYLON.Color3(Math.random(),Math.random(),Math.random());
-    });
-
-    // Doors
-    for(const r of MapGenerator.rooms){
-      if(r.doors.includes('door')){
-        const doorMesh = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "door.glb", attachToScene);
-        doorMesh.meshes.forEach(m=>m.position.set(r.x+r.w/2,0,r.y+r.h/2));
-      }
+    const bedroomCount = randInt(1,3);
+    for(let i=0;i<bedroomCount;i++){
+      const bx = SQUARE_SIZE * randInt(0,2);
+      const bz = SQUARE_SIZE * randInt(3,4);
+      const bSize = new BABYLON.Vector3(SQUARE_SIZE*randInt(2,4),0,SQUARE_SIZE);
+      const bPos = new BABYLON.Vector3(bx,0,bz);
+      rooms.push({name:"Bedroom"+(i+1), pos:bPos, size:bSize});
+      MapGenerator.roomBounds["Bedroom"+(i+1)] = {min:bPos.clone(), max:bPos.add(bSize)};
     }
 
-    return MapGenerator.rooms;
+    // -----------------------
+    // Bathrooms 1-3
+    const bathCount = randInt(1,3);
+    for(let i=0;i<bathCount;i++){
+      const bx = SQUARE_SIZE * randInt(0,2);
+      const bz = SQUARE_SIZE * randInt(3,4);
+      const bSize = new BABYLON.Vector3(SQUARE_SIZE,0,SQUARE_SIZE);
+      const bPos = new BABYLON.Vector3(bx,0,bz);
+      rooms.push({name:"Bathroom"+(i+1), pos:bPos, size:bSize});
+      MapGenerator.roomBounds["Bathroom"+(i+1)] = {min:bPos.clone(), max:bPos.add(bSize)};
+    }
+
+    // -----------------------
+    // Store rooms globally
+    MapGenerator.rooms = rooms;
+    return rooms;
   };
+
+  // -----------------------
+  // Minimal deterministic RNG
+  function mulberry32(a) {
+    return function() {
+      var t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
 
 })();
