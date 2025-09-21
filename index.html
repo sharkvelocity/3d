@@ -184,14 +184,15 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
       // Enable collisions
       scene.collisionsEnabled = true;
 
-      // Physics
+      // Initialize Havok physics
       const havok = await HavokPhysics();
-      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
+      const havokPlugin = new BABYLON.HavokPlugin(true, havok);
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), havokPlugin);
 
       if (loadingFill) loadingFill.style.width = '30%';
 
       // Skybox
-      const skybox = BABYLON.Mesh.CreateBox("skyBox", 1000.0, scene);
+      const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", {size:1000}, scene);
       const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
       skyboxMaterial.backFaceCulling = false;
       skybox.material = skyboxMaterial;
@@ -225,13 +226,18 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
             mesh.isPickable = true;
             mesh.checkCollisions = true;
 
-            if (!mesh.physicsImpostor) {
-              mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
-                mesh,
-                BABYLON.PhysicsImpostor.MeshImpostor,
-                { mass:0, restitution:0.1, friction:0.8 },
-                scene
-              );
+            // Assign physics impostor safely
+            try {
+              if (!mesh.physicsImpostor) {
+                mesh.physicsImpostor = new BABYLON.PhysicsImpostor(
+                  mesh,
+                  BABYLON.PhysicsImpostor.MeshImpostor,
+                  { mass:0, restitution:0.1, friction:0.8 },
+                  scene
+                );
+              }
+            } catch(e){
+              console.warn("Skipping physics impostor for mesh:", mesh.name, e);
             }
           });
 
@@ -242,22 +248,22 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
             const sp = window.MAP_DEF?.spawn || {x:0,y:5,z:0};
             window.PP.rig.body.position.set(sp.x, sp.y, sp.z);
 
-            if (!window.PP.rig.body.physicsImpostor){
-              window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
-                window.PP.rig.body,
-                BABYLON.PhysicsImpostor.CapsuleImpostor,
-                { mass: 80, restitution:0, friction:0.5 },
-                scene
-              );
+            try {
+              if (!window.PP.rig.body.physicsImpostor){
+                window.PP.rig.body.physicsImpostor = new BABYLON.PhysicsImpostor(
+                  window.PP.rig.body,
+                  BABYLON.PhysicsImpostor.CapsuleImpostor,
+                  { mass: 80, restitution:0, friction:0.5 },
+                  scene
+                );
+              }
+            } catch(e){
+              console.warn("Skipping physics impostor for player rig:", e);
             }
           }
 
           if (loadingFill) loadingFill.style.width = '100%';
-
-          // Hide loading box after short delay
-          setTimeout(() => {
-            if (loadingBox) loadingBox.style.display = 'none';
-          }, 400);
+          setTimeout(()=>{ if (loadingBox) loadingBox.style.display='none'; }, 400);
 
         }, null, function(scene,msg,ex){
           console.error("Error loading map:", msg, ex);
@@ -269,6 +275,7 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
   }, {once:true});
 })();
 </script>
+
 
 
 </body>
