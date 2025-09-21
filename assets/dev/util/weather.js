@@ -66,7 +66,7 @@
   function spawnRainParticles(){
     const s=S(); if(!s) return; disposeParticles();
     const ps = new BABYLON.ParticleSystem("rainPS",4000,s);
-    ps.particleTexture = new BABYLON.Texture("./assets/textures/raindrop.png",s);
+    ps.particleTexture = new BABYLON.ProceduralTexture("rainTex", 128, "flame", s);
     ps.minEmitBox = v3(-50,40,-50); ps.maxEmitBox=v3(50,40,50);
     ps.emitRate=3500; ps.minSize=0.05; ps.maxSize=0.15;
     ps.minLifeTime=0.8; ps.maxLifeTime=1.2;
@@ -79,7 +79,7 @@
   function spawnSnowParticles(){
     const s=S(); if(!s) return; disposeParticles();
     const ps = new BABYLON.ParticleSystem("snowPS",3000,s);
-    ps.particleTexture = new BABYLON.Texture("./assets/textures/snowflake.png",s);
+    ps.particleTexture = new BABYLON.ProceduralTexture("snowTex", 64, "noise", s);
     ps.minEmitBox=v3(-50,40,-50); ps.maxEmitBox=v3(50,40,50);
     ps.emitRate=2000; ps.minSize=0.2; ps.maxSize=0.4;
     ps.minLifeTime=2.5; ps.maxLifeTime=4.0;
@@ -90,10 +90,7 @@
   }
 
   // ────── Lightning ──────
-  function scheduleLightning(){
-    const now = performance.now()/1000;
-    ST.nextLightningAt = now + (18+Math.random()*24)*(0.85+Math.random()*0.3);
-  }
+  function scheduleLightning(){ ST.nextLightningAt = performance.now()/1000 + (18+Math.random()*24)*(0.85+Math.random()*0.3); }
 
   function flashBloodmoon(){
     const s=S(); if(!s) return;
@@ -170,7 +167,6 @@
     }
   }
 
-  // ────── Volume crossfade ──────
   function applyTargets(dt){
     if(!ST.ready) return;
     const k=clamp(dt*1.5,0,1);
@@ -184,7 +180,6 @@
     try{ ST.sounds.snow?.setVolume(ST.volNow.snow); }catch{}
   }
 
-  // ────── Frame loop ──────
   function tick(){
     const s=S(); if(!s) return;
     const now=performance.now()/1000, dt=Math.min(0.2,now-ST.lastT); ST.lastT=now;
@@ -192,6 +187,9 @@
     if(ST.state==="Bloodmoon" && now>=ST.nextLightningAt){ flashBloodmoon(); scheduleLightning(); }
     indoorMonitor(dt);
     applyTargets(dt);
+
+    // Random thunder for Rainstorm
+    if(ST.state==="Rainstorm" && Math.random()<0.002) playThunder();
 
     const hw=document.getElementById('hud-weather');
     if(hw) hw.textContent=ST.state+(ST.indoor?" (Indoor)":"");
@@ -204,6 +202,9 @@
 
   // ────── Public API ──────
   window.Weather = {
+    ST,
+    get state(){ return ST.state; },
+
     init(){
       if(ST.started) return;
       const s=S(), c=cam();
@@ -212,6 +213,7 @@
       Weather.set(ST.state,{immediate:true});
       hookLoop(); ST.started=true; console.log("[Weather] started:",ST.state);
     },
+
     set(state,opts={}) {
       if(!/^(Clear|Rainstorm|Bloodmoon|Snow)$/.test(state)) return;
       ensureSounds();
@@ -237,8 +239,10 @@
       const hw=document.getElementById('hud-weather');
       if(hw) hw.textContent=ST.state+(ST.indoor?" (Indoor)":"");
     },
+
     setIndoor(on){ ST.indoor=!!on; Weather.set(ST.state,{intensity:ST.intensity,immediate:true}); },
     setVolumes(v){ Object.assign(ST.volBase,{ambient:v.ambient??ST.volBase.ambient,rain:v.rain??ST.volBase.rain,snow:v.snow??ST.volBase.snow,thunder:v.thunder??ST.volBase.thunder}); Weather.set(ST.state,{intensity:ST.intensity,immediate:true}); },
+
     dispose(){
       try{ ST.sounds.ambient?.stop(); ST.sounds.rain?.stop(); ST.sounds.snow?.stop(); ST.sounds.thunder.forEach(s=>s.stop()); }catch{}
       disposeParticles();
@@ -249,27 +253,4 @@
     }
   };
 
-})();
-(function subtleThunderPatch(){
-  if(!window.Weather) return;
-
-  // Hook into the main tick for Rainstorm to play random thunder occasionally
-  const originalTick = Weather._loopCB || (()=>{});
-  Weather._loopCB = function(...args){
-    originalTick(...args);
-
-    // Only during Rainstorm
-    if(Weather && Weather.set && Weather._state==="Rainstorm" && Math.random()<0.002){
-      // Play one of the thunder sounds subtly
-      try {
-        const ST = window.Weather.ST || window.ST || {}; // access state
-        if(ST.sounds?.thunder?.length){
-          const pick=Math.random();
-          const snd = pick<0.2?ST.sounds.thunder[0]:pick<0.7?ST.sounds.thunder[1]:ST.sounds.thunder[2];
-          snd.setVolume((ST.volBase?.thunder||0.9)*(0.35 + Math.random()*0.25));
-          snd.play();
-        }
-      } catch(e){ console.warn("Random thunder patch failed",e); }
-    }
-  };
 })();
