@@ -315,3 +315,4 @@ async function startGame(){
     alert("Boot failed. Check console for details.");
   }
 }
+})(); // closes the IIFE
