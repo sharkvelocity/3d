@@ -1,4 +1,4 @@
-/* player_rig_controller_final.js — robust player rig with WASD + PS5 + mouse + animations + slopes */
+/* player_rig_controller_final.js — robust player rig with WASD + PS5 + mouse + animations + slopes + footsteps */
 (function(){
   if(window.__PP_RIG_READY__) return;
   window.__PP_RIG_READY__ = true;
@@ -168,6 +168,21 @@
     return moveDir||BABYLON.Vector3.Zero();
   }
 
+  // ---------- Footstep system ----------
+  const footstepState = { lastPos:null, acc:0 };
+  function handleFootsteps(moveVec){
+    if(!moveVec || moveVec.lengthSquared()<0.001 || !body) return;
+    if(!footstepState.lastPos) footstepState.lastPos=body.position.clone();
+    const dist = BABYLON.Vector3.Distance(footstepState.lastPos, body.position);
+    footstepState.acc += dist;
+    const stride = input.crouch ? 0.3 : input.run ? 0.8 : 0.5; // adjust per speed
+    if(footstepState.acc >= stride){
+      footstepState.acc=0;
+      footstepState.lastPos.copyFrom(body.position);
+      if(typeof window.playStep==="function") try{ window.playStep(0.42); }catch{}
+    }
+  }
+
   function moveLoop(){
     if(!ensureScene()){ requestAnimationFrame(moveLoop); return; }
     const dt=scene.getEngine().getDeltaTime()/1000;
@@ -186,9 +201,7 @@
       const slopeMove=stickToGround(move);
       if(slopeMove.lengthSquared()>0.001) body.physicsImpostor.applyImpulse(slopeMove.scale(speed), body.getAbsolutePosition());
       playAnim(input.crouch?"crouchWalk":"walk");
-      if(!lastPos) lastPos=body.position.clone();
-      const d=BABYLON.Vector3.Distance(lastPos, body.position);
-      if(d>0.6){ lastPos.copyFrom(body.position); if(typeof window.playStep==="function") try{ window.playStep(0.42); }catch{} }
+      handleFootsteps(slopeMove);
     } else playAnim("idle");
 
     stickToGround();
