@@ -1,4 +1,4 @@
-/* phasma_map_and_ghost.js — combines procedural map generation and ghost logic */
+/* phasma_map_and_ghost.js — full combined procedural map generator + ghost logic for PhasmaPhoney */
 
 (function(){
 "use strict";
@@ -139,6 +139,12 @@ window.MapGenerator = {
                 });
             }
         }
+
+        // place player at van location
+        if(window.__PP_SPAWN){
+            const sp = window.__PP_SPAWN;
+            sp.x = -3; sp.y = 1.8; sp.z = -5;
+        }
     },
 
     // --- helper methods used by ghost logic and bootstrap ---
@@ -186,6 +192,14 @@ window.GhostLogic = {
             const nextPos = positions[Math.floor(Math.random()*positions.length)];
             this.ghost.position.copyFrom(nextPos);
         }
+    },
+
+    // optional update loop for render observer
+    attachToScene(scene){
+        if(!scene) return;
+        scene.onBeforeRenderObservable.add(()=>{
+            if(this.ghost) this.moveGhostRandomly();
+        });
     }
 };
 
