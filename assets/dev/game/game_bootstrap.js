@@ -280,8 +280,6 @@ async function startGame(){
     console.log("[bootstrap] Camera locked to player rig body");
   }
 });
-
-    });
     Loader.addStep("Finalizing…", async () => {
       // attach camera to spawn
       if (window.__PP_SPAWN) {
