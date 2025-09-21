@@ -5,9 +5,9 @@ PP.audio = PP.audio || {};
 (function soundEngine(){
   'use strict';
 
-  // Central SFX registry. Update paths to match your repo.
+  // Central SFX registry
   const SFX = {
-    ambient:         './audio/clearWeather.mp3', // Clear weather ambient
+    ambient:         './audio/clearWeather.mp3',
     rainstorm:       './audio/rainstorm.mp3',
     snow:            './audio/snow.mp3',
     thunder1:        './audio/thunder.mp3',
@@ -24,7 +24,7 @@ PP.audio = PP.audio || {};
     spiritboxLoop:   './audio/spiritbox.mp3'
   };
 
-  // Register with the modular audio system
+  // Register all SFX
   PP.audio.register(Object.keys(SFX).reduce((m,k)=> (m[k]={url:SFX[k]}, m), {}));
 
   // Convenience wrappers
@@ -35,7 +35,7 @@ PP.audio = PP.audio || {};
   PP.audio.loopSnow = ()=> PP.audio.loop('snow', 0.25);
   PP.audio.loopRainstorm = ()=> PP.audio.loop('rainstorm', 0.6);
 
-  // Weather manager (subtle rain + random thunder)
+  // Weather manager (subtle rain + linked thunder + lightning flash)
   PP.audio.weather = (function(){
     let rainAudio, thunderTimeout;
     const thunderFiles = ['thunder1','thunderLoud','thunderRumble'];
@@ -51,8 +51,7 @@ PP.audio = PP.audio || {};
     }
 
     function scheduleThunder(scene){
-      // Random delay: 5–15s for subtle effect
-      const delay = 5000 + Math.random()*10000;
+      const delay = 5000 + Math.random()*10000; // 5–15s
       thunderTimeout = setTimeout(()=>{
         playRandomThunder(scene);
         scheduleThunder(scene);
@@ -61,15 +60,18 @@ PP.audio = PP.audio || {};
 
     function playRandomThunder(scene){
       const file = thunderFiles[Math.floor(Math.random()*thunderFiles.length)];
-      PP.audio.play(file, { volume: 0.4 + Math.random()*0.3 }); // subtle
-      // Optionally add screen flash / lightning effect here
-      if(scene?.effects?.flashLightning){
-        scene.effects.flashLightning();
+      const volume = 0.4 + Math.random()*0.3;
+      PP.audio.play(file, { volume });
+
+      // Lightning flash linked to thunder
+      if(scene && scene.effects && typeof scene.effects.flashLightning === 'function'){
+        // Short flash delay to simulate lightning/thunder distance
+        const flashDelay = Math.random() * 200; // 0–200ms
+        setTimeout(()=> scene.effects.flashLightning(volume), flashDelay);
       }
     }
 
     return { startRain, stopRain };
   })();
 
-  // Important: do NOT autoplay here; start from game logic after player starts
 })();
