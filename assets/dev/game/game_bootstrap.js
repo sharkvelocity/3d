@@ -174,58 +174,64 @@ function applyMapDefToRoot(root){
     } catch(e){ warn("applyMapDefToRoot failed", e); }
 }
 
-// ---------- Import Selected Map ----------
-async function importSelectedMap(){
-    const chosen = getSelectedMap();
-    const mapFile = chosen?.file || "Abandoned_House.glb";
+// ---------- Unified Map Loader ----------
+async function loadMap(mapData){
+    const scene = S();
+    if(!scene) return;
 
-    try { if (mapRoot && !mapRoot.isDisposed()) mapRoot.dispose(false, true); } catch{}
-    mapRoot = null;
-    try { if (fallbackGround && !fallbackGround.isDisposed()) { fallbackGround.dispose(false, true); fallbackGround = null; } } catch{}
+    clearMap?.();
 
-    await loadMapDef(chosen?.def, mapFile);
+    let unified = {
+        file: mapData.file,
+        title: mapData.title || mapData.file,
+        type: null,
+        meshes: [],
+        rooms: [],
+        doors: [],
+        spawn: new BABYLON.Vector3(0,1.8,0)
+    };
 
-    try {
+    if(mapData.file.toLowerCase().endsWith(".glb")){
+        // --- GLB map ---
         const res = await BABYLON.SceneLoader.ImportMeshAsync(
-            "", bURL("./assets/models/map/"), mapFile, scene
+            "", "./assets/models/map/", mapData.file, scene
         );
-        mapRoot = res.meshes[0] || null;
-        if (mapRoot) {
-            applyMapDefToRoot(mapRoot);
-            res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch(_){} });
+        unified.type = "glb";
+        unified.meshes = res.meshes;
+        unified.spawn = mapData.spawn ?
+            new BABYLON.Vector3(mapData.spawn.x, mapData.spawn.y, mapData.spawn.z) :
+            new BABYLON.Vector3(0,1.8,0);
+
+        if(mapData.rooms) unified.rooms = mapData.rooms;
+        if(mapData.doors) unified.doors = mapData.doors;
+
+        res.meshes.forEach(m => { 
+            try { m.checkCollisions = true; m.receiveShadows = true; } catch(_){} 
+        });
+
+    } else if(mapData.file.toLowerCase().endsWith(".config.js")){
+        // --- Procedural map ---
+        unified.type = "procedural";
+        if (window.MapGenerator) {
+            currentMap = window.MapGenerator;
+            await currentMap.spawnRooms();
+
+            unified.rooms = currentMap.rooms || [];
+            unified.doors = currentMap.doors || [];
+            unified.meshes = currentMap.roomMeshes || [];
+
+            const van = currentMap.getVanRoom && currentMap.getVanRoom();
+            if(van){
+                unified.spawn = new BABYLON.Vector3(van.position.x, 1.8, van.position.z);
+            }
         }
-        enforceSpawn();
-        mark("map-imported", { file: mapFile });
-        log("Map imported:", mapFile);
-    } catch (e) {
-        warn("Map import failed, creating fallback ground:", e);
-        const sideM = 50;
-        fallbackGround = BABYLON.MeshBuilder.CreateGround("fallback_ground",
-            { width: sideM, height: sideM, subdivisions: 1 }, scene);
-        fallbackGround.checkCollisions = true;
-        fallbackGround.position.y = 0;
-        enforceSpawn();
     }
-}
 
-// ---------- Spawn ----------
-function enforceSpawn(){
-    if (!scene) return;
-    const d = window.MAP_DEF || {};
-    const sp = d.spawn
-        ? {x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0}
-        : {x:0,y:1.8,z:0};
+    currentMap = unified;
+    window.__PP_SPAWN = unified.spawn.clone();
 
-    window.__PP_SPAWN = new BABYLON.Vector3(sp.x, sp.y, sp.z);
-}
-
-// ---------- Pointer Lock ----------
-function enablePointerLockOnce(){
-    const canvas = $("#renderCanvas");
-    if (!canvas) return;
-    const lock = ()=>{ if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch{} } };
-    canvas.addEventListener("click", lock);
-    setTimeout(lock, 200);
+    spawnPlayer?.();
+    console.log("[MapLoader] Loaded:", unified.title, unified);
 }
 
 // ---------- Start Game ----------
@@ -241,7 +247,12 @@ async function startGame(){
     try {
         Loader.reset();
         Loader.addStep("Preparing engine…", async () => createEngineScene());
-        Loader.addStep("Loading map…", async () => await importSelectedMap());
+
+        Loader.addStep("Loading map…", async () => {
+            const mapData = getSelectedMap();
+            await loadMap(mapData);
+        });
+
         Loader.addStep("Loading player rig…", async () => {
             await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
             await new Promise((resolve) => {
@@ -250,6 +261,7 @@ async function startGame(){
             });
             log("[bootstrap] Player rig ready");
         });
+
         Loader.addStep("Initializing player physics & movement…", async () => {
             const body = window.PP?.rig?.body;
             if (!body) return;
@@ -269,6 +281,7 @@ async function startGame(){
                 window.PP.rig.controller.enable(scene);
             }
         });
+
         Loader.addStep("Finalizing…", async () => {
             if (window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
             enablePointerLockOnce();
@@ -292,4 +305,3 @@ document.addEventListener("DOMContentLoaded", () => {
     loadManifest().catch(e => console.error("Failed to load map manifest:", e));
     $("#start-button")?.addEventListener("click", startGame, { once:true });
 });
-})();
