@@ -110,11 +110,128 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 <script src="./assets/dev/tools/lantern.js"></script> 
 <script src="./assets/dev/tools/emf.js"></script>
 
-<!-- ===================== Bootstrap ===================== -->
+<!-- ===================== Procedural Map + Doors ===================== -->
+<script>
+(function(){
+  const MAPS = {};
 
-<script src="./assets/dev/game/game_bootstrap.js"></script>
-<script src="./assets/dev/merge_patch.js"></script>
-<script src="./assets/dev/glue_patch.js"></script>
+  function seededRandom(seed){
+    let x = Math.sin(seed++) * 10000;
+    return x - Math.floor(x);
+  }
+
+  function generateMap(seed=0){
+    const w=8,h=8;
+    const grid=Array.from({length:h},()=>Array(w).fill(null));
+
+    // Fixed rooms
+    grid[0][3]="Foyer";
+    grid[1][3]="Living";
+    grid[2][2]="Kitchen";
+    grid[2][3]="Dining";
+    grid[3][0]="Garage";
+
+    // Randomized bedrooms/bathrooms
+    let rooms=["Bedroom","Bedroom","Bathroom"];
+    let rng=seededRandom(seed)*1000|0;
+
+    for(let r of rooms){
+      let tries=0;
+      while(tries<50){
+        const x=Math.floor(seededRandom(rng++)*w);
+        const y=Math.floor(seededRandom(rng++)*h);
+        if(!grid[y][x]){
+          grid[y][x]=r;
+          break;
+        }
+        tries++;
+      }
+    }
+    return grid;
+  }
+
+  async function spawnMapPrimitives(scene, grid){
+    const size=4;
+    const doorPath="./assets/models/map/door.glb";
+
+    const boxes=[];
+
+    for(let y=0;y<grid.length;y++){
+      for(let x=0;x<grid[y].length;x++){
+        const cell=grid[y][x];
+        if(!cell) continue;
+
+        const box=BABYLON.MeshBuilder.CreateBox(cell+"_"+x+"_"+y,{size:size},scene);
+        box.position.set(x*size, size/2, y*size);
+
+        const mat=new BABYLON.StandardMaterial(cell+"Mat",scene);
+        mat.diffuseColor=BABYLON.Color3.Random();
+        box.material=mat;
+        boxes.push(box);
+      }
+    }
+
+    // Spawn doors
+    for(let y=0;y<grid.length;y++){
+      for(let x=0;x<grid[y].length;x++){
+        const cell=grid[y][x];
+        if(!cell) continue;
+
+        const neighbors=[
+          {dx:1,dz:0,rot:Math.PI/2},
+          {dx:-1,dz:0,rot:Math.PI/2},
+          {dx:0,dz:1,rot:0},
+          {dx:0,dz:-1,rot:0}
+        ];
+
+        for(let n of neighbors){
+          const nx=x+n.dx,nz=y+n.dz;
+          if(nx>=0 && nx<grid[0].length && nz>=0 && nz<grid.length){
+            const neighborCell=grid[nz][nx];
+            if(neighborCell && neighborCell!==cell){
+              const px=(x+nx)/2*size;
+              const pz=(y+nz)/2*size;
+              const py=size/2;
+
+              const door=await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/", "door.glb", scene);
+              const root=door.meshes[0];
+              root.position.set(px,py,pz);
+              root.rotation.y=n.rot;
+            }
+          }
+        }
+      }
+    }
+
+    // Van in front of Foyer
+    const foyerX=grid[0].findIndex(c=>"Foyer"===c);
+    if(foyerX>=0){
+      const van=BABYLON.MeshBuilder.CreateBox("Van",{width:2,height:1.5,depth:3},scene);
+      van.position.set(foyerX*size,0.75,-6);
+      window.__PP_SPAWN=van.position.clone();
+    }
+  }
+
+  // Hook maps to dropdown
+  const mapSelect=document.getElementById("map-select");
+  MAPS["Random House"]=()=>generateMap(Date.now()&0xffff);
+  mapSelect.innerHTML="";
+  Object.keys(MAPS).forEach(name=>{
+    const opt=document.createElement("option");
+    opt.value=name; opt.textContent=name;
+    mapSelect.appendChild(opt);
+  });
+
+  mapSelect.addEventListener("change",async function(){
+    if(!window.SCENE) return;
+    const scene=window.SCENE;
+    const grid=MAPS[mapSelect.value]();
+    await spawnMapPrimitives(scene, grid);
+  });
+
+})();
+</script>
+
 <!-- ===================== HUD INIT ===================== -->
 <script>
 (function(){
@@ -142,12 +259,10 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
     if (hudTemp) hudTemp.textContent = temp+"°C";
   };
 
-  // init defaults
   setTimeout(()=>{ window.updateSanity(100); window.updateWeather("Clear",20); }, 0);
 })();
 </script>
 
-<!-- ===================== START BUTTON + BOOTSTRAP ===================== -->
 <!-- ===================== START BUTTON + BOOTSTRAP ===================== -->
 <script>
 (async function(){
@@ -159,45 +274,29 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 
   btn.addEventListener('click', async function onStart(){
     try {
-      // Remove title screen
       document.getElementById('title-screen')?.remove();
-
-      // Show loading UI
       if (loadingBox) loadingBox.style.display = 'flex';
       if (loadingFill) loadingFill.style.width = '0%';
-
       window.__PP_ALREADY_STARTED__ = true;
       window.dispatchEvent(new CustomEvent('pp:start'));
-
       const canvas = document.getElementById('renderCanvas');
       try { canvas?.requestPointerLock?.(); } catch {}
       try { canvas?.focus?.(); } catch {}
 
-      // Wait for Babylon scene to exist
       let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-      while(!scene) {
-        await new Promise(r => setTimeout(r, 50));
-        scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-      }
-      window.scene = scene; // global
+      while(!scene){ await new Promise(r => setTimeout(r, 50)); scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene; }
+      window.scene = scene;
 
       if (loadingFill) loadingFill.style.width = '10%';
-
-      // Enable collisions
       scene.collisionsEnabled = true;
-
-      // Physics (Havok)
       const havok = await HavokPhysics();
       scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true, havok));
-
       if (loadingFill) loadingFill.style.width = '30%';
 
-      // Skybox
       const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", {size:1000.0}, scene);
       const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
       skyboxMaterial.backFaceCulling = false;
       skybox.material = skyboxMaterial;
-
       skyboxMaterial.animations ??= [];
       const anim = new BABYLON.Animation(
         "cloudAnim",
@@ -209,22 +308,17 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
       anim.setKeys([{frame:0,value:10},{frame:100,value:50},{frame:200,value:10}]);
       skyboxMaterial.animations.push(anim);
       scene.beginAnimation(skyboxMaterial, 0, 200, true);
-
       if (loadingFill) loadingFill.style.width = '50%';
 
-      // ===================== HAVOK-SAFE AUDIO PATCH =====================
       if (!PP.audio.play){
         PP.audio.play = function(name){
           if (PP.audio.sfx?.play) PP.audio.sfx.play(name);
         };
       }
 
-      // ===================== FLAME SHADER PATH =====================
       window.FLAME_SHADER_PATH = "./assets/dev/game/flame.fragment.fx";
 
-    } catch(e){
-      console.error("Start button error:", e);
-    }
+    } catch(e){ console.error("Start button error:", e); }
   }, {once:true});
 })();
 </script>
