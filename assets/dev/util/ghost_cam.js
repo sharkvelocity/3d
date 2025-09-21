@@ -1,4 +1,4 @@
-// ./assets/index3/ghost_cam.js — v1.2
+// ./assets/dev/util/ghost_cam.js — v1.2
 // Picture-in-picture camera that shows what the ghost sees (or over-shoulder).
 // Independent of ghost visibility/alpha and resilient to scene/camera resets.
 
