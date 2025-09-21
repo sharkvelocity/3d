@@ -313,4 +313,8 @@ async function startGame(){
     alert("Boot failed. Check console for details.");
   }
 }
+   document.addEventListener("DOMContentLoaded", () => {
+    loadManifest().catch(e => console.error("Failed to load map manifest:", e));
+});
+
 })(); // closes the IIFE
