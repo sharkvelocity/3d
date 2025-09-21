@@ -1,184 +1,154 @@
-// ghost_logic.js — full integrated ghost system for PhasmaPhoney
+/* ghost_logic.js — deterministic-safe ghost wander + events, integrated with MapGenerator, EMF, DOTS, SpiritBox, etc. */
 (function(){
-  "use strict";
-  if(window.__GhostLogicReady) return;
-  window.__GhostLogicReady = true;
+"use strict";
+if(window.__GhostLogicReady) return;
+window.__GhostLogicReady = true;
 
-  const S = () => window.scene || BABYLON.Engine?.LastCreatedScene;
+const S = () => window.scene || BABYLON.Engine?.LastCreatedScene;
 
-  // ---------- Ghost object ----------
-  const ghost = window.ghost = window.ghost || {};
-  ghost.position = ghost.position instanceof BABYLON.Vector3 ? ghost.position : new BABYLON.Vector3(0,0,0);
-  ghost.type = ghost.type || "Spirit";
-  ghost.mode = ghost.mode || "idle";
-  ghost.roomName = ghost.roomName || "";
-  ghost.roomCenter = ghost.roomCenter || new BABYLON.Vector3(2,0,2);
-  ghost.nearPlayer = false;
-  ghost.visible = false;
+// ---------- Ghost Object ----------
+const ghost = window.ghost = window.ghost || {};
+ghost.position = ghost.position instanceof BABYLON.Vector3 ? ghost.position : new BABYLON.Vector3(0,0,0);
+ghost.type = ghost.type || "Spirit";
+ghost.mode = ghost.mode || "idle";
+ghost.roomCenter = ghost.roomCenter || new BABYLON.Vector3(0,0,0);
+ghost.roomName = ghost.roomName || "";
+ghost.nearPlayer = false;
+ghost.visible = false;
 
-  // ---------- Helpers ----------
-  const currentRoomName = () => {
-    try { return typeof window.currentRoomName === "function" ? window.currentRoomName() : ""; }
-    catch { return ""; }
-  };
+ghost.favoriteRoom = ghost.favoriteRoom || null; // For ghosts like Goryo
 
-  const playerNear = (pos, range=6.0) => {
-    try {
-      const cam = S()?.activeCamera;
-      if(!cam?.position) return false;
-      return BABYLON.Vector3.Distance(cam.position, pos) <= range;
-    } catch { return false; }
-  };
+// ---------- Helpers ----------
+const currentRoomName = () => {
+  try { return typeof window.currentRoomName === "function" ? window.currentRoomName() : ""; }
+  catch { return ""; }
+};
 
-  const triggerEMF = (level, pos) => {
-    if(!window.EMF?.trigger) return;
-    if(playerNear(pos)) window.EMF.trigger(level, pos);
-  };
+const playerNear = (pos, range=6.0) => {
+  try {
+    const cam = S()?.activeCamera;
+    if(!cam?.position) return false;
+    return BABYLON.Vector3.Distance(cam.position, pos) <= range;
+  } catch { return false; }
+};
 
-  const evidence = ghost.evidence || [];
-  const hasEvidence = ev => evidence.includes(ev);
+const triggerEMF = (level,pos) => {
+  if(!window.EMF?.trigger) return;
+  if(playerNear(pos)) window.EMF.trigger(level,pos);
+};
 
-  // ---------- Event Handlers ----------
-  const onSaltWalk       = pos => triggerEMF(1, pos);
-  const onBookThrow      = pos => { if(!hasEvidence("GhostWriting")) triggerEMF(1 + Math.floor(Math.random()*2), pos); };
-  const onBookWrite      = pos => { if(hasEvidence("GhostWriting")) triggerEMF(2 + Math.floor(Math.random()*3), pos); };
-  const onPlateThrow     = pos => triggerEMF(2 + Math.floor(Math.random()*2), pos);
-  const onCrossBurn      = pos => triggerEMF(3 + Math.floor(Math.random()*2), pos);
-  const onBreakerInteract= pos => triggerEMF(4 + Math.floor(Math.random()*2), pos);
-  const onObjectInteract = (pos, baseLevel=1) => triggerEMF(baseLevel + Math.floor(Math.random()*2), pos);
+const evidence = ghost.evidence || [];
+const hasEvidence = ev => evidence.includes(ev);
 
-  // ---------- Map constraints ----------
-  const MAP = window.MAP_DEF || {};
-  const getRoomByName = (name) => MAP.rooms?.find(r=>r.name===name) || null;
+// ---------- Event Handlers ----------
+const onSaltWalk        = pos => triggerEMF(1,pos);
+const onBookThrow       = pos => { if(!hasEvidence("GhostWriting")) triggerEMF(1 + Math.floor(Math.random()*2), pos); };
+const onBookWrite       = pos => { if(hasEvidence("GhostWriting")) triggerEMF(2 + Math.floor(Math.random()*3), pos); };
+const onPlateThrow      = pos => triggerEMF(2 + Math.floor(Math.random()*2), pos);
+const onCrossBurn       = pos => triggerEMF(3 + Math.floor(Math.random()*2), pos);
+const onBreakerInteract = pos => triggerEMF(4 + Math.floor(Math.random()*2), pos);
+const onObjectInteract  = (pos, baseLevel=1) => triggerEMF(baseLevel + Math.floor(Math.random()*2), pos);
 
-  const getRoomBounds = (room) => {
-    if(!room || !room.center || !room.size) return null;
-    const half = {x: room.size.x/2, z: room.size.z/2};
-    return {
-      minX: room.center.x - half.x,
-      maxX: room.center.x + half.x,
-      minZ: room.center.z - half.z,
-      maxZ: room.center.z + half.z
-    };
-  };
+// ---------- Wander & Pathfinding Helpers ----------
+function isGhostAllowedInRoom(roomName){
+  if(!roomName) return false;
+  // Garage and front door restrictions
+  if(roomName.toLowerCase() === "garage") return false;
+  if(roomName.toLowerCase() === "foyer") return false;
+  // Bedrooms cannot go to garage
+  if(ghost.type === "Goryo" && ghost.favoriteRoom) return roomName === ghost.favoriteRoom;
+  return true;
+}
 
-  const pointInsideRoom = (point, room) => {
-    const b = getRoomBounds(room);
-    if(!b) return false;
-    return point.x >= b.minX && point.x <= b.maxX && point.z >= b.minZ && point.z <= b.maxZ;
-  };
+function getValidAdjacentPositions(){
+  const mg = window.MapGenerator;
+  if(!mg) return [ghost.position.clone()];
+  const currentRoom = ghost.roomName;
+  const roomCenter = mg.getRoomCenter(currentRoom) || ghost.position.clone();
+  let positions = [];
 
-  const nearestDoorOrOpening = (pos, room) => {
-    if(!room || !room.doors) return null;
-    let best = null, bestDist = Infinity;
-    for(const d of room.doors){
-      const dp = d.position ? new BABYLON.Vector3(d.position.x, pos.y, d.position.z) : null;
-      if(!dp) continue;
-      const dist = BABYLON.Vector3.Distance(pos, dp);
-      if(dist < bestDist){ bestDist = dist; best = dp; }
+  // Sample positions inside room, respecting walls
+  for(let i=0;i<6;i++){
+    const offset = new BABYLON.Vector3((Math.random()-0.5)*4,0,(Math.random()-0.5)*4);
+    const candidate = roomCenter.add(offset);
+    if(mg.isPositionInsideRoom(candidate,currentRoom)) positions.push(candidate);
+  }
+  if(positions.length===0) positions.push(roomCenter.clone());
+  return positions;
+}
+
+// ---------- Wander Loop ----------
+let t = 0, nextEvent = 10 + Math.random()*10;
+let radioCooldown = 0;
+let wanderTarget = ghost.roomCenter.clone();
+
+const attachLoop = () => {
+  const sc = S();
+  if(!sc){ setTimeout(attachLoop,120); return; }
+  const eng = sc.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
+
+  sc.onBeforeRenderObservable.add(() => {
+    const dt = (eng?.getDeltaTime?.() || 16.7)/1000;
+    t += dt;
+    if(radioCooldown > 0) radioCooldown -= dt;
+
+    // Select new wander target occasionally
+    if(Math.random() < 0.015){
+      const candidates = getValidAdjacentPositions();
+      wanderTarget = candidates[Math.floor(Math.random()*candidates.length)];
     }
-    return best;
-  };
 
-  // ---------- Wander ----------
-  let wanderTarget = ghost.roomCenter.clone();
-  let t = 0, nextEvent = 10 + Math.random()*10;
-  let radioCooldown = 0;
+    // Move ghost toward target
+    let dir = wanderTarget.subtract(ghost.position);
+    dir.y = 0;
+    const L = dir.length();
+    const speed = 0.6;
+    if(L > 0.01) ghost.position.addInPlace(dir.normalize().scale(Math.min(L, dt*speed)));
 
-  const pickRandomWanderPoint = () => {
-    const room = getRoomByName(ghost.roomName) || {center: ghost.roomCenter, size:{x:4,z:4}};
-    const halfX = room.size?.x/2 || 2;
-    const halfZ = room.size?.z/2 || 2;
-    const px = room.center.x + (Math.random()-0.5)*halfX*2;
-    const pz = room.center.z + (Math.random()-0.5)*halfZ*2;
-    const candidate = new BABYLON.Vector3(px, ghost.position.y, pz);
+    // Check player proximity
+    try{
+      const cam = sc.activeCamera;
+      ghost.nearPlayer = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position) < 5.0 : false;
+    } catch{}
 
-    // snap to nearest door if too close to wall
-    const doorPos = nearestDoorOrOpening(candidate, room);
-    if(doorPos && Math.random()<0.2) return doorPos;
+    // Periodic ghost events
+    if(t >= nextEvent){
+      t=0; nextEvent=8 + Math.random()*12;
 
-    return candidate;
-  };
-
-  // ---------- Main Loop ----------
-  const attachLoop = () => {
-    const sc = S();
-    if(!sc){ setTimeout(attachLoop, 120); return; }
-    const eng = sc.getEngine?.() || BABYLON.Engine?.LastCreatedEngine;
-
-    sc.onBeforeRenderObservable.add(() => {
-      const dt = (eng?.getDeltaTime?.() || 16.7)/1000;
-      t += dt;
-      if(radioCooldown>0) radioCooldown-=dt;
-
-      // pick a new wander target occasionally
-      if(Math.random()<0.01 || BABYLON.Vector3.Distance(ghost.position, wanderTarget)<0.3){
-        wanderTarget = pickRandomWanderPoint();
-      }
-
-      // move ghost toward target
-      const dir = wanderTarget.subtract(ghost.position);
-      dir.y = 0;
-      const L = dir.length();
-      const speed = 0.6;
-      if(L>0.01) ghost.position.addInPlace(dir.normalize().scale(Math.min(L, dt*speed)));
-
-      // enforce room boundaries
-      const room = getRoomByName(ghost.roomName);
-      if(room){
-        const bounds = getRoomBounds(room);
-        if(bounds){
-          ghost.position.x = Math.min(bounds.maxX, Math.max(bounds.minX, ghost.position.x));
-          ghost.position.z = Math.min(bounds.maxZ, Math.max(bounds.minZ, ghost.position.z));
-        }
-      }
-
-      // near player
-      try{
-        const cam = sc.activeCamera;
-        ghost.nearPlayer = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position)<5.0 : false;
+      try {
+        const r = Math.random();
+        if(r<0.25) window.GhostAudio?.whisper?.();
+        else if(r<0.55) window.GhostAudio?.doorCreak?.();
+        else if(r<0.80) window.GhostAudio?.doorSlam?.();
+        else window.GhostAudio?.toss?.();
       } catch{}
 
-      // periodic events
-      if(t>=nextEvent){
-        t=0;
-        nextEvent = 8 + Math.random()*12;
+      try{
+        const cam = sc.activeCamera;
+        const dist = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position) : 999;
+        if(dist < 6.0) window.EMFAudio?.extend?.(10 + Math.random()*5);
 
-        try {
-          const r = Math.random();
-          if(r<0.25) window.GhostAudio?.whisper?.();
-          else if(r<0.55) window.GhostAudio?.doorCreak?.();
-          else if(r<0.80) window.GhostAudio?.doorSlam?.();
-          else window.GhostAudio?.toss?.();
-        } catch{}
+        const inRoom = ghost.roomName && currentRoomName()===ghost.roomName;
+        const radioChance = inRoom ? 0.45 : 0.12;
+        if(radioCooldown <=0 && Math.random()<radioChance){
+          window.RadioAudio?.playOnce?.();
+          radioCooldown = 20 + Math.random()*20;
+        }
+      } catch{}
+    }
+  });
+};
 
-        try {
-          const cam = sc.activeCamera;
-          const dist = cam ? BABYLON.Vector3.Distance(cam.position, ghost.position) : 999;
-          if(dist<6.0) window.EMFAudio?.extend?.(10 + Math.random()*5);
+attachLoop();
 
-          const inRoom = ghost.roomName && currentRoomName()===ghost.roomName;
-          const radioChance = inRoom ? 0.45 : 0.12;
-          if(radioCooldown<=0 && Math.random()<radioChance){
-            window.RadioAudio?.playOnce?.();
-            radioCooldown = 20 + Math.random()*20;
-          }
-        } catch{}
-      }
-    });
-  };
-
-  attachLoop();
-
-  // ---------- Expose events ----------
-  window.GhostEvents = {
-    onSaltWalk,
-    onBookThrow,
-    onBookWrite,
-    onPlateThrow,
-    onCrossBurn,
-    onBreakerInteract,
-    onObjectInteract
-  };
-
+// ---------- Expose Event Handlers ----------
+window.GhostEvents = {
+  onSaltWalk,
+  onBookThrow,
+  onBookWrite,
+  onPlateThrow,
+  onCrossBurn,
+  onBreakerInteract,
+  onObjectInteract
+};
 })();
