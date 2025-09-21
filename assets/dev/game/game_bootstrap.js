@@ -1,9 +1,9 @@
 /* game_bootstrap.js — robust start flow with player rig integration
-   - Populates map dropdown from assets/models/map/maps.json
-   - Waits for Start to create engine/scene and then import the selected map
-   - Ensures no double-start, no duplicate fallback ground
-   - Disposes fallback if the real map succeeds
-   - Integrates player rig fully (WASD, PS5, camera, animations)
+   - Populates map dropdown
+   - Starts engine, imports selected map
+   - Loads player rig and waits until fully ready
+   - Enables pointer lock only after rig is ready
+   - Dispatches pp:start only when fully initialized
 */
 (function () {
   "use strict";
@@ -14,8 +14,7 @@
   const warn = (...a)=>{ try{ console.warn("[bootstrap]", ...a); }catch{} };
   const mark = (lbl, extra)=>{ try{ window.BOOTLOG?.mark(lbl, extra); }catch{} };
 
-  // ---------- tiny utils ----------
-  const $  = (s)=> document.querySelector(s);
+  const $ = (s)=> document.querySelector(s);
   const bURL = (p)=> { try { return new URL(p, document.baseURI).toString(); } catch { return p; } };
   async function fetchJSON(url){
     try {
@@ -25,7 +24,7 @@
     } catch (e) { warn("fetchJSON failed:", url, e); return null; }
   }
 
-  // ---------- loader UI ----------
+  // Loader UI
   const Loader = (() => {
     const box  = ()=> $("#loading-box");
     const text = ()=> $("#loading-text");
@@ -50,24 +49,16 @@
     }
     return { reset, addStep, run, show, hide, label };
   })();
-// Randomize weather on start
-window.addEventListener("pp:start", () => {
-    const states = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
-    const chosen = states[Math.floor(Math.random() * states.length)];
-    Weather.init();           // ensure sounds and particles are ready
-    Weather.set(chosen, { intensity: 1.0, immediate: true });
-    console.log("[Weather] randomized to:", chosen);
-}, { once: true });
 
   // ---------- state ----------
   let engine = null, scene = null, camera = null;
   let hemi = null;
   let started = false;
-  let manifest = [];   // [{file, title, def?}]
-  let mapRoot = null;  // imported meshes[0]
+  let manifest = [];
+  let mapRoot = null;
   let fallbackGround = null;
 
-  // ---------- map list / selector ----------
+  // ---------- map list ----------
   async function loadManifest() {
     let j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) manifest = j;
@@ -91,16 +82,13 @@ window.addEventListener("pp:start", () => {
       sel.innerHTML = `<option value="-1">(no maps found)</option>`;
       return;
     }
-    const opts = manifest.map((m,i)=> `<option value="${i}">${m.title || m.file}</option>`).join("");
-    sel.innerHTML = opts;
+    sel.innerHTML = manifest.map((m,i)=> `<option value="${i}">${m.title || m.file}</option>`).join("");
     try {
       const saved = localStorage.getItem("selectedMapIndex");
       if (saved && manifest[+saved]) sel.value = saved;
       else sel.value = "0";
     } catch(_){ sel.value = "0"; }
-    sel.onchange = () => {
-      try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_){}
-    };
+    sel.onchange = () => { try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_){} };
   }
 
   function getSelectedMap(){
@@ -126,162 +114,155 @@ window.addEventListener("pp:start", () => {
     hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
     hemi.intensity = 0.35;
 
-    // Camera is only placeholder; player rig will control camera
+    // placeholder camera
     camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
     camera.minZ = 0.1;
-
-    // Disable default Babylon inputs
     camera.inputs.clear();
 
     window.ENGINE = engine; window.SCENE = scene; window.camera = camera;
-
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
     mark("engine+scene-created");
   }
 
-  // ---------- MAP_DEF loading + apply ----------
-  async function loadMapDef(defNameOrNull, mapFile){
-    const baseNoExt = (mapFile||"").replace(/\.[^.]+$/, "");
-    const candidates = [];
-    if (defNameOrNull) candidates.push(`./assets/models/map/${defNameOrNull}`);
-    candidates.push(`./assets/models/map/${baseNoExt}.config.js`);
-    candidates.push(`./assets/models/map/${baseNoExt}.js`);
-
-    for (const c of candidates){
-      const ok = await loadScriptOnce(c);
-      if (ok && window.MAP_DEF) return true;
-    }
-    window.MAP_DEF = window.MAP_DEF || {};
-    MAP_DEF.file = mapFile || MAP_DEF.file || "";
-    MAP_DEF.scale = MAP_DEF.scale ?? 1;
-    MAP_DEF.rotationY = MAP_DEF.rotationY ?? 0;
-    MAP_DEF.offset = MAP_DEF.offset || { x:0,y:0,z:0 };
-    MAP_DEF.spawn  = MAP_DEF.spawn  || { x:0, y:1.8, z:0 };
-    return true;
-  }
-
-  function applyMapDefToRoot(root){
-    if (!root || !window.MAP_DEF) return;
-    const d = MAP_DEF;
-    try {
-      if (typeof d.scale === "number"){
-        root.scaling.set(d.scale, d.scale, d.scale);
-      }
-      const yaw = (d.rotationY||0) * Math.PI/180;
-      root.rotation.set(0, yaw, 0);
-      if (d.offset){
-        root.position.x = d.offset.x||0;
-        root.position.y = d.offset.y||0;
-        root.position.z = d.offset.z||0;
-      }
-    } catch(e){ warn("applyMapDefToRoot failed", e); }
-  }
-
-  function loadScriptOnce(path){
-    return new Promise((resolve) => {
-      const s = document.createElement("script");
-      s.src = bURL(path) + (path.includes("?") ? "" : `?v=${Date.now()}`);
-      s.async = true;
-      s.onload = () => resolve(true);
-      s.onerror = () => resolve(false);
-      document.head.appendChild(s);
-    });
-  }
-
-  // ---------- import selected map ----------
+  // ---------- map import ----------
   async function importSelectedMap(){
     const chosen = getSelectedMap();
     const mapFile = chosen?.file || "Abandoned_House.glb";
 
-    try { if (mapRoot && !mapRoot.isDisposed()) mapRoot.dispose(false, true); } catch{}
+    try { if (mapRoot && !mapRoot.isDisposed()) mapRoot.dispose(false,true); } catch{}
     mapRoot = null;
-    try { if (fallbackGround && !fallbackGround.isDisposed()) { fallbackGround.dispose(false, true); fallbackGround = null; } } catch{}
+    try { if (fallbackGround && !fallbackGround.isDisposed()) fallbackGround.dispose(false,true); fallbackGround=null; } catch{}
 
     await loadMapDef(chosen?.def, mapFile);
 
     try {
-      const res = await BABYLON.SceneLoader.ImportMeshAsync(
-        "", bURL("./assets/models/map/"), mapFile, scene
-      );
+      const res = await BABYLON.SceneLoader.ImportMeshAsync("", bURL("./assets/models/map/"), mapFile, scene);
       mapRoot = res.meshes[0] || null;
-
       if (mapRoot) {
         applyMapDefToRoot(mapRoot);
-        res.meshes.forEach(m => { try { m.checkCollisions = true; m.receiveShadows = true; } catch(_){} });
+        res.meshes.forEach(m => { try { m.checkCollisions=true; m.receiveShadows=true; } catch{} });
       }
-
       enforceSpawn();
       mark("map-imported", { file: mapFile });
       log("Map imported:", mapFile);
-
     } catch (e) {
       warn("Map import failed, creating fallback ground:", e);
       const sideM = 50;
-      fallbackGround = BABYLON.MeshBuilder.CreateGround("fallback_ground",
-        { width: sideM, height: sideM, subdivisions: 1 }, scene);
+      fallbackGround = BABYLON.MeshBuilder.CreateGround("fallback_ground",{ width:sideM, height:sideM, subdivisions:1 }, scene);
       fallbackGround.checkCollisions = true;
-      fallbackGround.position.y = 0;
+      fallbackGround.position.y=0;
       enforceSpawn();
     }
   }
 
-  // ---------- spawn ----------
   function enforceSpawn(){
     if (!scene) return;
-    const d = window.MAP_DEF || {};
-    const sp = d.spawn
-      ? {x: d.spawn.x||0, y: d.spawn.y||1.8, z: d.spawn.z||0}
-      : {x:0,y:1.8,z:0};
-
-    // Let player rig handle camera position; we just store spawn
+    const sp = window.MAP_DEF?.spawn || {x:0,y:1.8,z:0};
     window.__PP_SPAWN = new BABYLON.Vector3(sp.x, sp.y, sp.z);
   }
 
-  // ---------- pointer lock helpers ----------
-  function enablePointerLockOnce(){
-    const canvas = $("#renderCanvas");
-    if (!canvas) return;
-    const lock = ()=>{ if (document.pointerLockElement !== canvas) { try { canvas.requestPointerLock(); } catch{} } };
-    canvas.addEventListener("click", lock);
-    setTimeout(lock, 200);
+  async function loadScriptOnce(path){
+    return new Promise(resolve => {
+      const s=document.createElement("script");
+      s.src=bURL(path)+(path.includes("?")?"":`?v=${Date.now()}`);
+      s.async=true;
+      s.onload = ()=>resolve(true);
+      s.onerror=()=>resolve(false);
+      document.head.appendChild(s);
+    });
   }
 
-  // ---------- Start button flow ----------
+  function enablePointerLockOnce(){
+    const canvas=$("#renderCanvas"); if(!canvas) return;
+    const lock = ()=>{ if(document.pointerLockElement!==canvas){ try{ canvas.requestPointerLock(); } catch{} } };
+    canvas.addEventListener("click", lock);
+    setTimeout(lock,200);
+  }
+
   async function startGame(){
-    if (started) return; started = true;
-    const title = $("#title-screen"); if (title) title.style.display = "none";
+    if (started) return; started=true;
+    $("#title-screen")?.style.display="none";
 
     try {
       Loader.reset();
-      Loader.addStep("Preparing engine…", async ()=> { createEngineScene(); });
-      Loader.addStep("Loading map…",       async ()=> { await importSelectedMap(); });
-      Loader.addStep("Loading player rig…", async ()=> { 
-          await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
+      Loader.addStep("Preparing engine…", async ()=>{ createEngineScene(); });
+      Loader.addStep("Loading map…", async ()=>{ await importSelectedMap(); });
+      Loader.addStep("Loading player rig…", async ()=>{
+        await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
+        // Wait until the rig is ready
+        await new Promise(resolve => {
+          const check = () => {
+            if (window.PP?.rig?.body) return resolve();
+            setTimeout(check,50);
+          };
+          check();
+        });
+        log("[bootstrap] player rig ready");
       });
-      Loader.addStep("Finalizing…",        async ()=> { enablePointerLockOnce(); });
+      Loader.addStep("Finalizing…", async ()=>{ enablePointerLockOnce(); });
       await Loader.run();
 
+      // Dispatch start event only now
       window.dispatchEvent(new CustomEvent("pp:start"));
-      try { $("#renderCanvas")?.focus?.(); } catch{}
 
-    } catch (err) {
+      // Randomize weather on start
+      if (window.Weather) {
+        const states=["Clear","Rainstorm","Snow","Bloodmoon"];
+        const chosen=states[Math.floor(Math.random()*states.length)];
+        Weather.init();
+        Weather.set(chosen,{intensity:1,immediate:true});
+        log("[Weather] randomized to:", chosen);
+      }
+
+      $("#renderCanvas")?.focus?.();
+
+    } catch(err){
       warn("fatal start error:", err);
-      try { window.BOOTLOG?.add?.("fatal", { err: String(err) }); } catch(_){}
-      started = false;
-      if (title) title.style.display = "flex";
+      window.BOOTLOG?.add?.("fatal",{err:String(err)});
+      started=false;
+      $("#title-screen")?.style.display="flex";
       alert("Boot failed. Check console for details.");
     }
   }
 
   (function wire(){
-    const btn = $("#start-button");
-    if (btn) btn.addEventListener("click", startGame, { passive: false });
-    if (document.readyState === "loading"){
-      document.addEventListener("DOMContentLoaded", ()=> loadManifest());
-    } else {
-      loadManifest();
-    }
+    $("#start-button")?.addEventListener("click", startGame, { passive:false });
+    if (document.readyState==="loading"){
+      document.addEventListener("DOMContentLoaded",()=>loadManifest());
+    } else { loadManifest(); }
   })();
+
+  // ---------- MAP_DEF helpers ----------
+  async function loadMapDef(defNameOrNull, mapFile){
+    const baseNoExt = (mapFile||"").replace(/\.[^.]+$/,"");
+    const candidates = [];
+    if (defNameOrNull) candidates.push(`./assets/models/map/${defNameOrNull}`);
+    candidates.push(`./assets/models/map/${baseNoExt}.config.js`);
+    candidates.push(`./assets/models/map/${baseNoExt}.js`);
+
+    for(const c of candidates){
+      const ok = await loadScriptOnce(c);
+      if(ok && window.MAP_DEF) return true;
+    }
+    window.MAP_DEF = window.MAP_DEF||{};
+    MAP_DEF.file = mapFile||MAP_DEF.file||"";
+    MAP_DEF.scale = MAP_DEF.scale ?? 1;
+    MAP_DEF.rotationY = MAP_DEF.rotationY ?? 0;
+    MAP_DEF.offset = MAP_DEF.offset || { x:0,y:0,z:0 };
+    MAP_DEF.spawn  = MAP_DEF.spawn  || { x:0,y:1.8,z:0 };
+    return true;
+  }
+
+  function applyMapDefToRoot(root){
+    if(!root||!window.MAP_DEF) return;
+    const d=MAP_DEF;
+    try{
+      if(typeof d.scale==="number") root.scaling.set(d.scale,d.scale,d.scale);
+      const yaw=(d.rotationY||0)*Math.PI/180;
+      root.rotation.set(0,yaw,0);
+      if(d.offset){ root.position.x=d.offset.x||0; root.position.y=d.offset.y||0; root.position.z=d.offset.z||0; }
+    } catch(e){ warn("applyMapDefToRoot failed",e); }
+  }
 
 })();
