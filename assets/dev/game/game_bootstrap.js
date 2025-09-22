@@ -65,16 +65,18 @@ let mapRoot=null;
 let currentMap=null;
 
 // ---------- Map Manifest / Selector ----------
-let manifest = []; // array of maps
+window.PP = window.PP || {};
+PP.manifest = []; // array of maps
+
 async function loadManifest() {
     // Try JSON first
-    let j = await fetchJSON("./assets/models/map/maps.json");
-    if (Array.isArray(j)) manifest = j;
-    else if (j && Array.isArray(j.maps)) manifest = j.maps;
+    const j = await fetchJSON("./assets/models/map/maps.json");
+    if (Array.isArray(j)) PP.manifest = j;
+    else if (j && Array.isArray(j.maps)) PP.manifest = j.maps;
 
     // Fallback if empty
-    if (!manifest.length) {
-        manifest = [
+    if (!PP.manifest.length) {
+        PP.manifest = [
             { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.config.js" },
             { file: "furnished_house.glb",  title: "Furnished House",  def: "furnished_house.js" },
             { file: "jailhouse.glb",        title: "Jailhouse",        def: "jailhouse.config.js" },
@@ -89,12 +91,34 @@ function populateMapSelector() {
     const sel = document.querySelector("#map-select");
     if (!sel) return;
 
-    if (!manifest.length) {
+    if (!PP.manifest.length) {
         sel.innerHTML = `<option value="-1">(no maps found)</option>`;
         return;
     }
 
-    sel.innerHTML = manifest.map((m, i) => `<option value="${i}">${m.title || m.file}</option>`).join("");
+    sel.innerHTML = PP.manifest.map((m, i) => 
+        `<option value="${i}">${m.title || m.file}</option>`
+    ).join("");
+
+    // Restore saved selection
+    try {
+        const saved = localStorage.getItem("selectedMapIndex");
+        if (saved && PP.manifest[+saved]) sel.value = saved;
+        else sel.value = "0";
+    } catch (_) {
+        sel.value = "0";
+    }
+
+    sel.onchange = () => {
+        try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_) {}
+    };
+}
+
+function getSelectedMap() {
+    const sel = document.querySelector("#map-select");
+    const idx = Math.max(0, Math.min(PP.manifest.length - 1, parseInt(sel?.value || "0", 10)));
+    return PP.manifest[idx];
+}
 
     // Restore saved selection
     try {
