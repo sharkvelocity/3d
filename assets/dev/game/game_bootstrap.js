@@ -61,7 +61,6 @@ const Loader = (()=>{
 let engine=null, scene=null, camera=null;
 let hemi=null;
 let started=false;
-let manifest=[];
 let mapRoot=null;
 let currentMap=null;
 
