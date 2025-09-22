@@ -120,19 +120,6 @@ function getSelectedMap() {
     return PP.manifest[idx];
 }
 
-    // Restore saved selection
-    try {
-        const saved = localStorage.getItem("selectedMapIndex");
-        if (saved && manifest[+saved]) sel.value = saved;
-        else sel.value = "0";
-    } catch (_) {
-        sel.value = "0";
-    }
-
-    sel.onchange = () => {
-        try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_) {}
-    };
-}
 
 // ---------- Engine & Scene ----------
 function createEngineScene(){
@@ -160,10 +147,13 @@ function createEngineScene(){
     window.addEventListener("resize",()=>engine.resize());
     mark("engine+scene-created");
 }
-
+<script src="./assets/dev/ghost/ghost_db.js"></script>
+<script src="./assets/dev/ghost/phasma_map_and_ghost.js"></script>
 // ---------- Ghosts & PS5 Injection ----------
 async function injectGhostsAndPS5(){
     await loadScriptOnce("./assets/dev/ghost/ghost_data.js");
+    await loadScriptOnce("./assets/dev/ghost/ghost_db.js");
+    await loadScriptOnce("./assets/dev/ghost/phasma_map_and_ghost.js");
     await loadScriptOnce("./assets/dev/ui/ps5_controller.js");
     mark("ghosts+ps5-loaded");
 }
