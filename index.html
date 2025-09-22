@@ -151,81 +151,115 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
     const btn = document.getElementById('start-button');
     const loadingBox = document.getElementById('loading-box');
     const loadingFill = document.getElementById('loading-fill');
-    if(!btn) return;
+    const mapSelect = document.getElementById('map-select');
+    if(!btn || !mapSelect) return;
 
+    // ---------------- Populate map dropdown ----------------
+    const maps = ["ProHouse"]; // add more maps here in the future
+    mapSelect.innerHTML = "";
+    maps.forEach((m,i)=>{
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = m;
+        mapSelect.appendChild(opt);
+    });
+
+    // ---------------- Start button ----------------
     btn.addEventListener('click', async function onStart(){
         try {
             // Remove title screen
             document.getElementById('title-screen')?.remove();
-            if(loadingBox) loadingBox.style.display='flex';
-            if(loadingFill) loadingFill.style.width='0%';
+            if(loadingBox) loadingBox.style.display = 'flex';
+            if(loadingFill) loadingFill.style.width = '0%';
 
             window.__PP_ALREADY_STARTED__ = true;
             window.dispatchEvent(new CustomEvent('pp:start'));
 
             const canvas = document.getElementById('renderCanvas');
-            try{ canvas?.requestPointerLock?.(); } catch{}
-            try{ canvas?.focus?.(); } catch{}
+            try { canvas?.requestPointerLock?.(); } catch {}
+            try { canvas?.focus?.(); } catch {}
 
-            // Wait for Babylon scene
+            // ---------------- Wait for Babylon scene ----------------
             let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-            while(!scene){ await new Promise(r=>setTimeout(r,50)); scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene; }
+            while(!scene){ 
+                await new Promise(r=>setTimeout(r,50));
+                scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene; 
+            }
             window.scene = scene;
-
             scene.collisionsEnabled = true;
 
-            if(loadingFill) loadingFill.style.width='10%';
+            if(loadingFill) loadingFill.style.width = '10%';
 
-            // Physics
+            // ---------------- Physics ----------------
             const havok = await HavokPhysics();
             scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
-            if(loadingFill) loadingFill.style.width='30%';
+            if(loadingFill) loadingFill.style.width = '30%';
 
-            // Skybox
-            const skybox = BABYLON.MeshBuilder.CreateBox("skyBox",{size:1000.0},scene);
-            const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial",scene);
-            skyboxMaterial.backFaceCulling=false; skybox.material=skyboxMaterial;
+            // ---------------- Skybox ----------------
+            const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", {size:1000.0}, scene);
+            const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
+            skyboxMaterial.backFaceCulling = false;
+            skybox.material = skyboxMaterial;
             skyboxMaterial.animations ??= [];
-            const anim = new BABYLON.Animation("cloudAnim","turbidity",30,BABYLON.Animation.ANIMATIONTYPE_FLOAT,BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
-            anim.setKeys([{frame:0,value:10},{frame:100,value:50},{frame:200,value:10}]);
+            const anim = new BABYLON.Animation("cloudAnim", "turbidity", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+            anim.setKeys([
+                {frame:0, value:10},
+                {frame:100, value:50},
+                {frame:200, value:10}
+            ]);
             skyboxMaterial.animations.push(anim);
-            scene.beginAnimation(skyboxMaterial,0,200,true);
-            if(loadingFill) loadingFill.style.width='50%';
+            scene.beginAnimation(skyboxMaterial, 0, 200, true);
+            if(loadingFill) loadingFill.style.width = '50%';
 
-            // ===================== GENERATE MAP + SPAWN ROOMS =====================
-            await MapGenerator.spawnRooms(Date.now());
-            if(loadingFill) loadingFill.style.width='70%';
+            // ---------------- Generate Map & Spawn Rooms ----------------
+            const selectedMapIndex = parseInt(mapSelect.value || 0);
+            const seed = Date.now() + selectedMapIndex;
+            await MapGenerator.spawnRooms(seed);
+            if(loadingFill) loadingFill.style.width = '70%';
 
-            // ===================== PLAYER SPAWN =====================
-            const vanRoom = MapGenerator.getVanRoom();
+            // ---------------- Player Spawn ----------------
+            const vanRoom = MapGenerator.getVanRoom ? MapGenerator.getVanRoom() : MapGenerator.rooms.find(r=>r.type==="garage") || MapGenerator.rooms[0];
             const spawnPos = vanRoom ? new BABYLON.Vector3(
-                vanRoom.position.x + vanRoom.width*MapGenerator.roomSizeUnit/2,
+                vanRoom.position.x + vanRoom.width * MapGenerator.roomSizeUnit / 2,
                 1.6,
                 vanRoom.position.z - 3
-            ) : new BABYLON.Vector3(0,1.6,0);
+            ) : new BABYLON.Vector3(0, 1.6, 0);
             window.__PP_SPAWN_POS__ = spawnPos;
 
             if(scene.activeCamera){
                 scene.activeCamera.position.copyFrom(spawnPos);
             }
 
-            // ===================== SPAWN GHOST =====================
+            // ---------------- Ghost Spawn ----------------
             if(window.GhostLogic?.ghost){
+                // Move ghost 5 units offset from player
                 window.GhostLogic.ghost.position.copyFrom(spawnPos.add(new BABYLON.Vector3(5,0,5)));
-                const ghostRoom = MapGenerator.rooms[Math.floor(Math.random()*MapGenerator.rooms.length)];
+
+                // Assign a random room
+                const ghostRoom = MapGenerator.rooms[Math.floor(Math.random() * MapGenerator.rooms.length)];
                 window.GhostLogic.ghost.roomName = ghostRoom.name;
-                window.GhostLogic.ghost.roomCenter = MapGenerator.getRoomCenter(ghostRoom.name);
+                window.GhostLogic.ghost.roomCenter = MapGenerator.getRoomCenter ? MapGenerator.getRoomCenter(ghostRoom.name) : 
+                    new BABYLON.Vector3(
+                        ghostRoom.position.x + ghostRoom.width*MapGenerator.roomSizeUnit/2,
+                        1.0,
+                        ghostRoom.position.z + ghostRoom.depth*MapGenerator.roomSizeUnit/2
+                    );
             }
 
-            if(loadingFill) loadingFill.style.width='100%';
-            setTimeout(()=>{if(loadingBox) loadingBox.style.display='none';},300);
+            // ---------------- Finish Loading ----------------
+            if(loadingFill) loadingFill.style.width = '100%';
+            setTimeout(()=>{
+                if(loadingBox) loadingBox.style.display = 'none';
+            }, 300);
 
         } catch(e){
-            console.error("Start button error:",e);
+            console.error("Start button error:", e);
+            if(loadingBox) loadingBox.style.display = 'none';
         }
     }, {once:true});
 })();
 </script>
+
 
 </body>
 </html>
