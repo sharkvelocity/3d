@@ -174,7 +174,7 @@ async function loadMap(mapData){
     log("[MapLoader] Loaded:", mapData.title||mapData.file,currentMap);
 }
 
-// ---------- Player Rig (full WASD + PS5 + mouse + physics + animations) ----------
+// ---------- Player Rig (full WASD + PS5 + mouse + physics + animations) ---------- //
 (async function(){
   if(window.__PP_RIG_READY__) return;
   window.__PP_RIG_READY__ = true;
@@ -219,7 +219,7 @@ async function loadMap(mapData){
   function uiBusy(){ const ae=document.activeElement; return ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"||ae.isContentEditable); }
   function selectSlot(n){ n=Math.max(1,Math.min(3,n|0)); const prev=PP.state.selectedSlot; if(prev===n){ emit("pp:slot:confirm",{slot:n}); return; } PP.state.selectedSlot=n; emit("pp:slot:change",{prev,next:n}); if(typeof window.selectSlot==="function") window.selectSlot(n); if(typeof window.buildBelt==="function"){ try{ window.buildBelt(null); }catch{} } }
 
-  // Keyboard
+  // ------- Keyboard --------//
   addEventListener("keydown",(e)=>{
     if(uiBusy()) return;
     keysDown[e.code]=true;
@@ -399,7 +399,7 @@ async function loadMap(mapData){
   startRig();
 })();
 
-// ---------- Start Game ----------
+// ---------- Start Game ---------- //
 async function startGame() {
     if (started) return;
     started = true;
@@ -459,7 +459,7 @@ if (titleScreen) titleScreen.style.display = "none";
     alert("Boot failed. Check console for details.");
     }
 }
-// ---------- Settings Menu ----------
+// ---------- Settings Menu ---------- //
 (function(){
     if(window.__PP_SETTINGS_MENU__) return;
     window.__PP_SETTINGS_MENU__ = true;
@@ -533,10 +533,9 @@ if (titleScreen) titleScreen.style.display = "none";
     console.log("[PP] Settings menu initialized (F1 to toggle)");
 })();
 
-// ---------- DOM Ready ----------
+// ---------- DOM Ready ---------- //
 document.addEventListener("DOMContentLoaded", () => {
     loadManifest().catch(e => console.error("Failed to load map manifest:", e));
     const startBtn = document.getElementById("start-button");
     if(startBtn) startBtn.addEventListener("click", startGame, { once: true });
 });
-
