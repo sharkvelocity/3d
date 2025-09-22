@@ -18,6 +18,11 @@ async function fetchJSON(url){
         return await r.json();
     }catch(e){ warn("fetchJSON failed:", url,e); return null; }
 }
+function enablePointerLockOnce(){
+    const canvas = document.querySelector("#renderCanvas");
+    if(!canvas) return;
+    canvas.addEventListener("click",()=>{ if(document.pointerLockElement!==canvas) canvas.requestPointerLock(); }, { once:true });
+}
 
 function loadScriptOnce(path){
     return new Promise(resolve=>{
