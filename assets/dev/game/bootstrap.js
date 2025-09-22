@@ -457,7 +457,6 @@ if (titleScreen) titleScreen.style.display = "none";
     const titleScreen = document.getElementById("title-screen");
     if (titleScreen) titleScreen.style.display = "flex";
     alert("Boot failed. Check console for details.");
-}
 
 }
 
