@@ -282,4 +282,4 @@ async function startGame(){
 document.addEventListener("DOMContentLoaded", () => {
     loadManifest().catch(e => console.error("Failed to load map manifest:", e));
     $("#start-button")?.addEventListener("click", startGame, { once:true });
-})();
+});
