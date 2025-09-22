@@ -192,7 +192,6 @@ async function loadMap(mapData){
     };
 
     if(mapData.file.toLowerCase().endsWith(".glb")){
-        // --- GLB map ---
         const res = await BABYLON.SceneLoader.ImportMeshAsync(
             "", "./assets/models/map/", mapData.file, scene
         );
@@ -210,7 +209,6 @@ async function loadMap(mapData){
         });
 
     } else if(mapData.file.toLowerCase().endsWith(".config.js")){
-        // --- Procedural map ---
         unified.type = "procedural";
         if (window.MapGenerator) {
             currentMap = window.MapGenerator;
@@ -231,8 +229,15 @@ async function loadMap(mapData){
     window.__PP_SPAWN = unified.spawn.clone();
 
     spawnPlayer?.();
+
+    // 🔥 Tie into ghost system
+    if (window.GhostSystem?.onMapLoaded) {
+        GhostSystem.onMapLoaded(unified, scene);
+    }
+
     console.log("[MapLoader] Loaded:", unified.title, unified);
 }
+
 
 // ---------- Start Game ----------
 async function startGame(){
