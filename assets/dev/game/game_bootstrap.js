@@ -209,10 +209,10 @@ async function startGame() {
     $("#title-screen")?.style.display = "none";
     log("[bootstrap] Starting game…");
 
-    const STEP_TIMEOUT = 10000; // 10 seconds max per step
+    const STEP_TIMEOUT = 10000; // 10s max per step
 
-    // Helper to wrap async steps safely
-    async function safeStep(label, fn) {
+    // Safe step wrapper — queues step in Loader
+    function safeStep(label, fn) {
         Loader.addStep(label, async () => {
             try {
                 await Promise.race([
@@ -228,20 +228,15 @@ async function startGame() {
     try {
         Loader.reset();
 
-        await safeStep("Preparing engine…", async () => createEngineScene());
-
-        await safeStep("Injecting ghosts & PS5 controller…", async () => injectGhostsAndPS5());
-
-        await safeStep("Loading map…", async () => {
+        // ---------- Add all steps ----------
+        safeStep("Preparing engine…", () => createEngineScene());
+        safeStep("Injecting ghosts & PS5 controller…", () => injectGhostsAndPS5());
+        safeStep("Loading map…", async () => {
             const mapData = getSelectedMap();
             await loadMap(mapData);
         });
-
-        await safeStep("Initializing logger…", async () => {
-            await loadScriptOnce("./assets/dev/game/logger.js");
-        });
-
-        await safeStep("Loading player rig…", async () => {
+        safeStep("Initializing logger…", () => loadScriptOnce("./assets/dev/game/logger.js"));
+        safeStep("Loading player rig…", async () => {
             await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
             await new Promise(r => {
                 if (window.PP?.rigReady) return r();
@@ -256,8 +251,7 @@ async function startGame() {
             });
             log("[bootstrap] Player rig ready");
         });
-
-        await safeStep("Initializing player physics & movement…", async () => {
+        safeStep("Initializing player physics & movement…", () => {
             const body = window.PP?.rig?.body;
             if (body && !body.physicsImpostor) {
                 body.physicsImpostor = new BABYLON.PhysicsImpostor(
@@ -270,19 +264,17 @@ async function startGame() {
             if (camera && body) { camera.parent = body; camera.position.set(0, 1.6, 0); }
             if (window.PP?.rig?.controller?.enable) window.PP.rig.controller.enable(scene);
         });
-
-        await safeStep("Finalizing…", async () => {
+        safeStep("Finalizing…", () => {
             if (window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
             enablePointerLockOnce();
         });
 
-        // Run Loader queue
+        // ---------- Run loader ----------
         await Loader.run();
 
         window.dispatchEvent(new CustomEvent("pp:start"));
         log("[bootstrap] Game started successfully.");
-
-        try { $("#renderCanvas")?.focus?.(); } catch { }
+        try { $("#renderCanvas")?.focus?.(); } catch {}
 
     } catch (err) {
         console.error("[bootstrap] Error starting game:", err);
@@ -291,6 +283,7 @@ async function startGame() {
         alert("Boot failed. Check console for details.");
     }
 }
+
 
 // ---------- Settings Menu ----------
 (function(){
