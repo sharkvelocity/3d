@@ -134,16 +134,6 @@ function getSelectedMap() {
     };
 }
 
-function getSelectedMap() {
-    const sel = document.querySelector("#map-select");
-    const idx = Math.max(0, Math.min(manifest.length - 1, parseInt(sel?.value || "0", 10)));
-    return manifest[idx];
-}
-Loader.addStep("Initializing logger…", async ()=>{
-    await loadScriptOnce("./assets/dev/game/logger.js");
-});
-
-
 // ---------- Engine & Scene ----------
 function createEngineScene(){
     if(engine && scene) return;
