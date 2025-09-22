@@ -452,11 +452,13 @@ if (titleScreen) titleScreen.style.display = "none";
         try { $("#renderCanvas")?.focus?.(); } catch {}
 
     } catch (err) {
-        console.error("[bootstrap] Error starting game:", err);
-        started = false;
-        $("#title-screen")?.style.display = "flex";
-        alert("Boot failed. Check console for details.");
-    }
+    console.error("[bootstrap] Error starting game:", err);
+    started = false;
+    const titleScreen = document.getElementById("title-screen");
+    if (titleScreen) titleScreen.style.display = "flex";
+    alert("Boot failed. Check console for details.");
+}
+
 }
 
 // ---------- Settings Menu ----------
