@@ -146,6 +146,7 @@ function createEngineScene(){
 async function injectGhostsAndPS5(){
     await loadScriptOnce("./assets/dev/ghost/ghost_data.js");
     await loadScriptOnce("./assets/dev/ghost/ghost_db.js");
+    await loadScriptOnce("./assets/models/map/prohouse_generator.js")
     await loadScriptOnce("./assets/dev/ghost/phasma_map_and_ghost.js");
     await loadScriptOnce("./assets/dev/ui/ps5_controller.js");
     mark("ghosts+ps5-loaded");
