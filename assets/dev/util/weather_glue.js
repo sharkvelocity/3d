@@ -38,17 +38,20 @@
     PP.audio.play(pick(sounds), { volume: 0.25 + Math.random()*0.3 });
   }
 
-  function scheduleRandomRumble(){
+ function scheduleRandomRumble(){
+    STATE.thunderTimers ||= [];
     const delay = 5000 + Math.random()*15000;
-    const timer = setTimeout(()=>{
-      if (STATE.current === "Rainstorm" && PP?.audio){
-        const rumbleSounds = window.WEATHER_AUDIO_MAP?.rumble || ["thunder_rumble1","thunder_rumble2"];
-        PP.audio.play(pick(rumbleSounds), { volume: 0.2 + Math.random()*0.2 });
-      }
-      scheduleRandomRumble();
+    const timer = setTimeout(() => {
+        if (STATE.current === "Rainstorm" && PP?.audio?.play){
+            const rumbleSounds = window.WEATHER_AUDIO_MAP?.rumble || ["thunder_rumble1","thunder_rumble2"];
+            const sound = rumbleSounds[Math.floor(Math.random()*rumbleSounds.length)];
+            PP.audio.play(sound, { volume: 0.2 + Math.random()*0.2 });
+        }
+        scheduleRandomRumble();
     }, delay);
     STATE.thunderTimers.push(timer);
-  }
+}
+
 
   function clearThunderTimers(){
     STATE.thunderTimers.forEach(t => clearTimeout(t));
