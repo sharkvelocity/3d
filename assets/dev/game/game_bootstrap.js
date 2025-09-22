@@ -65,39 +65,58 @@ let manifest=[];
 let mapRoot=null;
 let currentMap=null;
 
-// ---------- Map Manifest ----------
-async function loadManifest(){
+// ---------- Map Manifest / Selector ----------
+let manifest = []; // array of maps
+async function loadManifest() {
+    // Try JSON first
     let j = await fetchJSON("./assets/models/map/maps.json");
-    if(Array.isArray(j)) manifest=j;
-    else if(j && Array.isArray(j.maps)) manifest=j.maps;
-    if(!manifest.length){
-        manifest=[
-            {file:"prohouse_placeholder.glb", title:"ProHouse", def:"prohouse_generator.js"},
-            {file:"Abandoned_House.glb", title:"Abandoned House", def:"Abandoned_House.config.js"},
-            {file:"furnished_house.glb",  title:"Furnished House",  def:"furnished_house.js"}
+    if (Array.isArray(j)) manifest = j;
+    else if (j && Array.isArray(j.maps)) manifest = j.maps;
+
+    // Fallback if empty
+    if (!manifest.length) {
+        manifest = [
+            { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.config.js" },
+            { file: "furnished_house.glb",  title: "Furnished House",  def: "furnished_house.js" },
+            { file: "jailhouse.glb",        title: "Jailhouse",        def: "jailhouse.config.js" },
+            { file: "apartment_floor_plan.glb", title: "Apartment",    def: "apartment_floor_plan.config.js" }
         ];
     }
+
     populateMapSelector();
 }
 
-function populateMapSelector(){
-    const sel=$("#map-select");
-    if(!sel) return;
-    if(!manifest.length){ sel.innerHTML=`<option value="-1">(no maps found)</option>`; return; }
-    sel.innerHTML = manifest.map((m,i)=>`<option value="${i}">${m.title||m.file}</option>`).join("");
-    try{
+function populateMapSelector() {
+    const sel = document.querySelector("#map-select");
+    if (!sel) return;
+
+    if (!manifest.length) {
+        sel.innerHTML = `<option value="-1">(no maps found)</option>`;
+        return;
+    }
+
+    sel.innerHTML = manifest.map((m, i) => `<option value="${i}">${m.title || m.file}</option>`).join("");
+
+    // Restore saved selection
+    try {
         const saved = localStorage.getItem("selectedMapIndex");
-        if(saved && manifest[+saved]) sel.value = saved;
-        else sel.value="0";
-    }catch(_){ sel.value="0"; }
-    sel.onchange = ()=>{ try{ localStorage.setItem("selectedMapIndex", sel.value); }catch{} };
+        if (saved && manifest[+saved]) sel.value = saved;
+        else sel.value = "0";
+    } catch (_) {
+        sel.value = "0";
+    }
+
+    sel.onchange = () => {
+        try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_) {}
+    };
 }
 
-function getSelectedMap(){
-    const sel=$("#map-select");
-    const idx = Math.max(0, Math.min(manifest.length-1, parseInt(sel?.value||"0",10)||0));
+function getSelectedMap() {
+    const sel = document.querySelector("#map-select");
+    const idx = Math.max(0, Math.min(manifest.length - 1, parseInt(sel?.value || "0", 10)));
     return manifest[idx];
 }
+
 
 // ---------- Engine & Scene ----------
 function createEngineScene(){
