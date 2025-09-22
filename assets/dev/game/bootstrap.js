@@ -404,7 +404,9 @@ async function startGame() {
     if (started) return;
     started = true;
 
-    $("#title-screen")?.style.display = "none";
+   const titleScreen = document.getElementById("title-screen");
+if (titleScreen) titleScreen.style.display = "none";
+
     log("[bootstrap] Starting game…");
 
     const STEP_TIMEOUT = 10000;
