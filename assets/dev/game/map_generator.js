@@ -1,26 +1,24 @@
-/* map_generator.js — procedural house generator for PhasmaPhoney
-   - Generates rooms as square/rectangle/L-shapes
-   - Respects constraints: front door fixed, garage fixed side, bathrooms 1 door, bedrooms 1-3 rooms
-   - Kitchen + dining fixed together
-   - Living room fixed shape but can move
-   - Doors/doorways are centered on edges
-   - Player spawn at van location
-   - Ghost spawn constrained to map, cannot pass walls, uses doorways as openings
+/* prohouse_generator.js — procedural ProHouse generator for PhasmaPhoney
+   - Generates rooms (foyer, garage, living, kitchen/dining, bedrooms, bathrooms)
+   - Creates meshes and doors with collisions
+   - Returns object with meshes, rooms, doors, and player spawn
 */
 
 (function(){
 "use strict";
-if(window.__MapGeneratorReady) return;
-window.__MapGeneratorReady = true;
+if(window.__ProHouseGeneratorReady) return;
+window.__ProHouseGeneratorReady = true;
 
 const S = () => window.scene || BABYLON.EngineStore.LastCreatedScene;
 
-window.MapGenerator = {
+window.ProHouseGenerator = {
     rooms: [],
     roomMeshes: [],
+    doorMeshes: [],
     roomSizeUnit: 4,
     doorMesh: null,
 
+    // ----- Load door mesh once -----
     async loadDoorMesh(path="./assets/models/map/door.glb"){
         if(this.doorMesh) return this.doorMesh;
         const sc = S();
@@ -34,10 +32,11 @@ window.MapGenerator = {
         return this.doorMesh;
     },
 
+    // ----- Create room mesh -----
     createRoomMesh(room){
         const sc = S();
         if(!sc) return null;
-        let mesh = BABYLON.MeshBuilder.CreateBox(room.name, {
+        const mesh = BABYLON.MeshBuilder.CreateBox(room.name, {
             width: room.width*this.roomSizeUnit,
             depth: room.depth*this.roomSizeUnit,
             height: 2.5
@@ -49,11 +48,12 @@ window.MapGenerator = {
         return mesh;
     },
 
+    // ----- Procedural generation -----
     generate(seed = 12345){
-        let rng = (function(s){ let x = s; return ()=>{ x=(x*9301+49297)%233280; return x/233280; }; })(seed);
+        const rng = (function(s){ let x = s; return ()=>{ x=(x*9301+49297)%233280; return x/233280; }; })(seed);
         const rooms = [];
         const usedSpaces = new Set();
-        function hashPos(x,z){ return `${x},${z}`; }
+        const hashPos = (x,z) => `${x},${z}`;
 
         // Foyer
         const foyer = { name:"Foyer", width:1, depth:1, type:"foyer", position:{x:0,z:0}, doors:[] };
@@ -112,17 +112,25 @@ window.MapGenerator = {
         return rooms;
     },
 
-    async spawnRooms(seed){
-        const sc = S();
-        if(!sc) return;
-        if(this.roomMeshes.length){ this.roomMeshes.forEach(m=>{ try{ m.dispose(); } catch{} }); this.roomMeshes=[]; }
+    // ----- Generate room meshes and doors -----
+    async generateMap(scene, seed=12345){
+        if(!scene) scene = S();
+        if(!scene) throw new Error("Scene not ready");
 
+        // clear previous meshes
+        this.roomMeshes.forEach(m=>{ try{ m.dispose(); }catch{} });
+        this.roomMeshes=[];
+        this.doorMeshes.forEach(m=>{ try{ m.dispose(); }catch{} });
+        this.doorMeshes=[];
+
+        // generate rooms
         this.generate(seed);
 
-        for(const r of this.rooms) this.createRoomMesh(r);
+        // create meshes
+        this.rooms.forEach(r=>this.createRoomMesh(r));
 
         // spawn doors
-        if(!this.doorMesh) await this.loadDoorMesh();
+        await this.loadDoorMesh();
         if(this.doorMesh){
             for(const r of this.rooms){
                 r.doors.forEach(d=>{
@@ -130,15 +138,21 @@ window.MapGenerator = {
                     dm.isVisible = true;
                     dm.position.set(r.position.x + d.x, 1, r.position.z + d.z);
                     dm.checkCollisions = true;
+                    this.doorMeshes.push(dm);
                 });
             }
         }
 
-        // place player at van location
-        if(window.__PP_SPAWN){
-            const sp = window.__PP_SPAWN;
-            sp.x=-3; sp.y=1.8; sp.z=-5;
-        }
+        // player spawn
+        const spawn = window.__PP_SPAWN || {x:0,y:1.8,z:0};
+        spawn.x = -3; spawn.y = 1.8; spawn.z = -5;
+
+        return {
+            meshes: this.roomMeshes.concat(this.doorMeshes),
+            rooms: this.rooms,
+            doors: this.doorMeshes,
+            spawn
+        };
     }
 };
 })();
