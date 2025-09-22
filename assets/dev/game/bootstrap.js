@@ -1,4 +1,4 @@
-/* game_bootstrap.js — full bootstrap with ProHouse generator, ghost system, PS5 controls, player rig, and map loader */
+/* bootstrap.js — full bootstrap with ProHouse generator, ghost system, PS5 controls, player rig, map loader, and player movement */
 (function(){
 "use strict";
 if(window.__GameBootstrapReady) return;
@@ -66,15 +66,13 @@ let currentMap=null;
 
 // ---------- Map Manifest / Selector ----------
 window.PP = window.PP || {};
-PP.manifest = []; // array of maps
+PP.manifest = [];
 
 async function loadManifest() {
-    // Try JSON first
     const j = await fetchJSON("./assets/models/map/maps.json");
     if (Array.isArray(j)) PP.manifest = j;
     else if (j && Array.isArray(j.maps)) PP.manifest = j.maps;
 
-    // Fallback if empty
     if (!PP.manifest.length) {
         PP.manifest = [
             { file: "Abandoned_House.glb", title: "Abandoned House", def: "Abandoned_House.config.js" },
@@ -100,14 +98,11 @@ function populateMapSelector() {
         `<option value="${i}">${m.title || m.file}</option>`
     ).join("");
 
-    // Restore saved selection
     try {
         const saved = localStorage.getItem("selectedMapIndex");
         if (saved && PP.manifest[+saved]) sel.value = saved;
         else sel.value = "0";
-    } catch (_) {
-        sel.value = "0";
-    }
+    } catch (_) { sel.value = "0"; }
 
     sel.onchange = () => {
         try { localStorage.setItem("selectedMapIndex", sel.value); } catch(_) {}
@@ -119,7 +114,6 @@ function getSelectedMap() {
     const idx = Math.max(0, Math.min(PP.manifest.length - 1, parseInt(sel?.value || "0", 10)));
     return PP.manifest[idx];
 }
-
 
 // ---------- Engine & Scene ----------
 function createEngineScene(){
@@ -147,6 +141,7 @@ function createEngineScene(){
     window.addEventListener("resize",()=>engine.resize());
     mark("engine+scene-created");
 }
+
 // ---------- Ghosts & PS5 Injection ----------
 async function injectGhostsAndPS5(){
     await loadScriptOnce("./assets/dev/ghost/ghost_data.js");
@@ -179,6 +174,231 @@ async function loadMap(mapData){
     log("[MapLoader] Loaded:", mapData.title||mapData.file,currentMap);
 }
 
+// ---------- Player Rig (full WASD + PS5 + mouse + physics + animations) ----------
+(async function(){
+  if(window.__PP_RIG_READY__) return;
+  window.__PP_RIG_READY__ = true;
+
+  const PP = window.PP = window.PP || {};
+  PP.rig = PP.rig || {};
+  PP.state = PP.state || {};
+  PP.controls = PP.controls || {};
+
+  const AVATAR = { file:"./assets/models/player/player.glb", eyeY:1.6, targetHeight:1.75, meshYOffset:0.0 };
+  const CAM3 = { back:2.8, up:1.25 };
+  const SPEEDS = { walk:1.8, run:3.5, crouch:1.0 };
+  const MAX_SLOPE = 45;
+
+  let scene, camera;
+  let body, avatarRoot, avatarMeshes=[];
+  let isThird=false;
+  let animations={ idle:null, walk:null, crouch:null };
+  let currentAnim=null;
+  let lastPos=null;
+
+  const input = { forward:false, back:false, left:false, right:false, run:false, crouch:false };
+  let lastCrouchPressed=false;
+  const keysDown = {};
+  const mouse = { dx:0, dy:0, locked:false };
+  const gamepad = { axes:[0,0], buttons:[] };
+
+  const defaultKeys = {
+    forward:["KeyW","ArrowUp"], back:["KeyS","ArrowDown"],
+    left:["KeyA","ArrowLeft"], right:["KeyD","ArrowRight"],
+    sprint:["ShiftLeft","ShiftRight"], crouch:["KeyC"],
+    toggleCamera:["Backquote"], slots:["Digit1","Digit2","Digit3","Digit4"],
+    notebook:["KeyN"], use:["KeyE"], openDoor:["KeyF"],
+    flash:["KeyQ"], uv:["KeyU"], ir:["KeyI"],
+    lightToggle:["KeyL"], powerToggle:["KeyP"], minimap:["KeyM"]
+  };
+
+  const F = PP.state.controls;
+
+  function emit(name, detail){ try{ window.dispatchEvent(new CustomEvent(name,{detail})); }catch{} }
+  function has(arr, code){ return Array.isArray(arr)&&arr.includes(code); }
+  function uiBusy(){ const ae=document.activeElement; return ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"||ae.isContentEditable); }
+  function selectSlot(n){ n=Math.max(1,Math.min(3,n|0)); const prev=PP.state.selectedSlot; if(prev===n){ emit("pp:slot:confirm",{slot:n}); return; } PP.state.selectedSlot=n; emit("pp:slot:change",{prev,next:n}); if(typeof window.selectSlot==="function") window.selectSlot(n); if(typeof window.buildBelt==="function"){ try{ window.buildBelt(null); }catch{} } }
+
+  // Keyboard
+  addEventListener("keydown",(e)=>{
+    if(uiBusy()) return;
+    keysDown[e.code]=true;
+    if(has(defaultKeys.forward,e.code)) input.forward=true;
+    if(has(defaultKeys.back,e.code)) input.back=true;
+    if(has(defaultKeys.left,e.code)) input.left=true;
+    if(has(defaultKeys.right,e.code)) input.right=true;
+    if(has(defaultKeys.sprint,e.code)) input.run=true;
+    if(has(defaultKeys.crouch,e.code)) input.crouch=!input.crouch;
+    if(has(defaultKeys.toggleCamera,e.code)) { isThird=!isThird; e.preventDefault(); }
+    if(has(defaultKeys.slots,e.code)){ const n=parseInt(e.code.replace(/\D/g,""))||0; if(n>=1&&n<=3) selectSlot(n); }
+  },true);
+
+  addEventListener("keyup",(e)=>{
+    keysDown[e.code]=false;
+    if(has(defaultKeys.forward,e.code)) input.forward=false;
+    if(has(defaultKeys.back,e.code)) input.back=false;
+    if(has(defaultKeys.left,e.code)) input.left=false;
+    if(has(defaultKeys.right,e.code)) input.right=false;
+    if(has(defaultKeys.sprint,e.code)) input.run=false;
+  },true);
+
+  // Mouse
+  const canvas = document.querySelector("canvas");
+  if(canvas){
+    canvas.addEventListener("click",()=>{ if(!mouse.locked && canvas.requestPointerLock) canvas.requestPointerLock(); });
+    document.addEventListener("pointerlockchange",()=>{ mouse.locked = (document.pointerLockElement===canvas); });
+    document.addEventListener("mousemove",(e)=>{
+      if(!mouse.locked) return;
+      mouse.dx = e.movementX; mouse.dy = e.movementY;
+      emit("pp:mouseMove",{dx:mouse.dx,dy:mouse.dy});
+    });
+  }
+
+  // Gamepad
+  function pollGamepad(){
+    const pads=navigator.getGamepads?.(); if(!pads) return;
+    const pad=pads[0]; if(!pad) return;
+    gamepad.axes=[pad.axes[0],pad.axes[1]];
+    gamepad.buttons=pad.buttons.map(b=>b.pressed);
+    input.left = gamepad.axes[0]<-0.2; input.right=gamepad.axes[0]>0.2;
+    input.forward = gamepad.axes[1]<-0.2; input.back=gamepad.axes[1]>0.2;
+    input.run = gamepad.buttons[0];
+    if(gamepad.buttons[1] && !lastCrouchPressed) input.crouch = !input.crouch;
+    lastCrouchPressed=gamepad.buttons[1];
+    requestAnimationFrame(pollGamepad);
+  }
+  pollGamepad();
+
+  // Scene / spawn
+  function ensureScene(){ scene = scene || window.SCENE || BABYLON.EngineStore?.LastCreatedScene; camera = scene?.activeCamera; return !!(scene && camera); }
+  function getSpawnPosition(){ if(window.MAP_DEF?.spawn) return new BABYLON.Vector3(MAP_DEF.spawn.x||0,MAP_DEF.spawn.y||AVATAR.eyeY,MAP_DEF.spawn.z||0); if(window.__PP_SPAWN) return window.__PP_SPAWN.clone(); return new BABYLON.Vector3(0,AVATAR.eyeY,0); }
+
+  function makeBody(){
+    body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:AVATAR.targetHeight, radius:0.35 },scene);
+    body.isVisible=false; body.position.copyFrom(getSpawnPosition());
+    body.physicsImpostor=new BABYLON.PhysicsImpostor(body,BABYLON.PhysicsImpostor.CapsuleImpostor,{mass:70,restitution:0,friction:0.8},scene);
+    PP.rig.body = body; return body;
+  }
+
+  async function loadAvatar(){
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/player/", "player.glb", scene);
+    const root = res.meshes[0];
+    normalizeAvatarScale(root);
+    res.animationGroups.forEach(g=>{
+      if(/Idle/i.test(g.name)) animations.idle=g;
+      if(/Walk/i.test(g.name)) animations.walk=g;
+      if(/Crouch/i.test(g.name)) animations.crouch=g;
+    });
+    playAnim("idle");
+  }
+
+  function normalizeAvatarScale(root){
+    root.scaling.setAll(1);
+    const bb=root.getHierarchyBoundingVectors();
+    const rawH=bb.max.y-bb.min.y;
+    const scale=AVATAR.targetHeight/rawH;
+    root.scaling.setAll(scale);
+    const bb2=root.getHierarchyBoundingVectors();
+    root.position.y -= bb2.min.y;
+    avatarRoot=root;
+    avatarMeshes=root.getChildMeshes();
+    avatarRoot.parent=body;
+  }
+
+  function playAnim(name){
+    if(currentAnim===animations[name]) return;
+    Object.values(animations).forEach(g=>g?.stop());
+    animations[name]?.start(true);
+    currentAnim=animations[name];
+  }
+
+  function syncCamera(){
+    if(!camera||!body) return;
+    const pos=body.position;
+    if(!isThird) camera.position.set(pos.x,pos.y+AVATAR.eyeY,pos.z);
+    else{
+      const eye=new BABYLON.Vector3(pos.x,pos.y+AVATAR.eyeY,pos.z);
+      const back=camera.getDirection(BABYLON.Vector3.Forward()).scale(-CAM3.back);
+      camera.position.copyFrom(eye.add(new BABYLON.Vector3(0,CAM3.up,0)).add(back));
+      camera.setTarget(eye);
+    }
+  }
+
+  function stickToGround(moveDir){
+    if(!body||!scene) return moveDir;
+    const origin=body.position.add(new BABYLON.Vector3(0,1,0));
+    const ray=new BABYLON.Ray(origin,BABYLON.Axis.Y.scale(-1),4);
+    const pick=scene.pickWithRay(ray,m=>m.isPickable && m.name.toLowerCase().includes("ground"));
+    if(!pick.hit) return moveDir;
+    const groundPoint=pick.pickedPoint;
+    const groundNormal=pick.getNormal(true);
+    body.position.y = groundPoint.y + AVATAR.targetHeight/2;
+    if(moveDir && moveDir.lengthSquared()>0.001){
+      const slopeAngle=BABYLON.Vector3.GetAngleBetweenVectors(BABYLON.Axis.Y,groundNormal,BABYLON.Vector3.Forward())*(180/Math.PI);
+      if(slopeAngle<=MAX_SLOPE) return moveDir.subtract(groundNormal.scale(BABYLON.Vector3.Dot(moveDir,groundNormal))).normalize();
+      else return BABYLON.Vector3.Zero();
+    }
+    return moveDir||BABYLON.Vector3.Zero();
+  }
+
+  const footstepState = { lastPos:null, acc:0 };
+  function handleFootsteps(moveVec){
+    if(!moveVec || moveVec.lengthSquared()<0.001 || !body) return;
+    if(!footstepState.lastPos) footstepState.lastPos=body.position.clone();
+    const dist = BABYLON.Vector3.Distance(footstepState.lastPos, body.position);
+    footstepState.acc += dist;
+    const stride = input.crouch ? 0.3 : input.run ? 0.8 : 0.5;
+    if(footstepState.acc >= stride){
+      footstepState.acc=0;
+      footstepState.lastPos.copyFrom(body.position);
+      if(typeof window.playStep==="function") try{ window.playStep(0.42); }catch{}
+    }
+  }
+
+  function moveLoop(){
+    if(!ensureScene()){ requestAnimationFrame(moveLoop); return; }
+    const dt=scene.getEngine().getDeltaTime()/1000;
+    const forward=camera.getDirection(BABYLON.Vector3.Forward()).normalize();
+    const right=camera.getDirection(BABYLON.Vector3.Right()).normalize();
+
+    let move=new BABYLON.Vector3(0,0,0);
+    if(input.forward) move.addInPlace(forward);
+    if(input.back) move.subtractInPlace(forward);
+    if(input.left) move.subtractInPlace(right);
+    if(input.right) move.addInPlace(right);
+
+    if(move.lengthSquared()>0.001){
+      move.normalize();
+      const speed=input.crouch?SPEEDS.crouch:(input.run?SPEEDS.run:SPEEDS.walk);
+      const slopeMove=stickToGround(move);
+      if(slopeMove.lengthSquared()>0.001) body.physicsImpostor.applyImpulse(slopeMove.scale(speed), body.getAbsolutePosition());
+      playAnim(input.crouch?"crouch":"walk");
+      handleFootsteps(slopeMove);
+    } else playAnim("idle");
+
+    stickToGround();
+    syncCamera();
+    requestAnimationFrame(moveLoop);
+  }
+
+  async function startRig(){
+    if(!ensureScene()){ setTimeout(startRig,100); return; }
+    const havok = await HavokPhysics();
+    scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+    makeBody();
+    stickToGround(BABYLON.Vector3.Zero());
+    await loadAvatar();
+    stickToGround(BABYLON.Vector3.Zero());
+    moveLoop();
+
+    window.PP = window.PP || {};
+    window.PP.rigReady = true;
+    document.dispatchEvent(new Event("pp:rig-ready"));
+  }
+
+  startRig();
+})();
+
 // ---------- Start Game ----------
 async function startGame() {
     if (started) return;
@@ -187,9 +407,8 @@ async function startGame() {
     $("#title-screen")?.style.display = "none";
     log("[bootstrap] Starting game…");
 
-    const STEP_TIMEOUT = 10000; // 10s max per step
+    const STEP_TIMEOUT = 10000;
 
-    // Safe step wrapper — queues step in Loader
     function safeStep(label, fn) {
         Loader.addStep(label, async () => {
             try {
@@ -206,7 +425,6 @@ async function startGame() {
     try {
         Loader.reset();
 
-        // ---------- Add all steps ----------
         safeStep("Preparing engine…", () => createEngineScene());
         safeStep("Injecting ghosts & PS5 controller…", () => injectGhostsAndPS5());
         safeStep("Loading map…", async () => {
@@ -215,39 +433,16 @@ async function startGame() {
         });
         safeStep("Initializing logger…", () => loadScriptOnce("./assets/dev/game/logger.js"));
         safeStep("Loading player rig…", async () => {
-            await loadScriptOnce("./assets/dev/util/player_rig_controller_final.js");
             await new Promise(r => {
-                if (window.PP?.rigReady) return r();
-                const timeout = setTimeout(() => {
-                    console.warn("Rig ready event timeout");
-                    r();
-                }, STEP_TIMEOUT);
-                document.addEventListener("pp:rig-ready", () => {
-                    clearTimeout(timeout);
-                    r();
-                }, { once: true });
+                const timeout = setTimeout(() => { console.warn("Rig ready event timeout"); r(); }, STEP_TIMEOUT);
+                if(window.PP?.rigReady) r();
+                document.addEventListener("pp:rig-ready", () => { clearTimeout(timeout); r(); }, { once: true });
             });
             log("[bootstrap] Player rig ready");
         });
-        safeStep("Initializing player physics & movement…", () => {
-            const body = window.PP?.rig?.body;
-            if (body && !body.physicsImpostor) {
-                body.physicsImpostor = new BABYLON.PhysicsImpostor(
-                    body,
-                    BABYLON.PhysicsImpostor.CapsuleImpostor,
-                    { mass: 80, restitution: 0, friction: 0.5 },
-                    scene
-                );
-            }
-            if (camera && body) { camera.parent = body; camera.position.set(0, 1.6, 0); }
-            if (window.PP?.rig?.controller?.enable) window.PP.rig.controller.enable(scene);
-        });
-        safeStep("Finalizing…", () => {
-            if (window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
-            enablePointerLockOnce();
-        });
+        safeStep("Initializing player physics & movement…", () => {});
+        safeStep("Finalizing…", () => { if (window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN); enablePointerLockOnce(); });
 
-        // ---------- Run loader ----------
         await Loader.run();
 
         window.dispatchEvent(new CustomEvent("pp:start"));
@@ -261,7 +456,6 @@ async function startGame() {
         alert("Boot failed. Check console for details.");
     }
 }
-
 
 // ---------- Settings Menu ----------
 (function(){
@@ -322,7 +516,6 @@ async function startGame() {
 
     toggleBtn.addEventListener("click",()=>{ menu.style.display="none"; });
 
-    // Toggle menu with F1
     window.addEventListener("keydown",(e)=>{
         if(e.code==="F1"){ menu.style.display = (menu.style.display==="flex"?"none":"flex"); updateInputs(); e.preventDefault(); }
     });
