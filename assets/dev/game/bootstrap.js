@@ -459,7 +459,6 @@ if (titleScreen) titleScreen.style.display = "none";
     alert("Boot failed. Check console for details.");
     }
 }
-
 // ---------- Settings Menu ----------
 (function(){
     if(window.__PP_SETTINGS_MENU__) return;
@@ -540,3 +539,4 @@ document.addEventListener("DOMContentLoaded", () => {
     const startBtn = document.getElementById("start-button");
     if(startBtn) startBtn.addEventListener("click", startGame, { once: true });
 });
+
