@@ -203,6 +203,72 @@ async function startGame(){
         alert("Boot failed. Check console for details.");
     }
 }
+// ---------- Settings Menu ----------
+(function(){
+    if(window.__PP_SETTINGS_MENU__) return;
+    window.__PP_SETTINGS_MENU__ = true;
+
+    const menuHTML = `
+        <div id="pp-settings-menu" style="
+            position: fixed; top: 10%; right: 10%;
+            width: 300px; background: rgba(0,0,0,0.85); color: white; padding: 15px;
+            font-family: sans-serif; font-size: 14px; border-radius: 8px; z-index: 9999;
+            display: none; flex-direction: column; gap: 10px;
+        ">
+            <h3 style="margin:0 0 10px 0;">Player Settings</h3>
+            <label>Walk Speed: <input id="pp-walk-speed" type="number" step="0.1"></label>
+            <label>Run Speed: <input id="pp-run-speed" type="number" step="0.1"></label>
+            <label>Crouch Speed: <input id="pp-crouch-speed" type="number" step="0.1"></label>
+            <label>Stand Multiplier: <input id="pp-stand-mult" type="number" step="0.1"></label>
+            <button id="pp-toggle-menu">Close Menu</button>
+        </div>
+    `;
+    const div = document.createElement("div");
+    div.innerHTML = menuHTML;
+    document.body.appendChild(div);
+
+    const menu = $("#pp-settings-menu");
+    const walkInp = $("#pp-walk-speed");
+    const runInp = $("#pp-run-speed");
+    const crouchInp = $("#pp-crouch-speed");
+    const standInp = $("#pp-stand-mult");
+    const toggleBtn = $("#pp-toggle-menu");
+
+    function updateInputs(){
+        walkInp.value = window.PP?.rig?.controller?.SPEEDS?.walk || 1.8;
+        runInp.value = window.PP?.rig?.controller?.SPEEDS?.run || 3.5;
+        crouchInp.value = window.PP?.rig?.controller?.SPEEDS?.crouch || 1.0;
+        standInp.value = window.PLAYER?.standHeight ? (window.PLAYER.standHeight/window.PLAYER.crouchHeight) : 2.0;
+    }
+
+    function applySettings(){
+        const c = window.PP?.rig?.controller;
+        if(!c) return;
+        if(c.SPEEDS){
+            c.SPEEDS.walk = parseFloat(walkInp.value) || c.SPEEDS.walk;
+            c.SPEEDS.run = parseFloat(runInp.value) || c.SPEEDS.run;
+            c.SPEEDS.crouch = parseFloat(crouchInp.value) || c.SPEEDS.crouch;
+        }
+        if(window.PLAYER && window.PLAYER.crouchHeight){
+            const mult = parseFloat(standInp.value) || 2.0;
+            window.PLAYER.setStandMultiplier(mult);
+        }
+    }
+
+    [walkInp,runInp,crouchInp,standInp].forEach(i=>{
+        i.addEventListener("change", applySettings);
+        i.addEventListener("input", applySettings);
+    });
+
+    toggleBtn.addEventListener("click",()=>{ menu.style.display="none"; });
+
+    // Toggle menu with F1
+    window.addEventListener("keydown",(e)=>{
+        if(e.code==="F1"){ menu.style.display = (menu.style.display==="flex"?"none":"flex"); updateInputs(); e.preventDefault(); }
+    });
+
+    console.log("[PP] Settings menu initialized (F1 to toggle)");
+})();
 
 // ---------- DOM Ready ----------
 document.addEventListener("DOMContentLoaded",()=>{
