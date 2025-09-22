@@ -147,8 +147,6 @@ function createEngineScene(){
     window.addEventListener("resize",()=>engine.resize());
     mark("engine+scene-created");
 }
-<script src="./assets/dev/ghost/ghost_db.js"></script>
-<script src="./assets/dev/ghost/phasma_map_and_ghost.js"></script>
 // ---------- Ghosts & PS5 Injection ----------
 async function injectGhostsAndPS5(){
     await loadScriptOnce("./assets/dev/ghost/ghost_data.js");
