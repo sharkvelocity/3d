@@ -149,9 +149,9 @@ function createEngineScene(){
 
 // ---------- Ghosts & PS5 Injection ----------
 async function injectGhostsAndPS5(){
-    await loadScriptOnce("./assets/dev/ghost/ghost_data.js");
+    await loadScriptOnce("./assets/models/map/map_manager.js");
     await loadScriptOnce("./assets/dev/ghost/ghost_db.js");
-    await loadScriptOnce("./assets/models/map/prohouse_generator.js")
+    await loadScriptOnce("./assets/dev/util/env_and_sound.js");
     await loadScriptOnce("./assets/dev/ghost/phasma_map_and_ghost.js");
     await loadScriptOnce("./assets/dev/ui/ps5_controller.js");
     mark("ghosts+ps5-loaded");
@@ -163,10 +163,13 @@ async function loadMap(mapData){
     if(typeof clearMap==="function") clearMap();
 
     if(mapData.def && mapData.def.includes("prohouse_generator")){
-        if(!window.ProHouseGenerator) await loadScriptOnce("./assets/models/map/prohouse_generator.js");
-        currentMap = await window.ProHouseGenerator.generateMap(scene);
+        if(!window.ProHouseGenerator) 
+            await loadScriptOnce("./assets/models/map/prohouse_generator.js");
+        currentMap = 
+            await window.ProHouseGenerator.generateMap(scene);
     } else if(mapData.file.toLowerCase().endsWith(".glb")){
-        const res = await BABYLON.SceneLoader.ImportMeshAsync(
+        const res = 
+            await BABYLON.SceneLoader.ImportMeshAsync(
             "", "./assets/models/map/", mapData.file, scene
         );
         currentMap = { meshes: res.meshes, rooms: [], doors: [], spawn: mapData.spawn||new BABYLON.Vector3(0,1.8,0) };
