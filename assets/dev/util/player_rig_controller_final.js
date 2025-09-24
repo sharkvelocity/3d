@@ -1,259 +1,104 @@
-/* player_rig_controller_final.js — robust player rig with WASD + PS5 + mouse + animations + slopes + footsteps */
-(function(){
-  if(window.__PP_RIG_READY__) return;
-  window.__PP_RIG_READY__ = true;
+// player_rig_controller_final.js
+(() => {
+  // GLOBAL FLAGS
+  window.playerCanMove = false; // starts false
+  const SPEED_WALK = 3;
+  const SPEED_SPRINT = 6;
+  const SPEED_CROUCH = 1.5;
 
-  const PP = window.PP = window.PP || {};
-  PP.rig = PP.rig || {};
-  PP.state = PP.state || {};
-  PP.controls = PP.controls || {};
+  // INPUT STATE
+  const keys = {};
+  let isSprinting = false;
+  let isCrouching = false;
 
-  // ----- Avatar / camera / physics config -----
-  const AVATAR = { file:"./assets/models/player/player.glb", eyeY:1.6, targetHeight:1.75, meshYOffset:0.0 };
-  const CAM3 = { back:2.8, up:1.25 };
-  const SPEEDS = { walk:1.8, run:3.5, crouch:1.0 };
-  const MAX_SLOPE = 45;
+  // MOUSE STATE
+  let pitch = 0;
+  let yaw = 0;
+  const sensitivity = 0.002;
 
-  let scene, camera;
-  let body, avatarRoot, avatarMeshes=[];
-  let isThird=false;
-  let animations={ idle:null, walk:null, crouchWalk:null };
-  let currentAnim=null;
+  // PLAYER RIG
+  let playerMesh = null;
+  let camera = null;
+  let scene = null;
+  let canvas = null;
 
-  // ----- Input -----
-  const input = { forward:false, back:false, left:false, right:false, run:false, crouch:false };
-  let lastCrouchPressed=false;
+  // INIT FUNCTION (call AFTER map/player ready)
+  window.initPlayerRig = (_scene, _camera, _playerMesh, _canvas) => {
+    scene = _scene;
+    camera = _camera;
+    playerMesh = _playerMesh;
+    canvas = _canvas;
 
-  const keysDown = {};
-  const mouse = { dx:0, dy:0, locked:false };
-  const gamepad = { axes:[0,0], buttons:[] };
-
-  const defaultKeys = {
-    forward:["KeyW","ArrowUp"], back:["KeyS","ArrowDown"],
-    left:["KeyA","ArrowLeft"], right:["KeyD","ArrowRight"],
-    sprint:["ShiftLeft","ShiftRight"], crouch:["KeyC"],
-    toggleCamera:["Backquote"], slots:["Digit1","Digit2","Digit3","Digit4"],
-    notebook:["KeyN"], use:["KeyE"], openDoor:["KeyF"],
-    flash:["KeyQ"], uv:["KeyU"], ir:["KeyI"],
-    lightToggle:["KeyL"], powerToggle:["KeyP"], minimap:["KeyM"]
+    setupInput();
+    scene.onBeforeRenderObservable.add(updateMovement);
   };
 
-  const F = PP.state.controls;
+  // INPUT LISTENERS
+  function setupInput() {
+    if(!canvas) return;
 
-  function emit(name, detail){ try{ window.dispatchEvent(new CustomEvent(name,{detail})); }catch{} }
-  function has(arr, code){ return Array.isArray(arr)&&arr.includes(code); }
-  function uiBusy(){ const ae=document.activeElement; return ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"||ae.isContentEditable); }
+    // KEYBOARD
+    document.addEventListener("keydown", ev => {
+      if(!window.playerCanMove) return;
+      keys[ev.code] = true;
+      if(ev.code === "ShiftLeft") isSprinting = true;
+      if(ev.code === "ControlLeft") isCrouching = true;
+    });
 
-  function selectSlot(n){
-    n = Math.max(1, Math.min(3, n|0));
-    const prev = PP.state.selectedSlot;
-    if(prev === n){ 
-      emit("pp:slot:confirm",{slot:n});
-      return;
-    }
-    PP.state.selectedSlot = n;
-    emit("pp:slot:change",{ prev, next: n });
-    if(typeof window.selectSlot==="function") window.selectSlot(n);
-    if(typeof window.buildBelt==="function"){
-      try{ window.buildBelt(null); }catch{}
-    }
-  }
+    document.addEventListener("keyup", ev => {
+      if(!window.playerCanMove) return;
+      keys[ev.code] = false;
+      if(ev.code === "ShiftLeft") isSprinting = false;
+      if(ev.code === "ControlLeft") isCrouching = false;
+    });
 
-  // ---------- Keyboard ----------
-  addEventListener("keydown",(e)=>{
-    if(uiBusy()) return;
-    keysDown[e.code]=true;
-    if(has(defaultKeys.forward,e.code)) input.forward=true;
-    if(has(defaultKeys.back,e.code)) input.back=true;
-    if(has(defaultKeys.left,e.code)) input.left=true;
-    if(has(defaultKeys.right,e.code)) input.right=true;
-    if(has(defaultKeys.sprint,e.code)) input.run=true;
-    if(has(defaultKeys.crouch,e.code)) input.crouch=!input.crouch;
-    if(has(defaultKeys.toggleCamera,e.code)) { isThird=!isThird; e.preventDefault(); }
-    if(has(defaultKeys.slots,e.code)){ 
-      const n=parseInt(e.code.replace(/\D/g,""))||0; 
-      if(n>=1&&n<=3) selectSlot(n); 
-    }
-  },true);
+    // MOUSE
+    canvas.addEventListener("mousemove", ev => {
+      if(!window.playerCanMove) return;
+      if(document.pointerLockElement !== canvas) return;
 
-  addEventListener("keyup",(e)=>{
-    keysDown[e.code]=false;
-    if(has(defaultKeys.forward,e.code)) input.forward=false;
-    if(has(defaultKeys.back,e.code)) input.back=false;
-    if(has(defaultKeys.left,e.code)) input.left=false;
-    if(has(defaultKeys.right,e.code)) input.right=false;
-    if(has(defaultKeys.sprint,e.code)) input.run=false;
-  },true);
+      yaw += ev.movementX * sensitivity;
+      pitch -= ev.movementY * sensitivity;
+      pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
 
-  // ---------- Mouse ----------
-  const canvas = document.querySelector("canvas");
-  if(canvas){
-    canvas.addEventListener("click",()=>{ if(!mouse.locked && canvas.requestPointerLock) canvas.requestPointerLock(); });
-    document.addEventListener("pointerlockchange",()=>{ mouse.locked = (document.pointerLockElement===canvas); });
-    document.addEventListener("mousemove",(e)=>{
-      if(!mouse.locked) return;
-      mouse.dx = e.movementX; mouse.dy = e.movementY;
-      emit("pp:mouseMove",{dx:mouse.dx,dy:mouse.dy});
+      camera.rotation.x = pitch;
+      camera.rotation.y = yaw;
+    });
+
+    // POINTER LOCK
+    canvas.addEventListener("click", () => {
+      if(!window.playerCanMove) return;
+      if(document.pointerLockElement !== canvas) canvas.requestPointerLock();
     });
   }
 
-  // ---------- Gamepad ----------
-  function pollGamepad(){
-    const pads=navigator.getGamepads?.(); if(!pads) return;
-    const pad=pads[0]; if(!pad) return;
-    gamepad.axes=[pad.axes[0],pad.axes[1]];
-    gamepad.buttons=pad.buttons.map(b=>b.pressed);
-    input.left = gamepad.axes[0]<-0.2; input.right=gamepad.axes[0]>0.2;
-    input.forward = gamepad.axes[1]<-0.2; input.back=gamepad.axes[1]>0.2;
-    input.run = gamepad.buttons[0];
-    if(gamepad.buttons[1] && !lastCrouchPressed) input.crouch = !input.crouch;
-    lastCrouchPressed=gamepad.buttons[1];
-    requestAnimationFrame(pollGamepad);
-  }
-  pollGamepad();
+  // MOVEMENT UPDATE
+  function updateMovement() {
+    if(!window.playerCanMove || !playerMesh) return;
 
-  // ---------- Scene / spawn ----------
-  function ensureScene(){ 
-    scene = scene || window.SCENE || BABYLON.EngineStore?.LastCreatedScene; 
-    camera = scene?.activeCamera; 
-    return !!(scene && camera); 
-  }
+    const dt = scene.getEngine().getDeltaTime() / 1000;
+    let forward = keys["KeyW"] ? 1 : keys["KeyS"] ? -1 : 0;
+    let right = keys["KeyD"] ? 1 : keys["KeyA"] ? -1 : 0;
 
-  function getSpawnPosition(){ 
-    if(window.MAP_DEF?.spawn) return new BABYLON.Vector3(MAP_DEF.spawn.x||0,MAP_DEF.spawn.y||AVATAR.eyeY,MAP_DEF.spawn.z||0); 
-    if(window.__PP_SPAWN) return window.__PP_SPAWN.clone(); 
-    return new BABYLON.Vector3(0,AVATAR.eyeY,0); 
-  }
+    let speed = SPEED_WALK;
+    if(isSprinting && !isCrouching) speed = SPEED_SPRINT;
+    if(isCrouching) speed = SPEED_CROUCH;
 
-  function makeBody(){
-    body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:AVATAR.targetHeight, radius:0.35 },scene);
-    body.isVisible=false; 
-    body.position.copyFrom(getSpawnPosition());
-    body.physicsImpostor=new BABYLON.PhysicsImpostor(body,BABYLON.PhysicsImpostor.CapsuleImpostor,{mass:70,restitution:0,friction:0.8},scene);
-    PP.rig.body = body; 
-    return body;
-  }
-
-  async function loadAvatar(){
-    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/player/", "player.glb", scene);
-    const root = res.meshes[0];
-    normalizeAvatarScale(root);
-    res.animationGroups.forEach(g=>{
-      if(/Idle/i.test(g.name)) animations.idle=g;
-      if(/Walk/i.test(g.name)) animations.walk=g;
-      if(/Crouch/i.test(g.name)) animations.crouchWalk=g;
-    });
-    playAnim("idle");
-  }
-
-  function normalizeAvatarScale(root){
-    root.scaling.setAll(1);
-    const bb=root.getHierarchyBoundingVectors();
-    const rawH=bb.max.y-bb.min.y;
-    const scale=AVATAR.targetHeight/rawH;
-    root.scaling.setAll(scale);
-    const bb2=root.getHierarchyBoundingVectors();
-    root.position.y -= bb2.min.y;
-    avatarRoot=root;
-    avatarMeshes=root.getChildMeshes();
-    avatarRoot.parent=body;
-  }
-
-  function playAnim(name){
-    if(currentAnim===animations[name]) return;
-    Object.values(animations).forEach(g=>g?.stop());
-    animations[name]?.start(true);
-    currentAnim=animations[name];
-  }
-
-  function syncCamera(){
-    if(!camera||!body) return;
-    const pos=body.position;
-    if(!isThird) camera.position.set(pos.x,pos.y+AVATAR.eyeY,pos.z);
-    else{
-      const eye=new BABYLON.Vector3(pos.x,pos.y+AVATAR.eyeY,pos.z);
-      const back=camera.getDirection(BABYLON.Vector3.Forward()).scale(-CAM3.back);
-      camera.position.copyFrom(eye.add(new BABYLON.Vector3(0,CAM3.up,0)).add(back));
-      camera.setTarget(eye);
-    }
-  }
-
-  function stickToGround(moveDir){
-    if(!body||!scene) return moveDir;
-    const origin=body.position.add(new BABYLON.Vector3(0,1,0));
-    const ray=new BABYLON.Ray(origin,BABYLON.Axis.Y.scale(-1),4);
-    const pick=scene.pickWithRay(ray,m=>m.isPickable && m.name.toLowerCase().includes("ground"));
-    if(!pick.hit) return moveDir;
-    const groundPoint=pick.pickedPoint;
-    const groundNormal=pick.getNormal(true);
-    body.position.y = groundPoint.y + AVATAR.targetHeight/2;
-    if(moveDir && moveDir.lengthSquared()>0.001){
-      const slopeAngle=BABYLON.Vector3.GetAngleBetweenVectors(BABYLON.Axis.Y,groundNormal,BABYLON.Vector3.Forward())*(180/Math.PI);
-      if(slopeAngle<=MAX_SLOPE) return moveDir.subtract(groundNormal.scale(BABYLON.Vector3.Dot(moveDir,groundNormal))).normalize();
-      else return BABYLON.Vector3.Zero();
-    }
-    return moveDir||BABYLON.Vector3.Zero();
-  }
-
-  // ---------- Footstep system ----------
-  const footstepState = { lastPos:null, acc:0 };
-  function handleFootsteps(moveVec){
-    if(!moveVec || moveVec.lengthSquared()<0.001 || !body) return;
-    if(!footstepState.lastPos) footstepState.lastPos=body.position.clone();
-    const dist = BABYLON.Vector3.Distance(footstepState.lastPos, body.position);
-    footstepState.acc += dist;
-    const stride = input.crouch ? 0.3 : input.run ? 0.8 : 0.5;
-    if(footstepState.acc >= stride){
-      footstepState.acc=0;
-      footstepState.lastPos.copyFrom(body.position);
-      if(typeof window.playStep==="function") try{ window.playStep(0.42); }catch{}
-    }
-  }
-
-  function moveLoop(){
-    if(!ensureScene()){ requestAnimationFrame(moveLoop); return; }
-    const dt=scene.getEngine().getDeltaTime()/1000;
-    const forward=camera.getDirection(BABYLON.Vector3.Forward()).normalize();
-    const right=camera.getDirection(BABYLON.Vector3.Right()).normalize();
-
-    let move=new BABYLON.Vector3(0,0,0);
-    if(input.forward) move.addInPlace(forward);
-    if(input.back) move.subtractInPlace(forward);
-    if(input.left) move.subtractInPlace(right);
-    if(input.right) move.addInPlace(right);
-
-    if(move.lengthSquared()>0.001){
-      move.normalize();
-      const speed=input.crouch?SPEEDS.crouch:(input.run?SPEEDS.run:SPEEDS.walk);
-      const slopeMove=stickToGround(move);
-      if(slopeMove.lengthSquared()>0.001) body.physicsImpostor.applyImpulse(slopeMove.scale(speed), body.getAbsolutePosition());
-      playAnim(input.crouch?"crouchWalk":"walk");
-      handleFootsteps(slopeMove);
-    } else playAnim("idle");
-
-    stickToGround();
-    syncCamera();
-    requestAnimationFrame(moveLoop);
-  }
-
-  async function start(){
-    if(!ensureScene()){ setTimeout(start,100); return; }
-
-    if(typeof HavokPhysics==="function"){
-      const havok = await HavokPhysics();
-      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+    // Horizontal movement
+    const dir = new BABYLON.Vector3();
+    if(forward || right) {
+      const f = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      const r = new BABYLON.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+      dir.copyFrom(f.scale(forward).add(r.scale(right))).normalize().scaleInPlace(speed * dt);
+      playerMesh.moveWithCollisions(dir);
     }
 
-    makeBody();
-    stickToGround(BABYLON.Vector3.Zero());
-    await loadAvatar();
-    stickToGround(BABYLON.Vector3.Zero());
-    moveLoop();
+    // Keep grounded
+    playerMesh.position.y = 1.8; // your fixed floor height
 
-    window.PP = window.PP || {};
-    window.PP.rigReady = true;
-    document.dispatchEvent(new Event("pp:rig-ready"));
+    // Update HUD
+    if(window.updatePlayerPos) {
+      window.updatePlayerPos(playerMesh.position.x, playerMesh.position.y, playerMesh.position.z);
+    }
   }
-
-  window.startPlayerRig = start;
 })();
