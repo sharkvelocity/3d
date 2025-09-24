@@ -1,210 +1,259 @@
-/* bootstrap.js — unified bootstrap (engine, maps, player rig, movement, pointer lock) */
+/* player_rig_controller_final.js — robust player rig with WASD + PS5 + mouse + animations + slopes + footsteps */
 (function(){
-"use strict";
-
-if(window.__GameBootstrapReady) return;
-window.__GameBootstrapReady = true;
-
-const log = (...a)=>console.log("[bootstrap]", ...a);
-const $ = s => document.querySelector(s);
-
-window.PP = window.PP || {};
-PP.manifest = PP.manifest || [];
-
-// ---------- Engine & Scene ----------
-let engine = null, scene = null, camera = null;
-function createEngineScene(){
-  if(engine && scene) return;
-  const canvas = $("#renderCanvas");
-  if(!canvas) throw new Error("#renderCanvas missing");
-
-  engine = new BABYLON.Engine(canvas,true,{preserveDrawingBuffer:true,stencil:true,antialias:true});
-  scene = new BABYLON.Scene(engine);
-  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.0045;
-  scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
-
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
-  camera.minZ = 0.1;
-  try{ camera.inputs.clear(); }catch{}
-
-  const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
-  hemi.intensity = 0.35;
-
-  engine.runRenderLoop(()=>{ if(scene) scene.render(); });
-  window.addEventListener("resize", ()=> engine.resize());
-
-  window.ENGINE = engine; window.SCENE = scene; window.camera = camera;
-  log("Engine and scene created");
-}
-
-// ---------- Map ----------
-async function fetchJSON(url){
-  try{ return await (await fetch(url,{cache:"no-store"})).json(); }
-  catch(e){ console.warn("fetchJSON failed:", url,e); return null; }
-}
-
-async function loadManifest(){
-  const j = await fetchJSON("./assets/models/map/maps.json");
-  if(Array.isArray(j)) PP.manifest=j;
-  else if(j && Array.isArray(j.maps)) PP.manifest=j.maps;
-  if(!PP.manifest || !PP.manifest.length){
-    PP.manifest=[{file:"Abandoned_House.glb",title:"Abandoned House"}];
-  }
-  const sel = $("#map-select");
-  if(sel){
-    sel.innerHTML = PP.manifest.map((m,i)=>`<option value="${i}">${m.title||m.file||"map#"+i}</option>`).join("");
-    sel.value = localStorage.getItem("selectedMapIndex")||0;
-    sel.onchange = ()=> localStorage.setItem("selectedMapIndex", sel.value);
-  }
-}
-
-function getSelectedMap(){
-  const sel=$("#map-select"); const idx=Number(sel?.value);
-  return PP.manifest[idx]||PP.manifest[0];
-}
-
-// ---------- Player Rig ----------
-let input = { forward:false, back:false, left:false, right:false, run:false, crouch:false };
-let mouse = { dx:0, dy:0, locked:false };
-let isThird=false;
-
-async function startPlayerRig(){
   if(window.__PP_RIG_READY__) return;
   window.__PP_RIG_READY__ = true;
-  if(!scene) throw new Error("Scene not initialized");
 
-  // Havok physics
-  const havok = await HavokPhysics();
-  scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+  const PP = window.PP = window.PP || {};
+  PP.rig = PP.rig || {};
+  PP.state = PP.state || {};
+  PP.controls = PP.controls || {};
 
-  // Capsule
-  const body = BABYLON.MeshBuilder.CreateCapsule("player_capsule",{height:1.75,radius:0.35},scene);
-  body.isVisible=false;
-  body.position.set(0,1.6,0);
-  body.physicsImpostor = new BABYLON.PhysicsImpostor(body,BABYLON.PhysicsImpostor.CapsuleImpostor,{mass:70,restitution:0,friction:0.8},scene);
-  PP.rig = { body };
+  // ----- Avatar / camera / physics config -----
+  const AVATAR = { file:"./assets/models/player/player.glb", eyeY:1.6, targetHeight:1.75, meshYOffset:0.0 };
+  const CAM3 = { back:2.8, up:1.25 };
+  const SPEEDS = { walk:1.8, run:3.5, crouch:1.0 };
+  const MAX_SLOPE = 45;
 
-  // Load avatar
-  const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/player/", "player.glb", scene);
-  const root = res.meshes[0];
-  root.scaling.setAll(1);
-  root.position.y = 0;
-  root.parent = body;
-  PP.rig.avatar = root;
+  let scene, camera;
+  let body, avatarRoot, avatarMeshes=[];
+  let isThird=false;
+  let animations={ idle:null, walk:null, crouchWalk:null };
+  let currentAnim=null;
 
-  setupInput();
-  moveLoop();
-  log("Player rig ready");
-  document.dispatchEvent(new Event("pp:rig-ready"));
-}
+  // ----- Input -----
+  const input = { forward:false, back:false, left:false, right:false, run:false, crouch:false };
+  let lastCrouchPressed=false;
 
-// ---------- Input ----------
-function setupInput(){
-  // Keyboard
   const keysDown = {};
-  const defaultKeys = { forward:["KeyW","ArrowUp"], back:["KeyS","ArrowDown"], left:["KeyA","ArrowLeft"], right:["KeyD","ArrowRight"], sprint:["ShiftLeft","ShiftRight"], crouch:["KeyC"], toggleCamera:["Backquote"] };
-  
+  const mouse = { dx:0, dy:0, locked:false };
+  const gamepad = { axes:[0,0], buttons:[] };
+
+  const defaultKeys = {
+    forward:["KeyW","ArrowUp"], back:["KeyS","ArrowDown"],
+    left:["KeyA","ArrowLeft"], right:["KeyD","ArrowRight"],
+    sprint:["ShiftLeft","ShiftRight"], crouch:["KeyC"],
+    toggleCamera:["Backquote"], slots:["Digit1","Digit2","Digit3","Digit4"],
+    notebook:["KeyN"], use:["KeyE"], openDoor:["KeyF"],
+    flash:["KeyQ"], uv:["KeyU"], ir:["KeyI"],
+    lightToggle:["KeyL"], powerToggle:["KeyP"], minimap:["KeyM"]
+  };
+
+  const F = PP.state.controls;
+
+  function emit(name, detail){ try{ window.dispatchEvent(new CustomEvent(name,{detail})); }catch{} }
+  function has(arr, code){ return Array.isArray(arr)&&arr.includes(code); }
+  function uiBusy(){ const ae=document.activeElement; return ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"||ae.isContentEditable); }
+
+  function selectSlot(n){
+    n = Math.max(1, Math.min(3, n|0));
+    const prev = PP.state.selectedSlot;
+    if(prev === n){ 
+      emit("pp:slot:confirm",{slot:n});
+      return;
+    }
+    PP.state.selectedSlot = n;
+    emit("pp:slot:change",{ prev, next: n });
+    if(typeof window.selectSlot==="function") window.selectSlot(n);
+    if(typeof window.buildBelt==="function"){
+      try{ window.buildBelt(null); }catch{}
+    }
+  }
+
+  // ---------- Keyboard ----------
   addEventListener("keydown",(e)=>{
+    if(uiBusy()) return;
     keysDown[e.code]=true;
-    if(defaultKeys.forward.includes(e.code)) input.forward=true;
-    if(defaultKeys.back.includes(e.code)) input.back=true;
-    if(defaultKeys.left.includes(e.code)) input.left=true;
-    if(defaultKeys.right.includes(e.code)) input.right=true;
-    if(defaultKeys.sprint.includes(e.code)) input.run=true;
-    if(defaultKeys.crouch.includes(e.code)) input.crouch=!input.crouch;
-    if(defaultKeys.toggleCamera.includes(e.code)){ isThird=!isThird; e.preventDefault(); }
+    if(has(defaultKeys.forward,e.code)) input.forward=true;
+    if(has(defaultKeys.back,e.code)) input.back=true;
+    if(has(defaultKeys.left,e.code)) input.left=true;
+    if(has(defaultKeys.right,e.code)) input.right=true;
+    if(has(defaultKeys.sprint,e.code)) input.run=true;
+    if(has(defaultKeys.crouch,e.code)) input.crouch=!input.crouch;
+    if(has(defaultKeys.toggleCamera,e.code)) { isThird=!isThird; e.preventDefault(); }
+    if(has(defaultKeys.slots,e.code)){ 
+      const n=parseInt(e.code.replace(/\D/g,""))||0; 
+      if(n>=1&&n<=3) selectSlot(n); 
+    }
   },true);
 
   addEventListener("keyup",(e)=>{
     keysDown[e.code]=false;
-    if(defaultKeys.forward.includes(e.code)) input.forward=false;
-    if(defaultKeys.back.includes(e.code)) input.back=false;
-    if(defaultKeys.left.includes(e.code)) input.left=false;
-    if(defaultKeys.right.includes(e.code)) input.right=false;
-    if(defaultKeys.sprint.includes(e.code)) input.run=false;
+    if(has(defaultKeys.forward,e.code)) input.forward=false;
+    if(has(defaultKeys.back,e.code)) input.back=false;
+    if(has(defaultKeys.left,e.code)) input.left=false;
+    if(has(defaultKeys.right,e.code)) input.right=false;
+    if(has(defaultKeys.sprint,e.code)) input.run=false;
   },true);
 
-  // Mouse
-  const canvas=$("#renderCanvas");
+  // ---------- Mouse ----------
+  const canvas = document.querySelector("canvas");
   if(canvas){
     canvas.addEventListener("click",()=>{ if(!mouse.locked && canvas.requestPointerLock) canvas.requestPointerLock(); });
-    document.addEventListener("pointerlockchange",()=>{ mouse.locked=(document.pointerLockElement===canvas); });
+    document.addEventListener("pointerlockchange",()=>{ mouse.locked = (document.pointerLockElement===canvas); });
     document.addEventListener("mousemove",(e)=>{
       if(!mouse.locked) return;
-      mouse.dx=e.movementX; mouse.dy=e.movementY;
+      mouse.dx = e.movementX; mouse.dy = e.movementY;
+      emit("pp:mouseMove",{dx:mouse.dx,dy:mouse.dy});
     });
   }
-}
 
-// ---------- Movement loop ----------
-function moveLoop(){
-  if(!scene || !PP.rig?.body){ requestAnimationFrame(moveLoop); return; }
+  // ---------- Gamepad ----------
+  function pollGamepad(){
+    const pads=navigator.getGamepads?.(); if(!pads) return;
+    const pad=pads[0]; if(!pad) return;
+    gamepad.axes=[pad.axes[0],pad.axes[1]];
+    gamepad.buttons=pad.buttons.map(b=>b.pressed);
+    input.left = gamepad.axes[0]<-0.2; input.right=gamepad.axes[0]>0.2;
+    input.forward = gamepad.axes[1]<-0.2; input.back=gamepad.axes[1]>0.2;
+    input.run = gamepad.buttons[0];
+    if(gamepad.buttons[1] && !lastCrouchPressed) input.crouch = !input.crouch;
+    lastCrouchPressed=gamepad.buttons[1];
+    requestAnimationFrame(pollGamepad);
+  }
+  pollGamepad();
 
-  const dt = engine.getDeltaTime()/1000;
-  const speed = input.crouch?1:input.run?3.5:1.8;
-  const body = PP.rig.body;
-
-  // Directions
-  const forward = camera.getDirection(BABYLON.Vector3.Forward()).normalize();
-  const right = camera.getDirection(BABYLON.Vector3.Right()).normalize();
-  let move = new BABYLON.Vector3.Zero();
-
-  if(input.forward) move.addInPlace(forward);
-  if(input.back) move.subtractInPlace(forward);
-  if(input.left) move.subtractInPlace(right);
-  if(input.right) move.addInPlace(right);
-  if(move.lengthSquared()>0.001){
-    move.normalize().scaleInPlace(speed);
-    body.physicsImpostor.applyImpulse(move, body.getAbsolutePosition());
+  // ---------- Scene / spawn ----------
+  function ensureScene(){ 
+    scene = scene || window.SCENE || BABYLON.EngineStore?.LastCreatedScene; 
+    camera = scene?.activeCamera; 
+    return !!(scene && camera); 
   }
 
-  // Camera sync
-  const pos = body.position;
-  if(!isThird) camera.position.set(pos.x,pos.y+1.6,pos.z);
-  else{
-    const eye = new BABYLON.Vector3(pos.x,pos.y+1.6,pos.z);
-    const back = camera.getDirection(BABYLON.Vector3.Forward()).scale(-2.8);
-    camera.position.copyFrom(eye.add(new BABYLON.Vector3(0,1.25,0)).add(back));
-    camera.setTarget(eye);
+  function getSpawnPosition(){ 
+    if(window.MAP_DEF?.spawn) return new BABYLON.Vector3(MAP_DEF.spawn.x||0,MAP_DEF.spawn.y||AVATAR.eyeY,MAP_DEF.spawn.z||0); 
+    if(window.__PP_SPAWN) return window.__PP_SPAWN.clone(); 
+    return new BABYLON.Vector3(0,AVATAR.eyeY,0); 
   }
 
-  requestAnimationFrame(moveLoop);
-}
+  function makeBody(){
+    body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:AVATAR.targetHeight, radius:0.35 },scene);
+    body.isVisible=false; 
+    body.position.copyFrom(getSpawnPosition());
+    body.physicsImpostor=new BABYLON.PhysicsImpostor(body,BABYLON.PhysicsImpostor.CapsuleImpostor,{mass:70,restitution:0,friction:0.8},scene);
+    PP.rig.body = body; 
+    return body;
+  }
 
-// ---------- Start Game ----------
-let started = false;
-async function startGame(){
-  if(started) return;
-  started = true;
+  async function loadAvatar(){
+    const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/player/", "player.glb", scene);
+    const root = res.meshes[0];
+    normalizeAvatarScale(root);
+    res.animationGroups.forEach(g=>{
+      if(/Idle/i.test(g.name)) animations.idle=g;
+      if(/Walk/i.test(g.name)) animations.walk=g;
+      if(/Crouch/i.test(g.name)) animations.crouchWalk=g;
+    });
+    playAnim("idle");
+  }
 
-  $("#title-screen")?.style.display="none";
-  log("Starting game…");
+  function normalizeAvatarScale(root){
+    root.scaling.setAll(1);
+    const bb=root.getHierarchyBoundingVectors();
+    const rawH=bb.max.y-bb.min.y;
+    const scale=AVATAR.targetHeight/rawH;
+    root.scaling.setAll(scale);
+    const bb2=root.getHierarchyBoundingVectors();
+    root.position.y -= bb2.min.y;
+    avatarRoot=root;
+    avatarMeshes=root.getChildMeshes();
+    avatarRoot.parent=body;
+  }
 
-  createEngineScene();
-  await loadManifest();
+  function playAnim(name){
+    if(currentAnim===animations[name]) return;
+    Object.values(animations).forEach(g=>g?.stop());
+    animations[name]?.start(true);
+    currentAnim=animations[name];
+  }
 
-  // Load map
-  const mapData = getSelectedMap();
-  if(typeof PP.mapManager?.loadMap==="function") await PP.mapManager.loadMap(mapData);
+  function syncCamera(){
+    if(!camera||!body) return;
+    const pos=body.position;
+    if(!isThird) camera.position.set(pos.x,pos.y+AVATAR.eyeY,pos.z);
+    else{
+      const eye=new BABYLON.Vector3(pos.x,pos.y+AVATAR.eyeY,pos.z);
+      const back=camera.getDirection(BABYLON.Vector3.Forward()).scale(-CAM3.back);
+      camera.position.copyFrom(eye.add(new BABYLON.Vector3(0,CAM3.up,0)).add(back));
+      camera.setTarget(eye);
+    }
+  }
 
-  // Start player rig
-  await startPlayerRig();
+  function stickToGround(moveDir){
+    if(!body||!scene) return moveDir;
+    const origin=body.position.add(new BABYLON.Vector3(0,1,0));
+    const ray=new BABYLON.Ray(origin,BABYLON.Axis.Y.scale(-1),4);
+    const pick=scene.pickWithRay(ray,m=>m.isPickable && m.name.toLowerCase().includes("ground"));
+    if(!pick.hit) return moveDir;
+    const groundPoint=pick.pickedPoint;
+    const groundNormal=pick.getNormal(true);
+    body.position.y = groundPoint.y + AVATAR.targetHeight/2;
+    if(moveDir && moveDir.lengthSquared()>0.001){
+      const slopeAngle=BABYLON.Vector3.GetAngleBetweenVectors(BABYLON.Axis.Y,groundNormal,BABYLON.Vector3.Forward())*(180/Math.PI);
+      if(slopeAngle<=MAX_SLOPE) return moveDir.subtract(groundNormal.scale(BABYLON.Vector3.Dot(moveDir,groundNormal))).normalize();
+      else return BABYLON.Vector3.Zero();
+    }
+    return moveDir||BABYLON.Vector3.Zero();
+  }
 
-  // Focus canvas
-  $("#renderCanvas")?.focus();
-  log("Game fully initialized");
-}
+  // ---------- Footstep system ----------
+  const footstepState = { lastPos:null, acc:0 };
+  function handleFootsteps(moveVec){
+    if(!moveVec || moveVec.lengthSquared()<0.001 || !body) return;
+    if(!footstepState.lastPos) footstepState.lastPos=body.position.clone();
+    const dist = BABYLON.Vector3.Distance(footstepState.lastPos, body.position);
+    footstepState.acc += dist;
+    const stride = input.crouch ? 0.3 : input.run ? 0.8 : 0.5;
+    if(footstepState.acc >= stride){
+      footstepState.acc=0;
+      footstepState.lastPos.copyFrom(body.position);
+      if(typeof window.playStep==="function") try{ window.playStep(0.42); }catch{}
+    }
+  }
 
-// ---------- Start button ----------
-document.addEventListener("DOMContentLoaded", async ()=>{
-  await loadManifest();
-  const startBtn = $("#start-button");
-  if(startBtn) startBtn.addEventListener("click", ()=> startGame());
-  log("Start button bound");
-});
+  function moveLoop(){
+    if(!ensureScene()){ requestAnimationFrame(moveLoop); return; }
+    const dt=scene.getEngine().getDeltaTime()/1000;
+    const forward=camera.getDirection(BABYLON.Vector3.Forward()).normalize();
+    const right=camera.getDirection(BABYLON.Vector3.Right()).normalize();
 
-// Expose
-window.startGame=startGame;
-window.startPlayerRig=startPlayerRig;
+    let move=new BABYLON.Vector3(0,0,0);
+    if(input.forward) move.addInPlace(forward);
+    if(input.back) move.subtractInPlace(forward);
+    if(input.left) move.subtractInPlace(right);
+    if(input.right) move.addInPlace(right);
+
+    if(move.lengthSquared()>0.001){
+      move.normalize();
+      const speed=input.crouch?SPEEDS.crouch:(input.run?SPEEDS.run:SPEEDS.walk);
+      const slopeMove=stickToGround(move);
+      if(slopeMove.lengthSquared()>0.001) body.physicsImpostor.applyImpulse(slopeMove.scale(speed), body.getAbsolutePosition());
+      playAnim(input.crouch?"crouchWalk":"walk");
+      handleFootsteps(slopeMove);
+    } else playAnim("idle");
+
+    stickToGround();
+    syncCamera();
+    requestAnimationFrame(moveLoop);
+  }
+
+  async function start(){
+    if(!ensureScene()){ setTimeout(start,100); return; }
+
+    if(typeof HavokPhysics==="function"){
+      const havok = await HavokPhysics();
+      scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+    }
+
+    makeBody();
+    stickToGround(BABYLON.Vector3.Zero());
+    await loadAvatar();
+    stickToGround(BABYLON.Vector3.Zero());
+    moveLoop();
+
+    window.PP = window.PP || {};
+    window.PP.rigReady = true;
+    document.dispatchEvent(new Event("pp:rig-ready"));
+  }
+
+  window.startPlayerRig = start;
 })();
