@@ -85,32 +85,40 @@ async function loadManifest(){
 
   populateMapSelector();
 }
+function populateMapSelector() {
+  const sel = document.querySelector("#map-select");
+  if (!sel) return;
 
-function populateMapSelector(){
-  const sel = $("#map-select");
-  if(!sel) return;
-  if(!PP.manifest.length){
+  const manifest = window.PP?.manifest || [];
+  if (!manifest.length) {
     sel.innerHTML = `<option value="-1">(no maps found)</option>`;
     return;
   }
-  sel.innerHTML = PP.manifest.map((m,i)=>{
-    return `<option value="${i}">${m.title || m.file || ("map#"+i)}</option>`;
-  }).join("");
 
-  try{
-    const saved = localStorage.getItem("selectedMapIndex");
-    if(saved && PP.manifest[+saved]) sel.value = saved;
-    else sel.value = "0";
-  }catch(_){ sel.value = "0"; }
+  // Fill dropdown with indices
+  sel.innerHTML = manifest.map((m,i)=>`<option value="${i}">${m.title || m.file || "map#"+i}</option>`).join("");
 
-  sel.onchange = ()=>{ try{ localStorage.setItem("selectedMapIndex", sel.value); }catch(_){} };
+  // Restore saved index
+  let saved = localStorage.getItem("selectedMapIndex");
+  saved = Number(saved);
+  if (isNaN(saved) || saved < 0 || saved >= manifest.length) saved = 0;
+  sel.value = saved;
+
+  // Save on change
+  sel.onchange = ()=> {
+    const idx = Number(sel.value);
+    if (!isNaN(idx)) localStorage.setItem("selectedMapIndex", idx);
+  };
 }
 
-function getSelectedMap(){
-  const sel = $("#map-select");
-  const idx = Math.max(0, Math.min((PP.manifest||[]).length-1, parseInt(sel?.value||"0",10)));
-  return PP.manifest[idx];
+function getSelectedMap() {
+  const sel = document.querySelector("#map-select");
+  const manifest = window.PP?.manifest || [];
+  const idx = Number(sel?.value);
+  if (isNaN(idx) || idx < 0 || idx >= manifest.length) return manifest[0];
+  return manifest[idx];
 }
+
 
 // ---------- Engine & Scene ----------
 function createEngineScene(){
