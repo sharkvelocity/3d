@@ -1,153 +1,213 @@
-/* bootstrap.js — unified bootstrap (engine, maps, player rig, physics, pointer lock) */
+/* bootstrap.js — unified bootstrap with player rig + WASD + mouse + gamepad + physics */
 (function(){
 "use strict";
-
 if(window.__GameBootstrapReady) return;
 window.__GameBootstrapReady = true;
 
-const log = (...a)=>console.log("[bootstrap]", ...a);
+const log  = (...a)=>{ try{ console.log("[bootstrap]", ...a); }catch{} };
 const $ = s => document.querySelector(s);
 
+// ----- Loader UI -----
+const Loader = {
+  steps: [],
+  addStep(label, fn){ this.steps.push({label, fn}); },
+  async run(){
+    for(const s of this.steps){
+      console.log("[bootstrap] Step:", s.label);
+      try{ await s.fn(); }catch(e){ console.warn("[bootstrap] step failed:", s.label, e); }
+    }
+    this.steps = [];
+  }
+};
+
+// ----- State -----
+let engine=null, scene=null, camera=null;
 window.PP = window.PP || {};
 PP.manifest = PP.manifest || [];
 
-let engine = null, scene = null, camera = null;
-let started = false;
-
-// ---------- Map manifest ----------
-async function fetchJSON(url){
-  try{
-    const r = await fetch(url, {cache:"no-store"});
-    return await r.json();
-  }catch(e){ console.warn("fetchJSON failed:", url, e); return null; }
-}
-
+// ----- Maps -----
 async function loadManifest(){
-  const j = await fetchJSON("./assets/models/map/maps.json");
-  if(Array.isArray(j)) PP.manifest = j;
-  else if(j && Array.isArray(j.maps)) PP.manifest = j.maps;
-
-  if(!PP.manifest || !PP.manifest.length){
+  const data = await fetch("./assets/models/map/maps.json").then(r=>r.json()).catch(()=>null);
+  PP.manifest = Array.isArray(data) ? data : data?.maps || [];
+  if(!PP.manifest.length){
     PP.manifest = [
       { file: "Abandoned_House.glb", title: "Abandoned House" },
       { file: "furnished_house.glb", title: "Furnished House" },
-      { title: "Procedural ProHouse (grid)", def: "prohouse_generator" }
+      { title: "Procedural ProHouse", def: "prohouse_generator" }
     ];
   }
-
   const sel = $("#map-select");
   if(sel){
-    sel.innerHTML = PP.manifest.map((m,i)=>`<option value="${i}">${m.title||m.file||"map#"+i}</option>`).join("");
-    sel.value = localStorage.getItem("selectedMapIndex")||0;
+    sel.innerHTML = PP.manifest.map((m,i)=>{
+      const title = m.title || m.file || `Map #${i}`;
+      return `<option value="${i}">${title}</option>`;
+    }).join("");
+    sel.value = localStorage.getItem("selectedMapIndex") || 0;
     sel.onchange = ()=> localStorage.setItem("selectedMapIndex", sel.value);
   }
 }
 
-function getSelectedMap(){ 
+function getSelectedMap(){
   const sel = $("#map-select");
-  const idx = Number(sel?.value);
+  const idx = Number(sel?.value || 0);
   return PP.manifest[idx] || PP.manifest[0];
 }
 
-// ---------- Engine & scene ----------
+// ----- Engine & Scene -----
 function createEngineScene(){
   if(engine && scene) return;
   const canvas = $("#renderCanvas");
-  if(!canvas) throw new Error("#renderCanvas missing");
-  engine = new BABYLON.Engine(canvas,true,{preserveDrawingBuffer:true,stencil:true,antialias:true});
-  scene = new BABYLON.Scene(engine);
+  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true, antialias:true });
+  scene  = new BABYLON.Scene(engine);
   scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
   scene.fogDensity = 0.0045;
   scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
 
-  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
-  camera.minZ = 0.1;
-  try{ camera.inputs.clear(); }catch{}
-
   const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0,1,0), scene);
   hemi.intensity = 0.35;
 
-  engine.runRenderLoop(()=>{ if(scene) scene.render(); });
+  camera = new BABYLON.UniversalCamera("playerCam", new BABYLON.Vector3(0,1.8,0), scene);
+  camera.minZ = 0.1;
+  try{ camera.inputs.clear(); }catch(e){}
+
+  engine.runRenderLoop(()=> scene.render());
   window.addEventListener("resize", ()=> engine.resize());
 
-  window.ENGINE = engine; window.SCENE = scene; window.camera = camera;
-  log("Engine and scene created");
+  window.ENGINE = engine;
+  window.SCENE = scene;
+  window.camera = camera;
 }
 
-// ---------- Player Rig ----------
+// ----- Player Rig -----
 async function startPlayerRig(){
   if(window.__PP_RIG_READY__) return;
   window.__PP_RIG_READY__ = true;
 
-  if(!scene) throw new Error("Scene not initialized");
+  const AVATAR = { file:"./assets/models/player/player.glb", eyeY:1.6, targetHeight:1.75 };
+  const SPEEDS = { walk:1.8, run:3.5, crouch:1.0 };
+  const PP = window.PP;
+  PP.rig = {};
+  PP.state = PP.state || {};
+  const input = { forward:false, back:false, left:false, right:false, run:false, crouch:false };
+  let mouse = { dx:0, dy:0, locked:false };
+  let lastCrouchPressed=false;
 
-  // Physics init
+  // ----- Scene & Camera -----
+  const scene = window.SCENE;
+  const camera = window.camera;
+
+  // ----- Physics + Capsule -----
+  const body = BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:AVATAR.targetHeight, radius:0.35 },scene);
+  body.isVisible = false;
+  body.position.set(0, AVATAR.eyeY, 0);
   const havok = await HavokPhysics();
   scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
+  body.physicsImpostor = new BABYLON.PhysicsImpostor(body,BABYLON.PhysicsImpostor.CapsuleImpostor,{mass:70,restitution:0,friction:0.8},scene);
+  PP.rig.body = body;
 
-  // Capsule body
-  const body = BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:1.75, radius:0.35 },scene);
-  body.isVisible = false;
-  body.position.set(0,1.6,0);
-  body.physicsImpostor = new BABYLON.PhysicsImpostor(body, BABYLON.PhysicsImpostor.CapsuleImpostor,{mass:70,restitution:0,friction:0.8},scene);
-  PP.rig = { body };
-
-  // Load avatar
+  // ----- Avatar -----
   const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/player/", "player.glb", scene);
   const root = res.meshes[0];
   root.scaling.setAll(1);
-  root.position.y = 0;
+  const bb = root.getHierarchyBoundingVectors();
+  root.scaling.setAll(AVATAR.targetHeight / (bb.max.y - bb.min.y));
+  root.position.y -= root.getHierarchyBoundingVectors().min.y;
   root.parent = body;
   PP.rig.avatar = root;
 
-  log("Player rig ready");
+  // ----- Keyboard -----
+  document.addEventListener("keydown",(e)=>{
+    if(e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA") return;
+    switch(e.code){
+      case "KeyW": case "ArrowUp": input.forward=true; break;
+      case "KeyS": case "ArrowDown": input.back=true; break;
+      case "KeyA": case "ArrowLeft": input.left=true; break;
+      case "KeyD": case "ArrowRight": input.right=true; break;
+      case "ShiftLeft": case "ShiftRight": input.run=true; break;
+      case "KeyC": if(!lastCrouchPressed){ input.crouch=!input.crouch; lastCrouchPressed=true; } break;
+    }
+  });
+  document.addEventListener("keyup",(e)=>{
+    switch(e.code){
+      case "KeyW": case "ArrowUp": input.forward=false; break;
+      case "KeyS": case "ArrowDown": input.back=false; break;
+      case "KeyA": case "ArrowLeft": input.left=false; break;
+      case "KeyD": case "ArrowRight": input.right=false; break;
+      case "ShiftLeft": case "ShiftRight": input.run=false; break;
+      case "KeyC": lastCrouchPressed=false; break;
+    }
+  });
+
+  // ----- Mouse -----
+  const canvas = $("#renderCanvas");
+  canvas.addEventListener("click",()=>{ if(canvas.requestPointerLock) canvas.requestPointerLock(); });
+  document.addEventListener("pointerlockchange",()=>{ mouse.locked=document.pointerLockElement===canvas; });
+  document.addEventListener("mousemove",(e)=>{ if(!mouse.locked) return; mouse.dx=e.movementX; mouse.dy=e.movementY; });
+
+  // ----- Gamepad -----
+  function pollGamepad(){
+    const pads = navigator.getGamepads?.(); if(!pads) return;
+    const pad = pads[0]; if(!pad) return;
+    input.left = pad.axes[0]<-0.2; input.right = pad.axes[0]>0.2;
+    input.forward = pad.axes[1]<-0.2; input.back = pad.axes[1]>0.2;
+    input.run = pad.buttons[0];
+    if(pad.buttons[1] && !lastCrouchPressed) input.crouch = !input.crouch;
+    lastCrouchPressed = pad.buttons[1];
+    requestAnimationFrame(pollGamepad);
+  }
+  pollGamepad();
+
+  // ----- Movement loop -----
+  function moveLoop(){
+    if(!scene || !body) return requestAnimationFrame(moveLoop);
+    const dt = scene.getEngine().getDeltaTime()/1000;
+    const forward = camera.getDirection(BABYLON.Vector3.Forward()).normalize();
+    const right = camera.getDirection(BABYLON.Vector3.Right()).normalize();
+
+    let move = new BABYLON.Vector3(0,0,0);
+    if(input.forward) move.addInPlace(forward);
+    if(input.back) move.subtractInPlace(forward);
+    if(input.left) move.subtractInPlace(right);
+    if(input.right) move.addInPlace(right);
+
+    if(move.lengthSquared() > 0.001){
+      move.normalize();
+      const speed = input.crouch ? SPEEDS.crouch : input.run ? SPEEDS.run : SPEEDS.walk;
+      body.physicsImpostor.applyImpulse(move.scale(speed), body.getAbsolutePosition());
+    }
+
+    // Camera follows capsule
+    camera.position.set(body.position.x, body.position.y+AVATAR.eyeY, body.position.z);
+
+    requestAnimationFrame(moveLoop);
+  }
+  moveLoop();
+
+  // ✅ Signal rig ready
+  PP.rigReady = true;
   document.dispatchEvent(new Event("pp:rig-ready"));
 }
 
-// ---------- Start Game ----------
+// ----- Start Game -----
 async function startGame(){
-  if(started) return;
-  started = true;
-
   const titleScreen = $("#title-screen");
-  if(titleScreen) titleScreen.style.display = "none";
-  log("Starting game…");
+  if(titleScreen) titleScreen.style.display="none";
 
   createEngineScene();
   await loadManifest();
 
-  // Load map
   const mapData = getSelectedMap();
-  if(typeof PP.mapManager?.loadMap === "function"){
-    await PP.mapManager.loadMap(mapData);
-  }
+  if(typeof PP.mapManager?.loadMap==="function") await PP.mapManager.loadMap(mapData);
 
-  // Initialize player rig
   await startPlayerRig();
-
-  // Pointer lock safe: only after click
-  const canvas = $("#renderCanvas");
-  if(canvas){
-    canvas.addEventListener("click", ()=> {
-      if(canvas.requestPointerLock) canvas.requestPointerLock();
-    });
-  }
-
-  // Focus canvas
-  canvas?.focus();
+  $("#renderCanvas")?.focus();
   log("Game fully initialized");
 }
 
-// ---------- Start button ----------
-document.addEventListener("DOMContentLoaded", async ()=>{
-  await loadManifest();
-  const startBtn = $("#start-button");
-  if(startBtn) startBtn.addEventListener("click", ()=> startGame());
-  log("Start button bound");
-});
+// ----- Start Button -----
+const startBtn = $("#start-button");
+if(startBtn) startBtn.addEventListener("click", ()=> startGame());
 
-// Expose
+// Expose globally
 window.startGame = startGame;
-window.startPlayerRig = startPlayerRig;
-
 })();
