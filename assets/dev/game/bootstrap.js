@@ -61,8 +61,6 @@ const Loader = (()=>{
 let engine=null, scene=null, camera=null;
 let hemi=null;
 let started=false;
-let currentMap=null;
-let mapMeshes = []; // meshes loaded by loadMap / generator
 window.PP = window.PP || {};
 PP.manifest = PP.manifest || [];
 
@@ -87,15 +85,10 @@ async function loadManifest(){
 }
 
 function populateMapSelector() {
-  const sel = document.querySelector("#map-select");
+  const sel = $("#map-select");
   if (!sel) return;
 
-  const manifest = window.PP?.manifest || [];
-  if (!manifest.length) {
-    sel.innerHTML = `<option value="-1">(no maps found)</option>`;
-    return;
-  }
-
+  const manifest = PP.manifest || [];
   sel.innerHTML = manifest.map((m,i)=>{
     const title = m.title || m.file || ("map#" + i);
     return `<option value="${i}">${title}</option>`;
@@ -112,8 +105,8 @@ function populateMapSelector() {
 }
 
 function getSelectedMap() {
-  const sel = document.querySelector("#map-select");
-  const manifest = window.PP?.manifest || [];
+  const sel = $("#map-select");
+  const manifest = PP.manifest || [];
   const idx = Number(sel?.value);
   if (isNaN(idx) || idx < 0 || idx >= manifest.length) return manifest[0];
   return manifest[idx];
@@ -157,7 +150,7 @@ async function startGame(){
   if(started) return;
   started = true;
 
-  const titleScreen = document.querySelector("#title-screen");
+  const titleScreen = $("#title-screen");
   if(titleScreen) titleScreen.style.display = "none";
 
   log("[bootstrap] Starting game…");
@@ -174,129 +167,54 @@ async function startGame(){
     });
   }
 
-  try{
-    Loader.reset();
+  Loader.reset();
 
-    safeStep("Preparing engine…", async ()=> createEngineScene());
-    safeStep("Injecting ghosts & PS5 controller…", async ()=> window.injectGhostsAndPS5?.());
-    safeStep("Loading manifest (maps)…", async ()=> loadManifest());
-    safeStep("Loading map…", async ()=>{
-      const mapData = getSelectedMap();
-      if(typeof window.PP?.mapManager?.loadMap === 'function'){
-        await window.PP.mapManager.loadMap(mapData);
-      } else {
-        console.warn("MapManager not ready");
-      }
-
-      if(camera && scene){
-        scene.activeCamera = camera;
-        camera.attachControl($("#renderCanvas"), true);
-      }
-    });
-    safeStep("Initializing audio…", async ()=> window.__PP_initAudio?.("Clear"));
-    safeStep("Loading player rig…", async ()=>{
-      await new Promise(r=>{
-        if(window.PP?.rigReady) return r();
-        const timeout = setTimeout(()=> { console.warn("rig ready timeout"); r(); }, STEP_TIMEOUT);
-        document.addEventListener("pp:rig-ready", ()=> { clearTimeout(timeout); r(); }, { once:true });
-      });
-      log("[bootstrap] Player rig ready");
-    });
-    safeStep("Initializing player physics & movement…", async ()=>{
-      const body = window.PP?.rig?.body;
-      if(body && !body.physicsImpostor){
-        try{ body.physicsImpostor = new BABYLON.PhysicsImpostor(body, BABYLON.PhysicsImpostor.CapsuleImpostor, { mass:80, restitution:0, friction:0.5 }, scene); }catch(e){}
-      }
-      if(camera && window.PP?.rig?.body){ try{ camera.parent = window.PP.rig.body; camera.position.set(0,1.6,0); }catch(e){} }
-    });
-    safeStep("Finalizing…", async ()=>{
-      if(window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
-      window.enablePointerLockOnce?.();
-    });
-
-    await Loader.run();
-    window.dispatchEvent(new CustomEvent("pp:start"));
-    log("[bootstrap] Game started successfully.");
-    try{ $("#renderCanvas")?.focus?.(); }catch(e){}
-  }catch(err){
-    console.error("[bootstrap] Error starting game:", err);
-  }
-}
-/* bootstrap.js — safe game initialization */
-"use strict";
-
-const STEP_TIMEOUT = 12000; // 12s per step
-window.Loader = window.Loader || { steps: [] };
-
-// Add a step with timeout
-function safeStep(label, fn){
-  Loader.steps.push(async ()=>{
-    console.log(`[bootstrap] Step "${label}" started...`);
-    try{
-      await Promise.race([
-        Promise.resolve().then(()=>fn()),
-        new Promise((_, rej)=>setTimeout(()=>rej(new Error("Step timeout: "+label)), STEP_TIMEOUT))
-      ]);
-      console.log(`[bootstrap] Step "${label}" completed`);
-    }catch(e){
-      console.error(`[bootstrap] Step "${label}" failed:`, e);
+  safeStep("Preparing engine…", async ()=> createEngineScene());
+  safeStep("Loading manifest (maps)…", async ()=> loadManifest());
+  safeStep("Loading map…", async ()=>{
+    const mapData = getSelectedMap();
+    if(typeof PP.mapManager?.loadMap === 'function'){
+      await PP.mapManager.loadMap(mapData);
+    } else {
+      console.warn("MapManager not ready");
+    }
+    if(camera && scene){
+      scene.activeCamera = camera;
+      camera.attachControl($("#renderCanvas"), true);
     }
   });
-}
-
-// Run all steps sequentially
-async function runSteps(){
-  for(const step of Loader.steps){
-    await step();
-  }
-}
-
-// ----- Game start -----
-let started = false;
-async function startGame(){
-  if(started) return;
-  started = true;
-
-  const titleScreen = document.getElementById("title-screen");
-  if(titleScreen) titleScreen.style.display = "none";
-
-  // Steps
-  safeStep("Loading map…", async ()=>{
-    const mapSelect = document.getElementById("map-select");
-    const selected = mapSelect?.value || "default";
-    const mapData = window.MAPS?.[selected] || { file: "default.glb" };
-    if(!window.PP?.mapManager) throw new Error("Map manager missing");
-    await window.PP.mapManager.loadMap(mapData);
-  });
-
+  safeStep("Initializing audio…", async ()=> window.__PP_initAudio?.("Clear"));
   safeStep("Loading player rig…", async ()=>{
-    if(typeof window.startPlayerRig!=="function") throw new Error("Player rig not ready");
-    await window.startPlayerRig();
+    await new Promise(r=>{
+      if(window.PP?.rigReady) return r();
+      const timeout = setTimeout(()=> { console.warn("rig ready timeout"); r(); }, STEP_TIMEOUT);
+      document.addEventListener("pp:rig-ready", ()=> { clearTimeout(timeout); r(); }, { once:true });
+    });
+    log("[bootstrap] Player rig ready");
+  });
+  safeStep("Finalizing…", async ()=>{
+    window.enablePointerLockOnce?.();
   });
 
-  safeStep("Starting game loop…", async ()=>{
-    console.log("[bootstrap] Game fully initialized!");
-  });
-
-  await runSteps();
+  await Loader.run();
+  window.dispatchEvent(new CustomEvent("pp:start"));
+  log("[bootstrap] Game started successfully.");
+  try{ $("#renderCanvas")?.focus?.(); }catch(e){}
 }
 
-// ----- Start button binding -----
-const startBtn = document.getElementById("start-button");
-if(startBtn){
-  startBtn.addEventListener("click", async ()=>{
-    try{ await startGame(); }catch(e){ console.error("startGame failed:", e); }
-  });
-}
-
-// ---------- Expose Start ----------
-window.startGame = startGame;
-
-// ---------- Populate maps immediately on DOM ready ----------
+// ---------- Start button binding ----------
 document.addEventListener("DOMContentLoaded", async ()=>{
-  await loadManifest(); // ensures dropdown is populated immediately
-  const startBtn = document.querySelector("#start-button");
-  if(startBtn) startBtn.addEventListener("click", ()=> startGame());
+  await loadManifest(); // ensures dropdown is populated
+  const startBtn = $("#start-button");
+  if(startBtn){
+    startBtn.addEventListener("click", async ()=>{
+      try{ await startGame(); }catch(e){ console.error("startGame failed:", e); }
+    });
+  }
   log("[bootstrap] Start button bound");
 });
+
+// Expose globally
+window.startGame = startGame;
+window.Loader = Loader;
 })();
