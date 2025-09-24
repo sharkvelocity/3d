@@ -77,7 +77,7 @@ async function loadManifest(){
       { file: "Abandoned_House.glb", title: "Abandoned House", def:"" },
       { file: "furnished_house.glb", title: "Furnished House", def:"" },
       { file: "jailhouse.glb", title: "Jailhouse", def:"" },
-      { title: "Procedural ProHouse (grid)", def: "prohouse_generator" },
+      { title: "Procedural ProHouse (grid)", def: "prohouse_generator", procedural:true },
       { file: "Abandoned_House2.glb", title: "Abandoned House 2", def:"" },
       { file: "farm_house.glb", title: "Farm House", def:"" }
     ];
@@ -85,6 +85,7 @@ async function loadManifest(){
 
   populateMapSelector();
 }
+
 function populateMapSelector() {
   const sel = document.querySelector("#map-select");
   if (!sel) return;
@@ -119,7 +120,6 @@ function getSelectedMap() {
   return manifest[idx];
 }
 
-
 // ---------- Engine & Scene ----------
 function createEngineScene(){
   if(engine && scene) return;
@@ -153,15 +153,60 @@ function createEngineScene(){
   mark("engine+scene-created");
 }
 
+// ---------- Load Map ----------
+async function loadMap(mapData){
+  if(!scene) throw new Error("Scene not created");
+
+  // Clear previous
+  mapMeshes.forEach(m=>m.dispose());
+  mapMeshes = [];
+
+  if(mapData.procedural){
+    log("[bootstrap] Generating procedural map:", mapData.title || mapData.def);
+    if(!window.ProHouseGenerator) throw new Error("ProHouseGenerator not loaded");
+    await window.ProHouseGenerator.clear(scene);
+    const genData = await window.ProHouseGenerator.spawn(scene);
+    mapMeshes.push(...genData.meshes || []);
+    currentMap = mapData;
+
+    // --- Set camera spawn to van room if exists ---
+    const van = window.ProHouseGenerator.getVanRoom?.();
+    if(van && camera){
+      camera.position.set(van.gx*window.ProHouseGenerator.CELL_SIZE, 1.8, van.gz*window.ProHouseGenerator.CELL_SIZE);
+      camera.setTarget(camera.position.add(new BABYLON.Vector3(0,0,1)));
+      camera.attachControl($("#renderCanvas"), true);
+    }
+
+    return genData;
+  }
+
+  // Static GLB
+  const path = "./assets/models/map/";
+  const file = mapData.file;
+  const res = await BABYLON.SceneLoader.AppendAsync(path, file, scene);
+  mapMeshes.push(...res.meshes);
+  currentMap = mapData;
+
+  // Ensure camera attached
+  if(camera) camera.attachControl($("#renderCanvas"), true);
+
+  return res;
+}
+
 // ---------- ProHouse Generator (grid) ----------
 window.ProHouseGenerator = window.ProHouseGenerator || (function(){
   const PG = {
-    GRID_W: 10, GRID_D: 10, CELL_SIZE: 6,
-    rooms: [], roomMeshes: [], doorMeshes: [], lights: [], switches: [],
+    CELL_SIZE:6, rooms:[], roomMeshes:[], doorMeshes:[],
     async loadPrefab(prefab, scene){ return await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/prefabs/", prefab, scene); },
-    generate(seed=Date.now()){ /* same as original code */ },
-    async spawn(scene, seed){ /* same as original code */ },
-    clear(scene){ /* same as original code */ },
+    async spawn(scene, seed=Date.now()){
+      // Call your procedural generator
+      if(!window.ProHouseGenerator?.generateMap) throw new Error("generateMap() missing");
+      const mapData = await window.ProHouseGenerator.generateMap(scene);
+      this.rooms = mapData.rooms;
+      this.roomMeshes = mapData.meshes;
+      return mapData;
+    },
+    clear(scene){ this.rooms=[]; this.roomMeshes=[]; this.doorMeshes=[]; },
     getVanRoom(){ return this.rooms.find(r=>r.type==="van" || r.name==="Van") || null; },
     getRoomCenter(name){ const r = this.rooms.find(x=>x.name===name); if(!r) return null; return new BABYLON.Vector3(r.gx*this.CELL_SIZE, 0, r.gz*this.CELL_SIZE); }
   };
@@ -169,20 +214,19 @@ window.ProHouseGenerator = window.ProHouseGenerator || (function(){
 })();
 
 // ---------- Helpers ----------
-function clearMap(){ /* same as original */ }
-function spawnPlayer(){ /* same as original */ }
-function enablePointerLockOnce(){ /* same as original */ }
-async function injectGhostsAndPS5(){ /* same as original */ }
-async function loadMap(mapData){ /* same as original */ }
+function clearMap(){ mapMeshes.forEach(m=>m.dispose()); mapMeshes=[]; }
+function spawnPlayer(){ /* spawn logic */ }
+function enablePointerLockOnce(){ /* pointer lock */ }
+async function injectGhostsAndPS5(){ /* ghost & controller */ }
 
 // ---------- Audio & Weather ----------
-(function(){ /* same as original bootstrap code, including __PP_initAudio */ })();
+(function(){ if(typeof window.__PP_initAudio==="function") window.__PP_initAudio("Clear"); })();
 
 // ---------- Logger ----------
-window.GameLogger = window.GameLogger || (function(){ /* same as original */ })();
+window.GameLogger = window.GameLogger || (function(){ /* logging */ })();
 
 // ---------- Player rig ----------
-(async function(){ /* same as original rig code */ })();
+(async function(){ /* rig setup & physics */ })();
 
 // ---------- Start Game ----------
 async function startGame(){
@@ -200,15 +244,9 @@ async function startGame(){
     safeStep("Preparing engine…", async ()=> createEngineScene());
     safeStep("Injecting ghosts & PS5 controller…", async ()=> injectGhostsAndPS5());
     safeStep("Loading manifest (maps)…", async ()=> loadManifest());
-    safeStep("Loading map…", async ()=>{
+    safeStep("Loading map…", async ()=> {
       const mapData = getSelectedMap();
       await loadMap(mapData);
-
-      // <<< FIX: attach camera to canvas to render properly >>>
-      if(camera && scene){
-        scene.activeCamera = camera;
-        camera.attachControl($("#renderCanvas"), true);
-      }
     });
     safeStep("Initializing audio…", async ()=>{ if(typeof window.__PP_initAudio === "function") window.__PP_initAudio("Clear"); });
     safeStep("Loading player rig…", async ()=>{
