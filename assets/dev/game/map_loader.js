@@ -1,72 +1,44 @@
-/* ./assets/dev/game/map_loader.js */
-"use strict";
+// File: assets/dev/game/map_loader.js
+// Ensure this runs after scene and bootstrap are ready
 
-async function loadMap(mapData) {
-  if (!window.scene) throw new Error("Scene not initialized");
-  if (!mapData) mapData = window.PP?.manifest?.[0];
-  if (!mapData) throw new Error("No map data provided");
+(function(){
+    const mapSelect = document.getElementById("map-select");
 
-  // Clear previous map
-  if(window.mapMeshes){
-    window.mapMeshes.forEach(m=>m.dispose && m.dispose());
-    window.mapMeshes.length = 0;
-  }
+    async function loadMaps() {
+        try {
+            // Load maps manifest
+            const res = await fetch("./assets/models/map/maps.json");
+            if(!res.ok) throw new Error("Failed to load maps.json");
+            const mapsManifest = await res.json();
 
-  // Procedural map
-  if(mapData.def === "prohouse_generator" && window.ProHouseGenerator){
-    console.log("[map_loader] Spawning Procedural ProHouse...");
-    const meshes = await window.ProHouseGenerator.spawn(window.scene);
-    window.mapMeshes = meshes;
-    return meshes;
-  }
+            // Clear placeholder
+            mapSelect.innerHTML = "";
 
-  // Regular GLB map
-  if(!mapData.file) throw new Error("Map has no file: "+(mapData.title||"unknown"));
+            // Populate dropdown
+            mapsManifest.forEach((map, idx) => {
+                const option = document.createElement("option");
+                option.value = map.file || idx; // fallback to index
+                option.textContent = map.name || `Map ${idx+1}`;
+                mapSelect.appendChild(option);
+            });
 
-  const path = "./assets/models/map/";
-  try{
-    console.log("[map_loader] Loading GLB map:", mapData.file);
-    const res = await BABYLON.SceneLoader.ImportMeshAsync(
-      "", path, mapData.file, window.scene
-    );
+            // Auto-select first map if none selected
+            if(mapSelect.options.length > 0) mapSelect.selectedIndex = 0;
 
-    // position meshes
-    res.meshes.forEach(m=>{
-      if(!m.position) m.position = BABYLON.Vector3.Zero();
+        } catch(e) {
+            console.error("Map loader error:", e);
+            mapSelect.innerHTML = "<option value='-1'>Failed to load maps</option>";
+        }
+    }
+
+    // Event handler when player selects a map
+    mapSelect.addEventListener("change", () => {
+        const selected = mapSelect.value;
+        if(window.mapManager && selected !== "-1") {
+            window.mapManager.loadMap(selected); // assumes your mapManager handles loading by file
+        }
     });
 
-    window.mapMeshes = res.meshes;
-    return res.meshes;
-
-  }catch(e){
-    console.error("[map_loader] Failed to load map:", mapData.file, e);
-    return [];
-  }
-}
-
-// Optional: helper to get room by name (works with both procedural and GLB)
-window.getRoomCenter = function(name){
-  if(!window.mapMeshes) return null;
-
-  // For procedural
-  if(window.ProHouseGenerator && window.ProHouseGenerator.rooms){
-    const r = window.ProHouseGenerator.rooms.find(r=>r.name===name);
-    if(r) return new BABYLON.Vector3(r.gx*window.ProHouseGenerator.CELL_SIZE, 0, r.gz*window.ProHouseGenerator.CELL_SIZE);
-  }
-
-  // For static GLB maps: check metadata
-  const mesh = window.mapMeshes.find(m=>m.metadata?.roomName===name);
-  if(mesh) return mesh.position.clone();
-  return null;
-};
-
-// Optional: helper to clear map completely
-window.clearMap = function(){
-  if(window.mapMeshes){
-    window.mapMeshes.forEach(m=>m.dispose && m.dispose());
-    window.mapMeshes.length = 0;
-  }
-  if(window.ProHouseGenerator && typeof window.ProHouseGenerator.clear === "function"){
-    window.ProHouseGenerator.clear(window.scene);
-  }
-};
+    // Start loading maps
+    loadMaps();
+})();
