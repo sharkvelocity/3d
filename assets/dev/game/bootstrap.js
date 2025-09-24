@@ -54,7 +54,7 @@ const Loader = (()=>{
     await new Promise(r=>setTimeout(r,120));
     hide();
   }
-  return { reset, addStep, run, show, hide, label };
+  return { reset, addStep, run, show, hide, label, addStep };
 })();
 
 // ---------- State ----------
@@ -77,7 +77,7 @@ async function loadManifest(){
       { file: "Abandoned_House.glb", title: "Abandoned House", def:"" },
       { file: "furnished_house.glb", title: "Furnished House", def:"" },
       { file: "jailhouse.glb", title: "Jailhouse", def:"" },
-      { title: "Procedural ProHouse (grid)", def: "prohouse_generator", procedural:true },
+      { title: "Procedural ProHouse (grid)", def: "prohouse_generator" },
       { file: "Abandoned_House2.glb", title: "Abandoned House 2", def:"" },
       { file: "farm_house.glb", title: "Farm House", def:"" }
     ];
@@ -96,16 +96,12 @@ function populateMapSelector() {
     return;
   }
 
-  // Fill dropdown with indices
   sel.innerHTML = manifest.map((m,i)=>`<option value="${i}">${m.title || m.file || "map#"+i}</option>`).join("");
 
-  // Restore saved index
-  let saved = localStorage.getItem("selectedMapIndex");
-  saved = Number(saved);
-  if (isNaN(saved) || saved < 0 || saved >= manifest.length) saved = 0;
+  let saved = Number(localStorage.getItem("selectedMapIndex"));
+  if(isNaN(saved) || saved < 0 || saved >= manifest.length) saved = 0;
   sel.value = saved;
 
-  // Save on change
   sel.onchange = ()=> {
     const idx = Number(sel.value);
     if (!isNaN(idx)) localStorage.setItem("selectedMapIndex", idx);
@@ -148,85 +144,10 @@ function createEngineScene(){
 
   window.ENGINE = engine; window.SCENE = scene; window.camera = camera;
 
-  engine.runRenderLoop(()=>{ try{ scene.render(); }catch(e){ /* swallow render errors */ }});
+  engine.runRenderLoop(()=>{ try{ scene.render(); }catch(e){} });
   window.addEventListener("resize", ()=> engine.resize());
   mark("engine+scene-created");
 }
-
-// ---------- Load Map ----------
-async function loadMap(mapData){
-  if(!scene) throw new Error("Scene not created");
-
-  // Clear previous
-  mapMeshes.forEach(m=>m.dispose());
-  mapMeshes = [];
-
-  if(mapData.procedural){
-    log("[bootstrap] Generating procedural map:", mapData.title || mapData.def);
-    if(!window.ProHouseGenerator) throw new Error("ProHouseGenerator not loaded");
-    await window.ProHouseGenerator.clear(scene);
-    const genData = await window.ProHouseGenerator.spawn(scene);
-    mapMeshes.push(...genData.meshes || []);
-    currentMap = mapData;
-
-    // --- Set camera spawn to van room if exists ---
-    const van = window.ProHouseGenerator.getVanRoom?.();
-    if(van && camera){
-      camera.position.set(van.gx*window.ProHouseGenerator.CELL_SIZE, 1.8, van.gz*window.ProHouseGenerator.CELL_SIZE);
-      camera.setTarget(camera.position.add(new BABYLON.Vector3(0,0,1)));
-      camera.attachControl($("#renderCanvas"), true);
-    }
-
-    return genData;
-  }
-
-  // Static GLB
-  const path = "./assets/models/map/";
-  const file = mapData.file;
-  const res = await BABYLON.SceneLoader.AppendAsync(path, file, scene);
-  mapMeshes.push(...res.meshes);
-  currentMap = mapData;
-
-  // Ensure camera attached
-  if(camera) camera.attachControl($("#renderCanvas"), true);
-
-  return res;
-}
-
-// ---------- ProHouse Generator (grid) ----------
-window.ProHouseGenerator = window.ProHouseGenerator || (function(){
-  const PG = {
-    CELL_SIZE:6, rooms:[], roomMeshes:[], doorMeshes:[],
-    async loadPrefab(prefab, scene){ return await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/prefabs/", prefab, scene); },
-    async spawn(scene, seed=Date.now()){
-      // Call your procedural generator
-      if(!window.ProHouseGenerator?.generateMap) throw new Error("generateMap() missing");
-      const mapData = await window.ProHouseGenerator.generateMap(scene);
-      this.rooms = mapData.rooms;
-      this.roomMeshes = mapData.meshes;
-      return mapData;
-    },
-    clear(scene){ this.rooms=[]; this.roomMeshes=[]; this.doorMeshes=[]; },
-    getVanRoom(){ return this.rooms.find(r=>r.type==="van" || r.name==="Van") || null; },
-    getRoomCenter(name){ const r = this.rooms.find(x=>x.name===name); if(!r) return null; return new BABYLON.Vector3(r.gx*this.CELL_SIZE, 0, r.gz*this.CELL_SIZE); }
-  };
-  return PG;
-})();
-
-// ---------- Helpers ----------
-function clearMap(){ mapMeshes.forEach(m=>m.dispose()); mapMeshes=[]; }
-function spawnPlayer(){ /* spawn logic */ }
-function enablePointerLockOnce(){ /* pointer lock */ }
-async function injectGhostsAndPS5(){ /* ghost & controller */ }
-
-// ---------- Audio & Weather ----------
-(function(){ if(typeof window.__PP_initAudio==="function") window.__PP_initAudio("Clear"); })();
-
-// ---------- Logger ----------
-window.GameLogger = window.GameLogger || (function(){ /* logging */ })();
-
-// ---------- Player rig ----------
-(async function(){ /* rig setup & physics */ })();
 
 // ---------- Start Game ----------
 async function startGame(){
@@ -244,11 +165,35 @@ async function startGame(){
     safeStep("Preparing engine…", async ()=> createEngineScene());
     safeStep("Injecting ghosts & PS5 controller…", async ()=> injectGhostsAndPS5());
     safeStep("Loading manifest (maps)…", async ()=> loadManifest());
-    safeStep("Loading map…", async ()=> {
+
+    safeStep("Loading map…", async ()=>{
       const mapData = getSelectedMap();
-      await loadMap(mapData);
+
+      // Check if procedural
+      if(mapData.def === "prohouse_generator" && window.ProHouseGenerator){
+        mapMeshes = await window.ProHouseGenerator.spawn(scene);
+        currentMap = mapData;
+      } else {
+        currentMap = mapData;
+        mapMeshes = await loadMap(mapData);
+      }
+
+      // Spawn player after map
+      await spawnPlayer();
+      if(camera && window.PP?.rig?.body){
+        camera.parent = window.PP.rig.body;
+        camera.position.set(0,1.6,0);
+        scene.activeCamera = camera;
+        camera.attachControl($("#renderCanvas"), true);
+      }
+
+      // Initialize van UI & belt manager **after player rig**
+      if(window.PP?.vanUI && typeof PP.vanUI.init === "function") PP.vanUI.init();
+      if(window.PP?.beltManager && typeof PP.beltManager.init === "function") PP.beltManager.init();
     });
+
     safeStep("Initializing audio…", async ()=>{ if(typeof window.__PP_initAudio === "function") window.__PP_initAudio("Clear"); });
+
     safeStep("Loading player rig…", async ()=>{
       await new Promise(r=>{
         if(window.PP?.rigReady) return r();
@@ -257,13 +202,14 @@ async function startGame(){
       });
       log("[bootstrap] Player rig ready");
     });
+
     safeStep("Initializing player physics & movement…", async ()=>{
       const body = window.PP?.rig?.body;
       if(body && !body.physicsImpostor){
         try{ body.physicsImpostor = new BABYLON.PhysicsImpostor(body, BABYLON.PhysicsImpostor.CapsuleImpostor, { mass:80, restitution:0, friction:0.5 }, scene); }catch(e){}
       }
-      if(camera && window.PP?.rig?.body){ try{ camera.parent = window.PP.rig.body; camera.position.set(0,1.6,0); }catch(e){} }
     });
+
     safeStep("Finalizing…", async ()=>{
       if(window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
       enablePointerLockOnce();
