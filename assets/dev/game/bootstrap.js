@@ -153,67 +153,92 @@ function createEngineScene(){
 }
 
 // ---------- Start Game ----------
-async function startGame(){
-  if(started) return;
+async function startGame() {
+  if (started) return;
   started = true;
-  $("#title-screen")?.style.display = "none";
+
+  const titleScreen = $("#title-screen");
+  if (titleScreen) titleScreen.style.display = "none";
+
   log("[bootstrap] Starting game…");
 
   const STEP_TIMEOUT = 12000;
-  function safeStep(label, fn){
-    Loader.addStep(label, async ()=>{
-      try{
+
+  function safeStep(label, fn) {
+    Loader.addStep(label, async () => {
+      try {
         await Promise.race([
-          Promise.resolve().then(()=>fn()),
-          new Promise((_,rej)=>setTimeout(()=>rej(new Error("Step timeout: "+label)), STEP_TIMEOUT))
+          Promise.resolve().then(() => fn()),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("Step timeout: " + label)), STEP_TIMEOUT))
         ]);
-      }catch(e){ console.error(`[bootstrap] Step "${label}" failed:`, e); }
+      } catch (e) {
+        console.error(`[bootstrap] Step "${label}" failed:`, e);
+      }
     });
   }
 
-  try{
+  try {
     Loader.reset();
 
-    safeStep("Preparing engine…", async ()=> createEngineScene());
-    safeStep("Injecting ghosts & PS5 controller…", async ()=> window.injectGhostsAndPS5?.());
-    safeStep("Loading manifest (maps)…", async ()=> loadManifest());
-    safeStep("Loading map…", async ()=>{
+    safeStep("Preparing engine…", async () => createEngineScene());
+    safeStep("Injecting ghosts & PS5 controller…", async () => window.injectGhostsAndPS5?.());
+    safeStep("Loading manifest (maps)…", async () => loadManifest());
+    safeStep("Loading map…", async () => {
       const mapData = getSelectedMap();
       await window.loadMap?.(mapData);
-      if(camera && scene){
+
+      if (camera && scene) {
         scene.activeCamera = camera;
-        camera.attachControl($("#renderCanvas"), true);
+        if ($("#renderCanvas")) camera.attachControl($("#renderCanvas"), true);
       }
     });
-    safeStep("Initializing audio…", async ()=> window.__PP_initAudio?.("Clear"));
-    safeStep("Loading player rig…", async ()=>{
-      await new Promise(r=>{
-        if(window.PP?.rigReady) return r();
-        const timeout = setTimeout(()=> { console.warn("rig ready timeout"); r(); }, STEP_TIMEOUT);
-        document.addEventListener("pp:rig-ready", ()=> { clearTimeout(timeout); r(); }, { once:true });
+    safeStep("Initializing audio…", async () => window.__PP_initAudio?.("Clear"));
+    safeStep("Loading player rig…", async () => {
+      await new Promise(r => {
+        if (window.PP?.rigReady) return r();
+        const timeout = setTimeout(() => { console.warn("rig ready timeout"); r(); }, STEP_TIMEOUT);
+        document.addEventListener("pp:rig-ready", () => { clearTimeout(timeout); r(); }, { once: true });
       });
       log("[bootstrap] Player rig ready");
     });
-    safeStep("Initializing player physics & movement…", async ()=>{
+    safeStep("Initializing player physics & movement…", async () => {
       const body = window.PP?.rig?.body;
-      if(body && !body.physicsImpostor){
-        try{ body.physicsImpostor = new BABYLON.PhysicsImpostor(body, BABYLON.PhysicsImpostor.CapsuleImpostor, { mass:80, restitution:0, friction:0.5 }, scene); }catch(e){}
+      if (body && !body.physicsImpostor) {
+        try {
+          body.physicsImpostor = new BABYLON.PhysicsImpostor(
+            body,
+            BABYLON.PhysicsImpostor.CapsuleImpostor,
+            { mass: 80, restitution: 0, friction: 0.5 },
+            scene
+          );
+        } catch (e) { console.warn("Physics impostor failed:", e); }
       }
-      if(camera && window.PP?.rig?.body){ try{ camera.parent = window.PP.rig.body; camera.position.set(0,1.6,0); }catch(e){} }
+      if (camera && body) {
+        try { camera.parent = body; camera.position.set(0, 1.6, 0); } catch (e) { console.warn(e); }
+      }
     });
-    safeStep("Finalizing…", async ()=>{
-      if(window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
+    safeStep("Finalizing…", async () => {
+      if (window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
       window.enablePointerLockOnce?.();
     });
 
     await Loader.run();
     window.dispatchEvent(new CustomEvent("pp:start"));
     log("[bootstrap] Game started successfully.");
-    try{ $("#renderCanvas")?.focus?.(); }catch(e){}
-  }catch(err){
+
+    try { $("#renderCanvas")?.focus?.(); } catch (e) { console.warn(e); }
+  } catch (err) {
     console.error("[bootstrap] Error starting game:", err);
   }
 }
+
+// Ensure start button is bound safely
+document.addEventListener("DOMContentLoaded", async () => {
+  await loadManifest(); // ensures dropdown is populated immediately
+  const startBtn = $("#start-button");
+  if (startBtn) startBtn.addEventListener("click", () => startGame());
+  log("[bootstrap] Start button bound");
+});
 
 // ---------- Expose Start ----------
 window.startGame = startGame;
