@@ -38,6 +38,38 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 #sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
 #sanity-text{ margin-left:6px; }
 #hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; }
+#pause-menu {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 12000;
+}
+#pause-content {
+  background: #111;
+  padding: 24px 32px;
+  border: 2px solid #0ff;
+  border-radius: 12px;
+  color: #0ff;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: center;
+}
+#pause-content h2 { margin: 0 0 12px; font-size: 26px; }
+#pause-content button {
+  padding: 10px 18px;
+  font-size: 18px;
+  border: 1px solid #0ff;
+  background: #000;
+  color: #0ff;
+  cursor: pointer;
+}
+#pause-content button:hover {
+  background: #033;
+}
 </style>
 </head>
 <body>
@@ -77,11 +109,14 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 </div>
 
 <!-- ===================== SCRIPTS ===================== -->
-<!-- Utilities -->
+<!-- Utilities (order matters) -->
 <script src="./assets/dev/util/pointer_lock_manager.js"></script>
-<script src="./assets/dev/util/pp_runtime.js"></script>
+
 <script src="./assets/dev/util/modular_settings.js"></script>
-<script src="./assets/dev/util/env_and_sounds.js"></script>
+
+<!-- Unified environment & audio. NOTE: this file is intentionally passive; it initializes audio after the first interaction / start event. -->
+<script src="./assets/dev/util/env_and_sound.js"></script>
+
 <script src="./assets/dev/util/moon.js"></script>
 
 <script src="./assets/dev/modular_bindings.js"></script>
@@ -90,7 +125,14 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 <script src="./assets/dev/util/ghost_dev.js"></script>
 <script src="./assets/dev/util/ghost_cam.js"></script>
 
-<!-- Game -->
+<!-- Map generators / managers (must exist before bootstrap start) -->
+<script src="./assets/models/map/map_generator.js"></script>
+<script src="./assets/models/map/prohouse_generator.js"></script>
+<script src="./assets/models/map/map_manager.js"></script>
+<!-- Map loader (must be before bootstrap so start button sees the maps) -->
+<script src="./assets/dev/game/map_loader.js"></script>
+
+<!-- Game core -->
 <script src="./assets/dev/game/inventory_system.js"></script>
 <script src="./assets/dev/ui/belt_manager.js"></script>
 <script src="./assets/dev/ui/van_ui.js"></script>
@@ -98,7 +140,7 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 <script src="./assets/dev/ui/hud_ui.js"></script>
 <script src="./assets/dev/util/player_rig_controller_final.js"></script>
 
-<!-- Tools -->
+<!-- Tools / UI -->
 <script src="./assets/dev/ui/notebook_ui.js"></script>
 <script src="./assets/dev/tools/uv_prints.js"></script>
 <script src="./assets/dev/tools/salt_system.js"></script>
@@ -106,16 +148,14 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 <script src="./assets/dev/tools/dots_system.js"></script>
 <script src="./assets/dev/tools/writing_book.js"></script>
 <script src="./assets/dev/tools/parabolic_mic.js"></script>
-<script src="./assets/dev/tools/lighter.js"></script> 
-<script src="./assets/dev/tools/lantern.js"></script> 
+<script src="./assets/dev/tools/lighter.js"></script>
+<script src="./assets/dev/tools/lantern.js"></script>
 <script src="./assets/dev/tools/emf.js"></script>
-
-<!-- Bootstrap -->
+<script src="./assets/dev/util/pp_runtime.js"></script>
+<!-- Bootstrap + patches (bootstrap wires start button and manifest) -->
 <script src="./assets/dev/game/bootstrap.js"></script>
-<script src="./assets/dev/merge_patch.js"></script>
-<script src="./assets/dev/glue_patch.js"></script>
 
-
+<!-- Small HUD bindings (keeps index small) -->
 <script>
 (function(){
   const sanityFill = document.getElementById("sanity-fill");
@@ -137,128 +177,68 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 
   window.updateWeather = function(type,temp){
     if(hudWeather) hudWeather.textContent = type;
-    if(hudTemp) hudTemp.textContent = temp+"°C";
+    if(hudTemp) hudTemp.textContent = (typeof temp === 'number' ? temp + "°C" : (temp || ""));
+    // bridge to EnvAndSound / Weather if available
+    if(window.EnvAndSound && typeof EnvAndSound.setWeather === 'function'){
+      const mapState = (type === "Rain") ? "Rainstorm" : (type === "BloodMoon" ? "Bloodmoon" : (type === "Snow" ? "Snow" : "Clear"));
+      try{ EnvAndSound.setWeather(mapState, { immediate:true }); }catch(e){ console.warn("EnvAndSound.setWeather failed",e); }
+    } else if(window.Weather && typeof Weather.set === 'function'){
+      try{ Weather.set(type, { immediate:true }); }catch(e){ console.warn("Weather.set failed",e); }
+    }
   };
+(function(){
+  let isPaused = false;
+  const pauseMenu = document.getElementById("pause-menu");
+  const resumeBtn = document.getElementById("resume-btn");
+  const quitBtn = document.getElementById("quit-btn");
 
+  // toggle pause
+  function setPaused(p){
+    isPaused = p;
+    if(isPaused){
+      pauseMenu.style.display = "flex";
+      if(window.scene && window.scene.getEngine){
+        try{ window.scene.getEngine().stopRenderLoop(); }catch(e){}
+      }
+      // release mouse
+      if(document.exitPointerLock) document.exitPointerLock();
+    } else {
+      pauseMenu.style.display = "none";
+      if(window.scene && window.scene.getEngine){
+        try{ window.scene.getEngine().runRenderLoop(()=>window.scene.render()); }catch(e){}
+      }
+      // re-lock mouse if player was using pointer lock
+      const canvas = document.getElementById("renderCanvas");
+      if(canvas && canvas.requestPointerLock) canvas.requestPointerLock();
+    }
+  }
+
+  // key binding
+  window.addEventListener("keydown", (ev)=>{
+    if(ev.code === "Escape"){
+      setPaused(!isPaused);
+    }
+  });
+
+  // buttons
+  resumeBtn.addEventListener("click", ()=>setPaused(false));
+  quitBtn.addEventListener("click", ()=>{ 
+    alert("Quit to main menu (implement redirect here)."); 
+  });
+})();
+  // default display values
   setTimeout(()=>{ window.updateSanity(100); window.updateWeather("Clear",20); },0);
 })();
 </script>
-
-<!-- ===================== START BUTTON + MAP + PLAYER + GHOST ===================== -->
-<script>
-(async function(){
-    const btn = document.getElementById('start-button');
-    const loadingBox = document.getElementById('loading-box');
-    const loadingFill = document.getElementById('loading-fill');
-    const mapSelect = document.getElementById('map-select');
-    if(!btn || !mapSelect) return;
-
-    // ---------------- Populate map dropdown ----------------
-    const maps = ["ProHouse"]; // add more maps here in the future
-    mapSelect.innerHTML = "";
-    maps.forEach((m,i)=>{
-        const opt = document.createElement("option");
-        opt.value = i;
-        opt.textContent = m;
-        mapSelect.appendChild(opt);
-    });
-
-    // ---------------- Start button ----------------
-    btn.addEventListener('click', async function onStart(){
-        try {
-            // Remove title screen
-            document.getElementById('title-screen')?.remove();
-            if(loadingBox) loadingBox.style.display = 'flex';
-            if(loadingFill) loadingFill.style.width = '0%';
-
-            window.__PP_ALREADY_STARTED__ = true;
-            window.dispatchEvent(new CustomEvent('pp:start'));
-
-            const canvas = document.getElementById('renderCanvas');
-            try { canvas?.requestPointerLock?.(); } catch {}
-            try { canvas?.focus?.(); } catch {}
-
-            // ---------------- Wait for Babylon scene ----------------
-            let scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene;
-            while(!scene){ 
-                await new Promise(r=>setTimeout(r,50));
-                scene = window.SCENE || BABYLON.EngineStore.LastCreatedScene; 
-            }
-            window.scene = scene;
-            scene.collisionsEnabled = true;
-
-            if(loadingFill) loadingFill.style.width = '10%';
-
-            // ---------------- Physics ----------------
-            const havok = await HavokPhysics();
-            scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.HavokPlugin(true,havok));
-            if(loadingFill) loadingFill.style.width = '30%';
-
-            // ---------------- Skybox ----------------
-            const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", {size:1000.0}, scene);
-            const skyboxMaterial = new BABYLON.SkyMaterial("skyMaterial", scene);
-            skyboxMaterial.backFaceCulling = false;
-            skybox.material = skyboxMaterial;
-            skyboxMaterial.animations ??= [];
-            const anim = new BABYLON.Animation("cloudAnim", "turbidity", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
-            anim.setKeys([
-                {frame:0, value:10},
-                {frame:100, value:50},
-                {frame:200, value:10}
-            ]);
-            skyboxMaterial.animations.push(anim);
-            scene.beginAnimation(skyboxMaterial, 0, 200, true);
-            if(loadingFill) loadingFill.style.width = '50%';
-
-            // ---------------- Generate Map & Spawn Rooms ----------------
-            const selectedMapIndex = parseInt(mapSelect.value || 0);
-            const seed = Date.now() + selectedMapIndex;
-            await MapGenerator.spawnRooms(seed);
-            if(loadingFill) loadingFill.style.width = '70%';
-
-            // ---------------- Player Spawn ----------------
-            const vanRoom = MapGenerator.getVanRoom ? MapGenerator.getVanRoom() : MapGenerator.rooms.find(r=>r.type==="garage") || MapGenerator.rooms[0];
-            const spawnPos = vanRoom ? new BABYLON.Vector3(
-                vanRoom.position.x + vanRoom.width * MapGenerator.roomSizeUnit / 2,
-                1.6,
-                vanRoom.position.z - 3
-            ) : new BABYLON.Vector3(0, 1.6, 0);
-            window.__PP_SPAWN_POS__ = spawnPos;
-
-            if(scene.activeCamera){
-                scene.activeCamera.position.copyFrom(spawnPos);
-            }
-
-            // ---------------- Ghost Spawn ----------------
-            if(window.GhostLogic?.ghost){
-                // Move ghost 5 units offset from player
-                window.GhostLogic.ghost.position.copyFrom(spawnPos.add(new BABYLON.Vector3(5,0,5)));
-
-                // Assign a random room
-                const ghostRoom = MapGenerator.rooms[Math.floor(Math.random() * MapGenerator.rooms.length)];
-                window.GhostLogic.ghost.roomName = ghostRoom.name;
-                window.GhostLogic.ghost.roomCenter = MapGenerator.getRoomCenter ? MapGenerator.getRoomCenter(ghostRoom.name) : 
-                    new BABYLON.Vector3(
-                        ghostRoom.position.x + ghostRoom.width*MapGenerator.roomSizeUnit/2,
-                        1.0,
-                        ghostRoom.position.z + ghostRoom.depth*MapGenerator.roomSizeUnit/2
-                    );
-            }
-
-            // ---------------- Finish Loading ----------------
-            if(loadingFill) loadingFill.style.width = '100%';
-            setTimeout(()=>{
-                if(loadingBox) loadingBox.style.display = 'none';
-            }, 300);
-
-        } catch(e){
-            console.error("Start button error:", e);
-            if(loadingBox) loadingBox.style.display = 'none';
-        }
-    }, {once:true});
-})();
-</script>
-
+<!-- Pause Menu -->
+<div id="pause-menu">
+  <div id="pause-content">
+    <h2>Paused</h2>
+    <button id="resume-btn">Resume</button>
+    <button id="settings-btn">Settings</button>
+    <button id="quit-btn">Quit</button>
+  </div>
+</div>
 
 </body>
 </html>
