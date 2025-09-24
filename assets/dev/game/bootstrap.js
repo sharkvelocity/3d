@@ -6,7 +6,6 @@ window.__GameBootstrapReady = true;
 
 const log  = (...a)=>{ try{ console.log("[bootstrap]", ...a); }catch{} };
 const warn = (...a)=>{ try{ console.warn("[bootstrap]", ...a); }catch{} };
-const mark = (lbl, extra)=>{ try{ window.BOOTLOG?.mark(lbl, extra); }catch{} };
 
 const $ = s => document.querySelector(s);
 const bURL = p => { try { return new URL(p, document.baseURI).toString(); } catch { return p; } };
@@ -19,6 +18,7 @@ async function fetchJSON(url){
   }catch(e){ warn("fetchJSON failed:", url, e); return null; }
 }
 
+// Load script once
 function loadScriptOnce(path){
   return new Promise(resolve=>{
     if(document.querySelector(`script[src="${path}"]`)) return resolve(true);
@@ -51,7 +51,7 @@ const Loader = (()=>{
       stepsDone++; draw();
     }
     label("Finalizing…"); draw();
-    await new Promise(r=>setTimeout(r,120));
+    await new Promise(r=>setTimeout(r,100));
     hide();
   }
   return { reset, addStep, run, show, hide, label, addStep };
@@ -85,10 +85,15 @@ async function loadManifest(){
 }
 
 function populateMapSelector() {
-  const sel = $("#map-select");
+  const sel = document.querySelector("#map-select");
   if (!sel) return;
 
-  const manifest = PP.manifest || [];
+  const manifest = window.PP?.manifest || [];
+  if (!manifest.length) {
+    sel.innerHTML = `<option value="-1">(no maps found)</option>`;
+    return;
+  }
+
   sel.innerHTML = manifest.map((m,i)=>{
     const title = m.title || m.file || ("map#" + i);
     return `<option value="${i}">${title}</option>`;
@@ -105,8 +110,8 @@ function populateMapSelector() {
 }
 
 function getSelectedMap() {
-  const sel = $("#map-select");
-  const manifest = PP.manifest || [];
+  const sel = document.querySelector("#map-select");
+  const manifest = window.PP?.manifest || [];
   const idx = Number(sel?.value);
   if (isNaN(idx) || idx < 0 || idx >= manifest.length) return manifest[0];
   return manifest[idx];
@@ -142,7 +147,6 @@ function createEngineScene(){
 
   engine.runRenderLoop(()=>{ try{ if(scene) scene.render(); }catch(e){ } });
   window.addEventListener("resize", ()=> engine.resize());
-  mark("engine+scene-created");
 }
 
 // ---------- Start Game ----------
@@ -150,71 +154,54 @@ async function startGame(){
   if(started) return;
   started = true;
 
-  const titleScreen = $("#title-screen");
+  const titleScreen = document.querySelector("#title-screen");
   if(titleScreen) titleScreen.style.display = "none";
 
   log("[bootstrap] Starting game…");
 
-  const STEP_TIMEOUT = 12000;
-  function safeStep(label, fn){
-    Loader.addStep(label, async ()=>{
-      try{
-        await Promise.race([
-          Promise.resolve().then(()=>fn()),
-          new Promise((_,rej)=>setTimeout(()=>rej(new Error("Step timeout: "+label)), STEP_TIMEOUT))
-        ]);
-      }catch(e){ console.error(`[bootstrap] Step "${label}" failed:`, e); }
-    });
-  }
-
   Loader.reset();
 
-  safeStep("Preparing engine…", async ()=> createEngineScene());
-  safeStep("Loading manifest (maps)…", async ()=> loadManifest());
-  safeStep("Loading map…", async ()=>{
+  // ---------- Steps ----------
+  Loader.addStep("Preparing engine…", async ()=> createEngineScene());
+  Loader.addStep("Loading manifest (maps)…", async ()=> loadManifest());
+  Loader.addStep("Loading map…", async ()=>{
     const mapData = getSelectedMap();
-    if(typeof PP.mapManager?.loadMap === 'function'){
-      await PP.mapManager.loadMap(mapData);
+    if(typeof window.PP?.mapManager?.loadMap === 'function'){
+      await window.PP.mapManager.loadMap(mapData);
     } else {
       console.warn("MapManager not ready");
     }
-    if(camera && scene){
-      scene.activeCamera = camera;
-      camera.attachControl($("#renderCanvas"), true);
+  });
+  Loader.addStep("Loading player rig…", async ()=>{
+    if(typeof window.startPlayerRig === "function"){
+      await window.startPlayerRig();
+    } else {
+      console.warn("Player rig function not ready");
     }
   });
-  safeStep("Initializing audio…", async ()=> window.__PP_initAudio?.("Clear"));
-  safeStep("Loading player rig…", async ()=>{
-    await new Promise(r=>{
-      if(window.PP?.rigReady) return r();
-      const timeout = setTimeout(()=> { console.warn("rig ready timeout"); r(); }, STEP_TIMEOUT);
-      document.addEventListener("pp:rig-ready", ()=> { clearTimeout(timeout); r(); }, { once:true });
-    });
-    log("[bootstrap] Player rig ready");
-  });
-  safeStep("Finalizing…", async ()=>{
-    window.enablePointerLockOnce?.();
+  Loader.addStep("Finalizing…", async ()=>{
+    if(window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
+    log("[bootstrap] Game fully initialized!");
   });
 
   await Loader.run();
   window.dispatchEvent(new CustomEvent("pp:start"));
-  log("[bootstrap] Game started successfully.");
   try{ $("#renderCanvas")?.focus?.(); }catch(e){}
 }
 
-// ---------- Start button binding ----------
-document.addEventListener("DOMContentLoaded", async ()=>{
-  await loadManifest(); // ensures dropdown is populated
-  const startBtn = $("#start-button");
-  if(startBtn){
-    startBtn.addEventListener("click", async ()=>{
-      try{ await startGame(); }catch(e){ console.error("startGame failed:", e); }
-    });
-  }
+// ----- Bind Start Button -----
+document.addEventListener("DOMContentLoaded", ()=>{
+  const startBtn = document.getElementById("start-button");
+  if(startBtn) startBtn.addEventListener("click", async ()=> {
+    try{ await startGame(); }catch(e){ console.error("startGame failed:", e); }
+  });
+
+  // Populate maps immediately
+  loadManifest();
   log("[bootstrap] Start button bound");
 });
 
-// Expose globally
+// ----- Expose Start ----------
 window.startGame = startGame;
-window.Loader = Loader;
+
 })();
