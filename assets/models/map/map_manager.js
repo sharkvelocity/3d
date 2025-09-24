@@ -1,69 +1,50 @@
-/* ./assets/models/map/map_manager.js — manages map loading & map assets */
-"use strict";
-
+// map_manager.js
 window.PP = window.PP || {};
-PP.maps = PP.maps || {};
+PP.mapManager = (function(){
+  let currentMap = null;
 
-PP.mapManager = (function() {
-    const loadedMaps = {};
+  async function clearMap(){
+    if(!window.scene) return;
+    if(currentMap && Array.isArray(currentMap)){
+      currentMap.forEach(m=>{
+        try{ m.dispose(); }catch{} 
+      });
+    }
+    currentMap = [];
+  }
 
-    // Load a map (GLB or procedural)
-    async function loadMap(mapData) {
-        if (!mapData) throw new Error("No map data provided");
+  async function loadMap(mapData){
+    if(!window.scene) throw new Error("No scene available");
 
-        const scene = window.SCENE;
-        if (!scene) throw new Error("Scene not initialized");
+    // Clear previous map
+    await clearMap();
 
-        const isProcedural = !!mapData.procedural;
-
-        // Remove previous map meshes
-        if (PP.mapManager.currentMapMeshes) {
-            PP.mapManager.currentMapMeshes.forEach(m => m.dispose());
-            PP.mapManager.currentMapMeshes.length = 0;
-        } else {
-            PP.mapManager.currentMapMeshes = [];
-        }
-
-        if (isProcedural && window.generateProHouse) {
-            // Procedural map
-            const meshes = await window.generateProHouse(mapData);
-            PP.mapManager.currentMapMeshes.push(...meshes);
-            console.log("[map_manager] Procedural map loaded:", mapData.title || mapData.def);
-        } else {
-            // GLB map
-            const file = mapData.file;
-            if (!file) throw new Error("Map file missing: " + JSON.stringify(mapData));
-
-            const url = `./assets/models/map/${file}`;
-            const result = await BABYLON.SceneLoader.ImportMeshAsync(
-                null,
-                "",
-                url,
-                scene
-            );
-
-            const meshes = result.meshes || [];
-            PP.mapManager.currentMapMeshes.push(...meshes);
-            console.log("[map_manager] GLB map loaded:", file);
-        }
-
-        PP.mapManager.currentMap = mapData;
-        return PP.mapManager.currentMapMeshes;
+    // Procedural generator
+    if(mapData.def && typeof window[mapData.def] === "function"){
+      console.log("[map_manager] Generating procedural map:", mapData.title||mapData.def);
+      currentMap = await window[mapData.def](window.scene);
+      return;
     }
 
-    function getCurrentMap() {
-        return PP.mapManager.currentMap || null;
+    // GLB map
+    if(mapData.file){
+      console.log("[map_manager] Loading GLB map:", mapData.file);
+      const res = await BABYLON.SceneLoader.AppendAsync("./assets/models/map/", mapData.file, window.scene);
+      currentMap = res.meshes || [];
+      currentMap.forEach(m=>{
+        if(!m.metadata) m.metadata = {};
+        m.metadata.isMap = true;
+      });
+      console.log("[map_manager] Map loaded:", currentMap.length, "meshes");
+      return;
     }
 
-    function getCurrentMeshes() {
-        return PP.mapManager.currentMapMeshes || [];
-    }
+    console.warn("[map_manager] Map data invalid:", mapData);
+  }
 
-    return {
-        loadMap,
-        getCurrentMap,
-        getCurrentMeshes,
-        currentMap: null,
-        currentMapMeshes: []
-    };
+  function getCurrentMap(){
+    return currentMap;
+  }
+
+  return { loadMap, clearMap, getCurrentMap };
 })();
