@@ -1,4 +1,4 @@
-/* bootstrap.js — unified game bootstrap with full player rig, maps, audio, controls */
+/* bootstrap.js — unified game bootstrap with player rig + maps + audio + controls */
 (function(){
 "use strict";
 if(window.__GameBootstrapReady) return;
@@ -6,15 +6,14 @@ window.__GameBootstrapReady = true;
 
 const log  = (...a)=>{ try{ console.log("[bootstrap]", ...a); }catch{} };
 const warn = (...a)=>{ try{ console.warn("[bootstrap]", ...a); }catch{} };
-const mark = (lbl, extra)=>{ try{ window.BOOTLOG?.mark(lbl, extra); }catch{} };
 
 const $ = s => document.querySelector(s);
 
 // ---------- Loader UI ----------
-const Loader = (()=>{
-  const box = ()=>$("#loading-box");
-  const text = ()=>$("#loading-text");
-  const fill = ()=>$("#loading-fill");
+const Loader = (() => {
+  const box = () => $("#loading-box");
+  const text = () => $("#loading-text");
+  const fill = () => $("#loading-fill");
   let stepsDone=0, stepsTotal=0, queue=[];
   function show(){ const b=box(); if(b) b.style.display="flex"; }
   function hide(){ const b=box(); if(b) b.style.display="none"; }
@@ -63,12 +62,12 @@ async function loadManifest(){
 
   if(!PP.manifest || !PP.manifest.length){
     PP.manifest = [
-      { file: "Abandoned_House.glb", title: "Abandoned House", def:"" },
-      { file: "furnished_house.glb", title: "Furnished House", def:"" },
-      { file: "jailhouse.glb", title: "Jailhouse", def:"" },
+      { file: "Abandoned_House.glb", title: "Abandoned House" },
+      { file: "furnished_house.glb", title: "Furnished House" },
+      { file: "jailhouse.glb", title: "Jailhouse" },
       { title: "Procedural ProHouse (grid)", def: "prohouse_generator" },
-      { file: "Abandoned_House2.glb", title: "Abandoned House 2", def:"" },
-      { file: "farm_house.glb", title: "Farm House", def:"" }
+      { file: "Abandoned_House2.glb", title: "Abandoned House 2" },
+      { file: "farm_house.glb", title: "Farm House" }
     ];
   }
 
@@ -107,25 +106,29 @@ function createEngineScene(){
   camera.minZ=0.1;
   try{ camera.inputs.clear(); }catch(e){}
 
+  // Ground
   const ground=BABYLON.MeshBuilder.CreateGround("pp_ground",{width:200,height:200},scene);
   ground.isVisible=false;
   ground.checkCollisions=true;
   ground.receiveShadows=true;
   ground.metadata={isGround:true};
 
+  // Enable Babylon physics (default AmmoJS or CannonJS)
+  scene.enablePhysics(new BABYLON.Vector3(0,-9.81,0), new BABYLON.CannonJSPlugin());
+
   window.ENGINE=engine; window.SCENE=scene; window.camera=camera;
   engine.runRenderLoop(()=>{ try{ if(scene) scene.render(); }catch(e){} });
   window.addEventListener("resize",()=>engine.resize());
 }
 
-// ---------- Player Rig + Movement ----------
+// ---------- Player Rig ----------
 const AVATAR = { file:"./assets/models/player/player.glb", eyeY:1.6, targetHeight:1.75, meshYOffset:0.0 };
 const CAM3 = { back:2.8, up:1.25 };
 const SPEEDS = { walk:1.8, run:3.5, crouch:1.0 };
 const MAX_SLOPE=45;
-
 let body=null, avatarRoot=null, avatarMeshes=[], isThird=false;
-let animations={idle:null,walk:null,crouchWalk:null}, currentAnim=null;
+let animations={idle:null,walk:null,crouch:null}, currentAnim=null;
+
 const input={forward:false,back:false,left:false,right:false,run:false,crouch:false};
 let lastCrouchPressed=false;
 const keysDown={};
@@ -137,37 +140,34 @@ const defaultKeys = {
   sprint:["ShiftLeft","ShiftRight"], crouch:["KeyC"],
   toggleCamera:["Backquote"], slots:["Digit1","Digit2","Digit3","Digit4"],
   notebook:["KeyN"], use:["KeyE"], openDoor:["KeyF"],
-  flash:["KeyQ"], uv:["KeyU"], ir:["KeyI"],
-  lightToggle:["KeyL"], powerToggle:["KeyP"], minimap:["KeyM"]
+  flash:["KeyQ"], uv:["KeyU"], ir:["KeyI"], lightToggle:["KeyL"], powerToggle:["KeyP"], minimap:["KeyM"]
 };
 
-function emit(name, detail){ try{ window.dispatchEvent(new CustomEvent(name,{detail})); }catch{} }
-function has(arr,code){ return Array.isArray(arr)&&arr.includes(code); }
-function uiBusy(){ const ae=document.activeElement; return ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"||ae.isContentEditable); }
-function selectSlot(n){ n=Math.max(1,Math.min(3,n|0)); const prev=PP.state.selectedSlot; if(prev===n){ emit("pp:slot:confirm",{slot:n}); return; } PP.state.selectedSlot=n; emit("pp:slot:change",{prev,next:n}); }
-
+// Keyboard
 addEventListener("keydown",(e)=>{
-  if(uiBusy()) return;
+  if(document.activeElement?.tagName==="INPUT"||document.activeElement?.isContentEditable) return;
   keysDown[e.code]=true;
-  if(has(defaultKeys.forward,e.code)) input.forward=true;
-  if(has(defaultKeys.back,e.code)) input.back=true;
-  if(has(defaultKeys.left,e.code)) input.left=true;
-  if(has(defaultKeys.right,e.code)) input.right=true;
-  if(has(defaultKeys.sprint,e.code)) input.run=true;
-  if(has(defaultKeys.crouch,e.code)) input.crouch=!input.crouch;
-  if(has(defaultKeys.toggleCamera,e.code)) { isThird=!isThird; e.preventDefault(); }
-  if(has(defaultKeys.slots,e.code)){ const n=parseInt(e.code.replace(/\D/g,""))||0; if(n>=1&&n<=3) selectSlot(n); }
+  if(defaultKeys.forward.includes(e.code)) input.forward=true;
+  if(defaultKeys.back.includes(e.code)) input.back=true;
+  if(defaultKeys.left.includes(e.code)) input.left=true;
+  if(defaultKeys.right.includes(e.code)) input.right=true;
+  if(defaultKeys.sprint.includes(e.code)) input.run=true;
+  if(defaultKeys.crouch.includes(e.code) && !lastCrouchPressed) input.crouch=!input.crouch;
+  lastCrouchPressed=defaultKeys.crouch.includes(e.code);
+  if(defaultKeys.toggleCamera.includes(e.code)) { isThird=!isThird; e.preventDefault(); }
+  if(defaultKeys.slots.includes(e.code)){ const n=parseInt(e.code.replace(/\D/g,""))||0; if(n>=1&&n<=3){ PP.state.selectedSlot=n; } }
 },true);
 
 addEventListener("keyup",(e)=>{
   keysDown[e.code]=false;
-  if(has(defaultKeys.forward,e.code)) input.forward=false;
-  if(has(defaultKeys.back,e.code)) input.back=false;
-  if(has(defaultKeys.left,e.code)) input.left=false;
-  if(has(defaultKeys.right,e.code)) input.right=false;
-  if(has(defaultKeys.sprint,e.code)) input.run=false;
-},true);
+  if(defaultKeys.forward.includes(e.code)) input.forward=false;
+  if(defaultKeys.back.includes(e.code)) input.back=false;
+  if(defaultKeys.left.includes(e.code)) input.left=false;
+  if(defaultKeys.right.includes(e.code)) input.right=false;
+  if(defaultKeys.sprint.includes(e.code)) input.run=false;
+});
 
+// Pointer lock
 const canvas=document.querySelector("canvas");
 if(canvas){
   canvas.addEventListener("click",()=>{ if(!mouse.locked && canvas.requestPointerLock) canvas.requestPointerLock(); });
@@ -175,7 +175,6 @@ if(canvas){
   document.addEventListener("mousemove",(e)=>{
     if(!mouse.locked) return;
     mouse.dx=e.movementX; mouse.dy=e.movementY;
-    emit("pp:mouseMove",{dx:mouse.dx,dy:mouse.dy});
   });
 }
 
@@ -194,34 +193,28 @@ function pollGamepad(){
 }
 pollGamepad();
 
-// ---------- Physics Helpers ----------
-function getSpawnPosition(){ return window.__PP_SPAWN?.clone()||new BABYLON.Vector3(0,AVATAR.eyeY,0); }
+// ---------- Player Physics ----------
+function getSpawnPosition(){ return new BABYLON.Vector3(0, AVATAR.eyeY, 0); }
 function makeBody(){
-  body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:AVATAR.targetHeight, radius:0.35 },scene);
-  body.isVisible=false;
+  body = BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:AVATAR.targetHeight, radius:0.35 },scene);
   body.position.copyFrom(getSpawnPosition());
+  body.isVisible=false;
   body.physicsImpostor=new BABYLON.PhysicsImpostor(body,BABYLON.PhysicsImpostor.CapsuleImpostor,{mass:70,restitution:0,friction:0.8},scene);
   PP.rig.body=body;
   return body;
 }
 
+// Avatar loader
 async function loadAvatar(){
   const res = await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/player/", "player.glb", scene);
-  const root=res.meshes[0];
-  root.scaling.setAll(1);
-  const bb=root.getHierarchyBoundingVectors();
-  const scale=AVATAR.targetHeight/(bb.max.y-bb.min.y);
-  root.scaling.setAll(scale);
-  const bb2=root.getHierarchyBoundingVectors();
-  root.position.y-=bb2.min.y;
-  avatarRoot=root;
-  avatarMeshes=root.getChildMeshes();
+  avatarRoot=res.meshes[0];
+  avatarMeshes=avatarRoot.getChildMeshes();
   avatarRoot.parent=body;
 
   res.animationGroups.forEach(g=>{
     if(/Idle/i.test(g.name)) animations.idle=g;
     if(/Walk/i.test(g.name)) animations.walk=g;
-    if(/Crouch/i.test(g.name)) animations.crouchWalk=g;
+    if(/Crouch/i.test(g.name)) animations.crouch=g;
   });
   playAnim("idle");
 }
@@ -262,25 +255,9 @@ function stickToGround(moveDir){
   return moveDir||BABYLON.Vector3.Zero();
 }
 
-// Footsteps
-const footstepState={lastPos:null,acc:0};
-function handleFootsteps(moveVec){
-  if(!moveVec||moveVec.lengthSquared()<0.001||!body) return;
-  if(!footstepState.lastPos) footstepState.lastPos=body.position.clone();
-  const dist=BABYLON.Vector3.Distance(footstepState.lastPos,body.position);
-  footstepState.acc+=dist;
-  const stride=input.crouch?0.3:input.run?0.8:0.5;
-  if(footstepState.acc>=stride){
-    footstepState.acc=0;
-    footstepState.lastPos.copyFrom(body.position);
-    if(typeof window.playStep==="function") try{ window.playStep(0.42); }catch{}
-  }
-}
-
 // Movement loop
 function moveLoop(){
   if(!scene||!body||!camera){ requestAnimationFrame(moveLoop); return; }
-  const dt=scene.getEngine().getDeltaTime()/1000;
   const forward=camera.getDirection(BABYLON.Vector3.Forward()).normalize();
   const right=camera.getDirection(BABYLON.Vector3.Right()).normalize();
   let move=new BABYLON.Vector3(0,0,0);
@@ -294,8 +271,7 @@ function moveLoop(){
     const speed=input.crouch?SPEEDS.crouch:(input.run?SPEEDS.run:SPEEDS.walk);
     const slopeMove=stickToGround(move);
     if(slopeMove.lengthSquared()>0.001) body.physicsImpostor.applyImpulse(slopeMove.scale(speed), body.getAbsolutePosition());
-    playAnim(input.crouch?"crouchWalk":"walk");
-    handleFootsteps(slopeMove);
+    playAnim(input.crouch?"crouch":"walk");
   } else playAnim("idle");
 
   stickToGround();
@@ -316,40 +292,29 @@ async function startPlayerRig(){
 // ---------- Start Game ----------
 async function startGame(){
   if(started) return;
-  started = true;
-
-  const title = $("#title-screen");
-  if(title) title.style.display="none";
+  started=true;
+  $("#title-screen")?.style.display="none";
 
   Loader.reset();
-
   Loader.addStep("Preparing engine…", async ()=>createEngineScene());
   Loader.addStep("Loading manifest…", async ()=>loadManifest());
   Loader.addStep("Loading map…", async ()=>{
-    const mapData = getSelectedMap();
-    if(typeof PP.mapManager?.loadMap === "function") {
-      await PP.mapManager.loadMap(mapData);
-    }
+    const mapData=getSelectedMap();
+    if(typeof PP.mapManager?.loadMap==="function") await PP.mapManager.loadMap(mapData);
   });
   Loader.addStep("Starting player rig…", async ()=>startPlayerRig());
 
   await Loader.run();
 
-  const canvas=$("#renderCanvas");
-  if(canvas) canvas.focus();
-
+  $("#renderCanvas")?.focus();
   log("Game fully initialized");
 }
 
-// ---------- Bind start button ----------
+// Bind start button
 document.addEventListener("DOMContentLoaded",()=>{
   const startBtn=$("#start-button");
   if(startBtn) startBtn.addEventListener("click",()=>startGame());
-
-  // Populate maps immediately
-  loadManifest();
 });
-
 window.startGame=startGame;
 
 })();
