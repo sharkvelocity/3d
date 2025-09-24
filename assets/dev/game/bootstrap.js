@@ -338,7 +338,9 @@ async function startPlayerRig(){
 async function startGame(){
   if(started) return;
   started=true;
-  $("#title-screen")?.style.display="none";
+const titleScreen = $("#title-screen");
+if (titleScreen) titleScreen.style.display = "none";
+
 
   Loader.reset();
 
