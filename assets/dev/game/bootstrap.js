@@ -54,7 +54,7 @@ const Loader = (()=>{
     await new Promise(r=>setTimeout(r,120));
     hide();
   }
-  return { reset, addStep, run, show, hide, label };
+  return { reset, addStep, run, show, hide, label, addStep };
 })();
 
 // ---------- State ----------
@@ -62,7 +62,7 @@ let engine=null, scene=null, camera=null;
 let hemi=null;
 let started=false;
 let currentMap=null;
-let mapMeshes = [];
+let mapMeshes = []; // meshes loaded by loadMap / generator
 window.PP = window.PP || {};
 PP.manifest = PP.manifest || [];
 
@@ -77,7 +77,7 @@ async function loadManifest(){
       { file: "Abandoned_House.glb", title: "Abandoned House", def:"" },
       { file: "furnished_house.glb", title: "Furnished House", def:"" },
       { file: "jailhouse.glb", title: "Jailhouse", def:"" },
-      { title: "Procedural ProHouse (grid)", def: "prohouse_generator", procedural:true },
+      { title: "Procedural ProHouse (grid)", def: "prohouse_generator" },
       { file: "Abandoned_House2.glb", title: "Abandoned House 2", def:"" },
       { file: "farm_house.glb", title: "Farm House", def:"" }
     ];
@@ -114,7 +114,7 @@ function populateMapSelector() {
 function getSelectedMap() {
   const sel = document.querySelector("#map-select");
   const manifest = window.PP?.manifest || [];
-  const idx = parseInt(sel?.value);
+  const idx = Number(sel?.value);
   if (isNaN(idx) || idx < 0 || idx >= manifest.length) return manifest[0];
   return manifest[idx];
 }
@@ -152,37 +152,6 @@ function createEngineScene(){
   mark("engine+scene-created");
 }
 
-// ---------- ProHouse Generator ----------
-window.ProHouseGenerator = window.ProHouseGenerator || (function(){
-  const PG = {
-    GRID_W: 10, GRID_D: 10, CELL_SIZE: 6,
-    rooms: [], roomMeshes: [], doorMeshes: [], lights: [], switches: [],
-    async loadPrefab(prefab, scene){ return await BABYLON.SceneLoader.ImportMeshAsync("", "./assets/models/map/prefabs/", prefab, scene); },
-    generate(seed=Date.now()){ /* same as original code */ },
-    async spawn(scene, seed){ /* same as original code */ },
-    clear(scene){ /* same as original code */ },
-    getVanRoom(){ return this.rooms.find(r=>r.type==="van" || r.name==="Van") || null; },
-    getRoomCenter(name){ const r = this.rooms.find(x=>x.name===name); if(!r) return null; return new BABYLON.Vector3(r.gx*this.CELL_SIZE, 0, r.gz*this.CELL_SIZE); }
-  };
-  return PG;
-})();
-
-// ---------- Helpers ----------
-function clearMap(){ /* same as original */ }
-function spawnPlayer(){ /* same as original */ }
-function enablePointerLockOnce(){ /* same as original */ }
-async function injectGhostsAndPS5(){ /* same as original */ }
-async function loadMap(mapData){ /* same as original */ }
-
-// ---------- Audio & Weather ----------
-(function(){ /* same as original bootstrap code, including __PP_initAudio */ })();
-
-// ---------- Logger ----------
-window.GameLogger = window.GameLogger || (function(){ /* same as original */ })();
-
-// ---------- Player rig ----------
-(async function(){ /* same as original rig code */ })();
-
 // ---------- Start Game ----------
 async function startGame(){
   if(started) return;
@@ -191,24 +160,32 @@ async function startGame(){
   log("[bootstrap] Starting game…");
 
   const STEP_TIMEOUT = 12000;
-  function safeStep(label, fn){ Loader.addStep(label, async ()=>{ try{ await Promise.race([Promise.resolve().then(()=>fn()), new Promise((_,rej)=>setTimeout(()=>rej(new Error("Step timeout: "+label)),STEP_TIMEOUT)]); }catch(e){ console.error(`[bootstrap] Step "${label}" failed:`, e); } }); }
+  function safeStep(label, fn){
+    Loader.addStep(label, async ()=>{
+      try{
+        await Promise.race([
+          Promise.resolve().then(()=>fn()),
+          new Promise((_,rej)=>setTimeout(()=>rej(new Error("Step timeout: "+label)), STEP_TIMEOUT))
+        ]);
+      }catch(e){ console.error(`[bootstrap] Step "${label}" failed:`, e); }
+    });
+  }
 
   try{
     Loader.reset();
 
     safeStep("Preparing engine…", async ()=> createEngineScene());
-    safeStep("Injecting ghosts & PS5 controller…", async ()=> injectGhostsAndPS5());
+    safeStep("Injecting ghosts & PS5 controller…", async ()=> window.injectGhostsAndPS5?.());
     safeStep("Loading manifest (maps)…", async ()=> loadManifest());
     safeStep("Loading map…", async ()=>{
       const mapData = getSelectedMap();
-      await loadMap(mapData);
-
+      await window.loadMap?.(mapData);
       if(camera && scene){
         scene.activeCamera = camera;
         camera.attachControl($("#renderCanvas"), true);
       }
     });
-    safeStep("Initializing audio…", async ()=>{ if(typeof window.__PP_initAudio === "function") window.__PP_initAudio("Clear"); });
+    safeStep("Initializing audio…", async ()=> window.__PP_initAudio?.("Clear"));
     safeStep("Loading player rig…", async ()=>{
       await new Promise(r=>{
         if(window.PP?.rigReady) return r();
@@ -226,7 +203,7 @@ async function startGame(){
     });
     safeStep("Finalizing…", async ()=>{
       if(window.__PP_SPAWN && camera) camera.position.copyFrom(window.__PP_SPAWN);
-      enablePointerLockOnce();
+      window.enablePointerLockOnce?.();
     });
 
     await Loader.run();
@@ -241,10 +218,10 @@ async function startGame(){
 // ---------- Expose Start ----------
 window.startGame = startGame;
 
-// ---------- Bind Start Button ----------
-document.addEventListener("DOMContentLoaded", ()=>{
+// ---------- Populate maps immediately on DOM ready ----------
+document.addEventListener("DOMContentLoaded", async ()=>{
+  await loadManifest(); // ensures dropdown is populated immediately
   $("#start-button")?.addEventListener("click", ()=> startGame());
   log("[bootstrap] Start button bound");
 });
-
 })();
