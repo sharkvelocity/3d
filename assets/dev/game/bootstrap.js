@@ -10,6 +10,24 @@ const warn = (...a)=>{ try{ console.warn("[bootstrap]", ...a); }catch{} };
 const mark = (lbl, extra)=>{ try{ window.BOOTLOG?.mark(lbl, extra); }catch{} };
 const $ = s => document.querySelector(s);
 
+// ---------- Audio ----------
+const AudioManager = (()=>{
+  const sounds={};
+  function load(name,url,loop=false,volume=1){
+    return new Promise(r=>{
+      const a=new Audio(url);
+      a.loop=loop;
+      a.volume=volume;
+      a.oncanplaythrough=()=>{ sounds[name]=a; r(a); };
+      a.onerror=(e)=>{ warn("Audio load failed:",name,url,e); r(null); };
+      a.load();
+    });
+  }
+  function play(name){ if(sounds[name]) try{ sounds[name].currentTime=0; sounds[name].play(); }catch{} }
+  return { load, play };
+})();
+window.AudioManager = AudioManager;
+
 // ---------- Loader UI ----------
 const Loader = (()=>{
   const box = ()=>$("#loading-box");
@@ -197,7 +215,7 @@ function pollGamepad(){
 }
 pollGamepad();
 
-// Physics helpers
+// ---------- Physics helpers ----------
 function getSpawnPosition(){ return window.__PP_SPAWN?.clone()||new BABYLON.Vector3(0,AVATAR.eyeY,0); }
 function makeBody(){
   body = new BABYLON.MeshBuilder.CreateCapsule("player_capsule",{ height:AVATAR.targetHeight, radius:0.35 },scene);
@@ -265,7 +283,7 @@ function stickToGround(moveDir){
   return moveDir||BABYLON.Vector3.Zero();
 }
 
-// Footsteps
+// ---------- Footsteps & Audio ----------
 const footstepState={lastPos:null,acc:0};
 function handleFootsteps(moveVec){
   if(!moveVec||moveVec.lengthSquared()<0.001||!body) return;
@@ -276,11 +294,11 @@ function handleFootsteps(moveVec){
   if(footstepState.acc>=stride){
     footstepState.acc=0;
     footstepState.lastPos.copyFrom(body.position);
-    if(typeof window.playStep==="function") try{ window.playStep(0.42); }catch{}
+    AudioManager.play("footstep");
   }
 }
 
-// Movement loop
+// ---------- Movement Loop ----------
 function moveLoop(){
   if(!scene||!body||!camera){ requestAnimationFrame(moveLoop); return; }
   const dt=scene.getEngine().getDeltaTime()/1000;
@@ -306,7 +324,7 @@ function moveLoop(){
   requestAnimationFrame(moveLoop);
 }
 
-// Start player rig
+// ---------- Start Player Rig ----------
 async function startPlayerRig(){
   if(!scene) await createEngineScene();
   makeBody();
@@ -329,6 +347,9 @@ async function startGame(){
   Loader.addStep("Loading map…", async ()=>{
     const mapData=getSelectedMap();
     if(typeof PP.mapManager?.loadMap==="function") await PP.mapManager.loadMap(mapData);
+  });
+  Loader.addStep("Loading audio…", async ()=>{
+    await AudioManager.load("footstep","./assets/audio/footstep.wav",false,0.5);
   });
   Loader.addStep("Starting player rig…", async ()=>await startPlayerRig());
 
