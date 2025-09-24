@@ -313,25 +313,34 @@ async function startPlayerRig(){
 }
 
 // ---------- Start Game ----------
+// ---------- Start Game ----------
 async function startGame(){
   if(started) return;
-  started=true;
-  $("#title-screen")?.style.display="none";
+  started = true;
+  $("#title-screen")?.style.display = "none";
 
   Loader.reset();
 
   Loader.addStep("Preparing engine…", async ()=>createEngineScene());
-  Loader.addStep("Loading manifest…", async ()=>loadManifest());
-  Loader.addStep("Loading map…", async ()=>{
-    const mapData=getSelectedMap();
-    if(typeof PP.mapManager?.loadMap==="function") await PP.mapManager.loadMap(mapData);
+  Loader.addStep("Loading manifest…", async ()=>{
+    await loadManifest();
   });
-  Loader.addStep("Starting player rig…", async ()=>await startPlayerRig());
+  Loader.addStep("Loading map…", async ()=>{
+    const mapData = getSelectedMap();
+    if(typeof PP.mapManager?.loadMap === "function") {
+      await PP.mapManager.loadMap(mapData);
+    }
+  });
+  Loader.addStep("Starting player rig…", async ()=>{
+    await startPlayerRig();
+  });
+
   await Loader.run();
 
   $("#renderCanvas")?.focus();
   log("Game fully initialized");
 }
+
 
 // Bind start button
 document.addEventListener("DOMContentLoaded",()=>{
