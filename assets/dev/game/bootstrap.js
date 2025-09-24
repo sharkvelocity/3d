@@ -222,6 +222,72 @@ async function startGame(){
     console.error("[bootstrap] Error starting game:", err);
   }
 }
+/* bootstrap.js — safe game initialization */
+"use strict";
+
+const STEP_TIMEOUT = 12000; // 12s per step
+window.Loader = window.Loader || { steps: [] };
+
+// Add a step with timeout
+function safeStep(label, fn){
+  Loader.steps.push(async ()=>{
+    console.log(`[bootstrap] Step "${label}" started...`);
+    try{
+      await Promise.race([
+        Promise.resolve().then(()=>fn()),
+        new Promise((_, rej)=>setTimeout(()=>rej(new Error("Step timeout: "+label)), STEP_TIMEOUT))
+      ]);
+      console.log(`[bootstrap] Step "${label}" completed`);
+    }catch(e){
+      console.error(`[bootstrap] Step "${label}" failed:`, e);
+    }
+  });
+}
+
+// Run all steps sequentially
+async function runSteps(){
+  for(const step of Loader.steps){
+    await step();
+  }
+}
+
+// ----- Game start -----
+let started = false;
+async function startGame(){
+  if(started) return;
+  started = true;
+
+  const titleScreen = document.getElementById("title-screen");
+  if(titleScreen) titleScreen.style.display = "none";
+
+  // Steps
+  safeStep("Loading map…", async ()=>{
+    const mapSelect = document.getElementById("map-select");
+    const selected = mapSelect?.value || "default";
+    const mapData = window.MAPS?.[selected] || { file: "default.glb" };
+    if(!window.PP?.mapManager) throw new Error("Map manager missing");
+    await window.PP.mapManager.loadMap(mapData);
+  });
+
+  safeStep("Loading player rig…", async ()=>{
+    if(typeof window.startPlayerRig!=="function") throw new Error("Player rig not ready");
+    await window.startPlayerRig();
+  });
+
+  safeStep("Starting game loop…", async ()=>{
+    console.log("[bootstrap] Game fully initialized!");
+  });
+
+  await runSteps();
+}
+
+// ----- Start button binding -----
+const startBtn = document.getElementById("start-button");
+if(startBtn){
+  startBtn.addEventListener("click", async ()=>{
+    try{ await startGame(); }catch(e){ console.error("startGame failed:", e); }
+  });
+}
 
 // ---------- Expose Start ----------
 window.startGame = startGame;
