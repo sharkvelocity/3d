@@ -125,10 +125,10 @@ function createEngineScene(){
 // ---------- Weather + Audio ----------
 const WEATHER_TYPES=["clear","rain","snow","fog"];
 const WEATHER_SOUNDS={
-  clear:null,
-  rain:"./assets/audio/weather/rain_loop.mp3",
-  snow:"./assets/audio/weather/wind_loop.mp3",
-  fog:"./assets/audio/weather/fog_wind.mp3"
+  clear:"./assets/audio/ambient.mp3",
+  rain:"./assets/audio/rain.mp3",
+  snow:"./assets/audio/snow.mp3",
+  fog:"./assets/audio/ambient.mp3"
 };
 let weatherSound=null;
 
@@ -203,7 +203,6 @@ function applyWeather(type){
 }
 
 // ---------- Player Rig ----------
-// ---------- Player Rig added ----------
 /*
   ./assets/dev/game/bootstrap.js
 */
@@ -629,26 +628,67 @@ window.PlayerRig = (function(){
 })(); 
 
 // ---------- Start Game ----------
+
 async function startGame(){
   if(started) return;
-  started=true;
-  $("#title-screen")?.style.display="none";
+  started = true;
+
+  // Hide title screen
+  const title = document.getElementById("title-screen");
+  if(title) title.style.display = "none";
 
   Loader.reset();
+
   Loader.addStep("Preparing engine…", async ()=>createEngineScene());
+
   Loader.addStep("Loading manifest…", async ()=>loadManifest());
-  Loader.addStep("Loading map…", async ()=>{ const mapData=getSelectedMap(); if(typeof PP.mapManager?.loadMap==="function") await PP.mapManager.loadMap(mapData); });
-  Loader.addStep("Starting player rig…", async ()=>startPlayerRig());
-  Loader.addStep("Applying weather…", async ()=>{
-    let w=localStorage.getItem("pp_weather");
-    if(!w){ w=pickRandomWeather(); localStorage.setItem("pp_weather",w); }
-    applyWeather(w);
+
+  Loader.addStep("Loading map…", async ()=>{
+    const mapData = getSelectedMap(); // must return full map object from maps.json
+    if(mapData && typeof PP.mapManager?.loadMap === "function"){
+      await PP.mapManager.loadMap(mapData);
+    } else {
+      console.error("Invalid map data or mapManager missing", mapData);
+    }
   });
 
-  await Loader.run();
-  $("#renderCanvas")?.focus();
-  log("Game fully initialized");
+  Loader.addStep("Starting player rig…", async ()=>startPlayerRig());
+
+  Loader.addStep("Applying weather…", async ()=>{
+    let w = localStorage.getItem("pp_weather");
+
+    if(w){
+      try {
+        w = JSON.parse(w);
+      } catch(e) {
+        console.warn("Corrupt weather in storage, resetting.");
+        w = null;
+      }
+    }
+
+    if(!w){
+      w = pickRandomWeather();
+      localStorage.setItem("pp_weather", JSON.stringify(w));
+    }
+
+    applyWeather(w);
+
+    // If ambient audio defined
+    if(w.ambient && window.scene){
+      if(window.currentAmbientSound){
+        window.currentAmbientSound.dispose();
+      }
+      window.currentAmbientSound = new BABYLON.Sound(
+        "ambient",
+        "./assets/audio/" + w.ambient,
+        window.scene,
+        null,
+        { loop:true, autoplay:true, volume:0.7 }
+      );
+    }
+  });
 }
+
 
 // Bind start button
 document.addEventListener("DOMContentLoaded",()=>{ const startBtn=$("#start-button"); if(startBtn) startBtn.addEventListener("click",()=>startGame()); });
