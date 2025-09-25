@@ -50,7 +50,8 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 </style>
 </head>
 <body>
- oldEnsure === "function"){
+ <script>
+  (oldEnsure === "function"){
         try{
           const ok = await oldEnsure();
           if (ok) return true;
@@ -774,47 +775,6 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
   })();
 })();
 </script>
-
-<!-- PATCH: Audio Bootstrap -->
-<script>
-(function(){
-  function unlock(){
-    try {
-      if (BABYLON && BABYLON.Engine && BABYLON.Engine.audioEngine && BABYLON.Engine.audioEngine.unlock) {
-        BABYLON.Engine.audioEngine.unlock();
-      }
-      var a = new Audio();
-      a.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABYAAAABAAACAgAAAAAAAAAAA";
-      a.muted = true; a.play().catch(function(){});
-    } catch(e) {}
-    window.removeEventListener("pointerdown", unlock, true);
-    window.removeEventListener("keydown", unlock, true);
-  }
-  window.addEventListener("pointerdown", unlock, true);
-  window.addEventListener("keydown", unlock, true);
-
-  if (window.BABYLON && BABYLON.Sound && !BABYLON.__SoundWrapped) {
-    BABYLON.__SoundWrapped = true;
-    var Orig = BABYLON.Sound;
-    BABYLON.Sound = function(name, urlOrArrayBuffer, sceneOrEngine, onReady, options){
-      var s = sceneOrEngine || window.SCENE || window.scene || (window.ENGINE && ENGINE && ENGINE.scenes && ENGINE.scenes[0]) || null;
-      var opts = options || {}; if (opts.autoplay === undefined) opts.autoplay = false;
-      try {
-        var snd = new Orig(name, urlOrArrayBuffer, s, onReady, opts);
-        try { console.log("[AUDIO] created", name || urlOrArrayBuffer); } catch(e){}
-        return snd;
-      } catch(e) {
-        try { console.warn("[AUDIO] create failed; will retry", name, e); } catch(_){}
-        setTimeout(function(){
-          try { new Orig(name, urlOrArrayBuffer, (window.SCENE||window.scene||(window.ENGINE&&ENGINE&&ENGINE.scenes&&ENGINE.scenes[0])||s), onReady, opts); } catch(__){}
-        }, 500);
-        return { play: function(){}, stop: function(){} };
-      }
-    };
-  }
-})();
-</script>
-
 <!-- PATCH: Global engine/scene aliases -->
 <script>
 (function(){
@@ -837,47 +797,6 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
   }
 })();
 </script>
-
-<!-- PATCH: Map Select Fixups -->
-<script>
-(function(){
-  function ready(fn){ if (document.readyState==="loading") document.addEventListener("DOMContentLoaded", fn, {once:true}); else fn(); }
-  ready(function(){
-    var btn = document.getElementById("startBtn") || document.getElementById("start-investigation") || null;
-    var host = (btn && btn.parentElement) || document.getElementById("title-screen") || document.body;
-
-    var label = document.getElementById("map-select-label");
-    if (!label){
-      label = document.createElement("label");
-      label.id = "map-select-label";
-      label.textContent = "Map:";
-      label.style.cssText = "display:inline-block;margin:8px 8px 8px 0;";
-      host.insertBefore(label, btn ? btn : host.firstChild);
-    }
-
-    var sel = document.getElementById("map-select");
-    if (!sel){
-      sel = document.createElement("select");
-      sel.id = "map-select";
-      sel.name = "map";
-      sel.style.cssText = "min-width:220px;padding:4px 6px;margin:6px 8px;";
-      host.insertBefore(sel, btn ? btn : host.firstChild);
-    }
-
-    // Restore previous choice if available
-    try{
-      var saved = localStorage.getItem("selectedMapIndex");
-      if (saved !== null) sel.value = saved;
-    }catch(_){}
-
-    sel.addEventListener("change", function(){
-      try{ localStorage.setItem("selectedMapIndex", sel.value); }catch(_){}
-      try{ window.CURRENT_MAP = (typeof getSelectedMap === "function") ? getSelectedMap() : window.CURRENT_MAP; }catch(_){}
-    });
-  });
-})();
-</script>
-
 
 <!-- PATCH: WASD + Shift Run (player-aware + arcrotate follow) -->
 <script>
@@ -962,9 +881,6 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
   })();
 })();
 </script>
-
-
-
 <!-- PATCH: Player Model + Third-Person Rig -->
 <script>
 (function(){
@@ -982,8 +898,6 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
     // Try to load a GLB (best-guess paths). All are optional.
     var paths = [
       ["./assets/models/player/", "player.glb"],
-      ["./assets/models/", "player.glb"],
-      ["./assets/", "player.glb"]
     ];
     for (var i=0;i<paths.length;i++){
       try{
@@ -1073,70 +987,6 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
   })();
 })();
 </script>
-<!-- DEV FOLDER PATCH JS -->
-<script src="./assets/dev/sound_engine.js"></script>
-<script src="./assets/dev/movement_rig_clean.js"></script>
-<script src="./assets/dev/minimap_northup_xyz.js"></script>
-<script src="./assets/dev/spawn_fix.js"></script>
-<script src="./assets/dev/moon.js"></script>
-<script src="./assets/dev/merge_patch.js"></script>
-<script>
-(function initAudioOnceReady(){
-  const s = window.scene || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene);
-  if (!s) { setTimeout(initAudioOnceReady, 120); return; }
-  try {
-    SoundEngine.init(s);
-    SoundEngine.attachFootsteps(s);
-  } catch(_){}
-})();
-</script>
-</body>
-</html>
-
-<!-- Loading -->
-<div id="loading-box" aria-live="polite">
-  <img src="logo.png" alt="Logo" id="loading-logo">
-  <div id="loading-text">Initializing…</div>
-  <div id="loading-bar"><div id="loading-fill"></div></div>
-</div>
-
-<!-- Title / Start -->
-<div id="title-screen">
-  <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-  <button id="start-button">Start Investigation</button>
-  <div id="map-wrap">
-    <span>Map:</span>
-    <select id="map-select"><option value="-1">(loading maps...)</option></select>
-  </div>
-</div>
-
-<!-- Canvas -->
-<canvas id="renderCanvas" tabindex="0"></canvas>
-
-<!-- HUD Overlay -->
-<div id="hud-overlay">
-  <div id="hud-bar">
-    <div class="chip sanity-wrap">
-      <span>Sanity:</span>
-      <div id="sanity-gauge"><div id="sanity-fill"></div></div>
-      <span id="sanity-text">100%</span>
-    </div>
-    <div class="chip">Weather: <span id="hud-weather">Clear</span></div>
-    <div class="chip">Temp: <span id="hud-temp">20°C</span></div>
-  </div>
-  <div id="hud-xyz">XYZ: <span id="hud-pos">0,0,0</span></div>
-</div>
-
-<!-- Pause Menu -->
-<div id="pause-menu">
-  <div id="pause-content">
-    <h2>Paused</h2>
-    <button id="resume-btn">Resume</button>
-    <button id="settings-btn">Settings</button>
-    <button id="quit-btn">Quit</button>
-  </div>
-</div>
-
 <!-- ===================== SCRIPTS ===================== -->
 <script src="./assets/dev/util/pointer_lock_manager.js"></script>
 <script src="./assets/dev/util/modular_settings.js"></script>
@@ -1185,7 +1035,59 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 
 <!-- Bootstrap -->
 <script src="./assets/dev/game/bootstrap.js"></script>
+<script>
+(function initAudioOnceReady(){
+  const s = window.scene || (BABYLON.Engine && BABYLON.Engine.LastCreatedScene);
+  if (!s) { setTimeout(initAudioOnceReady, 120); return; }
+  try {
+    SoundEngine.init(s);
+    SoundEngine.attachFootsteps(s);
+  } catch(_){}
+})();
+</script>
+<!-- Loading -->
+<div id="loading-box" aria-live="polite">
+  <img src="logo.png" alt="Logo" id="loading-logo">
+  <div id="loading-text">Initializing…</div>
+  <div id="loading-bar"><div id="loading-fill"></div></div>
+</div>
 
+<!-- Title / Start -->
+<div id="title-screen">
+  <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
+  <button id="start-button">Start Investigation</button>
+  <div id="map-wrap">
+    <span>Map:</span>
+    <select id="map-select"><option value="-1">(loading maps...)</option></select>
+  </div>
+</div>
+
+<!-- Canvas -->
+<canvas id="renderCanvas" tabindex="0"></canvas>
+
+<!-- HUD Overlay -->
+<div id="hud-overlay">
+  <div id="hud-bar">
+    <div class="chip sanity-wrap">
+      <span>Sanity:</span>
+      <div id="sanity-gauge"><div id="sanity-fill"></div></div>
+      <span id="sanity-text">100%</span>
+    </div>
+    <div class="chip">Weather: <span id="hud-weather">Clear</span></div>
+    <div class="chip">Temp: <span id="hud-temp">20°C</span></div>
+  </div>
+  <div id="hud-xyz">XYZ: <span id="hud-pos">0,0,0</span></div>
+</div>
+
+<!-- Pause Menu -->
+<div id="pause-menu">
+  <div id="pause-content">
+    <h2>Paused</h2>
+    <button id="resume-btn">Resume</button>
+    <button id="settings-btn">Settings</button>
+    <button id="quit-btn">Quit</button>
+  </div>
+</div>
 <script>
 document.addEventListener("DOMContentLoaded", ()=> {
   const sanityFill = document.getElementById("sanity-fill");
