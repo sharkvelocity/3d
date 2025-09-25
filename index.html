@@ -51,57 +51,16 @@ html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden
 </head>
 <body>
  <script>
-  (oldEnsure === "function"){
-        try{
-          const ok = await oldEnsure();
-          if (ok) return true;
-        }catch(e){ /* fall through */ }
-      }
-      // Pull last list cached by original patch if available
-      const patch = window.__ManifestPatchCache;
-      const list = patch && patch.list ? patch.list : null;
-
-      // If we have a bad 'config' like a .glb or wrong path, try to fix
-      if (list && list.length){
-        // If a selected map exists, use it; else try each until success
-        const sel = (function(){
-          const s = document.querySelector("#mapSelect, #map-select, select[name='map']");
-          return s ? s.value : null;
-        })();
-        const ordered = sel ?
-          list.sort((a,b)=> (a.name===sel?-1:0) - (b.name===sel?-1:0)) :
-          list;
-
-        for (const entry of ordered){
-          // Fix paths
-          if (entry.config) entry.config = fixRepoPath(entry.config);
-          if (entry.glb) entry.glb = fixRepoPath(entry.glb);
-
-          try{
-            if (entry.config && /\.js(\?.*)?$/i.test(entry.config)){
-              await import(entry.config);
-              if (window.MAP_DEF && MAP_DEF.file) {
-                return true;
-              }
-            }
-          } catch(e){
-            // If config import fails, try GLB path-based synth
-            const ok = await ensureGlbMapDef(entry);
-            if (ok) return true;
-          }
-          // If no config given, try GLB synth
-          if (!entry.config){
-            const ok = await ensureGlbMapDef(entry);
-            if (ok) return true;
-          }
-        }
-      }
-      return !!(window.MAP_DEF && MAP_DEF.file);
-    }
-
-    window.ensureMapDef = ensure;
-    if (window.__TweakPatch) window.__TweakPatch.ensureMapDef = ensure;
+ try {
+  if (entry.config && /\.js(\?.*)?$/i.test(entry.config)) {
+    console.log("Importing map config:", entry.config);
+    await import(entry.config);
+    if (window.MAP_DEF && MAP_DEF.file) return true;
   }
+} catch(e) {
+  console.warn("Failed to import map config:", entry.config, e);
+}
+
 
   // Cache manifest list when loaded by earlier patch
   (function hookManifestCache(){
