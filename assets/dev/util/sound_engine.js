@@ -1,13 +1,9 @@
-// ./assets/dev/util/sound_engine.js
 window.PP = window.PP || {};
 PP.audio = PP.audio || {};
 
 (function soundEngine(){
   'use strict';
 
-  // ----------------------------
-  // Central SFX registry
-  // ----------------------------
   const SFX = {
     ambient:         './audio/clearWeather.mp3',
     rainstorm:       './audio/rainstorm.mp3',
@@ -26,18 +22,12 @@ PP.audio = PP.audio || {};
     spiritboxLoop:   './audio/spiritbox.mp3'
   };
 
-  // ----------------------------
-  // Register all SFX
-  // ----------------------------
   if(PP.audio.register) {
     PP.audio.register(Object.keys(SFX).reduce((m,k)=> (m[k]={url:SFX[k]}, m), {}));
   } else {
     console.warn("[soundEngine] PP.audio.register missing, skipping SFX registration");
   }
 
-  // ----------------------------
-  // Convenience wrappers
-  // ----------------------------
   PP.audio.playStep      = (i)=> PP.audio.play?.(['step1','step2','step3'][i%3], { volume: 0.9 });
   PP.audio.playRadio     = ()=> PP.audio.play?.('radio', { volume: 0.8 });
   PP.audio.playNotebook  = ()=> PP.audio.play?.('notebook', { volume: 0.7 });
@@ -45,25 +35,21 @@ PP.audio = PP.audio || {};
   PP.audio.loopSnow      = ()=> PP.audio.loop?.('snow', 0.25);
   PP.audio.loopRainstorm = ()=> PP.audio.loop?.('rainstorm', 0.6);
 
-  // ----------------------------
-  // Weather manager (rain, snow, bloodmoon, thunder + lightning)
-  // ----------------------------
   PP.audio.weather = (function(){
     let currentLoop = null;
     let rainAudio = null, thunderTimeout = null;
     let particleSystem = null;
     const thunderFiles = ['thunder1','thunderLoud','thunderRumble'];
 
-    function stopAll(){
+    function stopAll(scene){
       if(currentLoop){ currentLoop.stop(); currentLoop = null; }
       stopRain();
       stopParticles();
-      resetBloodmoonLighting();
+      resetBloodmoonLighting(scene);
     }
 
-    // --- Rain ---
     function startRain(scene){
-      stopAll();
+      stopAll(scene);
       rainAudio = PP.audio.loop?.('rainstorm', 0.6);
       currentLoop = rainAudio;
       scheduleThunder(scene);
@@ -90,30 +76,26 @@ PP.audio = PP.audio || {};
       if(scene?.effects?.flashLightning) setTimeout(()=> scene.effects.flashLightning(volume), Math.random()*200);
     }
 
-    // --- Snow ---
     function startSnow(scene){
-      stopAll();
+      stopAll(scene);
       currentLoop = PP.audio.loop?.('snow', 0.25);
       spawnSnowParticles(scene);
     }
 
-    // --- Clear / Ambient ---
     function startClear(scene){
-      stopAll();
+      stopAll(scene);
       currentLoop = PP.audio.loop?.('ambient', 0.35);
     }
 
-    // --- Bloodmoon ---
     function startBloodmoon(scene){
-      stopAll();
+      stopAll(scene);
       rainAudio = PP.audio.loop?.('rainstorm', 0.6);
       currentLoop = rainAudio;
       scheduleThunder(scene);
-      spawnRainParticles(scene, new BABYLON.Color3(1,0.1,0.1)); // red-tinted rain
+      spawnRainParticles(scene, new BABYLON.Color3(1,0.1,0.1));
       applyBloodmoonLighting(scene);
     }
 
-    // --- Particles ---
     function stopParticles(){
       if(particleSystem && !particleSystem.isDisposed()){
         particleSystem.dispose();
@@ -163,7 +145,6 @@ PP.audio = PP.audio || {};
       particleSystem.start();
     }
 
-    // --- Bloodmoon lighting helpers ---
     function applyBloodmoonLighting(scene){
       if(!scene) return;
       if(scene.fogColor) scene.fogColor = new BABYLON.Color3(0.3,0.05,0.05);
@@ -171,14 +152,13 @@ PP.audio = PP.audio || {};
       if(window.hemi) window.hemi.diffuse = new BABYLON.Color3(1,0.1,0.1);
     }
 
-    function resetBloodmoonLighting(){
+    function resetBloodmoonLighting(scene){
       if(!scene) return;
       if(scene.fogColor) scene.fogColor = new BABYLON.Color3(0.02,0.03,0.05);
       if(scene.clearColor) scene.clearColor = new BABYLON.Color3(0,0,0);
       if(window.hemi) window.hemi.diffuse = new BABYLON.Color3(1,1,1);
     }
 
-    // --- Unified setter ---
     function set(state, scene){
       switch(state?.toLowerCase()){
         case 'rainstorm': startRain(scene); break;
@@ -190,4 +170,6 @@ PP.audio = PP.audio || {};
     }
 
     return { stopAll, set };
+  })();
+
 })();
