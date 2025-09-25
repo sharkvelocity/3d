@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 // assets/dev/game/map_loader.js
 
 (async function(){
@@ -114,7 +113,6 @@
     });
   }
 
-=======
 // File: assets/dev/game/map_loader.js
 // Ensure this runs after scene and bootstrap are ready
 
@@ -158,5 +156,4 @@
 
     // Start loading maps
     loadMaps();
->>>>>>> cd402aa711720d7ea5d7ada861ce809b7b8cde7e
 })();
