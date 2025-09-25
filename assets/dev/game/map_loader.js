@@ -112,7 +112,7 @@
       }
     });
   }
-
+})();
 // File: assets/dev/game/map_loader.js
 // Ensure this runs after scene and bootstrap are ready
 
