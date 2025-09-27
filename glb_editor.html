@@ -33,137 +33,136 @@ const engine = new BABYLON.Engine(canvas, true);
 let scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
 
-// Camera
+// Camera & Light
 let camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 15, new BABYLON.Vector3(0,2,0), scene);
 camera.attachControl(canvas, true);
-
-// Lights
 let light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+
+// Highlight layer
 let highlight = new BABYLON.HighlightLayer("hl1", scene);
 
+// Scene state
 let ground = null, spawnCount = 0;
-let pickedMesh = null;
 let undoStack = [];
+let pickedMesh = null;
 let selectedMesh = null;
 
-// =============== Hover highlight & select ===============
+// =============== Pointer events ===============
 scene.onPointerObservable.add(evt=>{
-  const pick = evt.pickInfo;
-  if(evt.type === BABYLON.PointerEventTypes.POINTERMOVE){
-    highlight.removeAllMeshes();
-    if (pick.hit && pick.pickedMesh) {
-      highlight.addMesh(pick.pickedMesh, BABYLON.Color3.Teal());
-      document.getElementById("hoverInfo").innerText = "Hover: " + pick.pickedMesh.name;
-    } else {
-      document.getElementById("hoverInfo").innerText = "Hover: (none)";
+    const pick = evt.pickInfo;
+    switch(evt.type){
+        case BABYLON.PointerEventTypes.POINTERMOVE:
+            highlight.removeAllMeshes();
+            if(pick.hit && pick.pickedMesh){
+                highlight.addMesh(pick.pickedMesh, BABYLON.Color3.Teal());
+                document.getElementById("hoverInfo").innerText = "Hover: " + pick.pickedMesh.name;
+            } else {
+                document.getElementById("hoverInfo").innerText = "Hover: (none)";
+            }
+            if(pickedMesh && pick.hit && pick.pickedMesh === ground){
+                pickedMesh.position.copyFrom(pick.pickedPoint);
+            }
+            break;
+        case BABYLON.PointerEventTypes.POINTERDOWN:
+            if(pick.hit && pick.pickedMesh){
+                if(evt.event.button === 0 && pick.pickedMesh !== ground){
+                    pickedMesh = pick.pickedMesh;
+                    selectedMesh = pickedMesh;
+                    console.log("Selected mesh:", selectedMesh.name);
+                }
+                if(evt.event.button === 2 && ground){
+                    loadGLB("./sample.glb", true, pick.pickedPoint);
+                }
+            }
+            break;
+        case BABYLON.PointerEventTypes.POINTERUP:
+            pickedMesh = null;
+            break;
     }
-  }
-  if(evt.type === BABYLON.PointerEventTypes.POINTERDOWN && pick.hit && pick.pickedMesh){
-    selectedMesh = pick.pickedMesh;
-    console.log("Selected mesh:", selectedMesh.name);
-  }
 });
 
 // =============== Load GLB ===============
-function loadGLB(file, append=false, position){
-  let url = URL.createObjectURL(file);
-  const loader = append ? BABYLON.SceneLoader.AppendAsync : BABYLON.SceneLoader.ImportMeshAsync;
-
-  loader("", url, "", scene).then(res=>{
-    if(res.meshes){
-      res.meshes.forEach(m=>{
-        if(position) m.position = position.clone();
-        if(m !== scene.meshes[0]) undoStack.push(m);
-      });
-    }
-    URL.revokeObjectURL(url);
-  }).catch(err=>console.error("GLB load failed:", err));
+function loadGLB(fileOrUrl, append=false, position=null){
+    const url = fileOrUrl instanceof File ? URL.createObjectURL(fileOrUrl) : fileOrUrl;
+    const loader = append ? BABYLON.SceneLoader.AppendAsync : BABYLON.SceneLoader.ImportMeshAsync;
+    loader(null, url, "", scene).then(res=>{
+        res.meshes.forEach(m=>{
+            if(position) m.position = position.clone();
+            if(m!==scene.meshes[0]) undoStack.push(m);
+        });
+        if(fileOrUrl instanceof File) URL.revokeObjectURL(url);
+    }).catch(err=>console.error("GLB load failed:", err));
 }
 
-// Main file loader
-document.getElementById("fileInput").addEventListener("change", e=>{
-  [...e.target.files].forEach(f=>loadGLB(f,false));
-});
-
-// Add-to-scene loader
-document.getElementById("fileAdd").addEventListener("change", e=>{
-  [...e.target.files].forEach(f=>loadGLB(f,true));
-});
+// File uploads
+document.getElementById("fileInput").addEventListener("change", e=>[...e.target.files].forEach(f=>loadGLB(f,false)));
+document.getElementById("fileAdd").addEventListener("change", e=>[...e.target.files].forEach(f=>loadGLB(f,true)));
 
 // =============== Add Animations ===============
 document.getElementById("fileAnim").addEventListener("change", e=>{
-  const file = e.target.files[0];
-  if(!file || !selectedMesh){ alert("Select a mesh with a skeleton first."); return; }
+    const file = e.target.files[0];
+    if(!file || !selectedMesh || !selectedMesh.skeleton){ alert("Select a mesh with a skeleton first."); return; }
+    const url = URL.createObjectURL(file);
+    BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene).then(res=>{
+        if(res.skeletons.length){
+            let sourceSkel = res.skeletons[0];
+            let targetSkel = selectedMesh.skeleton;
 
-  const url = URL.createObjectURL(file);
-  BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene).then(res=>{
-    if(res.skeletons.length){
-      let sourceSkel = res.skeletons[0];
-      let targetSkel = selectedMesh.skeleton;
-      if(targetSkel){
-        // copy animation ranges
-        sourceSkel.getAnimationRanges().forEach(r=>{
-          targetSkel.createAnimationRange(r.name, r.from, r.to);
-        });
-        // copy animatable tracks
-        sourceSkel.animations.forEach(anim=>{
-          targetSkel.animations.push(anim.clone());
-        });
-        alert("Animations added to: " + selectedMesh.name);
-      } else {
-        alert("Selected mesh has no skeleton.");
-      }
-    }
-    res.meshes.forEach(m=>m.dispose()); // discard temp meshes
-    URL.revokeObjectURL(url);
-  });
+            // Copy animation ranges
+            sourceSkel.getAnimationRanges().forEach(r=>{
+                targetSkel.createAnimationRange(r.name, r.from, r.to);
+            });
+
+            // Copy animations
+            sourceSkel.animations.forEach(anim=>{
+                targetSkel.animations.push(anim.clone());
+            });
+
+            alert("Animations added to: " + selectedMesh.name);
+        }
+        res.meshes.forEach(m=>m.dispose());
+        URL.revokeObjectURL(url);
+    });
 });
 
-// =============== Ground plane ===============
+// =============== Ground & Spawn ===============
 document.getElementById("btn-ground").addEventListener("click", ()=>{
-  if(ground) ground.dispose();
-  ground = BABYLON.MeshBuilder.CreateGround("Ground", {width:50, height:50}, scene);
-  ground.position.y = 0;
-  ground.material = new BABYLON.StandardMaterial("gmat", scene);
-  ground.material.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
-  undoStack.push(ground);
+    if(ground) ground.dispose();
+    ground = BABYLON.MeshBuilder.CreateGround("Ground", {width:50, height:50}, scene);
+    ground.position.y = 0;
+    ground.material = new BABYLON.StandardMaterial("gmat", scene);
+    ground.material.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
+    undoStack.push(ground);
 });
 
-// =============== Spawn point ===============
 document.getElementById("btn-spawn").addEventListener("click", ()=>{
-  const sphere = BABYLON.MeshBuilder.CreateSphere("Spawn_"+(++spawnCount), {diameter:0.4}, scene);
-  sphere.position = camera.target.clone();
-  const mat = new BABYLON.StandardMaterial("spmat", scene);
-  mat.emissiveColor = BABYLON.Color3.Red();
-  sphere.material = mat;
-  undoStack.push(sphere);
+    const sphere = BABYLON.MeshBuilder.CreateSphere("Spawn_"+(++spawnCount), {diameter:0.4}, scene);
+    sphere.position = camera.target.clone();
+    const mat = new BABYLON.StandardMaterial("spmat", scene);
+    mat.emissiveColor = BABYLON.Color3.Red();
+    sphere.material = mat;
+    undoStack.push(sphere);
 });
 
 // =============== Undo ===============
 document.getElementById("btn-undo").addEventListener("click", ()=>{
-  const last = undoStack.pop();
-  if(last && last.dispose) last.dispose();
+    const last = undoStack.pop();
+    if(last && last.dispose) last.dispose();
 });
 
-// =============== Drag/Drop mesh transform ===============
-scene.onPointerObservable.add(evt=>{
-  const pick = evt.pickInfo;
-  if(evt.type === BABYLON.PointerEventTypes.POINTERDOWN && pick.hit && pick.pickedMesh && pick.pickedMesh !== ground){
-    pickedMesh = pick.pickedMesh;
-  }
-  if(evt.type === BABYLON.PointerEventTypes.POINTERUP){ pickedMesh = null; }
-  if(evt.type === BABYLON.PointerEventTypes.POINTERMOVE && pickedMesh && pick.hit && pick.pickedMesh===ground){
-    pickedMesh.position.copyFrom(pick.pickedPoint);
-  }
-});
-
-// =============== Export Scene to GLB ===============
+// =============== Export GLB ===============
 document.getElementById("btn-export").addEventListener("click", ()=>{
-  BABYLON.GLTF2Export.GLBAsync(scene, "scene").then(glb=>{
-    glb.downloadFiles();
-  });
+    BABYLON.GLTF2Export.GLBAsync(scene,"scene").then(glb=>glb.downloadFiles());
 });
 
+// =============== Drag & Drop Support ===============
+window.addEventListener("dragover", e=>e.preventDefault());
+window.addEventListener("drop", e=>{
+    e.preventDefault();
+    [...e.dataTransfer.files].forEach(f=>loadGLB(f,true));
+});
+
+// Render
 engine.runRenderLoop(()=>scene.render());
 window.addEventListener("resize", ()=>engine.resize());
 </script>
