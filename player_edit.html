@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Player FBX Editor</title>
+<title>Player FBX Editor + Test Scene</title>
 <script src="./cdn/babylon.js"></script>
 <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
 <script src="./cdn/gui/babylon.gui.min.js"></script>
@@ -19,7 +19,7 @@ input[type=range] { width:100px; }
 </style>
 </head>
 <body>
-<h1>Player FBX Editor</h1>
+<h1>Player FBX Editor + Test Scene</h1>
 <div id="ui">
   <div><label>Base Model (BASE.fbx)<input type="file" id="baseFile"></label></div>
   <div><label>Idle Animation<input type="file" id="idleFile"></label></div>
@@ -30,6 +30,7 @@ input[type=range] { width:100px; }
   <div><label>Player Scale<input type="range" id="playerScale" min="0.1" max="5" step="0.1" value="1"></label></div>
   <button id="btnLoadPlayer">Load Player</button>
   <button id="btnExportGLB">Export GLB</button>
+  <button id="btnTestMap">Test Map</button>
 </div>
 <canvas id="renderCanvas"></canvas>
 
@@ -39,16 +40,26 @@ const engine = new BABYLON.Engine(canvas,true);
 const scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
 
-const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 10, new BABYLON.Vector3(0,1,0), scene);
+// Camera and light
+const camera = new BABYLON.FreeCamera("playerCam", new BABYLON.Vector3(0,2,0), scene);
 camera.attachControl(canvas,true);
-new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+camera.checkCollisions = true;
+camera.applyGravity = true;
 
+const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+
+// Ground
+let ground = BABYLON.MeshBuilder.CreateGround("ground",{width:50,height:50},scene);
+ground.checkCollisions = true;
+
+// Player variables
 let baseMesh = null;
 let animGroups = {};
 let keys = {};
 let targetCrouch = 0;
 let crouchProgress = 0;
 let crouchSpeed = 0.1;
+let playerSpeed = 0.05;
 
 function createBlobURL(file){ return URL.createObjectURL(file); }
 async function loadFBX(file){
@@ -63,14 +74,14 @@ async function loadPlayer(){
         alert("Upload BASE.fbx");
         return;
     }
-    scene.meshes.forEach(m=>m.dispose());
+    scene.meshes.forEach(m=>{if(m!==ground) m.dispose();});
     animGroups={};
     baseMesh=null;
 
     const baseRes = await loadFBX(document.getElementById("baseFile").files[0]);
     baseMesh = baseRes.meshes[0];
     baseMesh.name="PlayerBase";
-    baseMesh.position = new BABYLON.Vector3(0,0,0);
+    baseMesh.position = new BABYLON.Vector3(0,1,0);
     baseMesh.scaling = new BABYLON.Vector3(1,1,1);
 
     const animFiles = {
@@ -100,45 +111,65 @@ async function loadPlayer(){
     alert("Player loaded with animations!");
 }
 
-document.getElementById("btnLoadPlayer").addEventListener("click",loadPlayer);
-document.getElementById("btnExportGLB").addEventListener("click", async ()=>{
-    if(!baseMesh){ alert("Load a player first"); return; }
-    const glb = await BABYLON.GLTF2Export.GLBAsync(scene,"Player");
-    glb.downloadFiles();
-});
-
-// Key input
+// Movement input
 window.addEventListener("keydown", e=>{
     keys[e.key.toLowerCase()]=true;
     if(e.key.toLowerCase()=="c") targetCrouch = 1-targetCrouch;
 });
 window.addEventListener("keyup", e=>{ keys[e.key.toLowerCase()]=false; });
 
-// Render loop with movement/animation
+// Test map button triggers pointer lock and first-person view
+document.getElementById("btnTestMap").addEventListener("click",()=>{
+    if(baseMesh){
+        canvas.requestPointerLock();
+    }
+});
+
 engine.runRenderLoop(()=>{
     if(baseMesh){
-        // Smooth crouch blending
+        // Smooth crouch
         crouchProgress += (targetCrouch - crouchProgress)*crouchSpeed;
 
         // Stop all animations
         for(let agName in animGroups) animGroups[agName].stop();
 
-        let move = keys["w"]||keys["a"]||keys["s"]||keys["d"];
+        // Movement vector
+        let forward = keys["w"]?-1:keys["s"]?1:0;
+        let right = keys["d"]?-1:keys["a"]?1:0;
+        let move = forward!==0 || right!==0;
 
-        // Play correct animation
+        // Update animation
         if(move){
             if(crouchProgress>0.5) animGroups["CrouchedWalking"]?.play(true);
             else if(keys["shift"]) { animGroups["Walking"].speedRatio=2; animGroups["Walking"]?.play(true);}
-            else animGroups["Walking"]?.speedRatio=1; animGroups["Walking"]?.play(true);
+            else { animGroups["Walking"].speedRatio=1; animGroups["Walking"]?.play(true);}
         }else{
             if(crouchProgress>0.5) animGroups["CrouchIdle"]?.play(true);
             else animGroups["Idle"]?.play(true);
         }
 
-        // Adjust vertical position based on crouch
+        // Update player position
+        let forwardVec = new BABYLON.Vector3(0,0,forward*playerSpeed);
+        let rightVec = new BABYLON.Vector3(right*playerSpeed,0,0);
+        let moveVec = forwardVec.add(rightVec);
+        baseMesh.moveWithCollisions(moveVec);
+
+        // Adjust vertical based on crouch
         baseMesh.position.y = 1 - 0.5*crouchProgress;
+
+        // Camera follows
+        camera.position = baseMesh.position.add(new BABYLON.Vector3(0,2,0));
+        camera.target = baseMesh.position.add(new BABYLON.Vector3(0,1,0));
     }
     scene.render();
+});
+
+// Load / Export buttons
+document.getElementById("btnLoadPlayer").addEventListener("click",loadPlayer);
+document.getElementById("btnExportGLB").addEventListener("click", async ()=>{
+    if(!baseMesh){ alert("Load a player first"); return; }
+    const glb = await BABYLON.GLTF2Export.GLBAsync(scene,"Player");
+    glb.downloadFiles();
 });
 
 window.addEventListener("resize",()=>engine.resize());
