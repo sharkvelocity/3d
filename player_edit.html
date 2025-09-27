@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Player Model Editor</title>
+<title>Player Model Editor - Test Map</title>
 <script src="./cdn/babylon.js"></script>
 <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
 <script src="./cdn/gui/babylon.gui.min.js"></script>
@@ -38,8 +38,9 @@ const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas,true);
 let scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
+
+// First-person camera
 let camera = new BABYLON.UniversalCamera("cam", new BABYLON.Vector3(0,1.7,5), scene);
-camera.setTarget(BABYLON.Vector3.Zero());
 camera.attachControl(canvas,true);
 let light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
 
@@ -75,7 +76,7 @@ function attachAnimToSkeleton(result){
   result.animationGroups.forEach(ag=>{
     ag.targetedAnimations.forEach(t=>{
       if(t.target instanceof BABYLON.TransformNode && t.target.skeleton){
-        t.target = skeleton.bones[0].getChildren()[0] || skeleton.bones[0]; // safest bone
+        t.target = skeleton.bones[0].getChildren()[0] || skeleton.bones[0];
       }
     });
     animations[ag.name] = ag;
@@ -92,47 +93,13 @@ document.getElementById("baseModel").addEventListener("change",async e=>{
   }
 });
 
-document.getElementById("idleAnim").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    attachAnimToSkeleton(res);
-  }
-});
-document.getElementById("standToCrouch").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    attachAnimToSkeleton(res);
-  }
-});
-document.getElementById("crouchIdle").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    attachAnimToSkeleton(res);
-  }
-});
-document.getElementById("crouchWalk").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    attachAnimToSkeleton(res);
-  }
-});
-document.getElementById("walkAnim").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    attachAnimToSkeleton(res);
-  }
-});
-document.getElementById("strafeLeft").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    attachAnimToSkeleton(res);
-  }
-});
-document.getElementById("strafeRight").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    attachAnimToSkeleton(res);
-  }
+["idleAnim","standToCrouch","crouchIdle","crouchWalk","walkAnim","strafeLeft","strafeRight"].forEach(id=>{
+  document.getElementById(id).addEventListener("change", async e=>{
+    if(e.target.files.length){
+      const res = await loadFBX(e.target.files[0]);
+      attachAnimToSkeleton(res);
+    }
+  });
 });
 
 // Scale slider
@@ -156,14 +123,28 @@ window.addEventListener("keyup", e=>{
   if(e.key.toLowerCase() in moveInput) moveInput[e.key.toLowerCase()]=false;
 });
 
-// Animation update loop
+// Player position & animation
+let playerVelocity = new BABYLON.Vector3();
 engine.runRenderLoop(()=>{
   scene.render();
   if(!baseMesh || !skeleton) return;
 
   let moving = moveInput.w||moveInput.a||moveInput.s||moveInput.d;
-  let speed = 1;
-  if(moveInput.shift && moveInput.w) speed = 2;
+  let speed = 0.05;
+  if(moveInput.shift && moveInput.w) speed = 0.1;
+
+  // Direction
+  let dir = new BABYLON.Vector3();
+  if(moveInput.w) dir.z += 1;
+  if(moveInput.s) dir.z -= 1;
+  if(moveInput.a) dir.x -= 1;
+  if(moveInput.d) dir.x += 1;
+  dir.normalize();
+  dir.scaleInPlace(speed);
+
+  // Apply movement
+  baseMesh.position.addInPlace(dir);
+  camera.position = baseMesh.position.add(new BABYLON.Vector3(0,crouching?1:1.7,0));
 
   // Determine animation
   let nextAnim = null;
@@ -178,34 +159,36 @@ engine.runRenderLoop(()=>{
     } else nextAnim = animations["Idle"];
   }
 
-  // Play Standing<->Crouch transition
+  // Standing<->Crouch transition
   if(moveInput.c && !crouching){
     crouching=true;
     if(animations["Standing To Crouched"]){
       animations["Standing To Crouched"].speedRatio = 1;
-      animations["Standing To Crouched"].play(true);
+      animations["Standing To Crouched"].play(false);
     }
   } else if(moveInput.c && crouching){
     crouching=false;
     if(animations["Standing To Crouched"]){
       animations["Standing To Crouched"].speedRatio = -1;
-      animations["Standing To Crouched"].play(true);
+      animations["Standing To Crouched"].play(false);
     }
   }
 
-  if(nextAnim && currentAnim !== nextAnim){
+  // Play animation
+  if(nextAnim && currentAnim!==nextAnim){
     if(currentAnim) currentAnim.stop();
-    currentAnim = nextAnim;
+    currentAnim=nextAnim;
     currentAnim.start(true);
-    currentAnim.speedRatio = speed;
+    currentAnim.speedRatio = (moveInput.shift && moveInput.w)?2:1;
   }
 });
 
-// Test map (pointer lock)
+// Test map
 document.getElementById("btn-test").addEventListener("click",()=>{
   canvas.requestPointerLock();
 });
 
+// Resize
 window.addEventListener("resize",()=>engine.resize());
 </script>
 </body>
