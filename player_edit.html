@@ -2,194 +2,149 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Player Model Editor - Test Map</title>
+<title>Player Model Editor</title>
 <script src="./cdn/babylon.js"></script>
 <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
 <script src="./cdn/gui/babylon.gui.min.js"></script>
 <script src="./cdn/serializers/babylonjs.serializers.min.js"></script>
 <style>
-html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111; color:#0ff; font-family:monospace; }
-#renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
-#ui-frame { position: fixed; top:0; left:0; right:0; height:auto; background: rgba(0,0,0,0.8); border-bottom: 1px solid #0ff; display:flex; flex-wrap:wrap; gap:6px; padding:4px 10px; z-index:20;}
-#ui-frame button, #ui-frame input { background: #000; border: 1px solid #0ff; color:#0ff; padding:4px 8px; font-size:13px; cursor:pointer;}
-#ui-frame button:hover { background:#033; }
-#hoverInfo { position: fixed; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); padding:6px 10px; border:1px solid #0ff; border-radius:6px; font-size:13px;}
+body {
+  margin:0; padding:0; background:#1a1a1a; color:#0ff; font-family: monospace;
+}
+#ui-frame {
+  position: fixed; top:0; left:0; right:0; background: rgba(0,0,0,0.85);
+  border-bottom: 1px solid #0ff; padding: 10px; display:flex; flex-wrap: wrap; gap:10px; z-index:20;
+}
+#ui-frame label {
+  display:flex; flex-direction: column; font-size: 13px; color:#0ff;
+}
+#ui-frame input, #ui-frame button {
+  margin-top:4px; background:#000; color:#0ff; border:1px solid #0ff; padding:4px 8px; cursor:pointer;
+}
+#ui-frame button:hover, #ui-frame input:hover { background:#022; }
+#renderCanvas { width:100%; height:100%; display:block; margin-top:72px; background:#111; }
 </style>
 </head>
 <body>
+
 <div id="ui-frame">
-  <input type="file" id="baseModel" accept=".fbx" /> Base Model<br>
-  <input type="file" id="idleAnim" accept=".fbx" /> Idle<br>
-  <input type="file" id="standToCrouch" accept=".fbx" /> Standing To Crouched<br>
-  <input type="file" id="crouchIdle" accept=".fbx" /> Crouching Idle<br>
-  <input type="file" id="crouchWalk" accept=".fbx" /> Crouched Walking<br>
-  <input type="file" id="walkAnim" accept=".fbx" /> Walking<br>
-  <input type="file" id="strafeLeft" accept=".fbx" /> Left Strafe Walk<br>
-  <input type="file" id="strafeRight" accept=".fbx" /> Right Strafe Walk<br>
-  <button id="btn-test">Test Map</button>
-  <label>Scale: <input type="range" id="scaleSlider" min="0.1" max="5" step="0.01" value="1"></label>
-  <button id="btn-export">Export GLB</button>
+  <label>Base Model
+    <input type="file" id="baseUpload" accept=".fbx"/>
+  </label>
+  <label>Idle Animation
+    <input type="file" id="idleUpload" accept=".fbx"/>
+  </label>
+  <label>Walking Animation
+    <input type="file" id="walkUpload" accept=".fbx"/>
+  </label>
+  <label>Crouched Walking
+    <input type="file" id="crouchWalkUpload" accept=".fbx"/>
+  </label>
+  <label>Crouching Idle
+    <input type="file" id="crouchIdleUpload" accept=".fbx"/>
+  </label>
+  <label>Standing To Crouched
+    <input type="file" id="standCrouchUpload" accept=".fbx"/>
+  </label>
+  <label>Left Strafe
+    <input type="file" id="leftStrafeUpload" accept=".fbx"/>
+  </label>
+  <label>Right Strafe
+    <input type="file" id="rightStrafeUpload" accept=".fbx"/>
+  </label>
+  <button id="btnLoadPlayer">Load Player</button>
+  <button id="btnExport">Export GLB</button>
 </div>
-<div id="hoverInfo">Hover: (none)</div>
+
 <canvas id="renderCanvas"></canvas>
 
 <script>
 const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas,true);
-let scene = new BABYLON.Scene(engine);
+const engine = new BABYLON.Engine(canvas, true);
+const scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
 
-// First-person camera
-let camera = new BABYLON.UniversalCamera("cam", new BABYLON.Vector3(0,1.7,5), scene);
+const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 10, new BABYLON.Vector3(0,1,0), scene);
 camera.attachControl(canvas,true);
-let light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
 
-let baseMesh = null;
+const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+let player = null;
 let skeleton = null;
-let animations = {};
-let currentAnim = null;
-let crouching = false;
-let moveInput = {w:false,a:false,s:false,d:false,shift:false,c:false};
-let playerScale = 1;
+let animGroups = {};
+let scaleFactor = 1;
 
-// Hover highlight
-let highlight = new BABYLON.HighlightLayer("hl1",scene);
-scene.onPointerMove = (evt,pick)=>{
-  highlight.removeAllMeshes();
-  if(pick.hit && pick.pickedMesh){
-    highlight.addMesh(pick.pickedMesh,BABYLON.Color3.Teal());
-    document.getElementById("hoverInfo").innerText = "Hover: "+pick.pickedMesh.name;
-  } else { document.getElementById("hoverInfo").innerText = "Hover: (none)"; }
-};
-
-// Load FBX
 async function loadFBX(file){
   try {
-    const result = await BABYLON.SceneLoader.ImportMeshAsync("", "file:", file, scene);
+    const result = await BABYLON.SceneLoader.ImportMeshAsync(
+      "", "file:", file, scene
+    );
     return result;
-  } catch(e){console.error(e); alert("Failed to load: "+file.name);}
-}
-
-// Attach animation to skeleton
-function attachAnimToSkeleton(result){
-  if(!skeleton) return;
-  result.animationGroups.forEach(ag=>{
-    ag.targetedAnimations.forEach(t=>{
-      if(t.target instanceof BABYLON.TransformNode && t.target.skeleton){
-        t.target = skeleton.bones[0].getChildren()[0] || skeleton.bones[0];
-      }
-    });
-    animations[ag.name] = ag;
-  });
-}
-
-// Upload handlers
-document.getElementById("baseModel").addEventListener("change",async e=>{
-  if(e.target.files.length){
-    const res = await loadFBX(e.target.files[0]);
-    if(res.meshes.length>0) baseMesh = res.meshes[0];
-    if(res.skeletons.length>0) skeleton = res.skeletons[0];
-    if(baseMesh) baseMesh.scaling.scaleInPlace(playerScale);
+  } catch(e){
+    console.error("Unable to load file:", file.name, e);
+    alert("Failed to load " + file.name);
   }
-});
+}
 
-["idleAnim","standToCrouch","crouchIdle","crouchWalk","walkAnim","strafeLeft","strafeRight"].forEach(id=>{
-  document.getElementById(id).addEventListener("change", async e=>{
-    if(e.target.files.length){
-      const res = await loadFBX(e.target.files[0]);
-      attachAnimToSkeleton(res);
+// Combine base mesh and animations
+async function loadPlayer(){
+  if(player) player.dispose();
+  skeleton = null;
+  animGroups = {};
+
+  const baseFile = document.getElementById("baseUpload").files[0];
+  if(!baseFile){ alert("Upload base model"); return; }
+
+  const baseResult = await loadFBX(baseFile);
+  player = baseResult.meshes[0];
+  skeleton = baseResult.skeletons[0] || null;
+
+  // Auto-scale down if too large
+  const bb = player.getBoundingInfo().boundingBox;
+  const size = bb.maximum.subtract(bb.minimum).length();
+  scaleFactor = 2/size;
+  player.scaling.scaleInPlace(scaleFactor);
+
+  // Load animations
+  const animInputs = {
+    Idle: "idleUpload",
+    Walking: "walkUpload",
+    CrouchedWalking: "crouchWalkUpload",
+    CrouchingIdle: "crouchIdleUpload",
+    StandingToCrouched: "standCrouchUpload",
+    LeftStrafe: "leftStrafeUpload",
+    RightStrafe: "rightStrafeUpload"
+  };
+
+  for(const [name,id] of Object.entries(animInputs)){
+    const file = document.getElementById(id).files[0];
+    if(file){
+      const result = await loadFBX(file);
+      if(result.animationGroups.length>0){
+        const group = result.animationGroups[0];
+        // Attach skeleton from base
+        if(skeleton) group.targetedAnimations.forEach(t => {
+          t.target = skeleton.bones.find(b=>b.name===t.target.name) || t.target;
+        });
+        animGroups[name] = group;
+      }
     }
-  });
-});
+  }
 
-// Scale slider
-document.getElementById("scaleSlider").addEventListener("input", e=>{
-  playerScale = parseFloat(e.target.value);
-  if(baseMesh) baseMesh.scaling = new BABYLON.Vector3(playerScale,playerScale,playerScale);
-});
+  alert("Player loaded successfully!");
+}
 
-// Export
-document.getElementById("btn-export").addEventListener("click",async ()=>{
-  if(!scene) return;
-  const glb = await BABYLON.GLTF2Export.GLBAsync(scene,"player");
+// Export as GLB
+document.getElementById("btnExport").addEventListener("click", async ()=>{
+  if(!player) { alert("Load player first"); return; }
+  const glb = await BABYLON.GLTF2Export.GLBAsync(scene, "Player");
   glb.downloadFiles();
 });
 
-// Movement keys
-window.addEventListener("keydown", e=>{
-  if(e.key.toLowerCase() in moveInput) moveInput[e.key.toLowerCase()]=true;
-});
-window.addEventListener("keyup", e=>{
-  if(e.key.toLowerCase() in moveInput) moveInput[e.key.toLowerCase()]=false;
-});
+document.getElementById("btnLoadPlayer").addEventListener("click", loadPlayer);
 
-// Player position & animation
-let playerVelocity = new BABYLON.Vector3();
-engine.runRenderLoop(()=>{
-  scene.render();
-  if(!baseMesh || !skeleton) return;
-
-  let moving = moveInput.w||moveInput.a||moveInput.s||moveInput.d;
-  let speed = 0.05;
-  if(moveInput.shift && moveInput.w) speed = 0.1;
-
-  // Direction
-  let dir = new BABYLON.Vector3();
-  if(moveInput.w) dir.z += 1;
-  if(moveInput.s) dir.z -= 1;
-  if(moveInput.a) dir.x -= 1;
-  if(moveInput.d) dir.x += 1;
-  dir.normalize();
-  dir.scaleInPlace(speed);
-
-  // Apply movement
-  baseMesh.position.addInPlace(dir);
-  camera.position = baseMesh.position.add(new BABYLON.Vector3(0,crouching?1:1.7,0));
-
-  // Determine animation
-  let nextAnim = null;
-  if(crouching){
-    if(moving) nextAnim = animations["Crouched Walking"];
-    else nextAnim = animations["Crouching Idle"];
-  } else {
-    if(moving){
-      if(moveInput.a) nextAnim = animations["Left Strafe Walk"];
-      else if(moveInput.d) nextAnim = animations["Right Strafe Walk"];
-      else nextAnim = animations["Walking"];
-    } else nextAnim = animations["Idle"];
-  }
-
-  // Standing<->Crouch transition
-  if(moveInput.c && !crouching){
-    crouching=true;
-    if(animations["Standing To Crouched"]){
-      animations["Standing To Crouched"].speedRatio = 1;
-      animations["Standing To Crouched"].play(false);
-    }
-  } else if(moveInput.c && crouching){
-    crouching=false;
-    if(animations["Standing To Crouched"]){
-      animations["Standing To Crouched"].speedRatio = -1;
-      animations["Standing To Crouched"].play(false);
-    }
-  }
-
-  // Play animation
-  if(nextAnim && currentAnim!==nextAnim){
-    if(currentAnim) currentAnim.stop();
-    currentAnim=nextAnim;
-    currentAnim.start(true);
-    currentAnim.speedRatio = (moveInput.shift && moveInput.w)?2:1;
-  }
-});
-
-// Test map
-document.getElementById("btn-test").addEventListener("click",()=>{
-  canvas.requestPointerLock();
-});
-
-// Resize
-window.addEventListener("resize",()=>engine.resize());
+engine.runRenderLoop(()=>scene.render());
+window.addEventListener("resize", ()=>engine.resize());
 </script>
+
 </body>
 </html>
