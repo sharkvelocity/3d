@@ -10,8 +10,6 @@
 <style>
 html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111; color:#0ff; font-family:monospace; }
 #renderCanvas { width:100%; height:100%; touch-action:none; display:block; }
-
-/* Frame-style UI */
 #ui-frame {
   position: fixed; top:0; left:0; right:0; height:42px;
   background: rgba(0,0,0,0.8);
@@ -24,8 +22,6 @@ html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111;
   padding: 4px 8px; font-size: 13px; cursor: pointer;
 }
 #ui-frame button:hover { background:#033; }
-
-/* Zoom slider on right */
 #zoom-slider {
   position: fixed; top: 50%; right: 12px; transform: translateY(-50%);
   height: 200px; writing-mode: bt-lr;
@@ -38,8 +34,8 @@ html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111;
   font-size:13px;
 }
 #scaleSlider {
-  position: fixed; top: 50px; right: 12px; transform: rotate(-90deg);
-  width: 150px;
+  position: fixed; top: 50%; left: 12px; transform: translateY(-50%);
+  height: 200px; writing-mode: bt-lr;
 }
 </style>
 </head>
@@ -47,17 +43,17 @@ html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111;
 <div id="ui-frame">
   <input type="file" id="fileInput" accept=".glb,.gltf" multiple />
   <button id="btn-add">Add GLB</button>
+  <button id="btn-addPlayer">Add Player</button>
   <button id="btn-ground">Ground</button>
   <button id="btn-grid">Grid</button>
   <button id="btn-spawn">Spawn Anchor</button>
   <button id="btn-undo">Undo</button>
   <button id="btn-center">Center/Normalize</button>
-  <button id="btn-export">Export GLB</button>
-  <button id="btn-addPlayer">Add Player Model</button>
   <button id="btn-testMap">Test Map</button>
+  <button id="btn-export">Export GLB</button>
 </div>
 <input type="range" id="zoom-slider" min="2" max="100" step="1" value="15">
-<input type="range" id="scaleSlider" min="0.2" max="3" step="0.05" value="1" title="Player Scale">
+<input type="range" id="scaleSlider" min="0.1" max="3" step="0.01" value="1">
 <div id="hoverInfo">Hover: (none)</div>
 <canvas id="renderCanvas"></canvas>
 
@@ -67,84 +63,86 @@ const engine = new BABYLON.Engine(canvas, true);
 let scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
 
+// Camera and light
 let camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 15, new BABYLON.Vector3(0,2,0), scene);
 camera.attachControl(canvas, true);
-
 let light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
 let highlight = new BABYLON.HighlightLayer("hl1", scene);
 let ground = BABYLON.MeshBuilder.CreateGround("Ground", {width:50, height:50}, scene);
 ground.material = new BABYLON.StandardMaterial("gmat", scene);
 ground.material.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
 let grid = null;
-let spawnCount = 0;
+let spawnAnchors = [];
 let undoStack = [];
-let anchors = [];
 
 // Hover highlight
 scene.onPointerMove = (evt, pick) => {
   highlight.removeAllMeshes();
-  if (pick.hit && pick.pickedMesh) {
+  if(pick.hit && pick.pickedMesh){
     highlight.addMesh(pick.pickedMesh, BABYLON.Color3.Teal());
     document.getElementById("hoverInfo").innerText = "Hover: " + pick.pickedMesh.name;
   } else document.getElementById("hoverInfo").innerText = "Hover: (none)";
 };
 
-// Load GLB (keeps original scale)
-async function loadGLB(fileOrUrl, position) {
-  try {
+// Load GLB
+async function loadGLB(fileOrUrl, position){
+  try{
     const before = scene.meshes.slice();
-    if (fileOrUrl instanceof File) await BABYLON.SceneLoader.AppendAsync("file:", fileOrUrl, scene);
-    else await BABYLON.SceneLoader.AppendAsync("", fileOrUrl, scene);
+    if(fileOrUrl instanceof File){
+      await BABYLON.SceneLoader.AppendAsync("file:", fileOrUrl, scene);
+    } else await BABYLON.SceneLoader.AppendAsync("", fileOrUrl, scene);
+
     const after = scene.meshes.filter(m => !before.includes(m));
-    if (position) after.forEach(m => m.position.addInPlace(position));
-    undoStack.push(() => after.forEach(m => m.dispose()));
-  } catch (err) {
+    if(position) after.forEach(m=>m.position.addInPlace(position));
+    undoStack.push(()=>after.forEach(m=>m.dispose()));
+  } catch(err){
     console.error("Failed to load GLB:", err);
     alert("Failed to load GLB. See console.");
   }
 }
 
-// UI event listeners
+// File input and buttons
 document.getElementById("fileInput").addEventListener("change", e=>[...e.target.files].forEach(f=>loadGLB(f)));
 document.getElementById("btn-add").addEventListener("click", ()=>document.getElementById("fileInput").click());
-window.addEventListener("dragover", e=>e.preventDefault());
-window.addEventListener("drop", e=>{
-  e.preventDefault();
-  if(e.dataTransfer.files.length) [...e.dataTransfer.files].forEach(f=>loadGLB(f));
-});
 
+// Ground
 document.getElementById("btn-ground").addEventListener("click", ()=>{
   if(ground) ground.dispose();
-  ground = BABYLON.MeshBuilder.CreateGround("Ground", {width:50, height:50}, scene);
+  ground = BABYLON.MeshBuilder.CreateGround("Ground", {width:50,height:50}, scene);
   ground.material = new BABYLON.StandardMaterial("gmat", scene);
   ground.material.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
 });
 
+// Grid toggle
 document.getElementById("btn-grid").addEventListener("click", ()=>{
-  if(grid){ grid.dispose(); grid=null; }
-  else grid = BABYLON.MeshBuilder.CreateGround("Grid", {width:100, height:100}, scene);
+  if(grid){ grid.dispose(); grid=null; } 
+  else grid = BABYLON.MeshBuilder.CreateGround("Grid",{width:100,height:100},scene);
 });
 
+// Spawn anchor
 document.getElementById("btn-spawn").addEventListener("click", ()=>{
-  const anchor = new BABYLON.TransformNode("SpawnAnchor_"+(++spawnCount), scene);
+  const anchor = new BABYLON.MeshBuilder.CreateBox("Anchor_"+spawnAnchors.length,{size:0.2},scene);
   anchor.position = camera.target.clone();
-  anchors.push(anchor);
+  spawnAnchors.push(anchor);
   undoStack.push(()=>anchor.dispose());
 });
 
+// Undo
 document.getElementById("btn-undo").addEventListener("click", ()=>{
-  const act = undoStack.pop(); if(act) act();
+  const act = undoStack.pop();
+  if(act) act();
 });
 
+// Center/Normalize
 document.getElementById("btn-center").addEventListener("click", ()=>{
-  let meshes = scene.meshes.filter(m=>m !== ground && m !== grid);
+  let meshes = scene.meshes.filter(m=>m!==ground && m!==grid);
   if(!meshes.length) return;
-  let min = new BABYLON.Vector3(Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE);
-  let max = new BABYLON.Vector3(-Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE);
+  let min = new BABYLON.Vector3(Number.MAX_VALUE,Number.MAX_VALUE,Number.MAX_VALUE);
+  let max = new BABYLON.Vector3(-Number.MAX_VALUE,-Number.MAX_VALUE,-Number.MAX_VALUE);
   meshes.forEach(m=>{
-    const info = m.getBoundingInfo().boundingBox;
-    min.minimizeInPlace(info.minimumWorld);
-    max.maximizeInPlace(info.maximumWorld);
+    const b = m.getBoundingInfo().boundingBox;
+    min.minimizeInPlace(b.minimumWorld);
+    max.maximizeInPlace(b.maximumWorld);
   });
   let center = min.add(max).scale(0.5);
   meshes.forEach(m=>m.position.subtractInPlace(center));
@@ -153,110 +151,99 @@ document.getElementById("btn-center").addEventListener("click", ()=>{
   meshes.forEach(m=>m.scaling.scaleInPlace(scaleFactor));
 });
 
+// Export
 document.getElementById("btn-export").addEventListener("click", ()=>{
-  BABYLON.GLTF2Export.GLBAsync(scene, "scene").then(glb=>glb.downloadFiles());
+  BABYLON.GLTF2Export.GLBAsync(scene,"scene").then(glb=>glb.downloadFiles());
 });
 
-document.getElementById("zoom-slider").addEventListener("input", e=>{
-  camera.radius = parseFloat(e.target.value);
-});
+// Zoom
+document.getElementById("zoom-slider").addEventListener("input", e=>camera.radius = parseFloat(e.target.value));
 
-// -------------------- Player Model & Test Map --------------------
-let playerModel = null;
-let fpsCamera = null;
-let isTesting = false;
-let animatables = [];
-let inputMap = {};
-let playerSpeed = 0.05;
-let sprintMultiplier = 2;
-let isCrouching = false;
-let currentAnim = null;
+// ===== Player & Test Map =====
+let playerModel = null, fpsCamera = null;
+let isTesting = false, animatables = [], inputMap = {};
+let baseHeight = 1.7, crouchHeight = 1.0, moveSpeed = 0.05, sprintMult = 2, currentAnim = null;
+let playerScale = 1;
 
-// Add Player Model
+// Add Player
 document.getElementById("btn-addPlayer").addEventListener("click", ()=>{
   const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = ".glb,.gltf";
+  fileInput.type = "file"; fileInput.accept = ".glb,.gltf";
   fileInput.onchange = e=>{
     const file = e.target.files[0];
     if(!file) return;
-    BABYLON.SceneLoader.AppendAsync("file:", file, scene).then(()=>{
-      playerModel = scene.meshes[scene.meshes.length-1]; 
-      // Auto scale player to ~1.7 units tall
-      let bbox = playerModel.getBoundingInfo().boundingBox.extendSize;
-      let height = bbox.y*2;
-      let scaleFactor = 1.7/height;
-      playerModel.scaling.scaleInPlace(scaleFactor);
-      document.getElementById("scaleSlider").value = scaleFactor;
+    BABYLON.SceneLoader.AppendAsync("file:",file,scene).then(()=>{
+      playerModel = scene.meshes[scene.meshes.length-1];
+      let bbox = playerModel.getBoundingInfo().boundingBox;
+      let height = bbox.maximumWorld.y - bbox.minimumWorld.y;
+      playerScale = baseHeight/height;
+      playerModel.scaling = new BABYLON.Vector3(playerScale,playerScale,playerScale);
+      document.getElementById("scaleSlider").value = playerScale;
       playerModel.position = new BABYLON.Vector3(0,0,0);
     });
   };
   fileInput.click();
 });
 
-// Player scale slider
+// Scale slider
 document.getElementById("scaleSlider").addEventListener("input", e=>{
-  if(playerModel) playerModel.scaling.scaleInPlace(parseFloat(e.target.value)/playerModel.scaling.x);
+  if(playerModel){
+    playerScale = parseFloat(e.target.value);
+    playerModel.scaling = new BABYLON.Vector3(playerScale,playerScale,playerScale);
+  }
 });
 
 // Test Map
 document.getElementById("btn-testMap").addEventListener("click", ()=>{
-  if(!playerModel) { alert("Add a player model first."); return; }
-
+  if(!playerModel){ alert("Add player first"); return; }
   if(fpsCamera) fpsCamera.dispose();
-  fpsCamera = new BABYLON.UniversalCamera("fpsCam", playerModel.position.clone().add(new BABYLON.Vector3(0,1.7,0)), scene);
+  fpsCamera = new BABYLON.UniversalCamera("fpsCam", playerModel.position.clone().add(new BABYLON.Vector3(0,baseHeight,0)), scene);
   fpsCamera.attachControl(canvas,true);
-  fpsCamera.ellipsoid = new BABYLON.Vector3(0.3,1,0.3);
+  fpsCamera.ellipsoid = new BABYLON.Vector3(0.3,baseHeight,0.3);
   fpsCamera.minZ = 0.1;
-  canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock;
   canvas.requestPointerLock();
   isTesting = true;
 });
 
-// Player input map
+// Input map
 scene.actionManager = new BABYLON.ActionManager(scene);
-scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, evt=>{
-  inputMap[evt.sourceEvent.key.toLowerCase()] = true;
-}));
-scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, evt=>{
-  inputMap[evt.sourceEvent.key.toLowerCase()] = false;
-}));
+scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, e=>{ inputMap[e.sourceEvent.key.toLowerCase()]=true; }));
+scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, e=>{ inputMap[e.sourceEvent.key.toLowerCase()]=false; }));
 
-// Animation playback
-function playAnimation(animName){
-  if(currentAnim === animName) return;
-  currentAnim = animName;
+// Play animation
+function playAnimation(name){
+  if(currentAnim===name) return;
+  currentAnim=name;
   animatables.forEach(a=>a.stop());
-  animatables = [];
-  let ag = scene.animationGroups.find(a=>a.name === animName);
+  animatables=[];
+  let ag = scene.animationGroups.find(a=>a.name===name);
   if(ag) animatables.push(ag.play(true));
 }
 
-// Main render loop
+// Main loop
 engine.runRenderLoop(()=>{
   scene.render();
   if(isTesting && playerModel && fpsCamera){
     let forward = new BABYLON.Vector3(Math.sin(fpsCamera.rotation.y),0,Math.cos(fpsCamera.rotation.y));
-    let right = new BABYLON.Vector3(Math.sin(fpsCamera.rotation.y + Math.PI/2),0,Math.cos(fpsCamera.rotation.y + Math.PI/2));
+    let right = new BABYLON.Vector3(Math.sin(fpsCamera.rotation.y+Math.PI/2),0,Math.cos(fpsCamera.rotation.y+Math.PI/2));
     let move = new BABYLON.Vector3.Zero();
-
     if(inputMap['w']) move.addInPlace(forward);
     if(inputMap['s']) move.subtractInPlace(forward);
     if(inputMap['a']) move.subtractInPlace(right);
     if(inputMap['d']) move.addInPlace(right);
 
-    let speed = playerSpeed;
-    if(inputMap['shift']) speed *= sprintMultiplier;
-    isCrouching = inputMap['c'] ? true : false;
+    let speed = moveSpeed;
+    let isCrouching = inputMap['c'];
+    if(inputMap['shift']) speed*=sprintMult;
 
-    if(move.length() > 0){
-      move.normalize();
-      fpsCamera.position.addInPlace(move.scale(speed));
-      playAnimation(isCrouching ? "CrouchedWalking" : "Walking");
-    } else playAnimation("Idle");
+    if(move.length()>0){ move.normalize(); fpsCamera.position.addInPlace(move.scale(speed)); playAnimation(isCrouching?"CrouchedWalking":"Walking"); }
+    else playAnimation("Idle");
 
-    // Sync model with camera
-    playerModel.position.copyFrom(fpsCamera.position).subtract(new BABYLON.Vector3(0,isCrouching?1:1.7,0));
+    fpsCamera.position.y = playerModel.position.y + (isCrouching?crouchHeight:baseHeight);
+    fpsCamera.ellipsoid.y = isCrouching?crouchHeight:baseHeight;
+    playerModel.position.x = fpsCamera.position.x;
+    playerModel.position.z = fpsCamera.position.z;
+    playerModel.position.y = fpsCamera.position.y - (isCrouching?crouchHeight:baseHeight);
     playerModel.rotation.y = fpsCamera.rotation.y;
   }
 });
