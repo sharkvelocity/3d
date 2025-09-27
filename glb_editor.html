@@ -45,10 +45,12 @@ html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111;
   <button id="btn-add">Add GLB</button>
   <button id="btn-ground">Ground</button>
   <button id="btn-grid">Grid</button>
-  <button id="btn-spawn">Spawn</button>
+  <button id="btn-spawn">Spawn Anchor</button>
   <button id="btn-undo">Undo</button>
   <button id="btn-center">Center/Normalize</button>
   <button id="btn-export">Export GLB</button>
+  <button id="btn-addPlayer">Add Player Model</button>
+  <button id="btn-testMap">Test Map</button>
 </div>
 <input type="range" id="zoom-slider" min="2" max="100" step="1" value="15">
 <div id="hoverInfo">Hover: (none)</div>
@@ -85,52 +87,40 @@ scene.onPointerMove = (evt, pick) => {
   }
 };
 
-// Load GLB
+// Load GLB (keeps original scale)
 async function loadGLB(fileOrUrl, position) {
   try {
     const before = scene.meshes.slice();
 
     if (fileOrUrl instanceof File) {
-      // Load from local file correctly
       await BABYLON.SceneLoader.AppendAsync("file:", fileOrUrl, scene);
     } else {
-      // Load from URL
       await BABYLON.SceneLoader.AppendAsync("", fileOrUrl, scene);
     }
 
-    // Find new meshes
     const after = scene.meshes.filter(m => !before.includes(m));
     if (position) {
       after.forEach(m => m.position.addInPlace(position));
     }
 
-    // Add undo action
     undoStack.push(() => after.forEach(m => m.dispose()));
-
   } catch (err) {
     console.error("Failed to load GLB:", err);
     alert("Failed to load GLB. See console.");
   }
 }
 
-
 // File picker
 document.getElementById("fileInput").addEventListener("change", e=>{
   [...e.target.files].forEach(f=>loadGLB(f));
 });
-
-// Add button triggers file input
-document.getElementById("btn-add").addEventListener("click", ()=>{
-  document.getElementById("fileInput").click();
-});
+document.getElementById("btn-add").addEventListener("click", ()=>document.getElementById("fileInput").click());
 
 // Drag + drop
 window.addEventListener("dragover", e=>e.preventDefault());
 window.addEventListener("drop", e=>{
   e.preventDefault();
-  if(e.dataTransfer.files.length){
-    [...e.dataTransfer.files].forEach(f=>loadGLB(f));
-  }
+  if(e.dataTransfer.files.length) [...e.dataTransfer.files].forEach(f=>loadGLB(f));
 });
 
 // Ground
@@ -147,14 +137,13 @@ document.getElementById("btn-grid").addEventListener("click", ()=>{
   else grid = BABYLON.MeshBuilder.CreateGround("Grid", {width:100, height:100}, scene);
 });
 
-// Spawn
+// Spawn anchor
+let anchors = [];
 document.getElementById("btn-spawn").addEventListener("click", ()=>{
-  const sphere = BABYLON.MeshBuilder.CreateSphere("Spawn_"+(++spawnCount), {diameter:0.4}, scene);
-  sphere.position = camera.target.clone();
-  const mat = new BABYLON.StandardMaterial("spmat", scene);
-  mat.emissiveColor = BABYLON.Color3.Red();
-  sphere.material = mat;
-  undoStack.push(()=>sphere.dispose());
+  const anchor = new BABYLON.TransformNode("SpawnAnchor_"+(++spawnCount), scene);
+  anchor.position = camera.target.clone();
+  anchors.push(anchor);
+  undoStack.push(()=>anchor.dispose());
 });
 
 // Undo
@@ -196,7 +185,100 @@ document.getElementById("zoom-slider").addEventListener("input", e=>{
   camera.radius = parseFloat(e.target.value);
 });
 
-engine.runRenderLoop(()=>scene.render());
+// -------------------- Player Model & Test Map --------------------
+let playerModel = null;
+let fpsCamera = null;
+let isTesting = false;
+let animatables = [];
+let inputMap = {};
+let playerSpeed = 0.05;
+let sprintMultiplier = 2;
+let isCrouching = false;
+let currentAnim = null;
+
+// Add Player Model
+document.getElementById("btn-addPlayer").addEventListener("click", ()=>{
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = ".glb,.gltf";
+  fileInput.onchange = e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    BABYLON.SceneLoader.AppendAsync("file:", file, scene).then(()=>{
+      playerModel = scene.meshes[scene.meshes.length-1]; // simple pick
+      playerModel.position = new BABYLON.Vector3(0,0,0);
+    });
+  };
+  fileInput.click();
+});
+
+// Test Map
+document.getElementById("btn-testMap").addEventListener("click", ()=>{
+  if(!playerModel) { alert("Add a player model first."); return; }
+
+  if(fpsCamera) fpsCamera.dispose();
+  fpsCamera = new BABYLON.UniversalCamera("fpsCam", playerModel.position.clone().add(new BABYLON.Vector3(0,1.7,0)), scene);
+  fpsCamera.attachControl(canvas,true);
+  fpsCamera.ellipsoid = new BABYLON.Vector3(0.3,1,0.3);
+  fpsCamera.minZ = 0.1;
+
+  // Pointer lock
+  canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock;
+  canvas.requestPointerLock();
+
+  isTesting = true;
+});
+
+// Player input map
+scene.actionManager = new BABYLON.ActionManager(scene);
+scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, evt=>{
+  inputMap[evt.sourceEvent.key.toLowerCase()] = true;
+}));
+scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, evt=>{
+  inputMap[evt.sourceEvent.key.toLowerCase()] = false;
+}));
+
+// Animation playback
+function playAnimation(animName){
+  if(currentAnim === animName) return;
+  currentAnim = animName;
+  animatables.forEach(a=>a.stop());
+  animatables = [];
+  let ag = scene.animationGroups.find(a=>a.name === animName);
+  if(ag) animatables.push(ag.play(true));
+}
+
+// Main render loop
+engine.runRenderLoop(()=>{
+  scene.render();
+
+  if(isTesting && playerModel && fpsCamera){
+    // Direction vectors
+    let forward = new BABYLON.Vector3(Math.sin(fpsCamera.rotation.y),0,Math.cos(fpsCamera.rotation.y));
+    let right = new BABYLON.Vector3(Math.sin(fpsCamera.rotation.y + Math.PI/2),0,Math.cos(fpsCamera.rotation.y + Math.PI/2));
+    let move = new BABYLON.Vector3.Zero();
+
+    if(inputMap['w']) move.addInPlace(forward);
+    if(inputMap['s']) move.subtractInPlace(forward);
+    if(inputMap['a']) move.subtractInPlace(right);
+    if(inputMap['d']) move.addInPlace(right);
+
+    let speed = playerSpeed;
+    if(inputMap['shift']) speed *= sprintMultiplier;
+    if(inputMap['c']) isCrouching = true; else isCrouching = false;
+
+    if(move.length() > 0){
+      move.normalize();
+      fpsCamera.position.addInPlace(move.scale(speed));
+      playAnimation(isCrouching ? "CrouchedWalking" : "Walking");
+    } else playAnimation("Idle");
+
+    // Sync model with camera
+    playerModel.position.copyFrom(fpsCamera.position).subtract(new BABYLON.Vector3(0,isCrouching?1:1.7,0));
+    playerModel.rotation.y = fpsCamera.rotation.y;
+  }
+});
+
 window.addEventListener("resize", ()=>engine.resize());
 </script>
 </body>
