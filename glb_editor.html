@@ -5,198 +5,182 @@
 <title>GLB Editor</title>
 <script src="./cdn/babylon.js"></script>
 <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
-<script src="./cdn/gui/babylon.gui.min.js"></script>
 <script src="./cdn/serializers/babylonjs.serializers.min.js"></script>
-<script src="./cdn/serializers/babylon.glTF2Export.min.js"></script>
+<script src="./cdn/gui/babylon.gui.min.js"></script>
 <style>
-html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111; color:#0ff; font-family:monospace; }
-#frame { position:fixed; inset:0; border:4px solid #0ff; box-sizing:border-box; display:flex; flex-direction:column; }
-#toolbar { background:rgba(0,0,0,0.85); padding:10px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-#toolbar button, #toolbar input { font-size:12px; padding:4px 8px; cursor:pointer; border:1px solid #0ff; color:#0ff; background:#111; border-radius:4px; }
-#toolbar button:hover, #toolbar input:hover { background:#033; }
-#hoverInfo { margin-left:12px; font-size:12px; }
-#renderCanvas { flex:1; width:100%; height:100%; display:block; }
+html, body { margin:0; padding:0; overflow:hidden; height:100%; background:#111; font-family:monospace; color:#0ff; }
+#renderCanvas { width:100%; height:100%; display:block; }
+#uiPanel {
+  position:fixed; top:0; right:0; width:300px; height:100%; background:rgba(0,0,0,0.85); border-left:2px solid #0ff; padding:12px; box-sizing:border-box;
+  display:flex; flex-direction:column; gap:8px; z-index:10; overflow-y:auto;
+}
+#uiPanel h3 { margin:4px 0; font-size:16px; }
+#uiPanel button, #uiPanel input, #uiPanel select { font-size:12px; margin:2px 0; padding:4px; width:100%; box-sizing:border-box; }
+#hoverInfo { position:fixed; bottom:10px; left:10px; background:rgba(0,0,0,0.65); padding:6px; border:1px solid #0ff; border-radius:4px; font-size:12px; }
 </style>
 </head>
 <body>
-<div id="frame">
-  <div id="toolbar">
-    <input type="file" id="fileInput" accept=".glb,.gltf" />
-    <button id="btn-add">Add GLB</button>
-    <button id="btn-spawn">Add Spawn</button>
-    <button id="btn-anim">Add Anim to Player</button>
-    <button id="btn-undo">Undo</button>
-    <button id="btn-origin">Center to Origin</button>
-    <button id="btn-export">Export GLB</button>
-    <button id="btn-grid">Toggle Grid</button>
-    <span id="hoverInfo">Hover: (none)</span>
-  </div>
-  <canvas id="renderCanvas"></canvas>
+<canvas id="renderCanvas"></canvas>
+<div id="uiPanel">
+  <h3>GLB Editor Tools</h3>
+  <input type="file" id="fileInput" accept=".glb,.gltf" multiple />
+  <button id="btnAddGLB">Add GLB to Scene</button>
+  <button id="btnGround">Add Ground</button>
+  <label><input type="checkbox" id="chkGrid"> Show Grid</label>
+  <button id="btnSpawn">Add Spawn Point</button>
+  <button id="btnOrigin">Center World Origin</button>
+  <input type="file" id="animFile" accept=".glb,.gltf" />
+  <button id="btnAddAnim">Add Animation to Skeleton</button>
+  <button id="btnUndo">Undo</button>
+  <button id="btnExport">Export Scene to GLB</button>
 </div>
+<div id="hoverInfo">Hover: (none)</div>
 
 <script>
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
-let scene = new BABYLON.Scene(engine);
+const scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
 
-let camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 15, new BABYLON.Vector3(0,2,0), scene);
-camera.attachControl(canvas, true);
+const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 15, new BABYLON.Vector3(0,2,0), scene);
+camera.attachControl(canvas,true);
+const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+const hl = new BABYLON.HighlightLayer("hl", scene);
 
-let light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
-let highlight = new BABYLON.HighlightLayer("hl1", scene);
+let ground = null;
+let spawnCount = 0;
+let gridMesh = null;
+let undoStack = [];
+let lastPickedMesh = null;
 
-let ground=null, spawnCount=0, grid=null;
-let lastAdded = [];
-let playerSkeleton=null;
-
-// ================== Initialize Ground ==================
-function createGround() {
-  if(ground) ground.dispose();
-  ground = BABYLON.MeshBuilder.CreateGround("Ground",{width:50,height:50},scene);
-  ground.position.y=0;
-  let mat=new BABYLON.StandardMaterial("gmat",scene);
-  mat.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
-  ground.material=mat;
-}
-createGround();
-
-// ================== Hover highlight ====================
-scene.onPointerMove = (evt, pick)=>{
-  highlight.removeAllMeshes();
-  if(pick.hit && pick.pickedMesh){
-    highlight.addMesh(pick.pickedMesh, BABYLON.Color3.Teal());
-    document.getElementById("hoverInfo").innerText = "Hover: " + pick.pickedMesh.name;
-  }else{
-    document.getElementById("hoverInfo").innerText = "Hover: (none)";
-  }
+// ================== Hover highlight ==================
+scene.onPointerMove = (evt, pick) => {
+    hl.removeAllMeshes();
+    if(pick.hit && pick.pickedMesh){
+        hl.addMesh(pick.pickedMesh, BABYLON.Color3.Teal());
+        document.getElementById("hoverInfo").innerText = "Hover: " + pick.pickedMesh.name;
+    } else {
+        document.getElementById("hoverInfo").innerText = "Hover: (none)";
+    }
 };
 
-// ================== GLB Load ===========================
-let fileToAdd=null;
+// ================== GLB Loader ==================
+function loadGLB(fileOrUrl, position){
+    let url = fileOrUrl instanceof File ? URL.createObjectURL(fileOrUrl) : fileOrUrl;
+    BABYLON.SceneLoader.ImportMeshAsync("", "", url, scene).then(res=>{
+        res.meshes.forEach(m=>{
+            if(position) m.position = position.clone();
+        });
+        undoStack.push({action:"add", meshes:res.meshes});
+        if(fileOrUrl instanceof File) setTimeout(()=>URL.revokeObjectURL(url), 10000);
+    }).catch(err=>{
+        console.error("Failed to load GLB:", err);
+        alert("Failed to load GLB. See console.");
+    });
+}
+
+// File input
 document.getElementById("fileInput").addEventListener("change", e=>{
-  fileToAdd = e.target.files[0] || null;
+    [...e.target.files].forEach(f=>loadGLB(f));
+});
+document.getElementById("btnAddGLB").addEventListener("click", ()=>{
+    const files = document.getElementById("fileInput").files;
+    if(files.length) [...files].forEach(f=>loadGLB(f));
 });
 
-document.getElementById("btn-add").addEventListener("click", ()=>{
-  if(!fileToAdd) return alert("Select a GLB file first.");
-  loadGLB(fileToAdd);
+// Drag & drop
+window.addEventListener("dragover", e=>e.preventDefault());
+window.addEventListener("drop", e=>{
+    e.preventDefault();
+    if(e.dataTransfer.files.length) [...e.dataTransfer.files].forEach(f=>loadGLB(f));
 });
 
-// ================== Spawn point ========================
-document.getElementById("btn-spawn").addEventListener("click", ()=>{
-  const sphere = BABYLON.MeshBuilder.CreateSphere("Spawn_"+(++spawnCount), {diameter:0.4}, scene);
-  sphere.position = camera.target.clone();
-  let mat = new BABYLON.StandardMaterial("spmat",scene);
-  mat.emissiveColor = BABYLON.Color3.Red();
-  sphere.material = mat;
-  lastAdded.push(sphere);
+// ================== Ground & Grid ==================
+document.getElementById("btnGround").addEventListener("click", ()=>{
+    if(ground) ground.dispose();
+    ground = BABYLON.MeshBuilder.CreateGround("Ground",{width:50,height:50},scene);
+    const mat = new BABYLON.StandardMaterial("gmat",scene);
+    mat.diffuseColor = new BABYLON.Color3(0.1,0.1,0.1);
+    ground.material = mat;
 });
 
-// ================== Undo ==============================
-document.getElementById("btn-undo").addEventListener("click", ()=>{
-  if(lastAdded.length){
-    const m = lastAdded.pop();
-    if(m.dispose) m.dispose();
-  }
+document.getElementById("chkGrid").addEventListener("change", e=>{
+    if(e.target.checked){
+        if(gridMesh) gridMesh.dispose();
+        gridMesh = BABYLON.MeshBuilder.CreateGround("Grid",{width:50,height:50, subdivisions:50},scene);
+        const gridMat = new BABYLON.StandardMaterial("gridMat",scene);
+        gridMat.diffuseColor = new BABYLON.Color3(0.0,0.0,0.0);
+        gridMat.wireframe = true;
+        gridMesh.material = gridMat;
+        gridMesh.position.y = 0.01;
+    } else if(gridMesh){ gridMesh.dispose(); gridMesh=null; }
 });
 
-// ================== Animation Loader ==================
-document.getElementById("btn-anim").addEventListener("click", ()=>{
-  const input = document.createElement("input");
-  input.type="file"; input.accept=".glb,.gltf";
-  input.onchange = async e=>{
-    const file = e.target.files[0];
-    if(!file) return;
+// ================== Spawn Points ==================
+document.getElementById("btnSpawn").addEventListener("click", ()=>{
+    const s = BABYLON.MeshBuilder.CreateSphere("Spawn_"+(++spawnCount),{diameter:0.4},scene);
+    s.position = camera.target.clone();
+    const mat = new BABYLON.StandardMaterial("spmat",scene);
+    mat.emissiveColor = BABYLON.Color3.Red();
+    s.material = mat;
+    undoStack.push({action:"add", meshes:[s]});
+});
+
+// ================== World Origin Fixer ==================
+document.getElementById("btnOrigin").addEventListener("click", ()=>{
+    const all = scene.meshes.filter(m=>m!==ground && m!==gridMesh);
+    if(!all.length) return;
+    const min = new BABYLON.Vector3(...all.map(m=>m.getBoundingInfo().boundingBox.minimumWorld).reduce((a,b)=>[Math.min(a[0],b.x),Math.min(a[1],b.y),Math.min(a[2],b.z)], [Infinity,Infinity,Infinity]));
+    const max = new BABYLON.Vector3(...all.map(m=>m.getBoundingInfo().boundingBox.maximumWorld).reduce((a,b)=>[Math.max(a[0],b.x),Math.max(a[1],b.y),Math.max(a[2],b.z)], [-Infinity,-Infinity,-Infinity]));
+    const center = min.add(max).scale(0.5);
+    all.forEach(m=>m.position.subtractInPlace(center));
+});
+
+// ================== Animation Addition ==================
+document.getElementById("btnAddAnim").addEventListener("click", ()=>{
+    const file = document.getElementById("animFile").files[0];
+    if(!file){ alert("Select an animation GLB first"); return; }
+    const target = scene.meshes.find(m=>m.skeleton);
+    if(!target){ alert("No skeleton found in scene"); return; }
     const url = URL.createObjectURL(file);
-    const result = await BABYLON.SceneLoader.ImportMeshAsync("", "", url, scene, null, ".glb");
-    const skel = result.skeletons[0];
-    if(playerSkeleton && skel){
-      skel.bones.forEach((b,i)=>{ if(playerSkeleton.bones[i]) playerSkeleton.bones[i].animations = b.animations; });
-    }
-    URL.revokeObjectURL(url);
-  };
-  input.click();
+    BABYLON.SceneLoader.ImportMeshAsync("", "", url, scene).then(res=>{
+        res.skeletons.forEach(skel=>{
+            target.skeleton = skel;
+        });
+        URL.revokeObjectURL(url);
+    });
 });
 
-// ================== World Origin Fixer =================
-document.getElementById("btn-origin").addEventListener("click", ()=>{
-  const all = scene.meshes;
-  if(!all.length) return;
-  let bbMin = new BABYLON.Vector3(Infinity,Infinity,Infinity);
-  let bbMax = new BABYLON.Vector3(-Infinity,-Infinity,-Infinity);
-  all.forEach(m=>{
-    const b = m.getBoundingInfo().boundingBox;
-    bbMin.minimizeInPlace(b.minimumWorld);
-    bbMax.maximizeInPlace(b.maximumWorld);
-  });
-  const center = bbMin.add(bbMax).scale(0.5).negate();
-  all.forEach(m=> m.position.addInPlace(center));
+// ================== Undo ==================
+document.getElementById("btnUndo").addEventListener("click", ()=>{
+    const last = undoStack.pop();
+    if(last && last.meshes) last.meshes.forEach(m=>m.dispose());
 });
 
-// ================== Grid Toggle ========================
-document.getElementById("btn-grid").addEventListener("click", ()=>{
-  if(grid){
-    grid.dispose();
-    grid = null;
-  }else{
-    grid = BABYLON.MeshBuilder.CreateGround("Grid",{width:50,height:50, subdivisions:50},scene);
-    let gridMat = new BABYLON.StandardMaterial("gridMat",scene);
-    gridMat.wireframe = true;
-    gridMat.diffuseColor = new BABYLON.Color3(0,1,1);
-    grid.material = gridMat;
-    grid.position.y=0.001; // slightly above ground to prevent z-fighting
-  }
+// ================== Export GLB ==================
+document.getElementById("btnExport").addEventListener("click", ()=>{
+    BABYLON.GLTF2Export.GLBAsync(scene, "scene").then(glb=>{
+        glb.downloadFiles();
+    });
 });
 
-// ================== Raycast Drag/Drop ==================
-let pickedMesh=null;
+// ================== Pointer drag to move meshes ==================
+let pickedMesh = null;
 scene.onPointerDown = (evt, pick)=>{
-  if(pick.hit && pick.pickedMesh && pick.pickedMesh!==ground && pick.pickedMesh!==grid){
-    pickedMesh = pick.pickedMesh;
-  }
+    if(pick.hit && pick.pickedMesh && pick.pickedMesh!==ground && pick.pickedMesh!==gridMesh){
+        pickedMesh = pick.pickedMesh;
+    }
 };
 scene.onPointerUp = ()=>{ pickedMesh=null; };
 scene.onPointerMove = (evt, pick)=>{
-  if(pickedMesh && pick.hit && (pick.pickedMesh===ground || pick.pickedMesh===grid)){
-    pickedMesh.position = pick.pickedPoint.clone();
-  }
+    if(pickedMesh && pick.hit && pick.pickedMesh===ground){
+        pickedMesh.position = pick.pickedPoint.clone();
+    }
 };
 
-// ================== Right click place GLB ==================
-scene.onPointerDown = (evt, pick)=>{
-  if(evt.button===2 && ground && pick.hit && pick.pickedMesh===ground && fileToAdd){
-    loadGLB(fileToAdd, pick.pickedPoint);
-  }
-};
-
-// ================== Export GLB ==========================
-document.getElementById("btn-export").addEventListener("click", async ()=>{
-  try{
-    const glb = await BABYLON.GLTF2Export.GLBAsync(scene,"scene");
-    glb.downloadFiles();
-  }catch(e){
-    console.error("Export failed:",e);
-  }
-});
-
-// ================== Helper for loading GLB =============
-async function loadGLB(file, position){
-  if(!file) return;
-  const url = URL.createObjectURL(file);
-  const result = await BABYLON.SceneLoader.ImportMeshAsync("", "", url, scene);
-  result.meshes.forEach(m=>{
-    if(position) m.position = position.clone();
-    lastAdded.push(m);
-  });
-  URL.revokeObjectURL(url);
-  fileToAdd=null;
-  document.getElementById("fileInput").value="";
-}
-
+// ================== Render Loop ==================
 engine.runRenderLoop(()=>scene.render());
 window.addEventListener("resize", ()=>engine.resize());
-window.addEventListener("contextmenu", e=>e.preventDefault());
 </script>
 </body>
 </html>
