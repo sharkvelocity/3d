@@ -8,15 +8,18 @@
 <script src="./cdn/serializers/babylonjs.serializers.min.js"></script>
 <script src="./cdn/gui/babylon.gui.min.js"></script>
 <style>
-html, body { margin:0; padding:0; height:100%; width:100%; overflow:hidden; background:#111; font-family:monospace; color:#0ff; }
+html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#111; font-family:monospace; color:#0ff; }
 #renderCanvas { width:100%; height:100%; display:block; }
-#gui { position:absolute; top:0; left:0; padding:10px; background:rgba(0,0,0,0.65); border:1px solid #0ff; border-radius:6px; z-index:10; }
-button,input { margin:3px; font-size:12px; }
-#hoverInfo { margin-top:6px; font-size:12px; }
+#gui { position:absolute; top:0; left:0; bottom:0; width:240px; background:rgba(0,0,0,0.85); border-right:1px solid #0ff; padding:10px; overflow-y:auto; z-index:10; }
+#gui h2 { margin-top:0; font-size:16px; }
+#gui button,input { width:100%; margin:4px 0; font-size:12px; }
+#hoverInfo { font-size:12px; margin-top:6px; }
+#zoomBar { position:absolute; top:10px; right:10px; transform:rotate(-90deg); transform-origin:right top; }
 </style>
 </head>
 <body>
 <div id="gui">
+  <h2>GLB Editor</h2>
   <input type="file" id="fileInput" accept=".glb,.gltf" multiple />
   <button id="btn-ground">Add Ground</button>
   <button id="btn-grid">Toggle Grid</button>
@@ -27,37 +30,51 @@ button,input { margin:3px; font-size:12px; }
   <button id="btn-undo">Undo</button>
   <div id="hoverInfo">Hover: (none)</div>
 </div>
+<input type="range" min="2" max="50" step="0.5" value="15" id="zoomBar" title="Camera Zoom">
+
 <canvas id="renderCanvas"></canvas>
 
 <script>
 const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
+const engine = new BABYLON.Engine(canvas,true);
 const scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
 
-const camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/3, 15, new BABYLON.Vector3(0,2,0), scene);
+const camera = new BABYLON.ArcRotateCamera("cam",Math.PI/2,Math.PI/3,15,new BABYLON.Vector3(0,2,0),scene);
 camera.attachControl(canvas,true);
 
-const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
-const highlight = new BABYLON.HighlightLayer("hl", scene);
+const light = new BABYLON.HemisphericLight("light",new BABYLON.Vector3(0,1,0),scene);
+const highlight = new BABYLON.HighlightLayer("hl",scene);
 
-let ground = null, gridMesh = null, spawnCount=0, pickedMesh=null, startPos=null;
-const undoStack = [];
+let ground=null, gridMesh=null, spawnCount=0, pickedMesh=null, startPos=null;
+const undoStack=[];
 
 // ===== Hover highlight =====
-scene.onPointerMove = (evt, pick) => {
+scene.onPointerMove = (evt,pick)=>{
   highlight.removeAllMeshes();
-  if (pick.hit && pick.pickedMesh && pick.pickedMesh !== ground && pick.pickedMesh !== gridMesh) {
-    highlight.addMesh(pick.pickedMesh, BABYLON.Color3.Teal());
-    document.getElementById("hoverInfo").innerText = "Hover: " + pick.pickedMesh.name;
-  } else {
+  if(pick.hit && pick.pickedMesh && pick.pickedMesh!==ground && pick.pickedMesh!==gridMesh){
+    highlight.addMesh(pick.pickedMesh,BABYLON.Color3.Teal());
+    document.getElementById("hoverInfo").innerText = "Hover: "+pick.pickedMesh.name;
+  }else{
     document.getElementById("hoverInfo").innerText = "Hover: (none)";
   }
 };
 
 // ===== Load GLB =====
+function autoNormalize(meshes, percent=100){
+  if(!meshes.length) return;
+  const bb = BABYLON.Mesh.MergeMeshes(meshes,true,true,undefined,false,true);
+  if(!bb) return;
+  const sizeVec = bb.getBoundingInfo().boundingBox.maximum.subtract(bb.getBoundingInfo().boundingBox.minimum);
+  const maxDim = Math.max(sizeVec.x,sizeVec.y,sizeVec.z);
+  const scale = percent/100 / maxDim;
+  meshes.forEach(m=>{ m.scaling.scaleInPlace(scale); });
+  bb.dispose();
+  return meshes;
+}
+
 function loadGLB(fileOrUrl, position){
-  if (!fileOrUrl) return;
+  if(!fileOrUrl) return;
   let loaderPromise;
   if(fileOrUrl instanceof File){
     loaderPromise = BABYLON.SceneLoader.ImportMeshAsync("", "", fileOrUrl, scene);
@@ -66,12 +83,14 @@ function loadGLB(fileOrUrl, position){
   }
 
   loaderPromise.then(res=>{
-    res.meshes.forEach(m=>{
-      if(position) m.position = position.clone();
-    });
-    undoStack.push({action:"add", meshes:res.meshes});
+    const meshes = res.meshes.filter(m=>m!==res.meshes[0].getScene().getMeshByName("__root__"));
+    if(position){
+      meshes.forEach(m=>m.position = position.clone());
+    }
+    autoNormalize(meshes,100); // default 100% size normalize
+    undoStack.push({action:"add", meshes});
   }).catch(err=>{
-    console.error("Failed to load GLB:", err);
+    console.error("Failed to load GLB:",err);
     alert("Failed to load GLB. Check console.");
   });
 }
@@ -82,8 +101,8 @@ document.getElementById("fileInput").addEventListener("change", e=>{
 });
 
 // ===== Drag + Drop =====
-window.addEventListener("dragover", e=>e.preventDefault());
-window.addEventListener("drop", e=>{
+window.addEventListener("dragover",e=>e.preventDefault());
+window.addEventListener("drop",e=>{
   e.preventDefault();
   if(e.dataTransfer.files.length){
     [...e.dataTransfer.files].forEach(f=>loadGLB(f));
@@ -91,7 +110,7 @@ window.addEventListener("drop", e=>{
 });
 
 // ===== Ground & Grid =====
-document.getElementById("btn-ground").addEventListener("click", ()=>{
+document.getElementById("btn-ground").addEventListener("click",()=>{
   if(ground) ground.dispose();
   ground = BABYLON.MeshBuilder.CreateGround("Ground",{width:50,height:50},scene);
   ground.position.y = 0;
@@ -100,12 +119,12 @@ document.getElementById("btn-ground").addEventListener("click", ()=>{
   ground.material = mat;
 });
 
-document.getElementById("btn-grid").addEventListener("click", ()=>{
+document.getElementById("btn-grid").addEventListener("click",()=>{
   if(gridMesh){
     gridMesh.dispose();
-    gridMesh = null;
+    gridMesh=null;
   }else if(ground){
-    gridMesh = BABYLON.MeshBuilder.CreateGround("Grid",{width:50,height:50, subdivisions:50},scene);
+    gridMesh = BABYLON.MeshBuilder.CreateGround("Grid",{width:50,height:50,subdivisions:50},scene);
     const mat = new BABYLON.StandardMaterial("gridMat",scene);
     mat.diffuseColor = new BABYLON.Color3(0.2,0.2,0.2);
     mat.wireframe = true;
@@ -115,7 +134,7 @@ document.getElementById("btn-grid").addEventListener("click", ()=>{
 });
 
 // ===== Spawn point =====
-document.getElementById("btn-spawn").addEventListener("click", ()=>{
+document.getElementById("btn-spawn").addEventListener("click",()=>{
   const sphere = BABYLON.MeshBuilder.CreateSphere("Spawn_"+(++spawnCount),{diameter:0.4},scene);
   sphere.position = camera.target.clone();
   const mat = new BABYLON.StandardMaterial("spmat",scene);
@@ -125,19 +144,17 @@ document.getElementById("btn-spawn").addEventListener("click", ()=>{
 });
 
 // ===== World origin fixer =====
-document.getElementById("btn-origin").addEventListener("click", ()=>{
+document.getElementById("btn-origin").addEventListener("click",()=>{
   const allMeshes = scene.meshes.filter(m=>m!==ground && m!==gridMesh);
   if(!allMeshes.length) return;
   const bb = BABYLON.Mesh.MergeMeshes(allMeshes,true,true,undefined,false,true);
   const offset = bb.getBoundingInfo().boundingBox.centerWorld;
-  allMeshes.forEach(m=>{
-    m.position.subtractInPlace(offset);
-  });
+  allMeshes.forEach(m=>{ m.position.subtractInPlace(offset); });
   bb.dispose();
 });
 
 // ===== Animations =====
-document.getElementById("btn-anim").addEventListener("click", ()=>{
+document.getElementById("btn-anim").addEventListener("click",()=>{
   const animFile = document.createElement("input");
   animFile.type="file"; animFile.accept=".glb,.gltf";
   animFile.click();
@@ -147,7 +164,7 @@ document.getElementById("btn-anim").addEventListener("click", ()=>{
       BABYLON.SceneLoader.ImportMeshAsync("", "", f, scene).then(res=>{
         const skels = res.skeletons;
         if(skels.length && scene.skeletons.length){
-          scene.skeletons[0].merge(skel[0]); // simplistic merge; adjust as needed
+          scene.skeletons[0].merge(skels[0]); // simplistic merge
           res.meshes.forEach(m=>m.dispose());
         }
       });
@@ -156,15 +173,13 @@ document.getElementById("btn-anim").addEventListener("click", ()=>{
 });
 
 // ===== Undo =====
-document.getElementById("btn-undo").addEventListener("click", ()=>{
+document.getElementById("btn-undo").addEventListener("click",()=>{
   const last = undoStack.pop();
-  if(last && last.meshes){
-    last.meshes.forEach(m=>m.dispose());
-  }
+  if(last && last.meshes) last.meshes.forEach(m=>m.dispose());
 });
 
-// ===== Raycast placement =====
-scene.onPointerDown = (evt, pick)=>{
+// ===== Raycast placement & drag =====
+scene.onPointerDown = (evt,pick)=>{
   if(evt.button===2 && ground && pick.pickedMesh===ground){
     loadGLB("./sample.glb", pick.pickedPoint);
   }
@@ -186,13 +201,20 @@ scene.onPointerMove = (evt,pick)=>{
 };
 
 // ===== Export GLB =====
-document.getElementById("btn-export").addEventListener("click", ()=>{
-  BABYLON.GLTF2Export.GLBAsync(scene,"scene.glb").then(()=>{alert("Export complete!");});
+document.getElementById("btn-export").addEventListener("click",()=>{
+  BABYLON.GLTF2Export.GLBAsync(scene,"scene.glb").then(()=>alert("Export complete!"));
 });
+
+// ===== Zoom slider =====
+const zoomSlider = document.getElementById("zoomBar");
+zoomSlider.addEventListener("input", ()=>{ camera.radius = parseFloat(zoomSlider.value); });
+
+// ===== Initial ground =====
+document.getElementById("btn-ground").click();
 
 // ===== Render loop =====
 engine.runRenderLoop(()=>scene.render());
-window.addEventListener("resize", ()=>engine.resize());
+window.addEventListener("resize",()=>engine.resize());
 </script>
 </body>
 </html>
