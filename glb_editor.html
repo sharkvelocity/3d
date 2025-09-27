@@ -86,18 +86,29 @@ scene.onPointerMove = (evt, pick) => {
 };
 
 // Load GLB
-async function loadGLB(fileOrUrl, position){
-  let url;
-  if(fileOrUrl instanceof File){
-    url = URL.createObjectURL(fileOrUrl);
-  } else {
-    url = fileOrUrl;
-  }
-
+async function loadGLB(fileOrUrl, position) {
   try {
     const before = scene.meshes.slice();
-    await BABYLON.SceneLoader.AppendAsync("", url, scene);
-    if(fileOrUrl instanceof File) URL.revokeObjectURL(url);
+    if (fileOrUrl instanceof File) {
+      // Load from local file correctly
+      await BABYLON.SceneLoader.AppendAsync("file:", fileOrUrl, scene);
+    } else {
+      // Load from URL
+      await BABYLON.SceneLoader.AppendAsync("", fileOrUrl, scene);
+    }
+
+    // Find new meshes
+    const after = scene.meshes.filter(m => !before.includes(m));
+    if (position) {
+      after.forEach(m => m.position.addInPlace(position));
+    }
+    undoStack.push(() => after.forEach(m => m.dispose()));
+
+  } catch (err) {
+    console.error("Failed to load GLB:", err);
+    alert("Failed to load GLB. See console.");
+  }
+}
 
     // Newly added meshes
     const after = scene.meshes.filter(m => !before.includes(m));
