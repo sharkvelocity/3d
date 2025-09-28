@@ -1,178 +1,581 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Player FBX Editor + Test Scene</title>
+<meta charset="utf-8" />
+<title>Player Editor — Babylon</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<!-- MUST exist locally in ./cdn/ -->
 <script src="./cdn/babylon.js"></script>
 <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
 <script src="./cdn/gui/babylon.gui.min.js"></script>
 <script src="./cdn/serializers/babylonjs.serializers.min.js"></script>
+
 <style>
-body { margin:0; font-family:sans-serif; background:#111; color:#0ff; }
-h1 { text-align:center; }
-#ui { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin:12px; }
-#ui label { display:block; }
-button { padding:6px 12px; background:#000; color:#0ff; border:1px solid #0ff; cursor:pointer; }
-button:hover { background:#033; }
-#renderCanvas { width:100%; height:70vh; display:block; margin:0 auto; border:1px solid #0ff; }
-input[type=range] { width:100px; }
+  :root{
+    --bg:#0f1720; --panel:#0b1220; --accent:#00d8ff; --muted:#9feafc;
+    --card:#0d1620; --danger:#ff6b6b;
+  }
+  html,body { height:100%; margin:0; background:var(--bg); color:#e6fcff; font-family:Inter,system-ui, monospace; }
+  #left { position:absolute; left:0; top:0; bottom:0; width:380px; background:linear-gradient(180deg,var(--panel),#071018); padding:14px; box-sizing:border-box; overflow:auto; border-right:1px solid rgba(0,216,255,0.06); }
+  h1 { margin:4px 0 10px; font-size:18px; color:var(--accent); }
+  h2 { margin:8px 0; font-size:13px; color:var(--muted); }
+  label { display:block; font-size:13px; margin:7px 0 4px; color:#bff; }
+  input[type=file] { color:var(--muted); }
+  button{ background:transparent; color:var(--accent); border:1px solid rgba(0,216,255,0.12); padding:8px 10px; cursor:pointer; margin:6px 0; width:100%; text-align:left; }
+  button:hover{ background:rgba(0,216,255,0.03); }
+  .small { font-size:12px; color:#9feafc; }
+  #renderWrap { position:absolute; left:400px; right:12px; top:12px; bottom:12px; border-radius:6px; overflow:hidden; box-shadow: 0 6px 30px rgba(0,0,0,0.6); }
+  #renderCanvas { width:100%; height:100%; display:block; background:linear-gradient(180deg,#081018,#071018);}
+  .section { margin:10px 0; padding:8px; background:var(--card); border-radius:6px; border:1px solid rgba(255,255,255,0.02); }
+  .list { max-height:160px; overflow:auto; padding:6px; border:1px dashed rgba(0,216,255,0.06); border-radius:6px; }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; }
+  .row > *{ flex:1; }
+  .boneEntry, .animEntry { display:flex; justify-content:space-between; gap:8px; padding:6px; border-radius:6px; background:rgba(255,255,255,0.01); margin:4px 0; align-items:center; }
+  .controls { display:flex; gap:8px; }
+  .danger { border-color: rgba(255,100,100,0.12); color:var(--danger); }
+  .muted { color:#9feafc; font-size:12px; }
+  .search { padding:6px; border-radius:6px; border:1px solid rgba(255,255,255,0.03); background:transparent; color:var(--muted); width:100%; box-sizing:border-box; }
+  .flex { display:flex; gap:8px; }
+  select,input[type=number] { padding:6px; border-radius:6px; background:#041018; border:1px solid rgba(255,255,255,0.03); color:var(--muted); }
+  .small-muted{ font-size:11px; color:#7fd9e7; }
 </style>
 </head>
 <body>
-<h1>Player FBX Editor + Test Scene</h1>
-<div id="ui">
-  <div><label>Base Model (BASE.fbx)<input type="file" id="baseFile"></label></div>
-  <div><label>Idle Animation<input type="file" id="idleFile"></label></div>
-  <div><label>Walking<input type="file" id="walkFile"></label></div>
-  <div><label>Crouching Idle<input type="file" id="crouchIdleFile"></label></div>
-  <div><label>Crouched Walking<input type="file" id="crouchWalkFile"></label></div>
-  <div><label>Standing To Crouched<input type="file" id="standToCrouchFile"></label></div>
-  <div><label>Player Scale<input type="range" id="playerScale" min="0.1" max="5" step="0.1" value="1"></label></div>
-  <button id="btnLoadPlayer">Load Player</button>
-  <button id="btnExportGLB">Export GLB</button>
-  <button id="btnTestMap">Test Map</button>
-</div>
-<canvas id="renderCanvas"></canvas>
+  <div id="left">
+    <h1>Player Editor</h1>
+
+    <div class="section">
+      <h2>Files</h2>
+      <label>Base Player GLB (mesh + skeleton)</label>
+      <input id="baseFile" type="file" accept=".glb,.gltf" />
+      <label>Map/Level GLB (optional)</label>
+      <input id="mapFile" type="file" accept=".glb,.gltf" />
+      <label>Animation GLB(s)</label>
+      <input id="animFiles" type="file" accept=".glb,.gltf" multiple />
+      <div class="flex">
+        <button id="btnLoadBase">Load Base</button>
+        <button id="btnLoadMap">Load Map</button>
+      </div>
+      <div class="flex">
+        <button id="btnScanAnims">Add / Scan Animations</button>
+        <button id="btnAutoMap">Auto-map unmapped bones</button>
+      </div>
+      <div class="small-muted">Tip: mark animation files as 'Animation-only' if they only contain animation and no skin.</div>
+    </div>
+
+    <div class="section">
+      <h2>Player Controls</h2>
+      <label>Player scale</label>
+      <div class="row">
+        <input id="scaleInput" type="number" step="0.1" value="1" />
+        <button id="btnApplyScale">Apply</button>
+      </div>
+
+      <div style="margin-top:8px">
+        <button id="btnAddFPNode">Add FP Node at estimate</button>
+        <button id="btnAttachFPS">Attach FPS Camera to selected</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Bones (Base)</h2>
+      <input id="boneSearch" class="search" placeholder="Search bones..." />
+      <div id="boneList" class="list small-muted"></div>
+      <div style="margin-top:8px" class="flex">
+        <button id="selectAllBones">Select All</button>
+        <button id="clearBoneSelection">Clear</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Animations</h2>
+      <div id="animFilesList" class="list small-muted"></div>
+      <div style="margin-top:8px" class="flex">
+        <button id="btnPlayAll">Play All</button>
+        <button id="btnStopAll">Stop All</button>
+      </div>
+      <div style="margin-top:6px" class="flex">
+        <button id="btnPruneUnselected" class="danger">Prune unselected animations (permanent)</button>
+        <button id="btnExport">Export GLB</button>
+      </div>
+      <div style="margin-top:6px" class="small-muted">Use Prune if you want exported GLB to include only checked animations.</div>
+    </div>
+
+    <div class="section">
+      <h2>Remapper & Mappings</h2>
+      <div class="row">
+        <button id="btnOpenRemapper">Open Bone Remapper</button>
+        <button id="btnSaveMap">Save Mapping</button>
+      </div>
+      <label>Load mapping JSON</label>
+      <input id="mapJsonFile" type="file" accept=".json" />
+      <div class="muted small">Mapping JSON maps animation-bone → base-bone by name. Useful for Mixamo vs custom rigs.</div>
+    </div>
+
+    <div class="section">
+      <h2>Spawn / Dev Camera</h2>
+      <div class="flex">
+        <button id="btnToggleDevCam">Toggle Dev Free Cam</button>
+        <button id="btnSaveSpawn">Save Spawn Here</button>
+      </div>
+      <div class="small-muted" id="spawnCoords">Spawn: (none)</div>
+      <div style="margin-top:8px" class="muted small">Use free cam to fly where you want, then Save Spawn to create/overwrite spawn node.</div>
+    </div>
+
+    <div style="height:18px"></div>
+    <div class="small-muted">Logs / Diagnostics</div>
+    <pre id="log" style="max-height:120px; overflow:auto; font-size:12px; color:#9feafc;"></pre>
+
+  </div>
+
+  <div id="renderWrap"><canvas id="renderCanvas"></canvas></div>
 
 <script>
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas,true);
+/* -------------------------------------------------------
+   Player Editor (browser) — single-file
+   Features implemented:
+   - base map load, animation load (GLB), auto-detect bones/animations
+   - bone inspector + checkboxes
+   - animation inspector + include toggles & play/stop
+   - bone remapper UI (dialog) with auto-suggest
+   - save/load mapping JSON
+   - dev free camera & spawn node creation/overwrite, display XYZ
+   - attach FPS camera to chosen bone/FP node
+   - scale player
+   - prune unselected animations (permanent) before export (user confirm)
+   - export combined GLB (will export whatever is left in the scene)
+   Limitations:
+   - Exporting only selected animations without pruning is not trivial to do in-place
+     cross-scene; the "Prune" tool permanently removes excluded animations so the export
+     contains only the kept ones. I provide mapping save/load so you can quickly re-import
+     and re-create animations, or use Blender for a permanent authoritative export pipeline.
+   -------------------------------------------------------*/
+
+const canvas = document.getElementById('renderCanvas');
+const engine = new BABYLON.Engine(canvas, true, {preserveDrawingBuffer:true, stencil:true});
 const scene = new BABYLON.Scene(engine);
-scene.clearColor = new BABYLON.Color4(0.05,0.05,0.05,1);
+scene.clearColor = new BABYLON.Color4(0.04,0.06,0.08,1);
 
-// Camera and light
-const camera = new BABYLON.FreeCamera("playerCam", new BABYLON.Vector3(0,2,0), scene);
-camera.attachControl(canvas,true);
-camera.checkCollisions = true;
-camera.applyGravity = true;
+const logEl = document.getElementById('log');
+function log(msg){ console.log(msg); logEl.textContent = (new Date()).toISOString().substr(11,8) + " | " + msg + "\n" + logEl.textContent; }
 
-const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+// camera + lights
+const arcCam = new BABYLON.ArcRotateCamera("arcCam", Math.PI/2, Math.PI/3, 4, BABYLON.Vector3.Zero(), scene);
+arcCam.attachControl(canvas, true);
+arcCam.wheelDeltaPercentage = 0.01;
+const hem = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+hem.intensity = 0.9;
 
-// Ground
-let ground = BABYLON.MeshBuilder.CreateGround("ground",{width:50,height:50},scene);
-ground.checkCollisions = true;
+// ground/grid for orientation
+const ground = BABYLON.MeshBuilder.CreateGround("ground", {width:20, height:20}, scene);
+const gmat = new BABYLON.StandardMaterial("gmat", scene); gmat.diffuseColor = new BABYLON.Color3(.03,.04,.05);
+ground.material = gmat;
 
-// Player variables
-let baseMesh = null;
-let animGroups = {};
-let keys = {};
-let targetCrouch = 0;
-let crouchProgress = 0;
-let crouchSpeed = 0.1;
-let playerSpeed = 0.05;
+// gizmo manager for spawn/FP node manipulation
+const gizmo = new BABYLON.GizmoManager(scene);
+gizmo.positionGizmoEnabled = true; gizmo.rotationGizmoEnabled = true; gizmo.scaleGizmoEnabled = false;
 
+// state
+let baseMeshes = [];            // meshes that belong to base (top-level)
+let baseSkeleton = null;        // main skeleton
+let importedAnimFiles = [];     // list of {fileName, added: {newMeshes,newSkels,newAG}, mapped: bool, records: ...}
+let retargetedGroups = [];     // animation groups we've retargeted into the scene (kept)
+let mappingTable = {};         // global mapping of animBoneName -> baseBoneName (user-saved or autosuggest)
+let devCam = null;
+let spawnNode = null;
+let fpNode = null;
+let fpsCam = null;
+
+// small helpers
+const $ = id=>document.getElementById(id);
 function createBlobURL(file){ return URL.createObjectURL(file); }
-async function loadFBX(file){
-    const url = createBlobURL(file);
-    const result = await BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene);
+async function appendFileToScene(file){
+  const before = { meshes: scene.meshes.slice(), skeletons: scene.skeletons.slice(), animationGroups: scene.animationGroups.slice() };
+  const url = createBlobURL(file);
+  try {
+    await BABYLON.SceneLoader.AppendAsync("", url, scene);
+  } finally {
     URL.revokeObjectURL(url);
-    return result;
+  }
+  return {
+    newMeshes: scene.meshes.filter(m => !before.meshes.includes(m)),
+    newSkels: scene.skeletons.filter(s => !before.skeletons.includes(s)),
+    newAG: scene.animationGroups.filter(ag => !before.animationGroups.includes(ag))
+  };
 }
 
-async function loadPlayer(){
-    if(!document.getElementById("baseFile").files[0]){
-        alert("Upload BASE.fbx");
-        return;
-    }
-    scene.meshes.forEach(m=>{if(m!==ground) m.dispose();});
-    animGroups={};
-    baseMesh=null;
+// load base
+async function loadBase(){
+  const f = $('baseFile').files[0];
+  if(!f) return alert("Choose a base glb first");
+  log("Loading base: " + f.name);
+  const added = await appendFileToScene(f);
+  // heuristics: choose first skeleton found in added
+  baseMeshes = added.newMeshes.slice();
+  baseSkeleton = added.newSkels[0] || (baseMeshes.find(m=>m.skeleton)? baseMeshes.find(m=>m.skeleton).skeleton : null);
+  if(baseSkeleton) {
+    log("Base skeleton loaded: " + baseSkeleton.name + " ("+ baseSkeleton.bones.length+" bones)");
+    populateBoneList();
+  } else {
+    log("Warning: no skeleton found on base model.");
+  }
+  // adjust camera target
+  if(baseMeshes[0]) arcCam.target = baseMeshes[0];
+}
 
-    const baseRes = await loadFBX(document.getElementById("baseFile").files[0]);
-    baseMesh = baseRes.meshes[0];
-    baseMesh.name="PlayerBase";
-    baseMesh.position = new BABYLON.Vector3(0,1,0);
-    baseMesh.scaling = new BABYLON.Vector3(1,1,1);
+// load map
+async function loadMap(){
+  const f = $('mapFile').files[0];
+  if(!f) return alert("Choose a map glb first");
+  log("Loading map: " + f.name);
+  await appendFileToScene(f);
+}
 
-    const animFiles = {
-        "Idle": document.getElementById("idleFile").files[0],
-        "Walking": document.getElementById("walkFile").files[0],
-        "CrouchIdle": document.getElementById("crouchIdleFile").files[0],
-        "CrouchedWalking": document.getElementById("crouchWalkFile").files[0],
-        "StandingToCrouched": document.getElementById("standToCrouchFile").files[0]
+// scan/add animations
+async function scanAddAnimations(){
+  const files = Array.from($('animFiles').files || []);
+  if(!files.length) return alert("Pick animation GLB(s) first");
+  if(!baseSkeleton) { if(!confirm("No base skeleton loaded — continue? (animations will still be loaded)")) return; }
+  for(const file of files){
+    log("Importing anim file: " + file.name);
+    const added = await appendFileToScene(file);
+    const rec = {
+      fileName: file.name,
+      added,
+      sourceSkeleton: added.newSkels[0] || null,
+      sourceAGs: added.newAG.slice(),
+      mapped: false,
+      unmappedBones: [],
+      fileIndex: importedAnimFiles.length
     };
 
-    for(const [name,file] of Object.entries(animFiles)){
-        if(file){
-            const animRes = await loadFBX(file);
-            animRes.animationGroups.forEach(ag=>{
-                ag.targetedAnimations.forEach(t=>{ t.target = baseMesh; });
-                ag.name=name;
-                animGroups[name]=ag;
-            });
-        }
+    // analyze unmapped bones
+    if(rec.sourceSkeleton && baseSkeleton){
+      const unm = [];
+      rec.sourceSkeleton.bones.forEach(b=>{
+        const found = baseSkeleton.bones.some(bb => bb.name === b.name) || (mappingTable[b.name] && baseSkeleton.bones.some(bb=>bb.name===mappingTable[b.name]));
+        if(!found) unm.push(b.name);
+      });
+      rec.unmappedBones = unm;
+    } else {
+      rec.unmappedBones = rec.sourceSkeleton ? rec.sourceSkeleton.bones.map(b=>b.name) : [];
     }
 
-    const scaleSlider = document.getElementById("playerScale");
-    scaleSlider.addEventListener("input",()=>{ 
-        if(baseMesh) baseMesh.scaling.setAll(scaleSlider.valueAsNumber); 
-    });
-
-    alert("Player loaded with animations!");
+    importedAnimFiles.push(rec);
+    log(`Imported: ${rec.fileName} | anim groups: ${rec.sourceAGs.length} | unmapped bones: ${rec.unmappedBones.length}`);
+    // Attempt to auto-retarget immediately for convenience:
+    await retargetFileAnimations(rec);
+    refreshAnimListUI();
+  }
 }
 
-// Movement input
-window.addEventListener("keydown", e=>{
-    keys[e.key.toLowerCase()]=true;
-    if(e.key.toLowerCase()=="c") targetCrouch = 1-targetCrouch;
-});
-window.addEventListener("keyup", e=>{ keys[e.key.toLowerCase()]=false; });
+// automatic retarget for a file using mappingTable + name matching
+async function retargetFileAnimations(fileRec){
+  if(!fileRec.sourceAGs || fileRec.sourceAGs.length===0) return;
+  const base = baseSkeleton;
+  for(const srcGroup of fileRec.sourceAGs){
+    log("Retargeting group: " + srcGroup.name + " from " + fileRec.fileName);
+    // clone with a mapping function
+    const cloned = srcGroup.clone(srcGroup.name + "_rt", (oldTarget)=>{
+      // oldTarget normally has .name
+      const oname = oldTarget && oldTarget.name ? oldTarget.name : null;
+      if(!oname) return oldTarget;
+      // 1) if mappingTable contains mapping, use it
+      if(mappingTable[oname]){
+        const mapped = mappingTable[oname];
+        const b = base && base.bones.find(bb => bb.name === mapped);
+        if(b) return b;
+      }
+      // 2) if direct match exists by name
+      if(base && base.bones.find(bb => bb.name === oname)) return base.bones.find(bb => bb.name === oname);
+      // 3) fallback: strip prefixes like "mixamorig:" and compare
+      const short = oname.replace(/^.*[:|.]/,'').toLowerCase();
+      const candidate = base && base.bones.find(bb => bb.name.toLowerCase() === short);
+      if(candidate) return candidate;
+      // Not found -> return original target; we'll later remove imported skeletons/meshes
+      return oldTarget;
+    });
 
-// Test map button triggers pointer lock and first-person view
-document.getElementById("btnTestMap").addEventListener("click",()=>{
-    if(baseMesh){
-        canvas.requestPointerLock();
+    // tag metadata so UI knows we added it and whether included
+    cloned.__meta = { fromFile: fileRec.fileName, originalName: srcGroup.name, include: true };
+    retargetedGroups.push(cloned);
+  }
+
+  // After cloning, we can dispose the imported skeleton & meshes to avoid duplicate rigs in scene
+  // BUT be careful: some cloned targetedAnimations may still reference nodes from source skeleton; we only remove imported skeletons if their AGs were cloned successfully
+  // Delete imported skeletons and meshes (best-effort)
+  try {
+    fileRec.added.newAG.forEach(ag => { try{ ag.dispose(); } catch(e){} });
+    fileRec.added.newSkels.forEach(s => { try{ s.dispose(); } catch(e){} });
+    fileRec.added.newMeshes.forEach(m => {
+      if(!m.skeleton || (base && m.skeleton !== base)) {
+        try{ m.dispose(true,true); } catch(e){}
+      }
+    });
+  } catch(e){ log("Cleanup after import error: " + e.message); }
+}
+
+// refresh UI lists
+function populateBoneList(filter){
+  const container = $('boneList');
+  container.innerHTML = "";
+  if(!baseSkeleton) { container.innerText = "No base skeleton loaded."; return; }
+  const bones = baseSkeleton.bones.slice();
+  (filter? bones.filter(b=>b.name.toLowerCase().includes(filter.toLowerCase())):bones).forEach(b=>{
+    const row = document.createElement('div'); row.className = 'boneEntry';
+    const label = document.createElement('div'); label.textContent = b.name;
+    const chk = document.createElement('input'); chk.type='checkbox'; chk.checked = true;
+    chk.onchange = ()=>{ /* inclusion store could be implemented */ };
+    row.appendChild(label); row.appendChild(chk);
+    container.appendChild(row);
+  });
+}
+$('boneSearch').addEventListener('input', ()=>populateBoneList($('boneSearch').value));
+
+function refreshAnimListUI(){
+  const container = $('animFilesList');
+  container.innerHTML = "";
+  // show retargetedGroups grouped by source file (use metadata)
+  const groups = scene.animationGroups.slice();
+  if(groups.length===0){ container.innerText = "No animations in scene."; return; }
+  groups.forEach(g=>{
+    const div = document.createElement('div'); div.className = 'animEntry';
+    const left = document.createElement('div'); left.innerHTML = `<strong>${g.name}</strong><div class="small-muted">from: ${g.__meta?g.__meta.fromFile:'(unknown)'}</div>`;
+    const right = document.createElement('div'); right.className='controls';
+    const play = document.createElement('button'); play.textContent='▶'; play.onclick = ()=>g.play(true);
+    const stop = document.createElement('button'); stop.textContent='■'; stop.onclick = ()=>g.stop();
+    const inc = document.createElement('input'); inc.type='checkbox'; inc.checked = g.__meta ? g.__meta.include : true;
+    inc.onchange = ()=> { if(g.__meta) g.__meta.include = inc.checked; else g.__meta = { include: inc.checked }; };
+    right.appendChild(play); right.appendChild(stop); right.appendChild(inc);
+    div.appendChild(left); div.appendChild(right);
+    container.appendChild(div);
+  });
+}
+
+// Auto-mapper: attempt smart mapping for unmapped bones using heuristics
+function autoMapUnmapped(){
+  if(!baseSkeleton) return alert("Load base first");
+  // create suggestions by normalized name
+  const baseNames = baseSkeleton.bones.map(b=>b.name);
+  function normalize(n){ return n.replace(/[^a-z0-9]/gi,'').toLowerCase(); }
+  const baseNorm = {}; baseNames.forEach(n=> baseNorm[normalize(n)] = n);
+  // for each imported file's sourceSkeleton, map unmapped bones
+  importedAnimFiles.forEach(rec=>{
+    if(!rec.sourceSkeleton) return;
+    rec.sourceSkeleton.bones.forEach(b=>{
+      if(baseSkeleton.bones.some(bb=>bb.name===b.name)) {
+        mappingTable[b.name] = b.name; // direct match
+      } else {
+        const ns = normalize(b.name);
+        if(baseNorm[ns]) mappingTable[b.name] = baseNorm[ns];
+      }
+    });
+  });
+  log("Auto-mapping applied. Use Remapper to fine-tune.");
+}
+
+// Remapper modal UI (simple)
+function openRemapper(){
+  // Gather all unmapped bones across importedAnimFiles
+  const modal = document.createElement('div'); modal.style = "position:fixed;left:420px;top:60px;width:640px;height:520px;background:#041018;border:1px solid rgba(0,216,255,0.08);padding:12px;z-index:9999;overflow:auto;border-radius:8px";
+  const title = document.createElement('h3'); title.textContent = "Bone Remapper — Map animation bones to base bones"; title.style.color = "#9feafc";
+  modal.appendChild(title);
+  if(!baseSkeleton){ const p = document.createElement('div'); p.textContent = "No base skeleton loaded."; modal.appendChild(p); document.body.appendChild(modal); return; }
+  // list every imported file and its unmapped bones
+  importedAnimFiles.forEach(rec=>{
+    const hdr = document.createElement('div'); hdr.textContent = rec.fileName + "  (" + (rec.sourceSkeleton? rec.sourceSkeleton.bones.length : 0) + " bones)"; hdr.style.marginTop='8px'; hdr.style.color='#9feafc';
+    modal.appendChild(hdr);
+    const table = document.createElement('div'); table.style.padding='6px';
+    // for each bone in the file, show a dropdown with base bone options
+    const options = ['(ignore)'].concat(baseSkeleton.bones.map(b=>b.name));
+    (rec.sourceSkeleton? rec.sourceSkeleton.bones : []).forEach(b=>{
+      const row = document.createElement('div'); row.style.display='flex'; row.style.gap='8px'; row.style.margin='4px 0';
+      const name = document.createElement('div'); name.textContent = b.name; name.style.width='44%';
+      const sel = document.createElement('select');
+      options.forEach(opt=>{ const o = document.createElement('option'); o.value = opt; o.textContent = opt; if(mappingTable[b.name] === opt) o.selected = true; sel.appendChild(o); });
+      const autoBtn = document.createElement('button'); autoBtn.textContent='Auto'; autoBtn.onclick = ()=>{
+        // auto-suggestion: strip prefixes and match
+        const short = b.name.replace(/^.*[:.]/,'').toLowerCase();
+        const match = baseSkeleton.bones.find(bb=>bb.name.toLowerCase()===short);
+        if(match) sel.value = match.name; else sel.value='(ignore)';
+      };
+      row.appendChild(name); row.appendChild(sel); row.appendChild(autoBtn);
+      table.appendChild(row);
+      // on change apply to mappingTable
+      sel.onchange = ()=>{ if(sel.value==='(ignore)') delete mappingTable[b.name]; else mappingTable[b.name]=sel.value; };
+    });
+    modal.appendChild(table);
+  });
+
+  const saveBtn = document.createElement('button'); saveBtn.textContent = "Apply & Close"; saveBtn.onclick = ()=>{ document.body.removeChild(modal); log("Remapper applied."); };
+  const exportBtn = document.createElement('button'); exportBtn.textContent = "Export Mapping JSON"; exportBtn.onclick = ()=>{
+    const blob = new Blob([JSON.stringify(mappingTable,null,2)],{type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mapping.json'; a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const importBtn = document.createElement('button'); importBtn.textContent = "Load Mapping JSON"; importBtn.onclick = ()=>$('mapJsonFile').click();
+  const closeBtn = document.createElement('button'); closeBtn.textContent='Close'; closeBtn.onclick = ()=>{ document.body.removeChild(modal); };
+  modal.appendChild(saveBtn); modal.appendChild(exportBtn); modal.appendChild(importBtn); modal.appendChild(closeBtn);
+  document.body.appendChild(modal);
+}
+
+// import mapping JSON
+$('mapJsonFile').addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = ()=>{ try{ mappingTable = JSON.parse(r.result); log("Mapping JSON loaded."); } catch(e){ alert("Invalid JSON"); } };
+  r.readAsText(f);
+});
+
+// apply scale
+$('btnApplyScale').addEventListener('click', ()=>{
+  const val = parseFloat($('scaleInput').value || 1);
+  baseMeshes.forEach(m => { try{ m.scaling = new BABYLON.Vector3(val,val,val); } catch(e){} });
+  log("Scale applied: " + val);
+});
+
+// add FP node (estimate)
+$('btnAddFPNode').addEventListener('click', ()=>{
+  if(!baseMeshes[0]) return alert("Load base first");
+  if(fpNode) fpNode.dispose();
+  fpNode = new BABYLON.TransformNode("FP_Node", scene);
+  // heuristics: place at base mesh top center
+  const bbox = baseMeshes[0].getBoundingInfo().boundingBox;
+  const topY = bbox.maximumWorld.y;
+  fpNode.position = new BABYLON.Vector3(0, topY - (bbox.maximumWorld.y - bbox.minimumWorld.y) * 0.1, 0);
+  gizmo.attachToNode(fpNode);
+  log("FP node created at " + fpNode.position.toString());
+});
+
+// attach fps camera to selected bone or fp node
+$('btnAttachFPS').addEventListener('click', ()=>{
+  // find selected bone from bone list UI (first checked)
+  const boneEntries = document.querySelectorAll('#boneList .boneEntry');
+  let selectedBoneName = null;
+  boneEntries.forEach((row)=>{
+    const chk = row.querySelector('input[type=checkbox]');
+    if(chk && chk.checked && !selectedBoneName){
+      selectedBoneName = row.querySelector('div').innerText;
     }
+  });
+  let attachTarget = null;
+  if(selectedBoneName && baseSkeleton){
+    const b = baseSkeleton.bones.find(bb => bb.name === selectedBoneName);
+    if(b){
+      // try to get transform node for bone
+      try {
+        attachTarget = b.getTransformNode ? b.getTransformNode() : null;
+      } catch(e){ attachTarget = null; }
+    }
+  }
+  if(!attachTarget && fpNode) attachTarget = fpNode;
+  if(!attachTarget) return alert("No bone selected and no FP node available to attach to.");
+  // create fps camera
+  if(fpsCam) { fpsCam.dispose(); fpsCam = null; }
+  fpsCam = new BABYLON.UniversalCamera("fpsCam", new BABYLON.Vector3(0,0,0), scene);
+  fpsCam.parent = attachTarget;
+  fpsCam.position = BABYLON.Vector3.Zero();
+  fpsCam.attachControl(canvas, true);
+  scene.activeCamera = fpsCam;
+  log("FPS camera attached to " + (attachTarget.name||"node"));
 });
 
+// Toggle dev camera
+$('btnToggleDevCam').addEventListener('click', ()=>{
+  if(!devCam){
+    devCam = new BABYLON.FreeCamera("devCam", new BABYLON.Vector3(0,2, -4), scene);
+    devCam.attachControl(canvas, true);
+    scene.activeCamera = devCam;
+    log("Dev camera enabled");
+  } else {
+    // restore arcCam
+    scene.activeCamera = arcCam;
+    try{ devCam.detachControl(canvas); devCam.dispose(); } catch(e){}
+    devCam = null;
+    log("Dev camera disabled");
+  }
+});
+
+// Save spawn location (overwrite previous)
+$('btnSaveSpawn').addEventListener('click', ()=>{
+  if(!devCam) return alert("Enable dev camera first");
+  if(spawnNode) spawnNode.dispose();
+  spawnNode = new BABYLON.TransformNode("SpawnNode", scene);
+  spawnNode.position = devCam.position.clone();
+  gizmo.attachToNode(spawnNode);
+  $('spawnCoords').innerText = `Spawn: ${spawnNode.position.x.toFixed(3)}, ${spawnNode.position.y.toFixed(3)}, ${spawnNode.position.z.toFixed(3)}`;
+  log("Spawn saved: " + spawnNode.position.toString());
+});
+
+// prune (permanent) unselected animations before export
+$('btnPruneUnselected').addEventListener('click', ()=>{
+  if(!confirm("Prune unselected animations? This will permanently remove them from the current scene. Make sure you saved any mapping if needed.")) return;
+  const groups = scene.animationGroups.slice();
+  groups.forEach(g=>{
+    const keep = g.__meta ? g.__meta.include : true;
+    if(!keep){
+      try{ g.dispose(); log("Pruned animation: " + g.name); } catch(e){ log("Error disposing group: "+e.message); }
+    }
+  });
+  refreshAnimListUI();
+});
+
+// export (simple: exports current scene)
+$('btnExport').addEventListener('click', async ()=>{
+  log("Exporting current scene to GLB... (this includes all animations currently present)");
+  try {
+    const res = await BABYLON.GLTF2Export.GLBAsync(scene, "PlayerCombined");
+    res.downloadFiles();
+    log("Export requested. (check downloads)");
+  } catch(err){
+    log("Export failed: " + err.message);
+  }
+});
+
+// open remapper
+$('btnOpenRemapper').addEventListener('click', ()=>openRemapper());
+
+// auto map
+$('btnAutoMap').addEventListener('click', ()=>{ autoMapUnmapped(); log("Auto-map applied (heuristic). Use Remapper to tweak)."); });
+
+// load base/map/animations buttons
+$('btnLoadBase').addEventListener('click', ()=>loadBase());
+$('btnLoadMap').addEventListener('click', ()=>loadMap());
+$('btnScanAnims').addEventListener('click', ()=>scanAddAnimations());
+
+// play/stop all UI
+$('btnPlayAll').addEventListener('click', ()=>scene.animationGroups.forEach(g=>g.play(true)));
+$('btnStopAll').addEventListener('click', ()=>scene.animationGroups.forEach(g=>g.stop()));
+
+// save mapping to file
+$('btnSaveMap').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(mappingTable,null,2)],{type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mapping.json'; a.click();
+  URL.revokeObjectURL(a.href);
+  log("Mapping saved to mapping.json");
+});
+
+// import mapping json via file input
+$('mapJsonFile').addEventListener('change', (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const fr = new FileReader();
+  fr.onload = ()=>{ try{ mappingTable = JSON.parse(fr.result); log("Mapping loaded."); } catch(e){ alert("Invalid JSON"); } };
+  fr.readAsText(f);
+});
+
+// update lists periodically (retained)
 engine.runRenderLoop(()=>{
-    if(baseMesh){
-        // Smooth crouch
-        crouchProgress += (targetCrouch - crouchProgress)*crouchSpeed;
-
-        // Stop all animations
-        for(let agName in animGroups) animGroups[agName].stop();
-
-        // Movement vector
-        let forward = keys["w"]?-1:keys["s"]?1:0;
-        let right = keys["d"]?-1:keys["a"]?1:0;
-        let move = forward!==0 || right!==0;
-
-        // Update animation
-        if(move){
-            if(crouchProgress>0.5) animGroups["CrouchedWalking"]?.play(true);
-            else if(keys["shift"]) { animGroups["Walking"].speedRatio=2; animGroups["Walking"]?.play(true);}
-            else { animGroups["Walking"].speedRatio=1; animGroups["Walking"]?.play(true);}
-        }else{
-            if(crouchProgress>0.5) animGroups["CrouchIdle"]?.play(true);
-            else animGroups["Idle"]?.play(true);
-        }
-
-        // Update player position
-        let forwardVec = new BABYLON.Vector3(0,0,forward*playerSpeed);
-        let rightVec = new BABYLON.Vector3(right*playerSpeed,0,0);
-        let moveVec = forwardVec.add(rightVec);
-        baseMesh.moveWithCollisions(moveVec);
-
-        // Adjust vertical based on crouch
-        baseMesh.position.y = 1 - 0.5*crouchProgress;
-
-        // Camera follows
-        camera.position = baseMesh.position.add(new BABYLON.Vector3(0,2,0));
-        camera.target = baseMesh.position.add(new BABYLON.Vector3(0,1,0));
-    }
-    scene.render();
+  try{ scene.render(); } catch(e){}
 });
+window.addEventListener('resize', ()=>engine.resize());
 
-// Load / Export buttons
-document.getElementById("btnLoadPlayer").addEventListener("click",loadPlayer);
-document.getElementById("btnExportGLB").addEventListener("click", async ()=>{
-    if(!baseMesh){ alert("Load a player first"); return; }
-    const glb = await BABYLON.GLTF2Export.GLBAsync(scene,"Player");
-    glb.downloadFiles();
-});
+// when scene.animationGroups change (not automatic event) we call refreshAnimListUI after operations that add groups
+// manual refresh every few seconds to keep UI in sync:
+setInterval(refreshAnimListUI, 1200);
 
-window.addEventListener("resize",()=>engine.resize());
+log("Player Editor ready.");
+
 </script>
 </body>
 </html>
