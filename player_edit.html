@@ -134,11 +134,15 @@ const scene = new BABYLON.Scene(engine);
 scene.clearColor = new BABYLON.Color4(0.04,0.06,0.08,1);
 
 const logEl = document.getElementById('log');
-function log(msg){ console.log(msg); logEl.textContent = (new Date()).toISOString().substr(11,8) + " | " + msg + "\n" + logEl.textContent; }
+function log(msg){ 
+  console.log(msg); 
+  logEl.textContent = (new Date()).toISOString().substr(11,8) + " | " + msg + "\n" + logEl.textContent; 
+}
 
 const arcCam = new BABYLON.ArcRotateCamera("arcCam", Math.PI/2, Math.PI/3, 4, BABYLON.Vector3.Zero(), scene);
 arcCam.attachControl(canvas, true);
 arcCam.wheelDeltaPercentage = 0.01;
+
 const hem = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
 hem.intensity = 0.9;
 
@@ -147,11 +151,14 @@ ground.material = new BABYLON.StandardMaterial("gmat", scene);
 ground.material.diffuseColor.set(0.03,0.04,0.05);
 
 const gizmo = new BABYLON.GizmoManager(scene);
-gizmo.positionGizmoEnabled = true; gizmo.rotationGizmoEnabled = true; gizmo.scaleGizmoEnabled = false;
+gizmo.positionGizmoEnabled = true;
+gizmo.rotationGizmoEnabled = true;
+gizmo.scaleGizmoEnabled = false;
 
 let baseMeshes = [];
 let baseSkeleton = null;
 let importedAnimFiles = [];
+
 let retargetedGroups = [];
 let mappingTable = {};
 let devCam = null;
@@ -159,204 +166,354 @@ let spawnNode = null;
 let fpNode = null;
 let fpsCam = null;
 
-const $ = id=>document.getElementById(id);
+const $ = id => document.getElementById(id);
 function createBlobURL(file){ return URL.createObjectURL(file); }
 
 async function appendFileToScene(file){
-  const before = { meshes: scene.meshes.slice(), skeletons: scene.skeletons.slice(), animationGroups: scene.animationGroups.slice() };
-  const url = createBlobURL(file);
-  try { await BABYLON.SceneLoader.AppendAsync("", url, scene); } finally { URL.revokeObjectURL(url); }
-  return {
-    newMeshes: scene.meshes.filter(m => !before.meshes.includes(m)),
-    newSkels: scene.skeletons.filter(s => !before.skeletons.includes(s)),
-    newAG: scene.animationGroups.filter(ag => !before.animationGroups.includes(ag))
-  };
+    const before = {
+        meshes: scene.meshes.slice(),
+        skeletons: scene.skeletons.slice(),
+        animationGroups: scene.animationGroups.slice()
+    };
+    const url = createBlobURL(file);
+    try { 
+        await BABYLON.SceneLoader.AppendAsync("", url, scene); 
+    } finally { 
+        URL.revokeObjectURL(url); 
+    }
+    return {
+        newMeshes: scene.meshes.filter(m => !before.meshes.includes(m)),
+        newSkels: scene.skeletons.filter(s => !before.skeletons.includes(s)),
+        newAG: scene.animationGroups.filter(ag => !before.animationGroups.includes(ag))
+    };
 }
 
-// --- Load Base ---
+// — Load Base —
 async function loadBase(){
-  const f = $('baseFile').files[0];
-  if(!f) return alert("Choose a base glb first");
-  log("Loading base: " + f.name);
-  const added = await appendFileToScene(f);
-  baseMeshes = added.newMeshes.slice();
-  baseSkeleton = added.newSkels[0] || (baseMeshes.find(m=>m.skeleton)? baseMeshes.find(m=>m.skeleton).skeleton : null);
-  if(baseSkeleton){ log("Base skeleton loaded: " + baseSkeleton.name + " ("+ baseSkeleton.bones.length+" bones)"); populateBoneList(); }
-  else log("Warning: no skeleton found on base model.");
-  if(baseMeshes[0]) arcCam.target = baseMeshes[0];
+    const f = $('baseFile').files[0];
+    if(!f) return alert("Choose a base glb first");
+    log("Loading base: " + f.name);
+    const added = await appendFileToScene(f);
+    baseMeshes = added.newMeshes.slice();
+    baseSkeleton = added.newSkels[0] || (baseMeshes.find(m=>m.skeleton)? baseMeshes.find(m=>m.skeleton).skeleton : null);
+    if(baseSkeleton){
+        log("Base skeleton loaded: " + baseSkeleton.name + " ("+ baseSkeleton.bones.length +" bones)");
+        populateBoneList();
+    } else log("Warning: no skeleton found on base model.");
+    if(baseMeshes[0]) arcCam.target = baseMeshes[0].position || baseMeshes[0].getBoundingInfo().boundingBox.centerWorld;
 }
 
-// --- Load Map ---
+// — Load Map —
 async function loadMap(){
-  const f = $('mapFile').files[0];
-  if(!f) return alert("Choose a map glb first");
-  log("Loading map: " + f.name);
-  await appendFileToScene(f);
+    const f = $('mapFile').files[0];
+    if(!f) return alert("Choose a map glb first");
+    log("Loading map: " + f.name);
+    await appendFileToScene(f);
 }
 
-// --- Scan/Add Animations ---
+// — Scan/Add Animations —
 async function scanAddAnimations(){
-  const files = Array.from($('animFiles').files || []);
-  if(!files.length) return alert("Pick animation GLB(s) first");
-  if(!baseSkeleton && !confirm("No base skeleton loaded — continue?")) return;
-  for(const file of files){
-    log("Importing anim file: " + file.name);
-    const added = await appendFileToScene(file);
-    const rec = { fileName:file.name, added, sourceSkeleton:added.newSkels[0]||null, sourceAGs:added.newAG.slice(), mapped:false, unmappedBones:[], fileIndex: importedAnimFiles.length };
-    if(rec.sourceSkeleton && baseSkeleton){
-      rec.sourceSkeleton.bones.forEach(b=>{
-        const found = baseSkeleton.bones.some(bb => bb.name === b.name) || (mappingTable[b.name] && baseSkeleton.bones.some(bb=>bb.name===mappingTable[b.name]));
-        if(!found) rec.unmappedBones.push(b.name);
-      });
-    } else rec.unmappedBones = rec.sourceSkeleton ? rec.sourceSkeleton.bones.map(b=>b.name) : [];
-    importedAnimFiles.push(rec);
-    log(`Imported: ${rec.fileName} | anim groups: ${rec.sourceAGs.length} | unmapped bones: ${rec.unmappedBones.length}`);
-    await retargetFileAnimations(rec);
-    refreshAnimListUI();
-  }
+    const files = Array.from($('animFiles').files || []);
+    if(!files.length) return alert("Pick animation GLB(s) first");
+    if(!baseSkeleton && !confirm("No base skeleton loaded — continue?")) return;
+    for(const file of files){
+        log("Importing anim file: " + file.name);
+        const added = await appendFileToScene(file);
+        const rec = { 
+            fileName:file.name, 
+            added, 
+            sourceSkeleton:added.newSkels[0]||null, 
+            sourceAGs:added.newAG.slice(), 
+            mapped:false, 
+            unmappedBones:[], 
+            fileIndex: importedAnimFiles.length 
+        };
+        if(rec.sourceSkeleton && baseSkeleton){
+            rec.sourceSkeleton.bones.forEach(b=>{
+                const found = baseSkeleton.bones.some(bb => bb.name === b.name) || (mappingTable[b.name] && baseSkeleton.bones.some(bb=>bb.name===mappingTable[b.name]));
+                if(!found) rec.unmappedBones.push(b.name);
+            });
+        } else rec.unmappedBones = rec.sourceSkeleton ? rec.sourceSkeleton.bones.map(b=>b.name) : [];
+        importedAnimFiles.push(rec);
+        log(`Imported: ${rec.fileName} | anim groups: ${rec.sourceAGs.length} | unmapped bones: ${rec.unmappedBones.length}`);
+        await retargetFileAnimations(rec);
+        refreshAnimListUI();
+    }
 }
 
-// --- Retarget ---
+// — Retarget —
 async function retargetFileAnimations(fileRec){
-  if(!fileRec.sourceAGs || fileRec.sourceAGs.length===0) return;
-  const base = baseSkeleton;
-  for(const srcGroup of fileRec.sourceAGs){
-    log("Retargeting group: " + srcGroup.name + " from " + fileRec.fileName);
-    const cloned = srcGroup.clone(srcGroup.name + "_rt", oldTarget=>{
-      if(!oldTarget || !oldTarget.name) return oldTarget;
-      const oname = oldTarget.name;
-      if(mappingTable[oname]){
-        const b = base && base.bones.find(bb => bb.name === mappingTable[oname]);
-        if(b) return b;
-      }
-      if(base && base.bones.find(bb => bb.name === oname)) return base.bones.find(bb => bb.name === oname);
-      const short = oname.replace(/^.*[:|.]/,'').toLowerCase();
-      const candidate = base && base.bones.find(bb => bb.name.toLowerCase() === short);
-      if(candidate) return candidate;
-      return oldTarget;
-    });
-    cloned.__meta = { fromFile: fileRec.fileName, originalName: srcGroup.name, include: true };
-    retargetedGroups.push(cloned);
-  }
-  try {
-    fileRec.added.newAG.forEach(ag=>{ try{ ag.dispose(); } catch(e){} });
-    fileRec.added.newSkels.forEach(s=>{ try{ s.dispose(); } catch(e){} });
-    fileRec.added.newMeshes.forEach(m=>{ if(!m.skeleton || (base && m.skeleton!==base)) try{ m.dispose(true,true); } catch(e){} });
-  } catch(e){ log("Cleanup error: " + e.message); }
+    if(!fileRec.sourceAGs || fileRec.sourceAGs.length===0) return;
+    const base = baseSkeleton;
+    for(const srcGroup of fileRec.sourceAGs){
+        log("Retargeting group: " + srcGroup.name + " from " + fileRec.fileName);
+        const cloned = srcGroup.clone(srcGroup.name + "_rt", oldTarget=>{
+            if(!oldTarget || !oldTarget.name) return oldTarget;
+            const oname = oldTarget.name;
+            if(mappingTable[oname]){
+                const b = base && base.bones.find(bb => bb.name === mappingTable[oname]);
+                if(b) return b;
+            }
+            if(base && base.bones.find(bb => bb.name === oname)) return base.bones.find(bb => bb.name === oname);
+            const short = oname.replace(/^.*[:|.]/,'').toLowerCase();
+            const candidate = base && base.bones.find(bb => bb.name.toLowerCase() === short);
+            if(candidate) return candidate;
+            return oldTarget;
+        });
+        cloned.__meta = { fromFile: fileRec.fileName, originalName: srcGroup.name, include: true };
+        retargetedGroups.push(cloned);
+    }
+    try {
+        fileRec.added.newAG.forEach(ag=>{ try{ ag.dispose(); } catch(e){} });
+        fileRec.added.newSkels.forEach(s=>{ try{ s.dispose(); } catch(e){} });
+        fileRec.added.newMeshes.forEach(m=>{ 
+            if(!m.skeleton || (base && m.skeleton!==base)) try{ m.dispose(true,true); } catch(e){} 
+        });
+    } catch(e){ log("Cleanup error: " + e.message); }
 }
 
-// --- UI Refresh ---
+// — UI Refresh —
 function populateBoneList(filter){
-  const container = $('boneList'); container.innerHTML="";
-  if(!baseSkeleton){ container.innerText = "No base skeleton loaded."; return; }
-  const bones = baseSkeleton.bones.slice();
-  (filter? bones.filter(b=>b.name.toLowerCase().includes(filter.toLowerCase())):bones).forEach(b=>{
-    const row = document.createElement('div'); row.className='boneEntry';
-    const label = document.createElement('div'); label.textContent=b.name;
-    const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true;
-    row.appendChild(label); row.appendChild(chk);
-    container.appendChild(row);
-  });
+    const container = $('boneList'); container.innerHTML="";
+    if(!baseSkeleton){ container.innerText = "No base skeleton loaded."; return; }
+    const bones = baseSkeleton.bones.slice();
+    (filter? bones.filter(b=>b.name.toLowerCase().includes(filter.toLowerCase())):bones).forEach(b=>{
+        const row = document.createElement('div'); row.className='boneEntry';
+        const label = document.createElement('div'); label.textContent=b.name;
+        const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true;
+        row.appendChild(label); row.appendChild(chk);
+        container.appendChild(row);
+    });
 }
 $('boneSearch').addEventListener('input', ()=>populateBoneList($('boneSearch').value));
 
 function refreshAnimListUI(){
-  const container = $('animFilesList'); container.innerHTML="";
-  const groups = scene.animationGroups.slice();
-  if(groups.length===0){ container.innerText = "No animations in scene."; return; }
-  groups.forEach(g=>{
-    const div = document.createElement('div'); div.className='animEntry';
-    const left = document.createElement('div'); left.innerHTML=`<strong>${g.name}</strong><div class="small-muted">from: ${g.__meta?g.__meta.fromFile:'(unknown)'}</div>`;
-    const right = document.createElement('div'); right.className='controls';
-    const play = document.createElement('button'); play.textContent='▶'; play.onclick=()=>g.play(true);
-    const stop = document.createElement('button'); stop.textContent='■'; stop.onclick=()=>g.stop();
-    const inc = document.createElement('input'); inc.type='checkbox'; inc.checked=g.__meta?g.__meta.include:true;
-    inc.onchange=()=>{ if(g.__meta) g.__meta.include=inc.checked; else g.__meta={include:inc.checked}; };
-    right.appendChild(play); right.appendChild(stop); right.appendChild(inc);
-    div.appendChild(left); div.appendChild(right);
-    container.appendChild(div);
-  });
+    const container = $('animFilesList'); container.innerHTML="";
+    const groups = scene.animationGroups.slice();
+    if(groups.length===0){ container.innerText = "No animations in scene."; return; }
+    groups.forEach(g=>{
+        const div = document.createElement('div'); div.className='animEntry';
+        const left = document.createElement('div'); 
+        left.innerHTML = `<strong>${g.name}</strong><div class="small-muted">from: ${g.__meta?g.__meta.fromFile:'(unknown)'}</div>`;
+        const right = document.createElement('div'); right.className='controls';
+        const play = document.createElement('button'); play.textContent='▶'; play.onclick=()=>g.play(true);
+        const stop = document.createElement('button'); stop.textContent='■'; stop.onclick=()=>g.stop();
+        const inc = document.createElement('input'); inc.type='checkbox'; inc.checked=g.__meta?g.__meta.include:true;
+        inc.onchange=()=>{ if(g.__meta) g.__meta.include=inc.checked; else g.__meta={include:inc.checked}; };
+        right.appendChild(play); right.appendChild(stop); right.appendChild(inc);
+        div.appendChild(left); div.appendChild(right);
+        container.appendChild(div);
+    });
+} 
+// --- Utility ---
+const $ = id => document.getElementById(id);
+function createBlobURL(file){ return URL.createObjectURL(file); }
+
+async function appendFileToScene(file){
+    const before = { meshes: scene.meshes.slice(), skeletons: scene.skeletons.slice(), animationGroups: scene.animationGroups.slice() };
+    const url = createBlobURL(file);
+    try { 
+        await BABYLON.SceneLoader.AppendAsync("", url, scene); 
+    } finally { 
+        URL.revokeObjectURL(url); 
+    }
+    return {
+        newMeshes: scene.meshes.filter(m => !before.meshes.includes(m)),
+        newSkels: scene.skeletons.filter(s => !before.skeletons.includes(s)),
+        newAG: scene.animationGroups.filter(ag => !before.animationGroups.includes(ag))
+    };
+}
+
+// --- Load Base Player ---
+async function loadBase(){
+    const f = $('baseFile').files[0];
+    if(!f) return alert("Choose a base GLB first");
+    log("Loading base: " + f.name);
+    const added = await appendFileToScene(f);
+    baseMeshes = added.newMeshes.slice();
+    baseSkeleton = added.newSkels[0] || (baseMeshes.find(m=>m.skeleton)? baseMeshes.find(m=>m.skeleton).skeleton : null);
+    if(baseSkeleton){
+        log(`Base skeleton loaded: ${baseSkeleton.name} (${baseSkeleton.bones.length} bones)`);
+        populateBoneList();
+    } else log("Warning: no skeleton found on base model.");
+    if(baseMeshes[0]) arcCam.target = baseMeshes[0].position.clone();
+}
+
+// --- Load Map ---
+async function loadMap(){
+    const f = $('mapFile').files[0];
+    if(!f) return alert("Choose a map GLB first");
+    log("Loading map: " + f.name);
+    await appendFileToScene(f);
+}
+
+// --- Scan/Add Animations ---
+async function scanAddAnimations(){
+    const files = Array.from($('animFiles').files || []);
+    if(!files.length) return alert("Pick animation GLB(s) first");
+    if(!baseSkeleton && !confirm("No base skeleton loaded — continue?")) return;
+
+    for(const file of files){
+        log("Importing anim file: " + file.name);
+        const added = await appendFileToScene(file);
+        const rec = { fileName:file.name, added, sourceSkeleton:added.newSkels[0]||null, sourceAGs:added.newAG.slice(), mapped:false, unmappedBones:[], fileIndex: importedAnimFiles.length };
+        if(rec.sourceSkeleton && baseSkeleton){
+            rec.sourceSkeleton.bones.forEach(b=>{
+                const found = baseSkeleton.bones.some(bb => bb.name === b.name) || (mappingTable[b.name] && baseSkeleton.bones.some(bb=>bb.name===mappingTable[b.name]));
+                if(!found) rec.unmappedBones.push(b.name);
+            });
+        } else rec.unmappedBones = rec.sourceSkeleton ? rec.sourceSkeleton.bones.map(b=>b.name) : [];
+        importedAnimFiles.push(rec);
+        log(`Imported: ${rec.fileName} | anim groups: ${rec.sourceAGs.length} | unmapped bones: ${rec.unmappedBones.length}`);
+        await retargetFileAnimations(rec);
+        refreshAnimListUI();
+    }
+}
+
+// --- Retarget Animations ---
+async function retargetFileAnimations(fileRec){
+    if(!fileRec.sourceAGs || fileRec.sourceAGs.length===0) return;
+    const base = baseSkeleton;
+    for(const srcGroup of fileRec.sourceAGs){
+        log("Retargeting group: " + srcGroup.name + " from " + fileRec.fileName);
+        const cloned = srcGroup.clone(srcGroup.name + "_rt", oldTarget=>{
+            if(!oldTarget || !oldTarget.name) return oldTarget;
+            const oname = oldTarget.name;
+            if(mappingTable[oname]){
+                const b = base && base.bones.find(bb => bb.name === mappingTable[oname]);
+                if(b) return b;
+            }
+            if(base && base.bones.find(bb => bb.name === oname)) return base.bones.find(bb => bb.name === oname);
+            const short = oname.replace(/^.*[:|.]/,'').toLowerCase();
+            const candidate = base && base.bones.find(bb => bb.name.toLowerCase() === short);
+            if(candidate) return candidate;
+            return oldTarget;
+        });
+        cloned.__meta = { fromFile: fileRec.fileName, originalName: srcGroup.name, include: true };
+        retargetedGroups.push(cloned);
+    }
+
+    // Clean up original imported meshes/AGs
+    try {
+        fileRec.added.newAG.forEach(ag=>{ try{ ag.dispose(); } catch(e){} });
+        fileRec.added.newSkels.forEach(s=>{ try{ s.dispose(); } catch(e){} });
+        fileRec.added.newMeshes.forEach(m=>{ if(!m.skeleton || (base && m.skeleton!==base)) try{ m.dispose(true,true); } catch(e){} });
+    } catch(e){ log("Cleanup error: " + e.message); }
+}
+
+// --- UI Updates ---
+function populateBoneList(filter){
+    const container = $('boneList'); container.innerHTML="";
+    if(!baseSkeleton){ container.innerText = "No base skeleton loaded."; return; }
+    const bones = baseSkeleton.bones.slice();
+    (filter? bones.filter(b=>b.name.toLowerCase().includes(filter.toLowerCase())):bones).forEach(b=>{
+        const row = document.createElement('div'); row.className='boneEntry';
+        const label = document.createElement('div'); label.textContent=b.name;
+        const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true;
+        row.appendChild(label); row.appendChild(chk);
+        container.appendChild(row);
+    });
+}
+$('boneSearch').addEventListener('input', ()=>populateBoneList($('boneSearch').value));
+
+function refreshAnimListUI(){
+    const container = $('animFilesList'); container.innerHTML="";
+    const groups = scene.animationGroups.slice();
+    if(groups.length===0){ container.innerText = "No animations in scene."; return; }
+    groups.forEach(g=>{
+        const div = document.createElement('div'); div.className='animEntry';
+        const left = document.createElement('div'); 
+        left.innerHTML=`<strong>${g.name}</strong><div class="small-muted">from: ${g.__meta?g.__meta.fromFile:'(unknown)'}</div>`;
+        const right = document.createElement('div'); right.className='controls';
+        const play = document.createElement('button'); play.textContent='▶'; play.onclick=()=>g.play(true);
+        const stop = document.createElement('button'); stop.textContent='■'; stop.onclick=()=>g.stop();
+        const inc = document.createElement('input'); inc.type='checkbox'; inc.checked=g.__meta?g.__meta.include:true;
+        inc.onchange=()=>{ if(g.__meta) g.__meta.include=inc.checked; else g.__meta={include:inc.checked}; };
+        right.appendChild(play); right.appendChild(stop); right.appendChild(inc);
+        div.appendChild(left); div.appendChild(right);
+        container.appendChild(div);
+    });
 }
 
 // --- Auto-map ---
 function autoMapUnmapped(){
-  if(!baseSkeleton) return alert("Load base first");
-  const baseNorm = {}; baseSkeleton.bones.forEach(n=>baseNorm[n.name.toLowerCase().replace(/[^a-z0-9]/gi,'')]=n.name);
-  importedAnimFiles.forEach(rec=>{
-    if(!rec.sourceSkeleton) return;
-    rec.sourceSkeleton.bones.forEach(b=>{
-      if(baseSkeleton.bones.some(bb=>bb.name===b.name)) mappingTable[b.name]=b.name;
-      else { const ns=b.name.toLowerCase().replace(/[^a-z0-9]/gi,''); if(baseNorm[ns]) mappingTable[b.name]=baseNorm[ns]; }
+    if(!baseSkeleton) return alert("Load base first");
+    const baseNorm = {}; baseSkeleton.bones.forEach(n=>baseNorm[n.name.toLowerCase().replace(/[^a-z0-9]/gi,'')]=n.name);
+    importedAnimFiles.forEach(rec=>{
+        if(!rec.sourceSkeleton) return;
+        rec.sourceSkeleton.bones.forEach(b=>{
+            if(baseSkeleton.bones.some(bb=>bb.name===b.name)) mappingTable[b.name]=b.name;
+            else { 
+                const ns=b.name.toLowerCase().replace(/[^a-z0-9]/gi,''); 
+                if(baseNorm[ns]) mappingTable[b.name]=baseNorm[ns]; 
+            }
+        });
     });
-  });
-  log("Auto-mapping applied.");
+    log("Auto-mapping applied.");
 }
 
 // --- Remapper UI ---
 function openRemapper(){
-  const modal=document.createElement('div'); modal.style="position:fixed;left:420px;top:60px;width:640px;height:520px;background:#041018;border:1px solid rgba(0,216,255,0.08);padding:12px;z-index:9999;overflow:auto;border-radius:8px";
-  const title=document.createElement('h3'); title.textContent="Bone Remapper — Map animation bones to base bones"; title.style.color="#9feafc"; modal.appendChild(title);
-  if(!baseSkeleton){ const p=document.createElement('div'); p.textContent="No base skeleton loaded."; modal.appendChild(p); document.body.appendChild(modal); return; }
-  importedAnimFiles.forEach(rec=>{
-    const hdr=document.createElement('div'); hdr.textContent=rec.fileName + " (" + (rec.sourceSkeleton? rec.sourceSkeleton.bones.length:0) + " bones)"; hdr.style    hdr.style.marginTop='8px'; hdr.style.color='#9feafc';
-    modal.appendChild(hdr);
-    const table=document.createElement('div');
-    if(!rec.sourceSkeleton) return;
-    rec.sourceSkeleton.bones.forEach(b=>{
-      const row=document.createElement('div'); row.className='row';
-      const lbl=document.createElement('div'); lbl.textContent=b.name;
-      const sel=document.createElement('select');
-      baseSkeleton.bones.forEach(bb=>{
-        const opt=document.createElement('option'); opt.value=bb.name; opt.text=bb.name;
-        if(mappingTable[b.name]===bb.name) opt.selected=true;
-        sel.appendChild(opt);
-      });
-      sel.onchange=()=>{ mappingTable[b.name]=sel.value; };
-      row.appendChild(lbl); row.appendChild(sel);
-      table.appendChild(row);
+    const modal=document.createElement('div'); 
+    modal.style="position:fixed;left:420px;top:60px;width:640px;height:520px;background:#041018;border:1px solid rgba(0,216,255,0.08);padding:12px;z-index:9999;overflow:auto;border-radius:8px";
+    const title=document.createElement('h3'); title.textContent="Bone Remapper — Map animation bones to base bones"; title.style.color="#9feafc"; modal.appendChild(title);
+    if(!baseSkeleton){ const p=document.createElement('div'); p.textContent="No base skeleton loaded."; modal.appendChild(p); document.body.appendChild(modal); return; }
+    importedAnimFiles.forEach(rec=>{
+        const hdr=document.createElement('div'); hdr.textContent=rec.fileName + " (" + (rec.sourceSkeleton? rec.sourceSkeleton.bones.length:0) + " bones)"; hdr.style.marginTop='8px'; hdr.style.color='#9feafc';
+        modal.appendChild(hdr);
+        const table=document.createElement('div'); modal.appendChild(table);
+        if(!rec.sourceSkeleton) return;
+        rec.sourceSkeleton.bones.forEach(b=>{
+            const row=document.createElement('div'); row.className='row';
+            const lbl=document.createElement('div'); lbl.textContent=b.name;
+            const sel=document.createElement('select');
+            baseSkeleton.bones.forEach(bb=>{
+                const opt=document.createElement('option'); opt.value=bb.name; opt.text=bb.name;
+                if(mappingTable[b.name]===bb.name) opt.selected=true;
+                sel.appendChild(opt);
+            });
+            sel.onchange=()=>{ mappingTable[b.name]=sel.value; };
+            row.appendChild(lbl); row.appendChild(sel);
+            table.appendChild(row);
+        });
     });
-    modal.appendChild(table);
-  });
-  const btnClose=document.createElement('button'); btnClose.textContent='Close';
-  btnClose.onclick=()=>document.body.removeChild(modal);
-  modal.appendChild(btnClose);
-  document.body.appendChild(modal);
+    const btnClose=document.createElement('button'); btnClose.textContent='Close';
+    btnClose.onclick=()=>document.body.removeChild(modal);
+    modal.appendChild(btnClose);
+    document.body.appendChild(modal);
 }
 
 // --- Spawn Node ---
+let fpNode=null;
 function saveSpawnNode(){
-  if(!fpNode){
-    fpNode = new BABYLON.TransformNode("SpawnPoint", scene);
-  }
-  const pos = arcCam.target.clone();
-  fpNode.position.copyFrom(pos);
-  $('spawnCoords').textContent = `Spawn: (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`;
-  log("Spawn node updated at: " + fpNode.position.toString());
+    if(!fpNode) fpNode = new BABYLON.TransformNode("SpawnPoint", scene);
+    const ray = new BABYLON.Ray(arcCam.target.clone().add(new BABYLON.Vector3(0,5,0)), new BABYLON.Vector3(0,-1,0), 100);
+    const hit = scene.pickWithRay(ray, m=> m!==fpNode && m!==ground);
+    if(hit.hit) fpNode.position.copyFrom(hit.pickedPoint);
+    else fpNode.position.copyFrom(arcCam.target);
+    $('spawnCoords').textContent = `Spawn: (${fpNode.position.x.toFixed(2)}, ${fpNode.position.y.toFixed(2)}, ${fpNode.position.z.toFixed(2)})`;
+    log("Spawn node updated at: " + fpNode.position.toString());
 }
 
-// --- Free Dev Camera ---
+// --- Dev Camera ---
+let devCam=null;
 function toggleDevCam(){
-  if(devCam){
-    devCam.detachControl(canvas);
-    devCam.dispose();
-    devCam = null;
-    log("Dev camera disabled");
-    return;
-  }
-  devCam = new BABYLON.FreeCamera("devCam", arcCam.target.clone().add(new BABYLON.Vector3(0,1,5)), scene);
-  devCam.attachControl(canvas, true);
-  devCam.speed = 0.5;
-  log("Dev camera enabled");
+    if(devCam){
+        devCam.detachControl(canvas); devCam.dispose(); devCam=null; log("Dev camera disabled"); return;
+    }
+    devCam = new BABYLON.FreeCamera("devCam", arcCam.target.clone().add(new BABYLON.Vector3(0,1,5)), scene);
+    devCam.attachControl(canvas, true); devCam.speed = 0.5; log("Dev camera enabled");
 }
 
-// --- FPS Camera Attach ---
+// --- FPS Camera ---
+let fpsCam=null;
 function attachFPS(){
-  if(!fpNode) return alert("Place a Spawn Node first");
-  if(fpsCam) fpsCam.dispose();
-  fpsCam = new BABYLON.FreeCamera("fpsCam", fpNode.position.clone(), scene);
-  fpsCam.attachControl(canvas, true);
-  arcCam.detachControl(canvas);
-  log("FPS Camera attached to SpawnNode");
+    if(!fpNode) return alert("Place a Spawn Node first");
+    if(fpsCam) fpsCam.dispose();
+    fpsCam = new BABYLON.FreeCamera("fpsCam", fpNode.position.clone(), scene);
+    fpsCam.attachControl(canvas, true);
+    arcCam.detachControl(canvas);
+    log("FPS Camera attached to SpawnNode");
 }
 
 // --- Button bindings ---
@@ -369,33 +526,32 @@ $('btnAddFPNode').onclick=saveSpawnNode;
 $('btnToggleDevCam').onclick=toggleDevCam;
 $('btnAttachFPS').onclick=attachFPS;
 $('btnApplyScale').onclick=()=>{
-  const s=parseFloat($('scaleInput').value)||1;
-  baseMeshes.forEach(m=>m.scaling.setAll(s));
-  log("Player scale applied: "+s);
+    const s=parseFloat($('scaleInput').value)||1;
+    baseMeshes.forEach(m=>m.scaling.setAll(s));
+    log("Player scale applied: "+s);
 };
 
 // --- Animation Controls ---
 $('btnPlayAll').onclick=()=>retargetedGroups.forEach(g=>g.play(true));
 $('btnStopAll').onclick=()=>retargetedGroups.forEach(g=>g.stop());
 $('btnPruneUnselected').onclick=()=>{
-  retargetedGroups.filter(g=>!g.__meta?.include).forEach(g=>g.dispose());
-  retargetedGroups = retargetedGroups.filter(g=>g.__meta?.include);
-  refreshAnimListUI();
-  log("Pruned unselected animations");
+    retargetedGroups.filter(g=>!g.__meta?.include).forEach(g=>g.dispose());
+    retargetedGroups = retargetedGroups.filter(g=>g.__meta?.include);
+    refreshAnimListUI();
+    log("Pruned unselected animations");
 };
 
-// --- Export ---
+// --- Export GLB ---
 $('btnExport').onclick=async()=>{
-  const allMeshes = baseMeshes.slice();
-  if(fpNode) allMeshes.push(fpNode);
-  const glb = await BABYLON.GLTF2Export.GLBAsync(scene, "exported_player", {shouldExportTransformNode:true});
-  glb.downloadFiles();
-  log("GLB exported with current base mesh, skeleton, animations, and SpawnPoint");
+    if(!baseMeshes.length) return alert("No base meshes to export");
+    if(fpNode) baseMeshes.push(fpNode);
+    const glb = await BABYLON.GLTF2Export.GLBAsync(scene, "exported_player", {shouldExportTransformNode:true});
+    glb.downloadFiles();
+    log("GLB exported with current base mesh, skeleton, animations, and SpawnPoint");
 };
 
 // --- Main Render Loop ---
 engine.runRenderLoop(()=>{ scene.render(); });
 window.addEventListener('resize', ()=>engine.resize());
 </script>
-</body>
 </html>
