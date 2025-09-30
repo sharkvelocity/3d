@@ -7,12 +7,12 @@ window.PP = window.PP || {};
 // Map Definitions (will be populated from maps.json in bootstrap)
 PP.mapManifest = [];
 
-// Weather Definitions
+// Weather Definitions - CONFIRMED AUDIO FILE NAMES from your repo tree
 PP.weatherDefs = [
-  { type: "Clear", tempRange: [15, 25], ambient: "clear.mp3" },
-  { type: "Rain", tempRange: [10, 18], ambient: "rain.mp3" },
-  { type: "Snow", tempRange: [-5, 2], ambient: "wind.mp3" },
-  { type: "Foggy", tempRange: [8, 14], ambient: "fog.mp3" },
+  { type: "Clear", tempRange: [15, 25], ambient: "clearWeather.mp3" }, // Using clearWeather.mp3
+  { type: "Rain", tempRange: [10, 18], ambient: "rainstorm.mp3" },   // Using rainstorm.mp3
+  { type: "Snow", tempRange: [-5, 2], ambient: "snow.mp3" },        // Using snow.mp3
+  { type: "Foggy", tempRange: [8, 14], ambient: "ambient.mp3" },    // Assuming ambient.mp3 for fog (adjust if you have a specific fog sound)
 ];
 
 // If you have specific procedural generator definitions or settings that
@@ -22,6 +22,3 @@ PP.weatherDefs = [
 // };
 
 console.log("[map_loader] Definitions loaded.");
-
-// No IIAFE here, no DOM manipulation, no event listeners.
-// Just data and simple utility functions.
