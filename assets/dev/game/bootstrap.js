@@ -118,10 +118,10 @@ function createEngineScene(){
   const canvas=$("#renderCanvas");
   if(!canvas) throw new Error("Missing #renderCanvas");
   engine=new BABYLON.Engine(canvas,true,{preserveDrawingBuffer:true,stencil:true,antialias:true});
-  scene=new BABYLON.Scene(engine);
-  scene.fogMode=BABYLON.Scene.FOGMODE_EXP2;
-  scene.fogDensity=0.0045;
-  scene.fogColor=new BABYLON.Color3(0.02,0.03,0.05);
+  scene = new BABYLON.Scene(engine);
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
+  scene.fogDensity = 0.0045;
+  scene.fogColor = new BABYLON.Color3(0.02, 0.03, 0.05);
 
   hemi=new BABYLON.HemisphericLight("hemi",new BABYLON.Vector3(0,1,0),scene);
   hemi.intensity=0.35;
@@ -146,10 +146,11 @@ function createEngineScene(){
   }
 
 
-  window.ENGINE=engine;
-  window.SCENE=scene; // Make scene globally accessible for other modules
-  window.camera=camera; // Make camera globally accessible
-
+  window.ENGINE = engine;
+  window.scene = scene;  
+  window.SCENE = scene;  
+  window.camera = camera; 
+  
   engine.runRenderLoop(()=>{ try{ if(scene) scene.render(); }catch(e){} });
   window.addEventListener("resize",()=>engine.resize());
   log("Babylon.js Engine and Scene created.");
