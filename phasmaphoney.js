@@ -1,4 +1,3 @@
-
 // =================================================================
 // PhasmaPhoney Monolithic Game Script
 // This file is a combination of all game-related JavaScript files.
@@ -182,27 +181,124 @@
 
 
 // =================================================================
+// START: assets/dev/game/ghost_logic.js
+// =================================================================
+(function(){
+  "use strict";
+  if (window.PP?.ghost?.logic) return;
+
+  const log = (...a) => console.log("[GhostLogic]", ...a);
+  const warn = (...a) => console.warn("[GhostLogic]", ...a);
+  
+  const BASE_URL = "https://sharkvelocity.github.io/3d/assets/models/ghosts/";
+
+  const GhostLogic = {
+    _scene: null,
+    _isInitialized: false,
+    
+    data: null,      // To hold the selected ghost's data (name, evidence, etc.)
+    root: null,      // The main TransformNode for positioning
+    modelRoot: null, // The root of the loaded GLB model
+    
+    init: function(scene) {
+      if (this._isInitialized || !scene) return;
+      this._scene = scene;
+      
+      this.root = new BABYLON.TransformNode("GhostRoot", scene);
+      this.root.position.set(0, -100, 0); // Start hidden
+      
+      // The dev tools might load a different model, but we start with the default.
+      this.setModel('ghost.glb');
+      
+      scene.onBeforeRenderObservable.add(() => this.update(scene.getEngine().getDeltaTime() / 1000));
+      
+      this._isInitialized = true;
+      log("Initialized.");
+    },
+    
+    setModel: async function(fileName) {
+      if (!this.root) {
+        warn("Cannot set model, root node not initialized.");
+        return;
+      }
+      
+      if (this.modelRoot) {
+        this.modelRoot.dispose();
+        this.modelRoot = null;
+      }
+      
+      const fullUrl = BASE_URL + fileName;
+      log(`Loading ghost model from: ${fullUrl}`);
+      
+      try {
+        const result = await BABYLON.SceneLoader.ImportMeshAsync(null, "", fullUrl, this._scene);
+        const loadedRoot = result.meshes[0];
+        
+        if (!loadedRoot) {
+            throw new Error("No meshes found in the loaded GLB file.");
+        }
+        
+        loadedRoot.name = "ghostModelRoot";
+        loadedRoot.parent = this.root;
+        loadedRoot.position.set(0, 0, 0);
+        
+        this.modelRoot = loadedRoot;
+        log("Ghost model loaded successfully.");
+        
+        // Apply current visibility state from dev tools if it exists
+        this.setVisible(window.GHOST_DEV_FORCE_VISIBLE || false);
+
+      } catch (error) {
+        warn(`Failed to load ghost model: ${fullUrl}`, error);
+      }
+    },
+    
+    setScale: function(scale) {
+      if (this.modelRoot) {
+        this.modelRoot.scaling.setAll(scale);
+      }
+    },
+    
+    setVisible: function(isVisible) {
+      const shouldBeVisible = window.GHOST_DEV_FORCE_VISIBLE || isVisible;
+      
+      if (this.modelRoot) {
+        this.modelRoot.getChildMeshes(false).forEach(m => m.setEnabled(shouldBeVisible));
+        this.modelRoot.setEnabled(shouldBeVisible);
+      }
+    },
+    
+    update: function(dt) {
+      if (!this.root) return;
+      // Placeholder logic for ghost movement, etc.
+    }
+  };
+  
+  window.PP = window.PP || {};
+  window.PP.ghost = Object.assign(window.PP.ghost || {}, GhostLogic);
+  window.PP.ghost.logic = true; // Mark as loaded
+
+})();
+// =================================================================
+// END: assets/dev/game/ghost_logic.js
+// =================================================================
+
+
+// =================================================================
 // START: assets/dev/game/map_loader.js
 // =================================================================
 (function(){
   "use strict";
-  // This module provides the definitive map manifest for the game.
-  // It directly sets the list of maps, ensuring consistency.
   window.PP = window.PP || {};
-
-  // The corrected and complete list of maps available for investigation.
   const MAPS = [
       {
-          id: 'default_map',
+          id: 'procedural_house',
           title: 'Investigation Site',
-          file: 'map.glb'
+          file: null // This map is generated, not loaded from a file
       }
   ];
-
-  // Directly assign the manifest to ensure it's always correctly formatted.
   window.PP.mapManifest = MAPS;
-
-  console.log("[map_loader] Map manifest created. Total maps:", window.PP.mapManifest.length);
+  console.log("[map_loader] Map manifest updated to use procedural generator.");
 })();
 // =================================================================
 // END: assets/dev/game/map_loader.js
@@ -3227,9 +3323,9 @@ log("Map Manager initialized.");
 
 
 // =================================================================
-// START: assets/dev/game/bootstrap.js
+// START: assets/dev/game/bootstrap.js (ROBUST INITIALIZATION REWORK)
 // =================================================================
-(async function(){
+(function(){
 "use strict";
 
 const log = (...a) => console.log("[Bootstrap]", ...a);
@@ -3271,35 +3367,33 @@ window.showLoading = showLoading;
 
 async function setupEngine() {
     log("1. Setting up engine and scene...");
-    showLoading(true, 10, "Initializing Engine...");
     
     const canvas = document.getElementById('renderCanvas');
     if (!canvas) {
-        throw new Error("renderCanvas not found!");
+        throw new Error("renderCanvas element not found in the DOM!");
     }
+    
     engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     scene = new BABYLON.Scene(engine);
     scene.collisionsEnabled = true;
     scene.gravity = new BABYLON.Vector3(0, -9.81, 0);
 
     camera = new BABYLON.FreeCamera("mainCam", new BABYLON.Vector3(0, 1.8, -5), scene);
-    camera.attachControl(canvas, true);
+    camera.attachControl(canvas, false); // Attach control later if needed
     scene.activeCamera = camera;
 
     const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
     hemi.intensity = 0.8;
-    scene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.05, 1);
-    scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-    scene.fogDensity = 0.01;
-    scene.fogColor = new BABYLON.Color3(0.02, 0.03, 0.05);
+    scene.clearColor = new BABYLON.Color4(0.0, 0.0, 0.0, 1.0);
 
+    // SMOKE TEST: Add simple, highly visible geometry to confirm rendering works.
     const debugGround = BABYLON.MeshBuilder.CreateGround("debugGround", {width: 20, height: 20}, scene);
     debugGround.isPickable = false;
     const debugSphere = BABYLON.MeshBuilder.CreateSphere("debugSphere", {diameter: 1}, scene);
     debugSphere.position.y = 1;
     debugSphere.isPickable = false;
     const debugMat = new BABYLON.StandardMaterial("debugMat", scene);
-    debugMat.diffuseColor = new BABYLON.Color3(0.8, 0.2, 0.5);
+    debugMat.diffuseColor = new BABYLON.Color3(1.0, 0.0, 1.0); // Bright magenta
     debugGround.material = debugMat;
     debugSphere.material = debugMat;
 
@@ -3310,19 +3404,15 @@ async function setupEngine() {
     PP.runtime?.exportGlobals(engine, scene, camera);
 
     window.addEventListener('resize', () => engine.resize());
-    log("Engine and scene OK.");
     
-    // START RENDER LOOP IMMEDIATELY FOR SMOKE TEST
+    // START RENDER LOOP IMMEDIATELY FOR THE SMOKE TEST
     engine.runRenderLoop(() => {
         if (scene && scene.activeCamera) {
             scene.render();
         }
     });
-}
-
-function setupPlayer() {
-    log("2. Setting up player rig...");
-    showLoading(true, 25, "Creating Player...");
+    
+    log("Engine and scene OK. Render loop started for smoke test.");
 }
 
 async function loadSelectedMap(mapId) {
@@ -3346,28 +3436,22 @@ async function loadSelectedMap(mapId) {
 async function setupMapAndWeather(mapId) {
     log("3. Loading map and initializing weather...");
     showLoading(true, 40, "Building World...");
-    try {
-        await loadSelectedMap(mapId);
+    
+    await loadSelectedMap(mapId);
 
-        if(window.EnvAndSound && typeof window.EnvAndSound.firstInteractionBoot === 'function') {
-            window.EnvAndSound.firstInteractionBoot();
-            const weathers = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
-            const choice = weathers[Math.floor(Math.random() * weathers.length)];
-            window.EnvAndSound.setWeather(choice, { intensity: 0.5 + Math.random() * 0.5 });
-            log(`Initial weather set to: ${choice}`);
-        } else {
-            warn("EnvAndSound system not found.");
-        }
+    if(window.EnvAndSound && typeof window.EnvAndSound.firstInteractionBoot === 'function') {
+        window.EnvAndSound.firstInteractionBoot();
+        const weathers = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
+        const choice = weathers[Math.floor(Math.random() * weathers.length)];
+        window.EnvAndSound.setWeather(choice, { intensity: 0.5 + Math.random() * 0.5 });
+        log(`Initial weather set to: ${choice}`);
+    } else {
+        warn("EnvAndSound system not found.");
+    }
 
-        if (typeof window.applyDoorsConfig === 'function') {
-            window.applyDoorsConfig(scene);
-            log("Door configurations applied.");
-        }
-
-    } catch (error) {
-        warn("Error during map and weather setup:", error);
-        showLoading(true, 100, `Error loading map: ${error.message}`);
-        throw error;
+    if (typeof window.applyDoorsConfig === 'function') {
+        window.applyDoorsConfig(scene);
+        log("Door configurations applied.");
     }
 }
 
@@ -3375,12 +3459,23 @@ function setupGameplaySystems() {
     log("4. Initializing gameplay systems...");
     showLoading(true, 75, "Waking Entities...");
 
+    // Init ghost logic FIRST, so PP.ghost object with methods exists
+    if (PP.ghost?.init) {
+        PP.ghost.init(scene);
+        log("Initialized ghost logic.");
+    } else {
+        warn("Ghost logic module not found for initialization.");
+    }
+
+    // Now select ghost DATA and assign it to the ghost logic object
     const ghostNames = Object.keys(PP.GHOST_DATA || {});
     if (ghostNames.length > 0) {
         const randomGhostName = ghostNames[Math.floor(Math.random() * ghostNames.length)];
         state.selectedGhost = PP.GHOST_DATA[randomGhostName];
         log(`Selected Ghost: ${state.selectedGhost.name}`);
-        window.PP.ghost = state.selectedGhost;
+        if (window.PP.ghost) {
+            window.PP.ghost.data = state.selectedGhost;
+        }
     } else {
         warn("GHOST_DATA is empty! Cannot select a ghost.");
     }
@@ -3394,7 +3489,6 @@ function setupGameplaySystems() {
         if (typeof tool.init === 'function') {
             try {
                 tool.init(scene);
-                log(`Initialized tool: ${tool.constructor.name || 'anonymous tool'}`);
             } catch (e) {
                 warn(`Error initializing a tool:`, e);
             }
@@ -3406,7 +3500,6 @@ function setupGameplaySystems() {
         if(sys && typeof sys.init === 'function') {
              try {
                 sys.init(scene);
-                log(`Initialized system: ${sysName}`);
              } catch(e){
                 warn(`Error initializing system ${sysName}:`, e);
              }
@@ -3414,47 +3507,31 @@ function setupGameplaySystems() {
     });
 }
 
-function runGameLoop() {
-    log("5. Starting render loop.");
-    showLoading(true, 90, "Finalizing...");
-    
-    // The render loop is already running from setupEngine. This function is now for post-init logic.
-    setTimeout(() => {
-        camera = scene.activeCamera;
-        window.camera = camera;
-        PP.runtime?.exportGlobals(engine, scene, camera);
-        log("Camera reference captured from player rig.");
-    }, 500);
-}
-
 async function startGame(mapId) {
     if (state.isStarted) return;
-    log(`PhasmaPhoney starting with map: ${mapId}`);
+    log(`Starting game content loading for map: ${mapId}`);
     
-    showLoading(true, 5, "Starting...");
-
-    setupPlayer();
+    showLoading(true, 25, "Creating Player...");
+    
     await setupMapAndWeather(mapId);
     setupGameplaySystems();
     
-    showLoading(true, 100, "Ready!");
+    showLoading(true, 90, "Finalizing...");
     
-    runGameLoop();
+    state.isStarted = true;
+    window.__PP_ALREADY_STARTED__ = true;
+    window.dispatchEvent(new CustomEvent('pp:start'));
+    log("Game start event dispatched!");
+
+    if(window.PlayerRig) {
+        log("Enabling player movement.");
+        window.PlayerRig.enableMovement(true);
+    }
+    
+    PP.pointerLock?.lock();
     
     setTimeout(() => {
         showLoading(false);
-        state.isStarted = true;
-        window.__PP_ALREADY_STARTED__ = true;
-        window.dispatchEvent(new CustomEvent('pp:start'));
-        log("Game started successfully!");
-
-        if(window.PlayerRig) {
-            log("Enabling player movement.");
-            window.PlayerRig.enableMovement(true);
-        }
-        window.playerCanMove = true;
-        
-        PP.pointerLock?.lock();
     }, 500);
 }
 
@@ -3473,7 +3550,6 @@ function setupGlobalHelpers() {
     window.addEventListener('pp:belt:equip', (e) => {
         const { item, slot } = e.detail;
         if (!item) return;
-        log(`Equipping ${item.id} from slot ${slot}`);
         window.dispatchEvent(new CustomEvent('pp:belt:unequip_all', { detail: { except: item.id } }));
         window.dispatchEvent(new CustomEvent(`pp:tool:equip:${item.id}`));
     });
@@ -3481,67 +3557,56 @@ function setupGlobalHelpers() {
      window.addEventListener('pp:belt:unequip', (e) => {
         const { item, slot } = e.detail;
         if (!item) return;
-        log(`Unequipping ${item.id}`);
         window.dispatchEvent(new CustomEvent(`pp:tool:unequip:${item.id}`));
     });
 }
 
 async function initialize() {
+    setupGlobalHelpers();
+    
     const fallbackBtn = document.getElementById('fallback-refresh-btn');
     if (fallbackBtn) {
-        fallbackBtn.addEventListener('click', () => {
-            window.location.reload();
-        });
+        fallbackBtn.addEventListener('click', () => window.location.reload());
     }
-
-    const fallbackTimeout = 15000;
+    
     const fallbackTimer = setTimeout(() => {
         if (!window.PP.gameHasRenderedFirstFrame) {
-            console.error("Fallback Triggered: Game failed to render a frame within the time limit.");
+            console.error("Fallback Triggered: Game failed to render a frame within 15 seconds.");
             showLoading(false);
             const fallbackOverlay = document.getElementById('fallback-overlay');
-            if (fallbackOverlay) {
-                fallbackOverlay.style.display = 'flex';
-            }
+            if (fallbackOverlay) fallbackOverlay.style.display = 'flex';
         }
-    }, fallbackTimeout);
+    }, 15000);
 
     try {
+        showLoading(true, 5, "Initializing Engine...");
         await setupEngine();
         
-        scene.onAfterRenderObservable.addOnce(() => {
-            log("First frame rendered successfully.");
+        // This is the gatekeeper. The rest of the game only loads if a frame renders.
+        scene.onAfterRenderObservable.addOnce(async () => {
+            log("First frame rendered successfully (Smoke Test Passed).");
             window.PP.gameHasRenderedFirstFrame = true;
             clearTimeout(fallbackTimer);
             
-            const ground = scene.getMeshByName("debugGround");
-            const sphere = scene.getMeshByName("debugSphere");
-            const mat = scene.getMaterialByName("debugMat");
-            ground?.dispose();
-            sphere?.dispose();
-            mat?.dispose();
+            // Clean up the debug geometry now that we know the engine works.
+            scene.getMeshByName("debugGround")?.dispose();
+            scene.getMeshByName("debugSphere")?.dispose();
+            scene.getMaterialByName("debugMat")?.dispose();
             
-            // Now that the engine is confirmed working, start loading the actual game
-            startGame('default_map');
+            // Now, load the actual game assets.
+            await startGame('procedural_house');
         });
 
     } catch(error) {
-        console.error("Critical failure during engine setup:", error);
+        console.error("CRITICAL FAILURE DURING INITIALIZATION:", error);
         clearTimeout(fallbackTimer);
         showLoading(false);
         const fallbackOverlay = document.getElementById('fallback-overlay');
-        if (fallbackOverlay) {
-            fallbackOverlay.style.display = 'flex';
-        }
+        if (fallbackOverlay) fallbackOverlay.style.display = 'flex';
     }
 }
 
-setupGlobalHelpers();
 document.addEventListener('DOMContentLoaded', initialize, { once: true });
 
 })();
-// =================================================================
-// END: assets/dev/game/bootstrap.js
-// =================================================================
-
-})(); // End Global Wrapper
+})();
