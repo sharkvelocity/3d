@@ -1,161 +1,124 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>PhasmaPhoney — Build</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhasmaPhoney</title>
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://aistudiocdn.com/react@^19.1.1",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+        "react/": "https://aistudiocdn.com/react@^19.1.1/",
+        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.21.0",
+        "babylonjs": "https://aistudiocdn.com/babylonjs@^7.16.0",
+        "babylonjs-loaders": "https://aistudiocdn.com/babylonjs-loaders@^7.16.0"
+      }
+    }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            height: 100vh; 
+            width: 100vw; 
+            background: #000; 
+        }
+        #renderCanvas { 
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%; 
+            height: 100%; 
+            touch-action: none; 
+            outline: none; 
+            z-index: 1;
+        }
+        .ui-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .ui-modal { background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); pointer-events: auto; }
+        .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 10000; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .toast { background: rgba(0, 200, 255, 0.8); color: #000; padding: 10px 20px; border-radius: 20px; font-family: sans-serif; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .action-bar { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 12px; border: 1px solid rgba(0,255,255,0.1); }
+        .action-btn { background: rgba(0,0,0,0.5); border: 1px solid #088; color: #0ff; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 18px; cursor: pointer; transition: all 0.2s; }
+        .action-btn:hover { background: rgba(0, 255, 255, 0.2); border-color: #0ff; }
+        .item-belt { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: flex-end; gap: 8px; height: 64px; }
+        .belt-slot { width: 64px; height: 64px; background: rgba(0,0,0,0.4); border: 1px solid #066; border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; position: relative; }
+        .belt-slot.active { border-color: #0ff; background: rgba(0, 255, 255, 0.2); box-shadow: 0 0 12px rgba(0,255,255,0.5); }
+        .belt-slot .slot-key { position: absolute; top: 2px; left: 4px; font-size: 10px; color: #0ff; opacity: 0.7; }
+        .belt-slot img { width: 48px; height: 48px; object-fit: contain; }
+        #notebook-modal { display: none; }
+        #devtools-panel { display: none; position: fixed; top: 10px; right: 10px; width: 480px; max-height: 90vh; overflow-y: auto; background: rgba(10,10,10,0.9); border: 1px solid #033; border-radius: 8px; padding: 12px; z-index: 9990; font-family: monospace; font-size: 13px; color: #eee; backdrop-filter: blur(4px); }
+        #devtools-toggle { display: none; position: fixed; top: 10px; right: 10px; z-index: 9991; padding: 4px 8px; background: #234; color: #9cf; border: 1px solid #456; cursor: pointer; border-radius: 4px; }
+        #start-investigation-btn:hover { background-color: #0aa; }
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 10000;
+            display: none; /* JS will manage */
+            flex-direction: column; justify-content: center; align-items: center;
+            color: #0ff; font-family: 'Courier New', monospace;
+            transition: opacity 0.5s ease;
+            opacity: 0;
+        }
+        #loading-text { font-size: 1.5em; margin-bottom: 20px; text-shadow: 0 0 8px #0ff; }
+        #loading-bar-container {
+            width: 50%; max-width: 600px; height: 20px;
+            border: 1px solid #088; border-radius: 5px; padding: 3px; background: #00000088;
+        }
+        #loading-bar {
+            width: 0%; height: 100%;
+            background: linear-gradient(90deg, #0aa, #0ff);
+            border-radius: 2px;
+            transition: width 0.3s ease-out;
+        }
+    </style>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div id="loading-overlay">
+        <div id="loading-text">Loading...</div>
+        <div id="loading-bar-container">
+            <div id="loading-bar"></div>
+        </div>
+    </div>
+    
+    <div id="fallback-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(10, 0, 0, 0.8); z-index: 10001; flex-direction: column; justify-content: center; align-items: center; color: #f88; font-family: 'Courier New', monospace; text-align: center;">
+        <h2 style="font-size: 2em; text-shadow: 0 0 8px #f00;">Loading Error</h2>
+        <p style="margin: 20px;">The game failed to start properly. This might be a temporary issue.</p>
+        <button id="fallback-refresh-btn" style="padding: 12px 24px; font-size: 1.2em; background: #900; color: #fff; border: 2px solid #f33; border-radius: 8px; cursor: pointer;">
+            Refresh Page
+        </button>
+    </div>
+    
+    <canvas id="renderCanvas"></canvas>
+    
+    <!-- React Journal UI -->
+    <div id="notebook-modal" class="ui-overlay ui-modal" style="display: none; z-index: 9999; overflow-y: auto;">
+      <div id="root"></div> <!-- React app mount point -->
+    </div>
+    
+    <!-- UI overlays will be created by JS -->
+    <div id="devtools-toggle" style="display:none;">DEV</div>
+    <div id="devtools-panel"></div>
+    <div id="ghostdev-toggle" style="display:none;">GHOST</div>
+    <div id="ghostdev-panel"></div>
 
-<<!-- ... Babylon core + loaders ... -->
 <script src="./cdn/babylon.js"></script>
 <script src="./cdn/earcut.min.js"></script>
-<script src="./cdn/materialsLibrary/babylonjs.materials.min.js"></script>
-<script src="./cdn/materialsLibrary/babylon.skyMaterial.min.js"></script>
 <script src="./cdn/meshopt_decoder.js"></script>
 <script src="./cdn/draco_decoder_gltf.js"></script>
 <script src="./cdn/loaders/babylonjs.loaders.min.js"></script>
 <script src="./cdn/gui/babylon.gui.min.js"></script>
 <script src="./cdn/inspector/babylon.inspector.bundle.js"></script>
-<script src="./cdn/cannon.js"></script> <!-- Ensure cannon.js is loaded -->
+<script src="./cdn/cannon.js"></script>
 
-<style>
-html, body { margin:0; height:100%; width:100%; background:#000; overflow:hidden; font-family:monospace; color:#0ff; touch-action:none; }
-#renderCanvas { width:100vw; height:100vh; display:block; background:#000; outline:none; }
+    <!-- Monolithic Game Script -->
+    <script src="./phasmaphoney.js"></script>
 
-#loading-box{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px; background:rgba(0,0,0,0.92); z-index:2147483000; color:#9ef; }
-#loading-logo{ width:240px; max-width:60vw; opacity:0.95; filter:drop-shadow(0 0 10px #0ff4); }
-#loading-text{ font-size:16px; letter-spacing:.3px; text-align:center; max-width:70vw; }
-#loading-bar{ width:64vw; max-width:720px; height:14px; border:1px solid #066; border-radius:10px; background:#071017; overflow:hidden; }
-#loading-fill{ height:100%; width:0%; background:linear-gradient(90deg,#19f,#0ff); transition:width .15s ease; }
-
-#title-screen{ position:fixed; inset:0; background:rgba(0,0,0,0.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; z-index:9999; }
-#title-logo{ max-width:60vw; max-height:35vh; object-fit:contain; }
-#start-button{ padding:14px 28px; font-size:22px; cursor:pointer; border:2px solid #0ff; color:#0ff; background:#111; }
-
-#map-wrap { margin-top:12px; color:#0ff; font-size:16px; }
-#map-select { padding:4px 8px; font-size:14px; }
-
-#hud-overlay{ position:fixed; inset:0; pointer-events:none; z-index:6000; }
-#hud-bar{ position:fixed; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:6000; }
-.chip { padding:2px 6px; border:1px solid #066; border-radius:6px; color:#aff; font-size:12px; background:rgba(0,0,0,0.5); }
-.sanity-wrap{ display:flex; align-items:center; gap:6px; padding:0 6px; }
-#sanity-gauge{ width:170px; height:10px; border:1px solid #066; background:#061013; border-radius:8px; overflow:hidden; }
-#sanity-fill{ width:100%; height:100%; background:linear-gradient(90deg,#19f,#0ff); transition:width .25s ease; }
-#sanity-text{ margin-left:6px; }
-#hud-xyz { position:fixed; top:36px; right:12px; background:rgba(0,0,0,0.5); border:1px solid #066; padding:6px 8px; color:#0ff; font:12px monospace; z-index:6000; }
-
-#pause-menu { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 12000; }
-#pause-content { background: #111; padding: 24px 32px; border: 2px solid #0ff; border-radius: 12px; color: #0ff; display: flex; flex-direction: column; gap: 14px; text-align: center; }
-#pause-content h2 { margin: 0 0 12px; font-size: 26px; }
-#pause-content button { padding: 10px 18px; font-size: 18px; border: 1px solid #0ff; background: #000; color: #0ff; cursor: pointer; }
-#pause-content button:hover { background: #033; }
-</style>
-</head>
-<body>
-
-<!-- Loading -->
-<div id="loading-box" aria-live="polite">
-  <img src="logo.png" alt="Logo" id="loading-logo">
-  <div id="loading-text">Initializing…</div>
-  <div id="loading-bar"><div id="loading-fill"></div></div>
-</div>
-
-<!-- Title / Start -->
-<div id="title-screen">
-  <img id="title-logo" src="./logo.png" alt="PhasmaPhoney Logo" />
-  <button id="start-button">Start Investigation</button>
-  <div id="map-wrap">
-    <span>Map:</span>
-    <select id="map-select"><option value="-1">(loading maps...)</option></select>
-  </div>
-</div>
-
-<!-- Canvas -->
-<canvas id="renderCanvas" tabindex="0"></canvas>
-
-<!-- HUD Overlay -->
-<div id="hud-overlay">
-  <div id="hud-bar">
-    <div class="chip sanity-wrap">
-      <span>Sanity:</span>
-      <div id="sanity-gauge"><div id="sanity-fill"></div></div>
-      <span id="sanity-text">100%</span>
-    </div>
-    <div class="chip">Weather: <span id="hud-weather">Clear</span></div>
-    <div class="chip">Temp: <span id="hud-temp">20°C</span></div>
-  </div>
-  <div id="hud-xyz">XYZ: <span id="hud-pos">0,0,0</span></div>
-</div>
-
-<!-- Pause Menu -->
-<div id="pause-menu">
-  <div id="pause-content">
-    <h2>Paused</h2>
-    <button id="resume-btn">Resume</button>
-    <button id="settings-btn">Settings</button>
-    <button id="quit-btn">Quit</button>
-  </div>
-</div>
-
-<!-- ===================== SCRIPTS ===================== -->
-<!-- ... other utility scripts that might be needed by player_rig or map_manager ... -->
-<script src="./phasmaphoney.js"></script>
-
-<script>
-document.addEventListener("DOMContentLoaded", ()=>{
-  // HUD helpers
-  const sanityFill = document.getElementById("sanity-fill");
-  const sanityText = document.getElementById("sanity-text");
-  const hudPos = document.getElementById("hud-pos");
-  const hudWeather = document.getElementById("hud-weather");
-  const hudTemp = document.getElementById("hud-temp");
-
-  window.updateSanity = (v)=>{
-    const clamped = Math.max(0, Math.min(100, v));
-    if(sanityFill) sanityFill.style.width = clamped+"%";
-    if(sanityFill) sanityFill.style.background = clamped>50?"#0f0":(clamped>25?"#ff0":"#f00");
-    if(sanityText) sanityText.textContent = clamped+"%";
-  };
-  window.updatePlayerPos = (x,y,z)=>{
-    if(hudPos) hudPos.textContent = x.toFixed(1)+","+y.toFixed(1)+","+z.toFixed(1);
-  };
-  window.updateWeather = (type,temp)=>{
-    if(hudWeather) hudWeather.textContent = type;
-    if(hudTemp) hudTemp.textContent = (typeof temp==='number'?temp+"°C":(temp||""));
-  };
-
-  // Pause Menu
-  let isPaused = false;
-  const pauseMenu = document.getElementById("pause-menu");
-  const resumeBtn = document.getElementById("resume-btn");
-  const quitBtn = document.getElementById("quit-btn");
-  const canvas = document.getElementById("renderCanvas");
-
-  function setPaused(p){
-    isPaused = p;
-    if(!pauseMenu) return;
-    pauseMenu.style.display = isPaused?"flex":"none";
-    if(window.scene && window.scene.getEngine){
-      try{
-        if(isPaused) window.scene.getEngine().stopRenderLoop();
-        else window.scene.getEngine().runRenderLoop(()=>window.scene.render());
-      }catch(e){}
-    }
-    if(canvas){
-      if(isPaused && document.exitPointerLock) document.exitPointerLock();
-      else if(!isPaused && canvas.requestPointerLock) canvas.requestPointerLock();
-    }
-  }
-
-  window.addEventListener("keydown", ev=>{ if(ev.code==="Escape") setPaused(!isPaused); });
-  if(resumeBtn) resumeBtn.addEventListener("click", ()=>setPaused(false));
-  if(quitBtn) quitBtn.addEventListener("click", ()=>alert("Quit to main menu"));
-
-  // Default display values
-  setTimeout(()=>{ window.updateSanity(100); window.updateWeather("Clear",20); },0);
-});
-</script>
-
-
-
+    <!-- React Journal App Entry Point -->
+    <script type="module" src="./journal/index.js"></script>
+<script type="module" src="/index.tsx"></script>
 </body>
 </html>
