@@ -1,9 +1,3 @@
-// This file acts as the main entry point and script loader for the game.
-// It ensures all game modules are loaded in the correct sequence before starting the game.
-
-// FIX: Define a more specific type for the global PP object to satisfy TypeScript.
-// Properties are marked as optional to allow for progressive initialization across different scripts.
-// This resolves multiple errors related to property access and initialization.
 declare global {
   interface Window {
     PP: {
