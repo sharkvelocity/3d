@@ -1,9 +1,11 @@
+
 // This file acts as the main entry point and script loader for the game.
 // It ensures all game modules are loaded in the correct sequence before starting the game.
 
 // FIX: Define a more specific type for the global PP object to satisfy TypeScript.
 // Properties are marked as optional to allow for progressive initialization across different scripts.
 // This resolves multiple errors related to property access and initialization.
+export {};
 declare global {
   interface Window {
     PP: {
@@ -85,10 +87,44 @@ declare global {
     reticleFlash?: any;
     reticleSetStyle?: any;
     EMF?: any;
+    // FIX: Added missing global properties to the Window interface for full type safety.
+    BASE_URL: string;
+    __FP_TP_SYNC_V2_3__?: boolean;
+    __PP_BINDINGS__?: boolean;
+    toggleNearestDoor?: () => void;
+    toggleMinimap?: () => void;
+    housePower?: boolean;
+    __PP_AUDIO__?: boolean;
+    webkitAudioContext?: typeof AudioContext;
+    weather?: any;
+    PP_SYSTEMS?: any;
+    __PP_EMF__?: boolean;
+    __PP_SPIRITBOX__?: boolean;
+    ENGINE?: any;
+    PP_Notebook_Vanilla?: boolean;
+    RETICLE_OPTS?: any;
+    GHOST_CAM?: any;
+    PREFERRED_GHOST_ROOT?: any;
+    __SCENE?: any;
+    __PP_MINIMAP_V3__?: boolean;
+    __PP_ALREADY_STARTED__?: boolean;
+    __MoonReady?: boolean;
+    applyDoorsConfig?: (scene: any) => void;
+    ghostDev_isBlockedRay?: (a: any, b: any) => boolean;
+    registerItem?: (item: any) => void;
+    selectSlot?: (n: number) => void;
+    buildBelt?: (slots: string[] | null) => void;
+    refreshCameraOverlay?: () => void;
+    MAP_DEF?: any;
+    toggleNearestHouseLight?: () => void;
+    setHousePower?: (on: boolean) => void;
+    // FIX: Added index signature to allow for dynamic properties without casting to any.
+    [key: string]: any;
   }
 }
 
-const BASE_URL = "https://sharkvelocity.github.io/3d/";
+// FIX: Declare BASE_URL as a global window property to avoid redeclaration errors across inlined scripts.
+window.BASE_URL = "https://sharkvelocity.github.io/3d/";
 
 /**
  * Initializes the global PP settings object.
@@ -229,9 +265,9 @@ function initializeRuntime() {
     PP._resolveReady = {};
 
     PP.signalReady = function(name: string) {
-        if (PP._resolveReady[name]) {
+        if (PP._resolveReady && PP._resolveReady[name]) {
             PP._resolveReady[name]();
-        } else {
+        } else if (PP.readySignals) {
             PP.readySignals[name] = Promise.resolve();
         }
         console.log(`[Runtime] Signal '${name}' is ready.`);
@@ -242,12 +278,12 @@ function initializeRuntime() {
             names = [names];
         }
         const promises = names.map(name => {
-            if (!PP.readySignals[name]) {
+            if (PP.readySignals && !PP.readySignals[name]) {
                 PP.readySignals[name] = new Promise<void>(resolve => {
-                    PP._resolveReady[name] = resolve;
+                    if(PP._resolveReady) PP._resolveReady[name] = resolve;
                 });
             }
-            return PP.readySignals[name];
+            return PP.readySignals![name];
         });
         return Promise.all(promises);
     };
@@ -268,7 +304,7 @@ function initializePlayerRigController() {
        - rigRoot -> yaw -> head -> handNode ; camera attaches to head (FP) or trails (TP)
     */
     (function(){
-      if ((window as any).__FP_TP_SYNC_V2_3__) return; (window as any).__FP_TP_SYNC_V2_3__ = true;
+      if (window.__FP_TP_SYNC_V2_3__) return; window.__FP_TP_SYNC_V2_3__ = true;
     
       const log  = (...a: any[])=>{ try{ console.log("[PlayerRig v2.3]", ...a);}catch(_){} };
       const warn = (...a: any[])=>{ try{ console.warn("[PlayerRig v2.3]", ...a);}catch(_){} };
@@ -315,7 +351,7 @@ function initializePlayerRigController() {
         
         try {
             // FIX: Remove `(window as any)` cast
-            const result = await window.BABYLON.SceneLoader.ImportMeshAsync(null, `${BASE_URL}assets/models/player/`, "main_player.glb", s);
+            const result = await window.BABYLON.SceneLoader.ImportMeshAsync(null, `${window.BASE_URL}assets/models/player/`, "main_player.glb", s);
             const body = result.meshes[0];
             if (body) {
                 body.name = "player_body_root";
@@ -579,7 +615,7 @@ function initializeGhostLogic() {
             this.modelRoot = null;
           }
           
-          const fullUrl = `${BASE_URL}assets/ghosts/${fileName}`;
+          const fullUrl = `${window.BASE_URL}assets/ghosts/${fileName}`;
           log(`Loading ghost model from: ${fullUrl}`);
           
           try {
@@ -656,12 +692,13 @@ function initializeInputManager() {
      * - Exposes PP.getMovementFlags() and PP.getSpeeds().
      */
     (function () {
-      if ((window as any).__PP_BINDINGS__) return; (window as any).__PP_BINDINGS__ = true;
+      if (window.__PP_BINDINGS__) return; window.__PP_BINDINGS__ = true;
 
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
       // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
-      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
+      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
+      const PP = window.PP;
       const C  = (PP.controls = PP.controls || {});
       PP.state = PP.state || {};
       PP.state.controls = PP.state.controls || { forward:false, back:false, left:false, right:false };
@@ -669,7 +706,7 @@ function initializeInputManager() {
       PP.state.running = false;
 
       const Keys: { [key: string]: boolean } = Object.create(null);
-      const F = PP.state.controls;
+      const F = PP.state.controls as any;
 
       // ---------- helpers ----------
       const has = (arr: string[], code: string) => Array.isArray(arr) && arr.includes(code);
@@ -691,9 +728,8 @@ function initializeInputManager() {
         try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch {}
       }
 
-      const syncHeldLights = () => { if (typeof (window as any).syncHeldLights === 'function') (window as any).syncHeldLights(); };
-      const toggleNearestHouseLight = () => { if (typeof (window as any).toggleNearestHouseLight === 'function') (window as any).toggleNearestHouseLight(); };
-      const setHousePower = (on: boolean) => { if (typeof (window as any).setHousePower === 'function') (window as any).setHousePower(on); };
+      const toggleNearestHouseLight = () => { if (typeof window.toggleNearestHouseLight === 'function') window.toggleNearestHouseLight(); };
+      const setHousePower = (on: boolean) => { if (typeof window.setHousePower === 'function') window.setHousePower(on); };
 
       function preventIfNeeded(e: KeyboardEvent){
         const block = ['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
@@ -722,9 +758,9 @@ function initializeInputManager() {
         }
 
         if (has(keyMap.notebook, e.code) && typeof window.openNotebook === 'function') window.openNotebook();
-        if (has(keyMap.interact, e.code) && typeof (window as any).toggleNearestDoor === 'function') (window as any).toggleNearestDoor();
+        if (has(keyMap.interact, e.code) && typeof window.toggleNearestDoor === 'function') window.toggleNearestDoor();
         if (has(keyMap.use,      e.code)) emit('pp:item:use');
-        if (has(keyMap.minimap,  e.code) && typeof (window as any).toggleMinimap === 'function') (window as any).toggleMinimap();
+        if (has(keyMap.minimap,  e.code) && typeof window.toggleMinimap === 'function') window.toggleMinimap();
         
         if (has(keyMap.lighter, e.code)) emit('pp:lighter:toggle');
         if (has(keyMap.flash, e.code)) emit('pp:flashlight:toggle');
@@ -732,7 +768,7 @@ function initializeInputManager() {
         if (has(keyMap.ir,    e.code)) emit('pp:ir_light:toggle');
         
         if (has(keyMap.lightToggle, e.code)) toggleNearestHouseLight();
-        if (has(keyMap.powerToggle, e.code)) setHousePower(!(window as any).housePower);
+        if (has(keyMap.powerToggle, e.code)) setHousePower(!window.housePower);
       }, { capture: true });
 
       addEventListener('keyup', (e) => {
@@ -757,7 +793,7 @@ function initializeInputManager() {
           10: () => { F.crouch = !F.crouch; emit('pp:crouch', { crouch: F.crouch }); },         // L3
           4: () => { PP.state.running = true; },                                               // L1 hold = sprint
           6: () => { emit('pp:item:place') },         // L2
-          7: () => { if (typeof (window as any).toggleNearestDoor === 'function') (window as any).toggleNearestDoor(); },           // R2
+          7: () => { if (typeof window.toggleNearestDoor === 'function') window.toggleNearestDoor(); },           // R2
           13: () => { emit('pp:flashlight:toggle'); } // D-pad Down
         } as {[key: number]: () => void}
       };
@@ -796,19 +832,23 @@ function initializeInputManager() {
             tick();
         }
         function tick(){
-          const now = cam?.position;
+          const pRig = window.PlayerRig?.getRigRoot();
+          const now = pRig?.position;
           if (!st.last || !now) { requestAnimationFrame(tick); return; }
+
           const d = window.BABYLON.Vector3.Distance(now, st.last);
           st.last.copyFrom(now);
 
           const moving = F.forward || F.back || F.left || F.right;
-          if (moving && cam.parent){ // parent check ensures we are not in free-cam
+          if (moving){
             st.acc += d;
-            const stride = (PP.state.running ? (PP.controls.strideRun || 0.8) : (PP.controls.strideWalk || 1.2));
+            const stride = PP.state.running ? 1.8 : 2.5;
             if (st.acc >= stride){
               st.acc = 0;
               if (PP.audio?.playStep) { try { PP.audio.playStep(0.42); } catch {} }
             }
+          } else {
+              st.acc = 0;
           }
           requestAnimationFrame(tick);
         }
@@ -817,10 +857,10 @@ function initializeInputManager() {
 
       // ---------- Exports ----------
       PP.getMovementFlags = () => ({ ...F, running: !!PP.state.running, crouch: !!F.crouch });
-      PP.getSpeeds        = () => ({ walk: PP.controls.speedWalk || 0.9, run: PP.controls.speedRun || 1.8 });
+      PP.getSpeeds        = () => ({ walk: PP.controls.speedWalk || 1.8, run: PP.controls.speedRun || 3.2 });
 
       window.addEventListener('pp:start', () => {
-        try { if (typeof (window as any).buildBelt === 'function') (window as any).buildBelt(null); } catch {}
+        try { if (typeof window.buildBelt === 'function') window.buildBelt(null); } catch {}
         pollController();
       }, { once: true });
       
@@ -840,7 +880,8 @@ function initializePointerLockManager() {
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
       // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
-      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
+      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
+      const PP = window.PP;
       const state = {
         canvas: null as HTMLElement | null,
         uiOpenCount: 0,       // how many UIs are asking to keep the mouse free
@@ -928,7 +969,7 @@ function initializeEnvAndSound() {
      * Replaces the previous env_and_sound.js
      */
     (function(){
-      if ((window as any).__PP_AUDIO__) return; (window as any).__PP_AUDIO__ = true;
+      if (window.__PP_AUDIO__) return; window.__PP_AUDIO__ = true;
 
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
@@ -940,20 +981,20 @@ function initializeEnvAndSound() {
       PP.audio.gain = { master:1.0, ambient:1.0, sfx:1.0, ui:1.0 };
 
       const A = PP.audio.tracks = {
-        rain:      new Audio(`${BASE_URL}assets/audio/rainstorm.mp3`),
-        clear:     new Audio(`${BASE_URL}assets/audio/clearWeather.mp3`),
-        spiritbox: new Audio(`${BASE_URL}assets/audio/spiritbox.mp3`),
-        whisper:   new Audio(`${BASE_URL}assets/audio/whisper.mp3`),
-        doorCreak1:new Audio(`${BASE_URL}assets/audio/doorCreak1.mp3`),
-        doorCreak2:new Audio(`${BASE_URL}assets/audio/doorCreak2.mp3`),
-        slam1:     new Audio(`${BASE_URL}assets/audio/doorSlam1.mp3`),
-        slam2:     new Audio(`${BASE_URL}assets/audio/doorSlam2.mp3`),
-        ghostLaugh:new Audio(`${BASE_URL}assets/audio/ghostLaugh.mp3`),
-        writing:   new Audio(`${BASE_URL}assets/audio/GhostWriting1.mp3`),
+        rain:      new Audio(`${window.BASE_URL}assets/audio/rainstorm.mp3`),
+        clear:     new Audio(`${window.BASE_URL}assets/audio/clearWeather.mp3`),
+        spiritbox: new Audio(`${window.BASE_URL}assets/audio/spiritbox.mp3`),
+        whisper:   new Audio(`${window.BASE_URL}assets/audio/whisper.mp3`),
+        doorCreak1:new Audio(`${window.BASE_URL}assets/audio/doorCreak1.mp3`),
+        doorCreak2:new Audio(`${window.BASE_URL}assets/audio/doorCreak2.mp3`),
+        slam1:     new Audio(`${window.BASE_URL}assets/audio/doorSlam1.mp3`),
+        slam2:     new Audio(`${window.BASE_URL}assets/audio/doorSlam2.mp3`),
+        ghostLaugh:new Audio(`${window.BASE_URL}assets/audio/ghostLaugh.mp3`),
+        writing:   new Audio(`${window.BASE_URL}assets/audio/GhostWriting1.mp3`),
         steps: [
-          new Audio(`${BASE_URL}assets/audio/step1.mp3`),
-          new Audio(`${BASE_URL}assets/audio/step2.mp3`),
-          new Audio(`${BASE_URL}assets/audio/step3.mp3`)
+          new Audio(`${window.BASE_URL}assets/audio/step1.mp3`),
+          new Audio(`${window.BASE_URL}assets/audio/step2.mp3`),
+          new Audio(`${window.BASE_URL}assets/audio/step3.mp3`)
         ]
       };
 
@@ -1001,7 +1042,7 @@ function initializeEnvAndSound() {
             else { try{ v.muted=false; }catch{} }
           });
           ensureGraph();
-          const initialWeather = ((window as any).weather&&(window as any).weather.state) || 'Clear';
+          const initialWeather = (window.weather&&window.weather.state) || 'Clear';
           PP.audio.applyWeather(initialWeather);
           console.log("[Audio] System unmuted and ready.");
         }, 50);
@@ -1019,7 +1060,7 @@ function initializeEnvAndSound() {
       function ensureGraph(){
         if (ctx) return true;
         try{
-          const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
           ctx = new AudioContext();
           srcStatic  = ctx.createMediaElementSource(A.spiritbox);
           srcWhisper = ctx.createMediaElementSource(A.whisper);
@@ -1227,7 +1268,7 @@ function initializeMapManager() {
             throw new Error("Invalid map data. Cannot load map.");
         }
 
-        const mapUrl = `${BASE_URL}assets/models/map/${mapData.file}`;
+        const mapUrl = `${window.BASE_URL}assets/models/map/${mapData.file}`;
         log(`Loading map: ${mapUrl}`);
 
         try {
@@ -1254,7 +1295,7 @@ function initializeMapManager() {
         }
     }
 
-    PP.mapManager = {
+    window.PP.mapManager = {
         loadMap
     };
 
@@ -1404,15 +1445,15 @@ function initializeInventorySystem() {
       PP.inventory = PP.inventory || {};
 
       const ITEM_META = {
-        dots:           { id:'dots',           name:'DOTS',           icon: `${BASE_URL}assets/icons/dots.png` },
-        smudge:         { id:'smudge',         name:'Smudge Stick',   icon: `${BASE_URL}assets/icons/smudge_sticks.png` },
-        salt:           { id:'salt',           name:'Salt Shaker',    icon: `${BASE_URL}assets/icons/salt.png` },
-        sanity:         { id:'sanity',         name:'Sanity Meds',    icon: `${BASE_URL}assets/icons/sanity_pills.png` },
-        crucifix:       { id:'crucifix',       name:'Crucifix',       icon: `${BASE_URL}assets/icons/crucifix.png` },
-        spirit:         { id:'spirit',         name:'Spirit Box',     icon: `${BASE_URL}assets/icons/spirit_box.png` },
-        book:           { id:'book',           name:'Writing Book',   icon: `${BASE_URL}assets/icons/ghost_writing_book.png` },
-        emf:            { id:'emf',            name:'EMF Reader',     icon: `${BASE_URL}assets/icons/emf.png` },
-        uv:             { id:'uv',             name:'UV Flashlight',  icon: `${BASE_URL}assets/icons/uv_light.png` }
+        dots:           { id:'dots',           name:'DOTS',           icon: `${window.BASE_URL}assets/icons/dots.png` },
+        smudge:         { id:'smudge',         name:'Smudge Stick',   icon: `${window.BASE_URL}assets/icons/smudge_sticks.png` },
+        salt:           { id:'salt',           name:'Salt Shaker',    icon: `${window.BASE_URL}assets/icons/salt.png` },
+        sanity:         { id:'sanity',         name:'Sanity Meds',    icon: `${window.BASE_URL}assets/icons/sanity_pills.png` },
+        crucifix:       { id:'crucifix',       name:'Crucifix',       icon: `${window.BASE_URL}assets/icons/crucifix.png` },
+        spirit:         { id:'spirit',         name:'Spirit Box',     icon: `${window.BASE_URL}assets/icons/spirit_box.png` },
+        book:           { id:'book',           name:'Writing Book',   icon: `${window.BASE_URL}assets/icons/ghost_writing_book.png` },
+        emf:            { id:'emf',            name:'EMF Reader',     icon: `${window.BASE_URL}assets/icons/emf.png` },
+        uv:             { id:'uv',             name:'UV Flashlight',  icon: `${window.BASE_URL}assets/icons/uv_light.png` }
       };
 
       PP.inventory.ITEM_META = Object.assign(PP.inventory.ITEM_META || {}, ITEM_META);
@@ -1425,9 +1466,9 @@ function initializeSaltSystem() {
     (function(){
       'use strict';
       const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
-      (PP as any).PP_SYSTEMS = (PP as any).PP_SYSTEMS || {};
+      PP.PP_SYSTEMS = PP.PP_SYSTEMS || {};
 
-      if ((PP as any).PP_SYSTEMS?.salt) return;
+      if (PP.PP_SYSTEMS?.salt) return;
 
       const log = (...a: any[]) => console.log("[SaltSystem]", ...a);
       const warn = (...a: any[]) => console.warn("[SaltSystem]", ...a);
@@ -1452,9 +1493,9 @@ function initializeSaltSystem() {
         }
 
         function ensureSounds(){
-          if (!s1) s1 = getSound('salt_step1', `${BASE_URL}assets/audio/step1.mp3`);
-          if (!s2) s2 = getSound('salt_step2', `${BASE_URL}assets/audio/step2.mp3`);
-          if (!s3) s3 = getSound('salt_step3', `${BASE_URL}assets/audio/step3.mp3`);
+          if (!s1) s1 = getSound('salt_step1', `${window.BASE_URL}assets/audio/step1.mp3`);
+          if (!s2) s2 = getSound('salt_step2', `${window.BASE_URL}assets/audio/step2.mp3`);
+          if (!s3) s3 = getSound('salt_step3', `${window.BASE_URL}assets/audio/step3.mp3`);
         }
 
         function setPosAndPlay(sound: any, pos: any){
@@ -1582,8 +1623,8 @@ function initializeSaltSystem() {
       }
       
       const api = { init, place: placeSaltLine };
-      (window.PP as any).PP_SYSTEMS = (window.PP as any).PP_SYSTEMS || {};
-      (window.PP as any).PP_SYSTEMS.salt = api;
+      PP.PP_SYSTEMS = PP.PP_SYSTEMS || {};
+      PP.PP_SYSTEMS.salt = api;
 
       window.addEventListener('pp:item:use', () => {
           const inventory = window.PP?.inventory;
@@ -1592,7 +1633,7 @@ function initializeSaltSystem() {
           const activeSlotIndex = window.BeltManager?.state?.activeSlot - 1;
           if (typeof activeSlotIndex !== 'number' || activeSlotIndex < 0) return;
           
-          const activeItemId = inventory.slots?.[activeSlotIndex];
+          const activeItemId = (inventory as any).slots?.[activeSlotIndex];
           if (activeItemId === 'salt') {
               placeSaltLine();
           }
@@ -1608,8 +1649,8 @@ function initializeWritingBook() {
     (function(){
       'use strict';
       const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
-      (PP as any).PP_SYSTEMS = (PP as any).PP_SYSTEMS || {};
-      if ((PP as any).PP_SYSTEMS?.writing_book) return;
+      PP.PP_SYSTEMS = PP.PP_SYSTEMS || {};
+      if (PP.PP_SYSTEMS?.writing_book) return;
 
       const log = (...a: any[]) => console.log("[WritingBook]", ...a);
       const warn = (...a: any[]) => console.warn("[WritingBook]", ...a);
@@ -1640,8 +1681,8 @@ function initializeWritingBook() {
             }
         }
         function ensure(){
-          if (!writeClip) writeClip = getSound('ghostWriting',`${BASE_URL}assets/audio/GhostWriting1.mp3`);
-          if (!tossClip) tossClip = getSound('bookToss',`${BASE_URL}assets/audio/Toss.wav`);
+          if (!writeClip) writeClip = getSound('ghostWriting',`${window.BASE_URL}assets/audio/GhostWriting1.mp3`);
+          if (!tossClip) tossClip = getSound('bookToss',`${window.BASE_URL}assets/audio/Toss.wav`);
         }
         function playAt(pos: any, snd: any){ 
           try{ 
@@ -1686,7 +1727,7 @@ function initializeWritingBook() {
         if (ghostData?.name?.toLowerCase() !== 'shade') return false;
         
         const ghostRoom = (window.PP?.ghost as any)?.currentRoom;
-        const playerRoom = (window.PP?.player as any)?.currentRoom;
+        const playerRoom = (window.PP as any)?.player?.currentRoom;
         return ghostRoom && playerRoom && ghostRoom === playerRoom;
       }
       
@@ -1755,7 +1796,7 @@ function initializeWritingBook() {
       }
       
       const api = { init, place: placeBook };
-      (window.PP as any).PP_SYSTEMS.writing_book = api;
+      PP.PP_SYSTEMS.writing_book = api;
 
       window.addEventListener('pp:item:use', () => {
           const inventory = window.PP?.inventory;
@@ -1764,7 +1805,7 @@ function initializeWritingBook() {
           const activeSlotIndex = window.BeltManager?.state?.activeSlot - 1;
           if (typeof activeSlotIndex !== 'number' || activeSlotIndex < 0) return;
           
-          const activeItemId = inventory.slots?.[activeSlotIndex];
+          const activeItemId = (inventory as any).slots?.[activeSlotIndex];
           if (activeItemId === 'book') {
               placeBook();
           }
@@ -1783,7 +1824,7 @@ function initializeUvPrints() {
 
       const SCENE = ()=> window.scene || window.BABYLON.Engine?.LastCreatedScene;
 
-      const TEX = `${BASE_URL}assets/textures/uv_footprint.png`;
+      const TEX = `${window.BASE_URL}assets/textures/uv_footprint.png`;
       const TTL = 60, FADE = 15, SCALE = 0.45, HEIGHT = 0.02;
 
       let mat: any=null;
@@ -1882,7 +1923,6 @@ function initializeLighter() {
 
       const log = (...a: any[]) => console.log("[Lighter]", ...a);
       
-      // FIX: Cast the lighter object to `any` to allow adding properties dynamically.
       const lighter: any = (window.LIGHTER = {
         mesh: null as any,
         flameEffect: null as any,
@@ -1913,7 +1953,7 @@ function initializeLighter() {
         lighter.light.range = 2.5;
 
         const flamePS = new window.BABYLON.ParticleSystem("lighterFlamePS", 500, scene);
-        flamePS.particleTexture = new window.BABYLON.Texture(`${BASE_URL}assets/textures/flare.png`, scene);
+        flamePS.particleTexture = new window.BABYLON.Texture(`${window.BASE_URL}assets/textures/flare.png`, scene);
         
         flamePS.minEmitBox = new window.BABYLON.Vector3(-0.005, 0.03, -0.005);
         flamePS.maxEmitBox = new window.BABYLON.Vector3(0.005, 0.03, 0.005);
@@ -1994,10 +2034,10 @@ function initializeLighter() {
 
         if (distance < 3 && ghostData.name !== 'Shade' && Math.random() < (0.2 * dt)) {
           lighter.toggle(false);
-          window.toast?.("Your lighter was extinguished!", 1500);
+          if(window.toast) window.toast("Your lighter was extinguished!", 1500);
           
           if(window.PP?.tools?.emf?.trigger) {
-            window.PP.tools.emf.trigger(rigRoot.position, 2);
+            (window.PP.tools.emf as any).trigger(rigRoot.position, 2);
           }
         }
       };
@@ -2017,7 +2057,6 @@ function initializeLantern() {
       'use strict';
       if (window.LANTERN) return;
 
-      // FIX: Cast the lantern object to `any` to allow adding properties dynamically.
       const lantern: any = (window.LANTERN = {
         mesh: null as any,
         flameMaterial: null as any,
@@ -2036,7 +2075,7 @@ function initializeLantern() {
           undefined,
           true
         );
-        (lantern.flameTexture as any).fragmentUrl = `${BASE_URL}assets/dev/game/flame.fragment.fx`;
+        (lantern.flameTexture as any).fragmentUrl = `${window.BASE_URL}assets/dev/game/flame.fragment.fx`;
 
         lantern.flameMaterial = new window.BABYLON.StandardMaterial("lanternFlameMat", scene);
         lantern.flameMaterial.emissiveTexture = lantern.flameTexture;
@@ -2057,10 +2096,8 @@ function initializeLantern() {
 function initializeDotsSystem() {
     (function(){
       "use strict";
-      // FIX: Initialize window.PP with required properties to satisfy the global type.
-      // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
       window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
+      const PP = window.PP;
       PP.tools = PP.tools || {};
       const V3 = window.BABYLON.Vector3, Q = window.BABYLON.Quaternion, M = window.BABYLON.Matrix;
 
@@ -2250,7 +2287,7 @@ function initializeDotsSystem() {
         if (S.timer){ clearInterval(S.timer); S.timer = null; }
         try { S.scn.onBeforeRenderObservable.removeCallback(_keepCamRef); } catch {}
       }
-      function _keepCamRef(){ S.lastCam = S.scn.activeCamera || S.lastCam; }
+      function _keepCamRef(){ if (S.scn) S.lastCam = S.scn.activeCamera || S.lastCam; }
 
       function clearDots(){
         if (!S.unit || !S.matrices) return;
@@ -2289,15 +2326,12 @@ function initializeDotsSystem() {
 function initializeEmf() {
     (function(){
       'use strict';
-      if ((window as any).__PP_EMF__) return; (window as any).__PP_EMF__ = true;
+      if (window.__PP_EMF__) return; window.__PP_EMF__ = true;
 
-      // FIX: Initialize window.PP with required properties to satisfy the global type.
-      // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
       const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       let ctx: AudioContext | null = null;
       try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
         ctx = new AudioContext();
       } catch(e) {
         console.warn("Could not create AudioContext for EMF sounds.");
@@ -2309,7 +2343,7 @@ function initializeEmf() {
         decayRate: 0.4,
         active: false,
         beepTimers: [] as any[],
-        position: ()=> (PP as any).rig?.body?.position || {x:0,y:0,z:0},
+        position: ()=> window.PlayerRig?.getRigRoot()?.position || new window.BABYLON.Vector3(0,0,0),
         range: 4.0,
         lastSpikeTime: 0
       };
@@ -2354,8 +2388,8 @@ function initializeEmf() {
       }
 
       function handleGhostEvent(ev: any){
-        const ghost = (window as any).ghost || {};
-        const ghostPos = ghost.position || {x:0,y:0,z:0};
+        const ghost = window.PP?.ghost || {};
+        const ghostPos = (ghost as any).root?.position || new window.BABYLON.Vector3(0,0,0);
         if (!isNear(ghostPos)) return;
 
         switch(ev.type){
@@ -2368,7 +2402,7 @@ function initializeEmf() {
             spike(1 + Math.floor(Math.random()*5));
             break;
           case 'hunt':
-            const huntRange = ghost.type==='Raiju'? 10:4;
+            const huntRange = (ghost as any).data?.name==='Raiju'? 10:4;
             if (distance(ghostPos, EMF.position()) <= huntRange){
               spike(1 + Math.floor(Math.random()*5));
             }
@@ -2403,10 +2437,8 @@ function initializeEmf() {
 function initializeParabolicMic() {
     (function(){
       "use strict";
-      // FIX: Initialize window.PP with required properties to satisfy the global type.
-      // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
       window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
+      const PP = window.PP;
       PP.tools = PP.tools || {};
       PP.tools.parabolic = PP.tools.parabolic || {};
 
@@ -2424,7 +2456,7 @@ function initializeParabolicMic() {
         orig: new WeakMap()
       };
 
-      function scene(){ return (window as any).SCENE || window.scene || window.BABYLON.Engine?.LastCreatedScene || null; }
+      function scene(){ return window.scene || window.BABYLON.Engine?.LastCreatedScene || null; }
 
       function inCone(origin: any, forward: any, p: any, deg: number){
         const dir = p.subtract(origin).normalize();
@@ -2437,7 +2469,7 @@ function initializeParabolicMic() {
       function tick(){
         if (!S.active || !S.scn) return;
 
-        const cam = S.scn.activeCamera || (window as any).camera;
+        const cam = S.scn.activeCamera || window.camera;
         if (!cam) return;
         const origin = cam.globalPosition || cam.position;
         const forward = cam.getDirection ? cam.getDirection(window.BABYLON.Vector3.Forward()) : new window.BABYLON.Vector3(0,0,1);
@@ -2455,7 +2487,7 @@ function initializeParabolicMic() {
 
         for (const snd of sounds){
           if (!snd || !snd.spatialSound) continue;
-          const n = snd.connectedTransformNode || snd._connectedTransformNode || null;
+          const n = snd.connectedTransformNode || (snd as any)._connectedTransformNode || null;
           const p = n?.getAbsolutePosition?.() || n?.position || null;
           if (!p) continue;
 
@@ -2499,14 +2531,13 @@ function initializeParabolicMic() {
 function initializeSpiritBox() {
     (function(){
       "use strict";
-      if ((window as any).__PP_SPIRITBOX__) return; (window as any).__PP_SPIRITBOX__ = true;
+      if (window.__PP_SPIRITBOX__) return; window.__PP_SPIRITBOX__ = true;
 
-// FIX: Initialize window.PP with required properties to satisfy the global type.
-const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
+      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
 
       const AUDIO_URLS = {
-        static:  `${BASE_URL}assets/audio/spiritbox.mp3`,
-        whisper: `${BASE_URL}assets/audio/whisper.mp3`
+        static:  `${window.BASE_URL}assets/audio/spiritbox.mp3`,
+        whisper: `${window.BASE_URL}assets/audio/whisper.mp3`
       };
 
       const PANNER_OPTS = {
@@ -2529,29 +2560,34 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
       let master: GainNode | null = null;
       function ensureAudio(){
         if (AC) return;
-        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-        AC = new AudioContext();
-        master = AC.createGain();
-        master.gain.value = ((PP.audio as any)?.gain?.sfx ?? 1.0) * ((PP.audio as any)?.gain?.master ?? 1.0);
-        master.connect(AC.destination);
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            AC = new AudioContext();
+            master = AC.createGain();
+            master.gain.value = ((PP.audio as any)?.gain?.sfx ?? 1.0) * ((PP.audio as any)?.gain?.master ?? 1.0);
+            master.connect(AC.destination);
 
-        window.addEventListener('pp:audio:gain-changed', ()=>{
-          try {
-            if (master) master.gain.value = ((PP.audio as any)?.gain?.sfx ?? 1.0) * ((PP.audio as any)?.gain?.master ?? 1.0);
-          } catch {}
-        });
+            window.addEventListener('pp:audio:gain-changed', ()=>{
+              try {
+                if (master) master.gain.value = ((PP.audio as any)?.gain?.sfx ?? 1.0) * ((PP.audio as any)?.gain?.master ?? 1.0);
+              } catch {}
+            });
+        } catch(e) {
+            console.warn("[SpiritBox] Could not create AudioContext", e);
+        }
       }
 
       function createUnitAudio(){
         ensureAudio();
+        if (!AC) return null;
 
         const elStatic = new Audio(AUDIO_URLS.static);
         elStatic.loop = true;
         elStatic.preload = "auto";
 
-        const srcStatic = AC!.createMediaElementSource(elStatic);
-        const panner    = AC!.createPanner();
-        const gUnit     = AC!.createGain();
+        const srcStatic = AC.createMediaElementSource(elStatic);
+        const panner    = AC.createPanner();
+        const gUnit     = AC.createGain();
 
         panner.panningModel  = PANNER_OPTS.panningModel as any;
         panner.distanceModel = PANNER_OPTS.distanceModel as any;
@@ -2568,7 +2604,7 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
 
         const elWhisper = new Audio(AUDIO_URLS.whisper);
         elWhisper.loop = false;
-        const srcWhisper = AC!.createMediaElementSource(elWhisper);
+        const srcWhisper = AC.createMediaElementSource(elWhisper);
         
         srcWhisper.connect(panner);
 
@@ -2588,10 +2624,10 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
 
       class SpiritBoxUnit {
         getPos: () => any;
-        elStatic: HTMLAudioElement;
-        elWhisper: HTMLAudioElement;
-        panner: PannerNode;
-        gUnit: GainNode;
+        elStatic: HTMLAudioElement | null;
+        elWhisper: HTMLAudioElement | null;
+        panner: PannerNode | null;
+        gUnit: GainNode | null;
         on: boolean;
         nextWhisperAt: number;
         __mesh?: any;
@@ -2606,25 +2642,29 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
           };
 
           const a = createUnitAudio();
-          this.elStatic  = a.elStatic;
-          this.elWhisper = a.elWhisper;
-          this.panner    = a.panner;
-          this.gUnit     = a.gUnit;
+          this.elStatic  = a?.elStatic || null;
+          this.elWhisper = a?.elWhisper || null;
+          this.panner    = a?.panner || null;
+          this.gUnit     = a?.gUnit || null;
 
           this.on = false;
           this.nextWhisperAt = 0;
 
-          const p = this.getPos() || v3(0,0,0);
-          this.panner.positionX.value = p.x;
-          this.panner.positionY.value = p.y;
-          this.panner.positionZ.value = p.z;
+          if (this.panner) {
+            const p = this.getPos() || v3(0,0,0);
+            this.panner.positionX.value = p.x;
+            this.panner.positionY.value = p.y;
+            this.panner.positionZ.value = p.z;
+          }
         }
 
         setOn(on: boolean){
           this.on = !!on;
           if (!AC) ensureAudio();
+          if (!this.elStatic) return;
+
           if (this.on){
-            AC!.resume?.().catch(()=>{});
+            AC?.resume?.().catch(()=>{});
             try { this.elStatic.play().catch(()=>{}); } catch {}
             this.scheduleNextWhisper();
           } else {
@@ -2636,12 +2676,14 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
         toggle(){ this.setOn(!this.on); }
 
         scheduleNextWhisper(){
+          if(!AC) return;
           const now = AC!.currentTime || (performance.now()/1000);
           const d = WHISPER.minGapSec + Math.random()*(WHISPER.maxGapSec-WHISPER.minGapSec);
           this.nextWhisperAt = now + d;
         }
 
         playWhisper(){
+          if (!this.elWhisper) return;
           try {
             this.elWhisper.currentTime = 0;
             this.elWhisper.play().catch(()=>{});
@@ -2650,16 +2692,17 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
         }
 
         tick(dt: number){
+          if (!AC || !this.panner) return;
           const p = this.getPos();
           if (p){
             try { 
-                this.panner.positionX.setValueAtTime(p.x, AC!.currentTime);
-                this.panner.positionY.setValueAtTime(p.y, AC!.currentTime);
-                this.panner.positionZ.setValueAtTime(p.z, AC!.currentTime);
+                this.panner.positionX.setValueAtTime(p.x, AC.currentTime);
+                this.panner.positionY.setValueAtTime(p.y, AC.currentTime);
+                this.panner.positionZ.setValueAtTime(p.z, AC.currentTime);
             } catch {}
           }
           if (this.on){
-            const now = AC!.currentTime || (performance.now()/1000);
+            const now = AC.currentTime || (performance.now()/1000);
             if (now >= this.nextWhisperAt){
               this.playWhisper();
             }
@@ -2667,8 +2710,8 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
         }
 
         stopAll(){
-          try{ this.elStatic.pause(); this.elStatic.currentTime=0; }catch{}
-          try{ this.elWhisper.pause(); this.elWhisper.currentTime=0; }catch{}
+          try{ this.elStatic?.pause(); if(this.elStatic) this.elStatic.currentTime=0; }catch{}
+          try{ this.elWhisper?.pause(); if(this.elWhisper) this.elWhisper.currentTime=0; }catch{}
           this.on = false;
         }
       }
@@ -2683,17 +2726,18 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
         if (M.loopAttached) return;
         const s = scene(); if (!s) return;
         s.onBeforeRenderObservable.add(()=>{
-          const eng = s.getEngine?.() || (window as any).ENGINE;
+          if (!AC) return;
+          const eng = s.getEngine?.() || window.ENGINE;
           const dt  = Math.min(0.1, ((eng?.getDeltaTime?.()||16.7)/1000));
           M.units.forEach(u => u.tick(dt));
-          if (M.inHand){
+          if (M.inHand && M.inHand.panner){
             try{
               const b = (s as any).__playerBody || s.getMeshByName?.('player_capsule') || cam();
               const p = b?.getAbsolutePosition?.() || b?.position;
               if (p) {
-                M.inHand.panner.positionX.setValueAtTime(p.x, AC!.currentTime);
-                M.inHand.panner.positionY.setValueAtTime(p.y + 1.6, AC!.currentTime);
-                M.inHand.panner.positionZ.setValueAtTime(p.z, AC!.currentTime);
+                M.inHand.panner.positionX.setValueAtTime(p.x, AC.currentTime);
+                M.inHand.panner.positionY.setValueAtTime(p.y + 1.6, AC.currentTime);
+                M.inHand.panner.positionZ.setValueAtTime(p.z, AC.currentTime);
               }
             }catch{}
           }
@@ -2768,19 +2812,23 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
       };
 
       window.addEventListener('pp:start', ()=>{
-        try{ ensureAudio(); AC!.resume?.(); }catch{}
+        try{ ensureAudio(); AC?.resume?.(); }catch{}
       });
 
-      window.addEventListener('pp:active-item-changed', (ev: any)=>{
-        const id = ev.detail?.id;
-        if (id !== 'spirit_box' && M.inHand){
+      window.addEventListener('pp:belt:equip', (ev: any)=>{
+        const id = ev.detail?.item?.id;
+        if (id !== 'spirit' && M.inHand){
           M.inHand.setOn(false);
+        } else if (id === 'spirit') {
+          ensureInHand().setOn(true);
         }
       });
 
+      const has = (arr: any[], code: any) => Array.isArray(arr) && arr.includes(code);
       addEventListener('keydown', (e)=>{
-        if (e.code === 'KeyE'){
-          if (PP.spiritBox.toggleLookedAt()) e.preventDefault();
+        const keyMap = window.PP?.controls?.keys;
+        if (keyMap && has(keyMap.interact, e.code)) {
+            if (PP.spiritBox.toggleLookedAt()) e.preventDefault();
         }
       }, true);
 
@@ -2792,7 +2840,7 @@ const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg:
 
 function initializeBeltManager() {
     (function(){
-      if ((window as any).BeltManager) return;
+      if (window.BeltManager) return;
 
       const state = {
         activeSlot: 1
@@ -2858,8 +2906,8 @@ function initializeBeltManager() {
           if(slotEl) slotEl.classList.toggle('active', i === state.activeSlot);
         }
 
-        const inventory = window.PP?.inventory?.slots;
-        const itemId = inventory ? inventory[slotNumber - 1] : null;
+        const inventory = window.PP?.inventory as any;
+        const itemId = inventory?.slots ? inventory.slots[slotNumber - 1] : null;
         const itemMeta = itemId ? (window.PP?.inventory?.ITEM_META?.[itemId] || null) : null;
         
         window.dispatchEvent(new CustomEvent('pp:belt:equip', {
@@ -2949,8 +2997,8 @@ function initializeHudUi() {
 function initializeNotebookUi() {
     (function(){
       'use strict';
-      if ((window as any).PP_Notebook_Vanilla) return;
-      (window as any).PP_Notebook_Vanilla = true;
+      if (window.PP_Notebook_Vanilla) return;
+      window.PP_Notebook_Vanilla = true;
 
       const NOTEBOOK_ID = 'notebook-modal';
       
@@ -3062,13 +3110,11 @@ function initializeNotebookUi() {
       }
 
       function attachEventListeners() {
-        // FIX: closeNotebook is now on the window object and typed.
-        elements['notebook-close-btn']?.addEventListener('click', window.closeNotebook);
+        elements['notebook-close-btn']?.addEventListener('click', () => window.closeNotebook());
         elements['evidence-reset-btn']?.addEventListener('click', handleReset);
       }
       
       function render() {
-        // FIX: Explicitly type GHOST_DATA to avoid `unknown` type on elements.
         const GHOST_DATA: any[] = Object.values(window.PP?.GHOST_DATA || {});
         if (GHOST_DATA.length === 0) return;
 
@@ -3255,7 +3301,7 @@ function initializeReticle() {
         hitColor: "rgba(0, 255, 0, 1)",
         opacity: 1,
         maxAimDistance: 3.0
-      }, ((window as any).RETICLE_OPTS || {}));
+      }, (window.RETICLE_OPTS || {}));
 
       let WRAP: HTMLElement, SVG: SVGElement;
 
@@ -3353,7 +3399,6 @@ function initializeReticle() {
           if (now - last < 80) return;
           last = now;
           try {
-            // FIX: Accessing window.camera is now type-safe.
             const cam = window.camera; if (!cam) return;
             const ray = scene.createPickingRay(scene.getEngine().getRenderWidth() / 2, scene.getEngine().getRenderHeight() / 2, null, cam);
             ray.length = RETICLE_OPTS.maxAimDistance;
@@ -3388,7 +3433,7 @@ function initializeVanUi() {
 
       function createUI() {
         let modal = document.getElementById('van-ui-modal') as HTMLElement;
-        if (modal) { // If it exists from HTML, just ensure it's styled correctly
+        if (modal) {
             modal.style.display = 'none';
             return modal;
         }
@@ -3471,9 +3516,6 @@ function initializeVanUi() {
         log("UI hidden.");
       }
 
-      // FIX: Initialize window.PP with required properties to satisfy the global type.
-      // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
       window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
       window.PP.vanUI = {
         show,
@@ -3494,7 +3536,7 @@ function initializeEffectsSanityMed() {
 
       function applyEffects(){
         window.dispatchEvent(new CustomEvent('pp:player:stamina-boost', { detail:{ seconds:10 }}));
-        window.toast?.("Stamina boost applied!", 1200);
+        if (window.toast) window.toast("Stamina boost applied!", 1200);
 
         const total = 40, dur = 30, tick = 0.5;
         const perTick = total / (dur / tick);
@@ -3513,7 +3555,7 @@ function initializeEffectsSanityMed() {
           } catch {}
           if (elapsed >= dur) {
             clearInterval(id);
-            window.toast?.("Sanity restored.", 1500);
+            if (window.toast) window.toast("Sanity restored.", 1500);
           }
         }, tick*1000);
       }
@@ -3526,7 +3568,7 @@ function initializeEffectsSanityMed() {
 function initializeGhostCam() {
     (function(){
       "use strict";
-      if ((window as any).GHOST_CAM && (window as any).GHOST_CAM.__v === "1.2") return;
+      if (window.GHOST_CAM && window.GHOST_CAM.__v === "1.2") return;
 
       const SCENE  = ()=> window.scene || window.BABYLON.Engine?.LastCreatedScene;
       const MAIN   = ()=> window.camera || SCENE()?.activeCamera;
@@ -3544,7 +3586,7 @@ function initializeGhostCam() {
       };
 
       function ghostRoot(){
-        if ((window as any).PREFERRED_GHOST_ROOT && !(window as any).PREFERRED_GHOST_ROOT.isDisposed?.()) return (window as any).PREFERRED_GHOST_ROOT;
+        if (window.PREFERRED_GHOST_ROOT && !window.PREFERRED_GHOST_ROOT.isDisposed?.()) return window.PREFERRED_GHOST_ROOT;
         return SCENE()?.getTransformNodeByName("GhostRoot");
       }
 
@@ -3666,7 +3708,7 @@ function initializeGhostCam() {
         }
       });
 
-      (window as any).GHOST_CAM = {
+      window.GHOST_CAM = {
         __v: "1.2",
         enable, disable, toggle, setMode, cycleMode,
         setViewport(x: number, y: number, w: number, h: number){
@@ -3689,7 +3731,7 @@ function initializeGhostCam() {
 
 function initializeMinimap() {
     (function(){
-      if ((window as any).__PP_MINIMAP_V3__) return; (window as any).__PP_MINIMAP_V3__ = true;
+      if (window.__PP_MINIMAP_V3__) return; window.__PP_MINIMAP_V3__ = true;
 
       const UI = {
         btn: null as HTMLElement | null,
@@ -3698,7 +3740,7 @@ function initializeMinimap() {
         open: false
       };
 
-      function S(){ return window.scene || (window as any).__SCENE || window.BABYLON.EngineStore?.LastCreatedScene || null; }
+      function S(){ return window.scene || window.__SCENE || window.BABYLON.EngineStore?.LastCreatedScene || null; }
       function cfg() { return window.PP?.controls?.keys; }
 
       function ensureUI(){
@@ -3739,6 +3781,7 @@ function initializeMinimap() {
       function toggle(){
         UI.open = !UI.open;
         if (UI.canvas) UI.canvas.style.display = UI.open ? 'block' : 'none';
+        window.toggleMinimap = toggle;
       }
 
       function playerPos(){
@@ -3750,11 +3793,11 @@ function initializeMinimap() {
       }
 
       function loopXYZ(){
-        const el = document.getElementById('hud-xyz');
-        if (!el) { requestAnimationFrame(loopXYZ); return; }
+        const hudManager = window.HUDManager;
+        if (!hudManager) { requestAnimationFrame(loopXYZ); return; }
         function tick(){
           const p = playerPos();
-          if (p) el.textContent = `XYZ: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
+          if (p) hudManager.updateXYZ(p);
           requestAnimationFrame(tick);
         }
         tick();
@@ -3781,7 +3824,6 @@ function initializeMinimap() {
             ctx.arc(w/2, h/2, 4, 0, Math.PI*2);
             ctx.fillStyle = '#0ff'; ctx.fill();
 
-            // FIX: Accessing window.camera is now type-safe.
             const cam = s.activeCamera || window.camera;
             if (cam && cam.getDirection){
                 const yaw = window.PlayerRig?.getState()?.yaw || 0;
@@ -3821,7 +3863,7 @@ function initializeMinimap() {
       }
 
       window.addEventListener('pp:start', start, { once:true });
-      if ((window as any).__PP_ALREADY_STARTED__) start();
+      if (window.__PP_ALREADY_STARTED__) start();
     })();
     console.log("[Loader] Minimap inlined.");
 }
@@ -3829,7 +3871,7 @@ function initializeMinimap() {
 function initializeMoon() {
     (function(){
       'use strict';
-      if ((window as any).__MoonReady) return; (window as any).__MoonReady = true;
+      if (window.__MoonReady) return; window.__MoonReady = true;
 
       const SCENE = ()=> window.scene || window.BABYLON.Engine?.LastCreatedScene;
 
@@ -3843,7 +3885,7 @@ function initializeMoon() {
         disc.isPickable = false; (disc as any).applyFog = false; disc.renderingGroupId = 0;
 
         const mat = new window.BABYLON.StandardMaterial('moonMat', s);
-        mat.diffuseTexture = new window.BABYLON.Texture(`${BASE_URL}assets/textures/moon.jpg`, s, true, false);
+        mat.diffuseTexture = new window.BABYLON.Texture(`${window.BASE_URL}assets/textures/moon.jpg`, s, true, false);
         mat.emissiveTexture = mat.diffuseTexture;
         mat.emissiveColor = new window.BABYLON.Color3(1,1,1);
         mat.specularColor = new window.BABYLON.Color3(0,0,0);
@@ -3860,14 +3902,11 @@ function initializeMoon() {
 
 function initializeGameplayPatch() {
     (function(){
-        // === Gameplay Patch: storage, belt safety, vanZone spawn, exterior rain ===
-        // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
         const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
         PP.cfg = PP.cfg || { spawnWS: null };
         PP.state = PP.state || {};
         PP.cfg.spawnWS = PP.cfg.spawnWS || new window.BABYLON.Vector3(47.52, 0.22, -105.28);
 
-        // ---------------- storage ----------------
         PP.storage = PP.storage || (function(){
             const KEY_INV='pp_inventory_v1', KEY_FLAGS='pp_flags_v1';
             function get(k: string, d: any){ try{return JSON.parse(localStorage.getItem(k)!) ?? d;}catch(_){return d;} }
@@ -3880,7 +3919,6 @@ function initializeGameplayPatch() {
             };
         })();
 
-        // ---------------- belt (SAFE) ----------------
         function getBelt(){ return document.getElementById('belt') || document.getElementById('item-belt-container'); }
 
         function buildBelt(slots: string[] | null){
@@ -3901,7 +3939,7 @@ function initializeGameplayPatch() {
                 bar.appendChild(el);
             });
         }
-        (window as any).buildBelt = buildBelt;
+        window.buildBelt = buildBelt;
 
         function setEquipped(i: number){
             const inv = PP.storage.loadInventory();
@@ -3912,7 +3950,7 @@ function initializeGameplayPatch() {
             const bar = getBelt(); if (!bar) return;
             [...bar.children].forEach((el,idx)=> el.classList.toggle('active', idx===inv.equipped));
             
-            const itemDef = (PP.inventory.ITEM_META || {})[inv.slots[inv.equipped]];
+            const itemDef = ((PP.inventory as any).ITEM_META || {})[inv.slots[inv.equipped]];
             window.dispatchEvent(new CustomEvent('pp:belt:equip', { detail: { item: itemDef, slot: inv.equipped } }));
         }
 
@@ -3920,7 +3958,7 @@ function initializeGameplayPatch() {
             const inv = PP.storage.loadInventory();
             if (!inv.slots || !inv.slots.length) return;
             inv.equipped = (inv.equipped + (dir>0?1:-1) + inv.slots.length) % inv.slots.length;
-            setEquipped(inv.equipped); // this will save and update UI
+            setEquipped(inv.equipped);
         }
 
         (function attachWheelWhenReady(){
@@ -3939,7 +3977,6 @@ function initializeGameplayPatch() {
             } else { tryAttach(); }
         })();
 
-        // ---------------- item scatter (placeholder) ----------------
         function scatterItems(slots: string[]){
             const sc = window.scene;
             if (!sc) return;
@@ -3950,7 +3987,6 @@ function initializeGameplayPatch() {
             });
         }
 
-        // ---------------- spawn helpers (vanZone aware) ----------------
         function computeSpawnWS(){
             if (window.PP_SPAWN_POS) {
                 return window.PP_SPAWN_POS.clone();
@@ -3971,13 +4007,12 @@ function initializeGameplayPatch() {
             rigState.pitch = 0;
         }
 
-        // ---------------- exterior rain (guards) ----------------
         function exteriorRain(){
             const sc = window.scene;
             if (!sc) return;
             
             const tpl = new window.BABYLON.ParticleSystem("rain_template", 2000, sc);
-            try { tpl.particleTexture = new window.BABYLON.Texture(`${BASE_URL}assets/textures/rain.png`, sc, true, false); } catch(_){}
+            try { tpl.particleTexture = new window.BABYLON.Texture(`${window.BASE_URL}assets/textures/rain.png`, sc, true, false); } catch(_){}
             tpl.blendMode = window.BABYLON.ParticleSystem.BLENDMODE_STANDARD;
             tpl.isBillboardBased = true; (tpl as any).updateSpeed=0.02;
             tpl.minSize=0.05; tpl.maxSize=0.15; tpl.minEmitPower=4; tpl.maxEmitPower=7;
@@ -4007,5 +4042,700 @@ function initializeGameplayPatch() {
             });
         }
 
-        // ---------------- post-load hook ----------------
-        (function attachAfterLoad
+        (function attachAfterLoad(){
+          function run() {
+            try{
+              forceSpawn();
+              exteriorRain();
+              let inv = PP.storage.loadInventory();
+              if (!inv || !Array.isArray(inv.slots) || !inv.slots.length) {
+                inv = { slots: ['emf','spirit','uv'], equipped: 0 }; 
+                PP.storage.saveInventory(inv);
+              }
+              buildBelt(inv.slots);
+              setEquipped(inv.equipped);
+              scatterItems(inv.slots);
+            } catch(e){ console.warn('Gameplay patch post-load error', e); }
+          }
+
+          window.addEventListener('pp:start', () => setTimeout(run, 200), { once: true });
+        })();
+    })();
+    console.log("[Loader] Gameplay Patch inlined.");
+}
+
+function initializePs5Controller() {
+    (function(){
+        if (window.PP?.ps5) return;
+
+        const log = (...a: any[]) => console.log("[PS5_Enhancements]", ...a);
+        const state = {
+            gamepad: null as Gamepad | null,
+            gamepadIndex: -1,
+        };
+
+        function findDualSense() {
+            try {
+                const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+                for (let i = 0; i < gamepads.length; i++) {
+                    const gp = gamepads[i];
+                    if (gp && gp.id.toLowerCase().includes('dualsense')) {
+                        if (state.gamepadIndex !== i) {
+                            log(`DualSense controller found at index ${i}.`);
+                            state.gamepad = gp;
+                            state.gamepadIndex = i;
+                        }
+                        return;
+                    }
+                }
+            } catch(e) {
+                console.warn("[PS5_Enhancements] Error while polling for gamepads.", e);
+            }
+            
+            if (state.gamepad) {
+                log("DualSense controller disconnected.");
+                state.gamepad = null;
+                state.gamepadIndex = -1;
+            }
+        }
+        
+        function pulse(strong = 0.8, weak = 0.4, duration = 150) {
+            if (!state.gamepad || !(state.gamepad as any).vibrationActuator) return;
+
+            (state.gamepad as any).vibrationActuator.playEffect("dual-rumble", {
+                startDelay: 0,
+                duration: duration,
+                weakMagnitude: weak,
+                strongMagnitude: strong,
+            }).catch((e: any) => {
+                // This can fail if the document isn't focused, so we don't need to spam the console.
+            });
+        }
+
+        // A more complex effect, like a heartbeat for low sanity
+        let heartbeatInterval: any = null;
+        function startHeartbeat() {
+            if (heartbeatInterval) return;
+            stopHeartbeat(); // Ensure no duplicates
+            heartbeatInterval = setInterval(() => {
+                pulse(0.9, 0, 80);
+                setTimeout(() => pulse(0.5, 0, 60), 120);
+            }, 800);
+            log("Heartbeat effect started.");
+        }
+        
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+                log("Heartbeat effect stopped.");
+            }
+        }
+
+        // Hook into game events
+        function attachEventListeners() {
+            window.addEventListener('pp:ghost:interact', () => pulse(1.0, 1.0, 300));
+            window.addEventListener('pp:ghost:hunt_start', () => pulse(0.8, 0.8, 1000));
+            window.addEventListener('pp:sanity:changed', (e: any) => {
+                const sanity = e.detail?.sanity;
+                if (typeof sanity === 'number') {
+                    if (sanity < 30) {
+                        startHeartbeat();
+                    } else {
+                        stopHeartbeat();
+                    }
+                }
+            });
+            window.addEventListener('pp:player:hit', () => pulse(1.0, 0.2, 200));
+        }
+
+
+        function init() {
+            window.addEventListener("gamepadconnected", findDualSense, { passive: true });
+            window.addEventListener("gamepaddisconnected", findDualSense, { passive: true });
+            findDualSense(); // Initial check
+            attachEventListeners();
+            log("Initialized.");
+        }
+        
+        const api = {
+            pulse,
+        };
+
+        window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
+        window.PP.ps5 = api;
+
+        window.addEventListener('pp:start', init, { once: true });
+
+    })();
+    console.log("[Loader] PS5 Controller Enhancements inlined.");
+}
+
+function initializeSimLog() {
+    (function(){
+        if(window.SimLog) return;
+
+        window.SimLog = {
+            events: [] as any[],
+            enabled: true,
+            record: function(type: string, data: any){ 
+                if(!this.enabled) return;
+                this.events.push({ time: performance.now(), type, data }); 
+            },
+            exportJSON: function(){ return JSON.stringify(this.events,null,2); },
+            saveToFile: function(filename="sim_log.json"){
+                try{
+                    const blob = new Blob([this.exportJSON()], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = filename;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    console.log("[SimLog] Saved", this.events.length, "events");
+                }catch(e){ console.warn("[SimLog] Save failed", e); }
+            }
+        };
+
+        const recordPlayer = ()=> {
+            const rigRoot = window.PlayerRig?.getRigRoot();
+            if(rigRoot) SimLog.record("playerTick", { pos: {x: rigRoot.position.x, y: rigRoot.position.y, z: rigRoot.position.z} });
+        };
+        const recordCamera = ()=> {
+            const cam = window.camera;
+            if(cam) SimLog.record("cameraTick", { pos: {x: cam.globalPosition.x, y: cam.globalPosition.y, z: cam.globalPosition.z}, rot: {x: cam.rotation.x, y: cam.rotation.y, z: cam.rotation.z} });
+        };
+        
+        function startLogging() {
+            const scene = window.scene;
+            if (scene) {
+                scene.onBeforeRenderObservable.add(()=>{
+                    recordPlayer();
+                    recordCamera();
+                });
+                console.log("[SimLog] Player and camera tick logging attached.");
+            } else {
+                console.warn("[SimLog] Scene not ready for logging hooks.");
+            }
+        }
+        
+        window.addEventListener("pp:ghost:attack", (e: any) => {
+            SimLog.record("ghostAttack", { ghost: e.detail?.ghostType, target: e.detail?.target });
+        });
+
+        window.addEventListener("keydown",(e)=>{
+            if(e.altKey && e.code==="KeyS"){
+                e.preventDefault();
+                SimLog.saveToFile();
+            }
+        });
+        
+        window.addEventListener("pp:start", startLogging, { once: true });
+
+        console.log("[SimLog] Initialized — Alt+S to save log");
+    })();
+    console.log("[Loader] SimLog (logger.js) inlined.");
+}
+
+function initializeDevTools() {
+    (function(){
+      "use strict";
+
+      const $ = (sel: string, root: Document | HTMLElement =document)=> root.querySelector(sel);
+      const el = (tag: string, attrs: any ={}, kids: any[] =[])=>{
+        const n=document.createElement(tag);
+        for (const k in attrs){
+          if (k==="style") Object.assign(n.style, attrs[k]);
+          else if (k in n) (n as any)[k]=attrs[k];
+          else n.setAttribute(k, attrs[k]);
+        }
+        for (const k of kids) n.appendChild(typeof k==="string"?document.createTextNode(k):k);
+        return n;
+      };
+      const btn = (label: string, onclick: any, title: string ='')=>{ const b=el('button',{className:'hud-btn', title},[label]); if(onclick) b.onclick=onclick; Object.assign(b.style, { border:'1px solid #244',background:'#0b0b0b',color:'#9ff',padding:'6px 10px',borderRadius:'8px',cursor:'pointer'}); return b; };
+      const lab = (t: string)=> el('span',{style:{color:'#9ff',minWidth:'56px',display:'inline-block'}},[t]);
+      const input = (type: string,id: string,val: string,attrs: any ={})=>{
+        return el('input',Object.assign({type,id,value:val,style:{padding:'4px',background:'#000',color:'#0ff',
+          border:'1px solid #066',borderRadius:'4px'}},attrs),[]);
+      };
+      const check = (label: string,id: string,onChange: any,checked=false)=>{
+        const w=el('label',{style:{display:'inline-flex',gap:'6px',alignItems:'center',cursor:'pointer'}},
+          [el('input',{id,type:'checkbox',checked}), el('span',{style:{color:'#cff'}},[label])]);
+        if(onChange) setTimeout(()=> ($('#'+id) as HTMLElement).addEventListener('change', onChange),0);
+        return w;
+      };
+
+      const STATE = { ready:false, fpsEl:null as HTMLElement | null, lastPick:null as any, gizmo: null as any };
+      const SCENE = ()=> window.scene;
+      const ENGINE= ()=> window.engine;
+      const toast = (msg: string,ms=1200)=> (window.toast? window.toast(msg,ms): console.log('[toast]',msg));
+
+      function selectMesh(mesh: any){
+        STATE.lastPick = mesh;
+        const name = $('#mesh-name'); if (name) name.textContent = mesh?.name || '(unnamed)';
+        try{
+          if (!STATE.gizmo){
+            const gm = new window.BABYLON.GizmoManager(SCENE());
+            gm.usePointerToAttachGizmos=false;
+            gm.positionGizmoEnabled=true; gm.rotationGizmoEnabled=true; gm.scaleGizmoEnabled=false;
+            STATE.gizmo = gm;
+          }
+          STATE.gizmo.attachToMesh(mesh);
+        }catch(e){}
+      }
+
+      const PANEL = { root:null as HTMLElement | null, tabs:null as HTMLElement | null, body:null as HTMLElement | null };
+
+      function ensurePanel(){
+        const root = $('#devtools-panel');
+        if (!root) return false;
+        root.innerHTML = "";
+        const hdr = el('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'6px'}},[
+          el('div',{style:{color:'#9ff',fontWeight:'bold'}},['Developer Tools']),
+          (STATE.fpsEl = el('div',{style:{color:'#8ff',fontSize:'12px'}},['FPS: --']))
+        ]);
+        const tabs = el('div',{style:{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'8px'}},[]);
+        const body = el('div',{style:{border:'1px solid #033',padding:'8px',borderRadius:'8px',background:'#0a0a0a'}},[]);
+        PANEL.root=root; PANEL.tabs=tabs; PANEL.body=body;
+        root.appendChild(hdr); root.appendChild(tabs); root.appendChild(body);
+        return true;
+      }
+      function addTab(name: string, builder: ()=>void, active=false){
+        const b = btn(name, ()=>{ if(PANEL.body) {PANEL.body.innerHTML=""; builder();} });
+        if (active) setTimeout(()=> b.click(), 0);
+        if(PANEL.tabs) PANEL.tabs.appendChild(b);
+      }
+
+      function buildMapUI(){
+          if(!PANEL.body) return;
+        const row = el('div',{style:{display:'flex',gap:'8px'}},[
+            btn('Generate New Map', async ()=>{
+                const scene = SCENE();
+                if(window.ProHouseGenerator && scene){
+                    const oldMap = scene.getTransformNodeByName("ProceduralMapRoot");
+                    if(oldMap) oldMap.dispose(false, true);
+                    await window.ProHouseGenerator.generateMap(scene);
+                }
+            })
+        ]);
+        PANEL.body.appendChild(row);
+      }
+
+      function init(){
+        ensurePanel();
+        addTab('Map', buildMapUI, true);
+
+        setInterval(()=>{ if(STATE.fpsEl) STATE.fpsEl.textContent = `FPS: ${ENGINE()?.getFps().toFixed(0)}`; }, 1000);
+        
+        const toggleBtn = document.getElementById('devtools-toggle');
+        const panel = document.getElementById('devtools-panel');
+        if (toggleBtn) {
+            toggleBtn.style.display = 'block';
+            toggleBtn.onclick = () => {
+                const isHidden = panel!.style.display === 'none';
+                panel!.style.display = isHidden ? 'block' : 'none';
+                if (isHidden) window.PP?.pointerLock?.hold('devtools');
+                else window.PP?.pointerLock?.release('devtools');
+            };
+        }
+      }
+
+      const boot = setInterval(()=>{
+        try{
+          if (SCENE() && ENGINE()){ clearInterval(boot); init(); STATE.ready = true; }
+        }catch{}
+      }, 150);
+
+    })();
+    console.log("[Loader] DevTools (devtools.js) inlined.");
+}
+
+function initializeGhostDev() {
+    (function(){
+      "use strict";
+
+      const toast  = (m: string, ms=1200)=> (window.toast? window.toast(m,ms) : console.log('[ghost-dev]', m));
+      const ST = { open:false, devVisible:false, ui: null as HTMLElement | null };
+
+      function setDevVisible(on: boolean){
+        ST.devVisible = !!on;
+        window.GHOST_DEV_FORCE_VISIBLE = ST.devVisible;
+        const visBtn = ST.ui?.querySelector('#gd-vis') as HTMLElement;
+        if (visBtn) visBtn.textContent = ST.devVisible ? 'Visible ✓' : 'Visible';
+        window.PP?.ghost?.setVisible?.(ST.devVisible);
+      }
+
+      function buildUI(){
+        if (ST.ui) return ST.ui;
+        const wrap = document.getElementById('ghostdev-panel');
+        if(!wrap) return null;
+        wrap.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-weight:bold;color:#9ff">Ghost Dev</div><button id="gd-close" style="border:1px solid #333;background:#181818;color:#ddd;padding:4px 8px;border-radius:6px;cursor:pointer">Close</button></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0"><button id="gd-vis">Visible</button></div>`;
+        wrap.querySelectorAll('button').forEach(b => Object.assign(b.style, { border:'1px solid #244', background:'#0b0b0b', color:'#9ff', padding:'6px 10px', borderRadius:'8px', cursor:'pointer' }));
+        ST.ui = wrap;
+        (wrap.querySelector('#gd-close') as HTMLElement).onclick = ()=> { if(ST.ui) ST.ui.style.display = 'none'; };
+        (wrap.querySelector('#gd-vis') as HTMLElement).onclick = ()=>setDevVisible(!ST.devVisible);
+        return wrap;
+      }
+
+      function init(){
+        const toggle = document.getElementById('ghostdev-toggle');
+        const panel  = document.getElementById('ghostdev-panel');
+        if (!toggle || !panel) { console.warn("GhostDev UI anchors not found."); return; }
+        toggle.style.display = 'block';
+        panel.style.display = 'none';
+        toggle.onclick = ()=>{
+          const p = buildUI();
+          if(!p) return;
+          const on = p.style.display !== 'none';
+          p.style.display = on ? 'none' : 'block';
+          if (!on) window.PP?.pointerLock?.hold('ghostdev');
+          else window.PP?.pointerLock?.release('ghostdev');
+        };
+      }
+      window.addEventListener('pp:start', init, { once: true });
+    })();
+    console.log("[Loader] GhostDev (ghost_dev.js) inlined.");
+}
+
+function initializeBootstrap() {
+    (function(){
+        "use strict";
+
+        const log = (...a: any[]) => console.log("[Bootstrap]", ...a);
+        const warn = (...a: any[]) => console.warn("[Bootstrap]", ...a);
+
+        let engine: any, scene: any, camera: any;
+
+        const state = {
+            isStarted: false,
+            selectedGhost: null,
+            foundEvidence: new Set(),
+        };
+        window.PP = window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null };
+        window.PP.state = Object.assign(window.PP.state || {}, state);
+        window.PP.gameHasRenderedFirstFrame = false;
+
+        function showLoading(show: boolean, percent?: number, text?: string, subText?: string) {
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const loadingBar = document.getElementById('loading-bar');
+            const loadingText = document.getElementById('loading-text');
+            const loadingSubText = document.getElementById('loading-sub-text');
+
+            if (!loadingOverlay || !loadingBar || !loadingText || !loadingSubText) return;
+
+            if (show) {
+                loadingOverlay.style.display = 'flex';
+                setTimeout(()=> loadingOverlay.style.opacity = '1', 10);
+                if (percent !== undefined) {
+                     (loadingBar as HTMLElement).style.width = `${percent}%`;
+                }
+                if (text) {
+                     loadingText.textContent = text;
+                }
+                if (subText !== undefined) {
+                    loadingSubText.textContent = subText;
+                }
+            } else {
+                loadingOverlay.style.opacity = '0';
+                setTimeout(()=> loadingOverlay.style.display = 'none', 500);
+            }
+        }
+        window.showLoading = showLoading;
+
+        async function setupEngine() {
+            log("1. Setting up engine and scene...");
+            
+            const canvas = document.getElementById('renderCanvas');
+            if (!canvas) throw new Error("renderCanvas element not found in the DOM!");
+            
+            engine = new window.BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+            scene = new window.BABYLON.Scene(engine);
+            scene.collisionsEnabled = true;
+            scene.gravity = new window.BABYLON.Vector3(0, -9.81, 0);
+
+            camera = new window.BABYLON.FreeCamera("mainCam", new window.BABYLON.Vector3(0, 1.8, -5), scene);
+            camera.attachControl(canvas, false);
+            scene.activeCamera = camera;
+
+            const hemi = new window.BABYLON.HemisphericLight("hemi", new window.BABYLON.Vector3(0, 1, 0), scene);
+            hemi.intensity = 0.8;
+            scene.clearColor = new window.BABYLON.Color4(0.0, 0.0, 0.0, 1.0);
+
+            const debugGround = window.BABYLON.MeshBuilder.CreateGround("debugGround", {width: 20, height: 20}, scene);
+            debugGround.isPickable = false;
+            const debugSphere = window.BABYLON.MeshBuilder.CreateSphere("debugSphere", {diameter: 1}, scene);
+            debugSphere.position.y = 1;
+            debugSphere.isPickable = false;
+            const debugMat = new window.BABYLON.StandardMaterial("debugMat", scene);
+            debugMat.diffuseColor = new window.BABYLON.Color3(1.0, 0.0, 1.0);
+            debugGround.material = debugMat;
+            debugSphere.material = debugMat;
+
+            window.engine = engine;
+            window.scene = scene;
+            window.camera = camera;
+            
+            window.PP.runtime?.exportGlobals(engine, scene, camera);
+
+            window.addEventListener('resize', () => engine.resize());
+            
+            engine.runRenderLoop(() => {
+                if (scene && scene.activeCamera) {
+                    scene.render();
+                }
+            });
+            
+            log("Engine and scene OK. Render loop started for smoke test.");
+        }
+
+        async function loadSelectedMap(mapId: string) {
+            const mapData = window.PP.mapManifest.find((m:any) => m.id === mapId);
+            if (!mapData) throw new Error(`Map with id "${mapId}" not found in manifest.`);
+
+            log(`Loading map: ${mapData.title}`);
+            if (mapData.id === 'procedural_house' && window.ProHouseGenerator) {
+                await window.ProHouseGenerator.generateMap(scene);
+                log("Procedural map generated.");
+            } else if (mapData.file && window.PP.mapManager && typeof window.PP.mapManager.loadMap === 'function') {
+                await window.PP.mapManager.loadMap(mapData);
+                log("Static map loaded.");
+            } else {
+                throw new Error(`Map '${mapData.title}' has no valid loader defined.`);
+            }
+        }
+
+        async function setupMapAndWeather(mapId: string) {
+            log("3. Loading map and initializing weather...");
+            showLoading(true, 40, "Building World...", "Loading map data...");
+            
+            await loadSelectedMap(mapId);
+
+            showLoading(true, 70, "Building World...", "Initializing weather systems...");
+            if(window.EnvAndSound && typeof window.EnvAndSound.firstInteractionBoot === 'function') {
+                window.EnvAndSound.firstInteractionBoot();
+                const weathers = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
+                const choice = weathers[Math.floor(Math.random() * weathers.length)];
+                window.EnvAndSound.setWeather(choice);
+                log(`Initial weather set to: ${choice}`);
+            } else {
+                warn("EnvAndSound system not found.");
+            }
+        }
+
+        function setupGameplaySystems() {
+            log("4. Initializing gameplay systems...");
+            showLoading(true, 75, "Waking Entities...", "Initializing ghost logic...");
+
+            if (window.PP.ghost?.init) {
+                window.PP.ghost.init(scene);
+                log("Initialized ghost logic.");
+            } else {
+                warn("Ghost logic module not found for initialization.");
+            }
+
+            showLoading(true, 80, "Waking Entities...", "Selecting a ghost...");
+            const ghostNames = Object.keys(window.PP.GHOST_DATA || {});
+            if (ghostNames.length > 0) {
+                const randomGhostName = ghostNames[Math.floor(Math.random() * ghostNames.length)];
+                window.PP.state.selectedGhost = window.PP.GHOST_DATA[randomGhostName];
+                log(`Selected Ghost: ${window.PP.state.selectedGhost.name}`);
+                if (window.PP.ghost) {
+                    window.PP.ghost.data = window.PP.state.selectedGhost;
+                }
+            } else {
+                warn("GHOST_DATA is empty! Cannot select a ghost.");
+            }
+            
+            showLoading(true, 85, "Waking Entities...", "Initializing tools and systems...");
+            
+            Object.values(window.PP.tools || {}).forEach((tool: any) => {
+                if (typeof tool.init === 'function') {
+                    try { tool.init(scene); } catch (e) { warn(`Error initializing a tool:`, e); }
+                }
+            });
+            
+            ['salt', 'writing_book', 'lighter'].forEach(sysName => {
+                const sys = (window.PP_SYSTEMS as any)?.[sysName] || (window as any)[sysName.toUpperCase()];
+                if(sys && typeof sys.init === 'function') {
+                     try { sys.init(scene); } catch(e){ warn(`Error initializing system ${sysName}:`, e); }
+                }
+            });
+        }
+
+        async function startGame(mapId: string) {
+            if (window.PP.state.isStarted) return;
+            log(`Starting game content loading for map: ${mapId}`);
+            
+            showLoading(true, 25, "Creating Player...", "");
+            
+            await setupMapAndWeather(mapId);
+            setupGameplaySystems();
+            
+            showLoading(true, 90, "Finalizing...");
+            
+            window.PP.state.isStarted = true;
+            window.__PP_ALREADY_STARTED__ = true;
+            window.dispatchEvent(new CustomEvent('pp:start'));
+            log("Game start event dispatched!");
+
+            if(window.PlayerRig) {
+                log("Enabling player movement.");
+                window.PlayerRig.enableMovement(true);
+            }
+            
+            window.PP.pointerLock?.lock();
+            
+            setTimeout(() => { showLoading(false); }, 500);
+        }
+
+        function setupGlobalHelpers() {
+            window.PP.checkForEvidence = (evidenceKey: string) => {
+                if (!window.PP.state.selectedGhost) return false;
+                return window.PP.state.selectedGhost.evidence.includes(evidenceKey);
+            };
+
+            window.PP.foundEvidence = (evidenceKey: string) => {
+                window.PP.state.foundEvidence.add(evidenceKey);
+                log(`Evidence found: ${evidenceKey}. Total: ${window.PP.state.foundEvidence.size}/3`);
+                window.dispatchEvent(new CustomEvent('pp:evidence:found', { detail: { evidence: evidenceKey }}));
+            };
+        }
+
+        async function initialize() {
+            setupGlobalHelpers();
+            
+            const fallbackBtn = document.getElementById('fallback-refresh-btn');
+            if (fallbackBtn) fallbackBtn.addEventListener('click', () => window.location.reload());
+            
+            const fallbackTimer = setTimeout(() => {
+                if (!window.PP.gameHasRenderedFirstFrame) {
+                    console.error("Fallback Triggered: Game failed to render a frame within 15 seconds.");
+                    showLoading(false);
+                    const fallbackOverlay = document.getElementById('fallback-overlay');
+                    if (fallbackOverlay) fallbackOverlay.style.display = 'flex';
+                }
+            }, 15000);
+
+            window.addEventListener('pp:start-investigation', async (e: any) => {
+                const mapId = e.detail?.mapId;
+                if (!mapId) { console.error("Start event fired without a mapId."); return; }
+                
+                try {
+                    await startGame(mapId);
+                } catch(error) {
+                    console.error("CRITICAL FAILURE DURING GAME START:", error);
+                    clearTimeout(fallbackTimer);
+                    showLoading(false);
+                    const fallbackOverlay = document.getElementById('fallback-overlay');
+                    if (fallbackOverlay) fallbackOverlay.style.display = 'flex';
+                }
+            }, { once: true });
+
+            try {
+                log("Waiting for critical systems to be ready...");
+                showLoading(true, 5, "Initializing...", "Waiting for systems...");
+                await window.PP.waitFor(['playerRig', 'ghostLogic', 'mapLoader', 'inputManager', 'envAndSound', 'pointerLock']);
+                log("All systems ready. Proceeding with engine setup.");
+
+                showLoading(true, 10, "Initializing Engine...", "Setting up Babylon.js");
+                await setupEngine();
+                
+                scene.onAfterRenderObservable.addOnce(() => {
+                    log("First frame rendered successfully (Smoke Test Passed).");
+                    window.PP.gameHasRenderedFirstFrame = true;
+                    clearTimeout(fallbackTimer);
+                    
+                    scene.getMeshByName("debugGround")?.dispose();
+                    scene.getMeshByName("debugSphere")?.dispose();
+                    scene.getMaterialByName("debugMat")?.dispose();
+                    
+                    showLoading(false);
+                    setTimeout(() => {
+                        if (window.PP?.vanUI?.show) {
+                            window.PP.vanUI.show();
+                        } else {
+                            warn("Van UI not found. Cannot start game selection.");
+                            const fallbackOverlay = document.getElementById('fallback-overlay');
+                            if(fallbackOverlay) {
+                                (fallbackOverlay.querySelector('h2') as HTMLElement).textContent = "UI Error";
+                                (fallbackOverlay.querySelector('p') as HTMLElement).textContent = "The main menu failed to load.";
+                                fallbackOverlay.style.display = 'flex';
+                            }
+                        }
+                    }, 500);
+                });
+            } catch(error) {
+                console.error("CRITICAL FAILURE DURING INITIALIZATION:", error);
+                clearTimeout(fallbackTimer);
+                showLoading(false);
+                const fallbackOverlay = document.getElementById('fallback-overlay');
+                if (fallbackOverlay) fallbackOverlay.style.display = 'flex';
+            }
+        }
+        initialize();
+    })();
+    console.log("[Loader] Bootstrap inlined.");
+}
+
+/**
+ * Main execution block.
+ * This function orchestrates the initialization of all game modules in the correct order.
+ */
+function main() {
+    console.log("[Loader] Starting main initialization sequence...");
+    
+    // Initialize core systems first, as others depend on them.
+    initializeSettings();
+    initializeRuntime();
+    initializeGhostData();
+
+    // Initialize systems that can load in parallel.
+    initializePlayerRigController();
+    initializeGhostLogic();
+    initializeInputManager();
+    initializePointerLockManager();
+    initializeEnvAndSound();
+    initializeMapLoader();
+    initializeMapManager();
+    initializePhasmaMapAndGhost();
+    
+    // Initialize item and tool systems.
+    initializeInventorySystem();
+    initializeSaltSystem();
+    initializeWritingBook();
+    initializeUvPrints();
+    initializeLighter();
+    initializeLantern();
+    initializeDotsSystem();
+    initializeEmf();
+    initializeParabolicMic();
+    initializeSpiritBox();
+
+    // Initialize UI systems.
+    initializeBeltManager();
+    initializeHudUi();
+    initializeNotebookUi();
+    initializeReticle();
+    initializeVanUi();
+
+    // Initialize effects and misc utilities.
+    initializeEffectsSanityMed();
+    initializeGhostCam();
+    initializeMinimap();
+    initializeMoon();
+    initializeGameplayPatch();
+    initializePs5Controller();
+
+    // Initialize developer tools (can be last).
+    initializeSimLog();
+    initializeDevTools();
+    initializeGhostDev();
+    
+    // Finally, initialize the main game bootstrap logic which sets up the engine and starts the game.
+    initializeBootstrap();
+
+    console.log("[Loader] Main initialization sequence complete.");
+}
+
+// Run the main function to start the application.
+main();
