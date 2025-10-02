@@ -1,3 +1,9 @@
+// This file acts as the main entry point and script loader for the game.
+// It ensures all game modules are loaded in the correct sequence before starting the game.
+
+// FIX: Define a more specific type for the global PP object to satisfy TypeScript.
+// Properties are marked as optional to allow for progressive initialization across different scripts.
+// This resolves multiple errors related to property access and initialization.
 declare global {
   interface Window {
     PP: {
@@ -32,9 +38,11 @@ declare global {
       // FIX: Made storage a required property.
       storage: any;
       mapManifest?: any;
-      mapManager?: any;
+      // FIX: Made mapManager a required property to resolve type errors.
+      mapManager: any;
       inventory?: any;
-      tools?: any;
+      // FIX: Made tools a required property to resolve type errors.
+      tools: any;
       spiritBox?: any;
       vanUI?: any;
       ps5?: any;
@@ -44,6 +52,8 @@ declare global {
       gameHasRenderedFirstFrame?: boolean;
       audio?: any;
       rig?: any;
+      checkForEvidence?: (evidenceKey: string) => boolean;
+      foundEvidence?: (evidenceKey: string) => void;
       
       // Allow other properties to be added by various modules
       [key: string]: any;
@@ -90,7 +100,8 @@ function initializeSettings() {
   // FIX: Add `cfg`, `state`, and `storage` to the initial object to satisfy TypeScript's inferred global type for PP, which requires these properties.
   // FIX: Use `null` for GHOST_DATA to satisfy the inferred type, which expects a complex object, not `{}`.
   // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-  window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+  // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+  window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
 
   /* ------------ Controls (keys & movement tuning) ------------ */
   window.PP.controls = {
@@ -188,7 +199,8 @@ function initializeRuntime() {
     // FIX: Add `cfg`, `state`, and `storage` to the initial object to satisfy TypeScript's inferred global type for PP, which requires these properties.
     // FIX: Use `null` for GHOST_DATA to satisfy the inferred type, which expects a complex object, not `{}`.
     // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-    const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP']);
+    // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+    const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP']);
     if (PP.runtime) return;
 
     PP.globals = PP.globals || {};
@@ -617,7 +629,8 @@ function initializeGhostLogic() {
     // FIX: Add `state` and `storage` to the initial object to satisfy TypeScript's inferred global type for PP, which requires these properties.
     // FIX: Use `null` for GHOST_DATA to satisfy the inferred type, which expects a complex object, not `{}`.
     // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-    window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+    // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+    window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
     window.PP.ghost = Object.assign(window.PP.ghost || {}, GhostLogic);
     window.PP.ghost.logic = true;
     
@@ -647,7 +660,8 @@ function initializeInputManager() {
 
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} })) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
       const C  = (PP.controls = PP.controls || {});
       PP.state = PP.state || {};
       PP.state.controls = PP.state.controls || { forward:false, back:false, left:false, right:false };
@@ -825,7 +839,8 @@ function initializePointerLockManager() {
 
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} })) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
       const state = {
         canvas: null as HTMLElement | null,
         uiOpenCount: 0,       // how many UIs are asking to keep the mouse free
@@ -917,7 +932,8 @@ function initializeEnvAndSound() {
 
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
       const PP = window.PP;
       PP.audio = PP.audio || {};
       
@@ -1078,7 +1094,7 @@ function initializeEnvAndSound() {
             pan.rolloffFactor = on ? 1.0 : 0.0;
           } catch {}
         },
-        // FIX: Replace incorrect `.call` on AudioParam with modern API.
+        // FIX: Replace incorrect .call on AudioParam with modern API.
         setWorldPosition(x=0,y=0,z=0){
           if (!ensureGraph() || !pan || !ctx) return;
           try {
@@ -1091,7 +1107,7 @@ function initializeEnvAndSound() {
             }
           } catch {}
         },
-        // FIX: Replace incorrect `.call` on AudioParam with modern API.
+        // FIX: Replace incorrect .call on AudioParam with modern API.
         setListener(x:number,y:number,z:number, fx:number,fy:number,fz:number, ux:number,uy:number,uz:number){
           if (!ensureGraph() || !ctx) return;
           const L = ctx.listener;
@@ -1153,7 +1169,8 @@ function initializeMapLoader() {
       "use strict";
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
       
       const MAPS = [
           {
@@ -1185,7 +1202,8 @@ function initializeMapManager() {
     if(window.PP && window.PP.mapManager) return;
     // FIX: Initialize window.PP with required properties to satisfy the global type.
     // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-    window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+    // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+    window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
     
     let currentMapRoot: any = null;
     const log  = (...a: any[])=>{ try{ console.log("[mapManager]", ...a); }catch{} };
@@ -1381,7 +1399,8 @@ function initializeInventorySystem() {
       "use strict";
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} })) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
       PP.inventory = PP.inventory || {};
 
       const ITEM_META = {
@@ -1404,16 +1423,357 @@ function initializeInventorySystem() {
 
 function initializeSaltSystem() {
     (function(){
-        // This script is intentionally left blank as its logic has been moved.
+      'use strict';
+      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
+      (PP as any).PP_SYSTEMS = (PP as any).PP_SYSTEMS || {};
+
+      if ((PP as any).PP_SYSTEMS?.salt) return;
+
+      const log = (...a: any[]) => console.log("[SaltSystem]", ...a);
+      const warn = (...a: any[]) => console.warn("[SaltSystem]", ...a);
+      
+      const SCENE = ()=> window.scene;
+
+      const StepAudio = (function(){
+        let s1: any=null, s2: any=null, s3: any=null;
+
+        function getSound(name: string, url: string) {
+            const scene = SCENE();
+            if (!scene) return null;
+            try {
+                return new window.BABYLON.Sound(name, url, scene, null, {
+                    spatialSound: true, autoplay: false, loop: false, volume: 0.9, 
+                    refDistance: 2, rolloffFactor: 1.2, maxDistance: 25
+                });
+            } catch(e) {
+                warn(`Failed to load sound: ${url}`, e);
+                return null;
+            }
+        }
+
+        function ensureSounds(){
+          if (!s1) s1 = getSound('salt_step1', `${BASE_URL}assets/audio/step1.mp3`);
+          if (!s2) s2 = getSound('salt_step2', `${BASE_URL}assets/audio/step2.mp3`);
+          if (!s3) s3 = getSound('salt_step3', `${BASE_URL}assets/audio/step3.mp3`);
+        }
+
+        function setPosAndPlay(sound: any, pos: any){
+          if (!sound || !pos) return;
+          try { sound.setPosition(pos); sound.stop(); sound.play(); } catch(_) {}
+        }
+
+        return {
+          playTripletAt(pos: any){
+            ensureSounds();
+            setPosAndPlay(s1, pos);
+            setTimeout(()=> setPosAndPlay(s2, pos), 230);
+            setTimeout(()=> setPosAndPlay(s3, pos), 480);
+          }
+        };
+      })();
+
+      function ghostType(){
+        return window.PP?.state?.selectedGhost?.name?.toLowerCase() || '';
+      }
+
+      function ghostHasUvEvidence(){
+        return window.PP?.checkForEvidence('Ultraviolet') || false;
+      }
+      
+      function getGhostPosition() {
+        return window.PP?.ghost?.root?.position;
+      }
+
+      function aimPoint(maxDist=3.8){
+        const s=SCENE(); const cam = s?.activeCamera;
+        if (!cam) return new window.BABYLON.Vector3(0,0,0);
+        const ray = cam.getForwardRay(maxDist);
+        const pick = s.pickWithRay(ray, (m: any)=>m && m.isPickable!==false);
+        if (pick?.hit) return pick.pickedPoint.clone();
+        
+        const ahead = cam.position.add(ray.direction.scale(maxDist));
+        
+        const groundRay = new window.BABYLON.Ray(ahead.add(new window.BABYLON.Vector3(0, 2, 0)), window.BABYLON.Vector3.Down(), 4);
+        const groundPick = s.pickWithRay(groundRay, (m: any) => m.isPickable !== false && m.checkCollisions);
+        if (groundPick?.hit) return groundPick.pickedPoint;
+
+        return ahead;
+      }
+
+      const SALT_LINES: any[] = [];
+      function placeSaltLine(){
+        const s=SCENE(); if (!s) return;
+        const center = aimPoint(3.8);
+        const fwd = s.activeCamera.getForwardRay().direction;
+        const yaw = Math.atan2(fwd.z, fwd.x);
+        const half = 0.60;
+        
+        center.y += 0.01;
+
+        const a = center.subtract(new window.BABYLON.Vector3(Math.sin(yaw) * half, 0, Math.cos(yaw) * half));
+        const b = center.add(new window.BABYLON.Vector3(Math.sin(yaw) * half, 0, Math.cos(yaw) * half));
+        
+        const mesh = window.BABYLON.MeshBuilder.CreateTube('salt_line', {path:[a,b], radius:0.04, tessellation:8}, s);
+        const mat = new window.BABYLON.StandardMaterial('salt_mat', s);
+        mat.diffuseColor = new window.BABYLON.Color3(0.95,0.95,0.95);
+        mat.specularColor = new window.BABYLON.Color3(0.1,0.1,0.1);
+        mat.emissiveColor = new window.BABYLON.Color3(0.05,0.05,0.05);
+        mesh.material = mat;
+        mesh.isPickable = false;
+
+        const mid = a.add(b).scale(0.5);
+        SALT_LINES.push({mesh, a, b, mid, disturbed:false, yaw});
+        
+        window.dispatchEvent(new CustomEvent('pp:item:used', { detail: { id: 'salt' } }));
+      }
+
+      let lastGhostPos = new window.BABYLON.Vector3(Infinity, Infinity, Infinity);
+
+      function pointToSegDistanceXZ(p: any, a: any, b: any){
+        const l2 = window.BABYLON.Vector3.DistanceSquared(a, b);
+        if (l2 === 0) return window.BABYLON.Vector3.Distance(p, a);
+        const t = Math.max(0, Math.min(1, window.BABYLON.Vector3.Dot(p.subtract(a), b.subtract(a)) / l2));
+        const projection = a.add(b.subtract(a).scale(t));
+        return window.BABYLON.Vector3.Distance(new window.BABYLON.Vector3(p.x, 0, p.z), new window.BABYLON.Vector3(projection.x, 0, projection.z));
+      }
+
+      function disturbCheck(ghostPos: any){
+        if (!ghostPos) return;
+        
+        if (ghostType() === 'wraith') return;
+
+        for (const s of SALT_LINES){
+          if (s.disturbed) continue;
+          const d = pointToSegDistanceXZ(ghostPos, s.a, s.b);
+          
+          if (d < 0.25){
+            s.disturbed = true;
+            s.mesh.setEnabled(false);
+            setTimeout(() => s.mesh.dispose(), 1000);
+
+            StepAudio.playTripletAt(s.mid);
+
+            if (ghostHasUvEvidence() && window.UVPrints){
+              const dirYaw = (function(){
+                const dx = ghostPos.x - lastGhostPos.x, dz = ghostPos.z - lastGhostPos.z;
+                if (dx*dx + dz*dz > 1e-4) return Math.atan2(dx, dz);
+                return s.yaw + Math.PI / 2;
+              })();
+
+              window.UVPrints.addStepPair(s.mid, dirYaw);
+              const step2Pos = s.mid.add(new window.BABYLON.Vector3(Math.sin(dirYaw), 0, Math.cos(dirYaw)).scale(0.5));
+              window.UVPrints.addStepPair(step2Pos, dirYaw);
+              
+              window.PP.foundEvidence('Ultraviolet');
+            }
+          }
+        }
+      }
+
+      function init(scene: any) {
+        scene.onBeforeRenderObservable.add(()=>{
+          const gpos = getGhostPosition();
+          if(gpos) {
+              disturbCheck(gpos);
+              lastGhostPos.copyFrom(gpos);
+          }
+        });
+        log("Update loop attached.");
+      }
+      
+      const api = { init, place: placeSaltLine };
+      (window.PP as any).PP_SYSTEMS = (window.PP as any).PP_SYSTEMS || {};
+      (window.PP as any).PP_SYSTEMS.salt = api;
+
+      window.addEventListener('pp:item:use', () => {
+          const inventory = window.PP?.inventory;
+          if (!inventory) return;
+          
+          const activeSlotIndex = window.BeltManager?.state?.activeSlot - 1;
+          if (typeof activeSlotIndex !== 'number' || activeSlotIndex < 0) return;
+          
+          const activeItemId = inventory.slots?.[activeSlotIndex];
+          if (activeItemId === 'salt') {
+              placeSaltLine();
+          }
+      });
+
+      log("Salt System Initialized.");
+
     })();
-    console.log("[Loader] Salt System inlined.");
+    console.log("[Loader] Salt System inlined and restored.");
 }
 
 function initializeWritingBook() {
     (function(){
-        // This script is intentionally left blank as its logic has been moved.
+      'use strict';
+      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
+      (PP as any).PP_SYSTEMS = (PP as any).PP_SYSTEMS || {};
+      if ((PP as any).PP_SYSTEMS?.writing_book) return;
+
+      const log = (...a: any[]) => console.log("[WritingBook]", ...a);
+      const warn = (...a: any[]) => console.warn("[WritingBook]", ...a);
+      
+      const SCENE = ()=> window.scene;
+
+      const state = {
+        isPlaced: false,
+        isWritten: false,
+        position: null as any,
+        cooldown: 0,
+        mesh: null as any,
+      };
+
+      const WritingAudio = (function(){
+        let writeClip: any=null, tossClip: any=null;
+        function getSound(name: string, url: string) {
+            const s = SCENE();
+            if (!s) return null;
+            try {
+                return new window.BABYLON.Sound(name, url, s, null, { 
+                    spatialSound: true, autoplay: false, loop: false, volume: 0.9, 
+                    refDistance: 2, rolloffFactor: 1.2, maxDistance: 25 
+                });
+            } catch(e) {
+                warn(`Failed to load sound ${url}`, e);
+                return null;
+            }
+        }
+        function ensure(){
+          if (!writeClip) writeClip = getSound('ghostWriting',`${BASE_URL}assets/audio/GhostWriting1.mp3`);
+          if (!tossClip) tossClip = getSound('bookToss',`${BASE_URL}assets/audio/Toss.wav`);
+        }
+        function playAt(pos: any, snd: any){ 
+          try{ 
+            ensure(); 
+            if(snd) {
+                snd.setPosition(pos); 
+                snd.stop(); 
+                snd.play();
+            }
+          }catch(_){ } 
+        }
+        return { writeAt:(p: any)=>playAt(p,writeClip), tossAt:(p: any)=>playAt(p,tossClip) };
+      })();
+
+      function getGhostData() {
+        return window.PP?.state?.selectedGhost;
+      }
+
+      function getGhostPosition() {
+        return window.PP?.ghost?.root?.position;
+      }
+
+      function aimPointOnGround(maxDist=4){
+        const s = SCENE();
+        const cam = s?.activeCamera;
+        if (!cam) return new window.BABYLON.Vector3(0, 1, 0);
+
+        const ray = cam.getForwardRay(maxDist);
+        const pick = s.pickWithRay(ray, (m: any) => m?.isPickable !== false && m.checkCollisions);
+        if (pick?.hit) return pick.pickedPoint;
+        
+        const endPoint = cam.position.add(ray.direction.scale(maxDist));
+        const downRay = new window.BABYLON.Ray(endPoint.add(new window.BABYLON.Vector3(0, 2, 0)), window.BABYLON.Vector3.Down(), 4);
+        const groundPick = s.pickWithRay(downRay, (m: any) => m?.isPickable !== false && m.checkCollisions);
+        if (groundPick?.hit) return groundPick.pickedPoint;
+
+        return endPoint;
+      }
+
+      function isShadeAndPlayerInRoom(){
+        const ghostData = getGhostData();
+        if (ghostData?.name?.toLowerCase() !== 'shade') return false;
+        
+        const ghostRoom = (window.PP?.ghost as any)?.currentRoom;
+        const playerRoom = (window.PP?.player as any)?.currentRoom;
+        return ghostRoom && playerRoom && ghostRoom === playerRoom;
+      }
+      
+      function ghostHasWritingEvidence(){
+        return window.PP?.checkForEvidence('Ghost Writing') || false;
+      }
+
+      function placeBook(){
+        if (state.isPlaced) return;
+
+        state.isPlaced = true;
+        state.isWritten = false;
+        state.position = aimPointOnGround(3.8);
+        state.cooldown = 2;
+        
+        log(`Book placed at ${state.position.x.toFixed(2)}, ${state.position.y.toFixed(2)}, ${state.position.z.toFixed(2)}`);
+        
+        window.dispatchEvent(new CustomEvent('pp:item:used', { detail: { id: 'book' } }));
+      }
+
+      function update(dt: number) {
+        if (state.cooldown > 0) {
+          state.cooldown -= dt;
+        }
+
+        if (!state.isPlaced || !state.position || state.cooldown > 0 || state.isWritten) return;
+
+        if (Math.random() > 0.1 * dt) return;
+
+        if (isShadeAndPlayerInRoom()) return;
+
+        const gpos = getGhostPosition();
+        if (!gpos) return;
+
+        const near = window.BABYLON.Vector3.Distance(state.position, gpos) < 3.2;
+        if (!near) return;
+
+        if (ghostHasWritingEvidence()){
+          if (Math.random() < 0.5){ 
+            WritingAudio.writeAt(state.position); 
+            state.isWritten = true; 
+            state.cooldown = 999;
+            log('Ghost wrote in the book!');
+            window.PP.foundEvidence('Ghost Writing');
+          } else { 
+            WritingAudio.tossAt(state.position); 
+            state.isPlaced = false; 
+            state.cooldown = 5; 
+            log('The book was tossed!');
+          }
+        } else {
+          if(Math.random() < 0.7) {
+            WritingAudio.tossAt(state.position); 
+            state.isPlaced = false; 
+            state.cooldown = 5; 
+            log('The book was tossed!');
+          }
+        }
+      }
+
+      function init(scene: any) {
+        scene.onBeforeRenderObservable.add(() => {
+            update(scene.getEngine().getDeltaTime() / 1000);
+        });
+        log("Update loop attached.");
+      }
+      
+      const api = { init, place: placeBook };
+      (window.PP as any).PP_SYSTEMS.writing_book = api;
+
+      window.addEventListener('pp:item:use', () => {
+          const inventory = window.PP?.inventory;
+          if (!inventory) return;
+          
+          const activeSlotIndex = window.BeltManager?.state?.activeSlot - 1;
+          if (typeof activeSlotIndex !== 'number' || activeSlotIndex < 0) return;
+          
+          const activeItemId = inventory.slots?.[activeSlotIndex];
+          if (activeItemId === 'book') {
+              placeBook();
+          }
+      });
+
+      log("Writing Book System Initialized.");
+
     })();
-    console.log("[Loader] Writing Book System inlined.");
+    console.log("[Loader] Writing Book System inlined and restored.");
 }
 
 function initializeUvPrints() {
@@ -1699,7 +2059,8 @@ function initializeDotsSystem() {
       "use strict";
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
       PP.tools = PP.tools || {};
       const V3 = window.BABYLON.Vector3, Q = window.BABYLON.Quaternion, M = window.BABYLON.Matrix;
 
@@ -1932,7 +2293,8 @@ function initializeEmf() {
 
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} })) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       let ctx: AudioContext | null = null;
       try {
@@ -1947,7 +2309,7 @@ function initializeEmf() {
         decayRate: 0.4,
         active: false,
         beepTimers: [] as any[],
-        position: ()=> PP.rig?.body?.position || {x:0,y:0,z:0},
+        position: ()=> (PP as any).rig?.body?.position || {x:0,y:0,z:0},
         range: 4.0,
         lastSpikeTime: 0
       };
@@ -2043,7 +2405,8 @@ function initializeParabolicMic() {
       "use strict";
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
       PP.tools = PP.tools || {};
       PP.tools.parabolic = PP.tools.parabolic || {};
 
@@ -2135,9 +2498,296 @@ function initializeParabolicMic() {
 
 function initializeSpiritBox() {
     (function(){
-        // This script is intentionally left blank as its logic has been moved.
+      "use strict";
+      if ((window as any).__PP_SPIRITBOX__) return; (window as any).__PP_SPIRITBOX__ = true;
+
+// FIX: Initialize window.PP with required properties to satisfy the global type.
+const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
+
+      const AUDIO_URLS = {
+        static:  `${BASE_URL}assets/audio/spiritbox.mp3`,
+        whisper: `${BASE_URL}assets/audio/whisper.mp3`
+      };
+
+      const PANNER_OPTS = {
+        panningModel:  "HRTF",
+        distanceModel: "inverse",
+        refDistance:   2.0,
+        rolloffFactor: 1.0,
+        maxDistance:   40.0,
+        coneInnerAngle: 360,
+        coneOuterAngle: 360,
+        coneOuterGain:  0.7
+      };
+
+      const WHISPER = {
+        minGapSec: 10,
+        maxGapSec: 22,
+      };
+
+      let AC: AudioContext | null = null;
+      let master: GainNode | null = null;
+      function ensureAudio(){
+        if (AC) return;
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        AC = new AudioContext();
+        master = AC.createGain();
+        master.gain.value = ((PP.audio as any)?.gain?.sfx ?? 1.0) * ((PP.audio as any)?.gain?.master ?? 1.0);
+        master.connect(AC.destination);
+
+        window.addEventListener('pp:audio:gain-changed', ()=>{
+          try {
+            if (master) master.gain.value = ((PP.audio as any)?.gain?.sfx ?? 1.0) * ((PP.audio as any)?.gain?.master ?? 1.0);
+          } catch {}
+        });
+      }
+
+      function createUnitAudio(){
+        ensureAudio();
+
+        const elStatic = new Audio(AUDIO_URLS.static);
+        elStatic.loop = true;
+        elStatic.preload = "auto";
+
+        const srcStatic = AC!.createMediaElementSource(elStatic);
+        const panner    = AC!.createPanner();
+        const gUnit     = AC!.createGain();
+
+        panner.panningModel  = PANNER_OPTS.panningModel as any;
+        panner.distanceModel = PANNER_OPTS.distanceModel as any;
+        panner.refDistance   = PANNER_OPTS.refDistance;
+        panner.rolloffFactor = PANNER_OPTS.rolloffFactor;
+        panner.maxDistance   = PANNER_OPTS.maxDistance;
+        panner.coneInnerAngle = PANNER_OPTS.coneInnerAngle;
+        panner.coneOuterAngle = PANNER_OPTS.coneOuterAngle;
+        panner.coneOuterGain  = PANNER_OPTS.coneOuterGain;
+
+        srcStatic.connect(panner);
+        panner.connect(gUnit);
+        gUnit.connect(master!);
+
+        const elWhisper = new Audio(AUDIO_URLS.whisper);
+        elWhisper.loop = false;
+        const srcWhisper = AC!.createMediaElementSource(elWhisper);
+        
+        srcWhisper.connect(panner);
+
+        return { elStatic, elWhisper, panner, gUnit };
+      }
+
+      function scene(){ return window.scene || window.BABYLON.Engine?.LastCreatedScene || null; }
+      function cam(){ const s=scene(); return s && (s.activeCamera || window.camera); }
+      function v3(x: number,y: number,z: number){ return new window.BABYLON.Vector3(x,y,z); }
+
+      function rayFromCam(dist=4){
+        const c = cam(); const s = scene(); if (!c || !s) return null;
+        const origin = c.globalPosition ? c.globalPosition.clone() : c.position.clone();
+        const dir    = c.getForwardRay(dist).direction;
+        return new window.BABYLON.Ray(origin, dir, dist);
+      }
+
+      class SpiritBoxUnit {
+        getPos: () => any;
+        elStatic: HTMLAudioElement;
+        elWhisper: HTMLAudioElement;
+        panner: PannerNode;
+        gUnit: GainNode;
+        on: boolean;
+        nextWhisperAt: number;
+        __mesh?: any;
+
+        constructor(meshOrGetter: any){
+          this.getPos = () => {
+            try{
+              if (typeof meshOrGetter === 'function') return meshOrGetter();
+              const m = meshOrGetter;
+              return m?.getAbsolutePosition?.() || m?.position || null;
+            }catch{ return null; }
+          };
+
+          const a = createUnitAudio();
+          this.elStatic  = a.elStatic;
+          this.elWhisper = a.elWhisper;
+          this.panner    = a.panner;
+          this.gUnit     = a.gUnit;
+
+          this.on = false;
+          this.nextWhisperAt = 0;
+
+          const p = this.getPos() || v3(0,0,0);
+          this.panner.positionX.value = p.x;
+          this.panner.positionY.value = p.y;
+          this.panner.positionZ.value = p.z;
+        }
+
+        setOn(on: boolean){
+          this.on = !!on;
+          if (!AC) ensureAudio();
+          if (this.on){
+            AC!.resume?.().catch(()=>{});
+            try { this.elStatic.play().catch(()=>{}); } catch {}
+            this.scheduleNextWhisper();
+          } else {
+            try { this.elStatic.pause(); } catch {}
+            this.elStatic.currentTime = 0;
+          }
+        }
+
+        toggle(){ this.setOn(!this.on); }
+
+        scheduleNextWhisper(){
+          const now = AC!.currentTime || (performance.now()/1000);
+          const d = WHISPER.minGapSec + Math.random()*(WHISPER.maxGapSec-WHISPER.minGapSec);
+          this.nextWhisperAt = now + d;
+        }
+
+        playWhisper(){
+          try {
+            this.elWhisper.currentTime = 0;
+            this.elWhisper.play().catch(()=>{});
+          } catch {}
+          this.scheduleNextWhisper();
+        }
+
+        tick(dt: number){
+          const p = this.getPos();
+          if (p){
+            try { 
+                this.panner.positionX.setValueAtTime(p.x, AC!.currentTime);
+                this.panner.positionY.setValueAtTime(p.y, AC!.currentTime);
+                this.panner.positionZ.setValueAtTime(p.z, AC!.currentTime);
+            } catch {}
+          }
+          if (this.on){
+            const now = AC!.currentTime || (performance.now()/1000);
+            if (now >= this.nextWhisperAt){
+              this.playWhisper();
+            }
+          }
+        }
+
+        stopAll(){
+          try{ this.elStatic.pause(); this.elStatic.currentTime=0; }catch{}
+          try{ this.elWhisper.pause(); this.elWhisper.currentTime=0; }catch{}
+          this.on = false;
+        }
+      }
+
+      const M = {
+        units: new Set<SpiritBoxUnit>(),
+        inHand: null as SpiritBoxUnit | null,
+        loopAttached: false
+      };
+
+      function attachLoop(){
+        if (M.loopAttached) return;
+        const s = scene(); if (!s) return;
+        s.onBeforeRenderObservable.add(()=>{
+          const eng = s.getEngine?.() || (window as any).ENGINE;
+          const dt  = Math.min(0.1, ((eng?.getDeltaTime?.()||16.7)/1000));
+          M.units.forEach(u => u.tick(dt));
+          if (M.inHand){
+            try{
+              const b = (s as any).__playerBody || s.getMeshByName?.('player_capsule') || cam();
+              const p = b?.getAbsolutePosition?.() || b?.position;
+              if (p) {
+                M.inHand.panner.positionX.setValueAtTime(p.x, AC!.currentTime);
+                M.inHand.panner.positionY.setValueAtTime(p.y + 1.6, AC!.currentTime);
+                M.inHand.panner.positionZ.setValueAtTime(p.z, AC!.currentTime);
+              }
+            }catch{}
+          }
+        });
+        M.loopAttached = true;
+      }
+
+      function ensureUnitForMesh(mesh: any){
+        for (const u of M.units){
+          if (u.__mesh === mesh) return u;
+        }
+        const unit = new SpiritBoxUnit(mesh);
+        unit.__mesh = mesh;
+        M.units.add(unit);
+        attachLoop();
+        return unit;
+      }
+
+      function ensureInHand(){
+        if (M.inHand) return M.inHand;
+        const unit = new SpiritBoxUnit(()=> {
+          const s=scene(); const b=(s as any)?.__playerBody || s?.getMeshByName?.('player_capsule') || cam();
+          const p=b?.getAbsolutePosition?.() || b?.position || v3(0,0,0);
+          return new window.BABYLON.Vector3(p.x, p.y + 1.6, p.z);
+        });
+        M.inHand = unit;
+        M.units.add(unit);
+        attachLoop();
+        return unit;
+      }
+
+      PP.spiritBox = {
+        setEquipped(on: boolean){
+          if (on){
+            const u = ensureInHand();
+            u.setOn(true);
+          } else if (M.inHand){
+            M.inHand.setOn(false);
+          }
+        },
+        onPlaced(mesh: any){
+          if (!mesh) return;
+          mesh.metadata = mesh.metadata || {};
+          mesh.metadata.type = 'spirit_box';
+          const u = ensureUnitForMesh(mesh);
+          if (M.inHand && M.inHand.on){ u.setOn(true); }
+          attachLoop();
+        },
+        toggleLookedAt(){
+          const s=scene(); const r=rayFromCam(4); if (!s || !r) return false;
+          const hit = s.pickWithRay(r, m=> !!(m?.metadata?.type==='spirit_box'));
+          if (hit?.pickedMesh){
+            const u = ensureUnitForMesh(hit.pickedMesh);
+            u.toggle();
+            return true;
+          }
+          return false;
+        },
+        ghostSpeak(){
+          let target: SpiritBoxUnit | null=null, minD=1e9;
+          const cpos = cam()?.globalPosition || cam()?.position;
+          if (!cpos) return;
+          M.units.forEach(u=>{
+            if (!u.on) return;
+            const p = u.getPos(); if (!p) return;
+            const d = window.BABYLON.Vector3.Distance(p, cpos);
+            if (d < minD){ minD=d; target=u; }
+          });
+          target?.playWhisper();
+        },
+        stopAll(){ M.units.forEach(u=>u.stopAll()); }
+      };
+
+      window.addEventListener('pp:start', ()=>{
+        try{ ensureAudio(); AC!.resume?.(); }catch{}
+      });
+
+      window.addEventListener('pp:active-item-changed', (ev: any)=>{
+        const id = ev.detail?.id;
+        if (id !== 'spirit_box' && M.inHand){
+          M.inHand.setOn(false);
+        }
+      });
+
+      addEventListener('keydown', (e)=>{
+        if (e.code === 'KeyE'){
+          if (PP.spiritBox.toggleLookedAt()) e.preventDefault();
+        }
+      }, true);
+
+      window.addEventListener('pp:ghost:spirit-speak', ()=> PP.spiritBox.ghostSpeak());
+
     })();
-    console.log("[Loader] Spirit Box System inlined.");
+    console.log("[Loader] Spirit Box System inlined and restored.");
 }
 
 function initializeBeltManager() {
@@ -2823,7 +3473,8 @@ function initializeVanUi() {
 
       // FIX: Initialize window.PP with required properties to satisfy the global type.
       // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
+      // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+      window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null }) as Window['PP'];
       window.PP.vanUI = {
         show,
         hide,
@@ -3209,601 +3860,152 @@ function initializeMoon() {
 
 function initializeGameplayPatch() {
     (function(){
-        // This script is intentionally left blank as its logic has been moved.
-    })();
-    console.log("[Loader] Gameplay Patch inlined.");
-}
+        // === Gameplay Patch: storage, belt safety, vanZone spawn, exterior rain ===
+        // FIX: Set storage, mapManager, and tools to null to satisfy the required type and allow for later initialization.
+        const PP = (window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: null, mapManager: null, tools: null })) as Window['PP'];
+        PP.cfg = PP.cfg || { spawnWS: null };
+        PP.state = PP.state || {};
+        PP.cfg.spawnWS = PP.cfg.spawnWS || new window.BABYLON.Vector3(47.52, 0.22, -105.28);
 
-function initializePs5Controller() {
-    (function(){
-        if (window.PP?.ps5) return;
+        // ---------------- storage ----------------
+        PP.storage = PP.storage || (function(){
+            const KEY_INV='pp_inventory_v1', KEY_FLAGS='pp_flags_v1';
+            function get(k: string, d: any){ try{return JSON.parse(localStorage.getItem(k)!) ?? d;}catch(_){return d;} }
+            function set(k: string, v: any){ localStorage.setItem(k, JSON.stringify(v)); return v; }
+            return {
+                saveInventory: (inv: any) => set(KEY_INV, inv),
+                loadInventory: () => get(KEY_INV, {slots:[], equipped:0}),
+                getFlag: (k: string, d = false)=>{ const f=get(KEY_FLAGS,{}); return (k in f)?f[k]:d; },
+                setFlag: (k: string, v: any)=>{ const f=get(KEY_FLAGS,{}); f[k]=v; set(KEY_FLAGS,f); }
+            };
+        })();
 
-        const log = (...a: any[]) => console.log("[PS5_Enhancements]", ...a);
-        const state = {
-            gamepad: null as Gamepad | null,
-            gamepadIndex: -1,
-        };
+        // ---------------- belt (SAFE) ----------------
+        function getBelt(){ return document.getElementById('belt') || document.getElementById('item-belt-container'); }
 
-        function findDualSense() {
-            try {
-                const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-                for (let i = 0; i < gamepads.length; i++) {
-                    const gp = gamepads[i];
-                    if (gp && gp.id.toLowerCase().includes('dualsense')) {
-                        if (state.gamepadIndex !== i) {
-                            log(`DualSense controller found at index ${i}.`);
-                            state.gamepad = gp;
-                            state.gamepadIndex = i;
-                        }
-                        return;
-                    }
-                }
-            } catch(e) {
-                console.warn("[PS5_Enhancements] Error while polling for gamepads.", e);
-            }
+        function buildBelt(slots: string[] | null){
+            const bar = getBelt(); if (!bar) return;
+            bar.innerHTML='';
             
-            if (state.gamepad) {
-                log("DualSense controller disconnected.");
-                state.gamepad = null;
-                state.gamepadIndex = -1;
+            const inv = slots ? { slots, equipped: PP.storage.loadInventory().equipped } : PP.storage.loadInventory();
+            if (!inv.slots) return;
+
+            inv.slots.forEach((id: string, i: number)=>{
+                const catalog = PP.inventory.ITEM_META || {};
+                const def = catalog[id] || {name:id,icon:''};
+                const el=document.createElement('div');
+                el.className='belt-slot'+(i===inv.equipped?' active':'');
+                el.innerHTML = (def.icon?`<img src="${def.icon}" style="max-width:48px;max-height:48px;object-fit:contain">`:`<span style="font-size:10px;color:#adf">${def.name}</span>`)
+                + `<div class="slot-key">${i+1}</div>`;
+                el.onclick = ()=> setEquipped(i);
+                bar.appendChild(el);
+            });
+        }
+        (window as any).buildBelt = buildBelt;
+
+        function setEquipped(i: number){
+            const inv = PP.storage.loadInventory();
+            if (!inv.slots || !inv.slots.length) return;
+            inv.equipped = Math.max(0, Math.min(i, inv.slots.length-1));
+            PP.storage.saveInventory(inv);
+
+            const bar = getBelt(); if (!bar) return;
+            [...bar.children].forEach((el,idx)=> el.classList.toggle('active', idx===inv.equipped));
+            
+            const itemDef = (PP.inventory.ITEM_META || {})[inv.slots[inv.equipped]];
+            window.dispatchEvent(new CustomEvent('pp:belt:equip', { detail: { item: itemDef, slot: inv.equipped } }));
+        }
+
+        function cycleSlot(dir: number){
+            const inv = PP.storage.loadInventory();
+            if (!inv.slots || !inv.slots.length) return;
+            inv.equipped = (inv.equipped + (dir>0?1:-1) + inv.slots.length) % inv.slots.length;
+            setEquipped(inv.equipped); // this will save and update UI
+        }
+
+        (function attachWheelWhenReady(){
+            function onWheel(e: WheelEvent){
+                const bar = getBelt(); if (!bar) return;
+                if (e.deltaY > 0) cycleSlot(+1);
+                else if (e.deltaY < 0) cycleSlot(-1);
             }
-        }
-        
-        function pulse(strong = 0.8, weak = 0.4, duration = 150) {
-            if (!state.gamepad || !(state.gamepad as any).vibrationActuator) return;
-
-            (state.gamepad as any).vibrationActuator.playEffect("dual-rumble", {
-                startDelay: 0,
-                duration: duration,
-                weakMagnitude: weak,
-                strongMagnitude: strong,
-            }).catch((e: any) => {});
-        }
-
-        let heartbeatInterval: any = null;
-        function startHeartbeat() {
-            if (heartbeatInterval) return;
-            stopHeartbeat();
-            heartbeatInterval = setInterval(() => {
-                pulse(0.9, 0, 80);
-                setTimeout(() => pulse(0.5, 0, 60), 120);
-            }, 800);
-            log("Heartbeat effect started.");
-        }
-        
-        function stopHeartbeat() {
-            if (heartbeatInterval) {
-                clearInterval(heartbeatInterval);
-                heartbeatInterval = null;
-                log("Heartbeat effect stopped.");
+            function tryAttach(){
+                const belt = document.querySelector('.item-belt');
+                if (belt) belt.addEventListener('wheel', onWheel as any, { passive:true });
+                else setTimeout(tryAttach, 50);
             }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', tryAttach, { once:true });
+            } else { tryAttach(); }
+        })();
+
+        // ---------------- item scatter (placeholder) ----------------
+        function scatterItems(slots: string[]){
+            const sc = window.scene;
+            if (!sc) return;
+            const s = computeSpawnWS();
+            (slots||PP.storage.loadInventory().slots).forEach((id: string,idx: number)=>{
+                const node=new window.BABYLON.TransformNode('item_in_van_'+id, sc);
+                node.position = new window.BABYLON.Vector3(s.x+1.2+0.6*idx, s.y-1.6, s.z-1.5);
+            });
         }
 
-        function attachEventListeners() {
-            window.addEventListener('pp:ghost:interact', () => pulse(1.0, 1.0, 300));
-            window.addEventListener('pp:ghost:hunt_start', () => pulse(0.8, 0.8, 1000));
-            window.addEventListener('pp:sanity:changed', (e: any) => {
-                const sanity = e.detail?.sanity;
-                if (typeof sanity === 'number') {
-                    if (sanity < 30) {
-                        startHeartbeat();
-                    } else {
-                        stopHeartbeat();
-                    }
+        // ---------------- spawn helpers (vanZone aware) ----------------
+        function computeSpawnWS(){
+            if (window.PP_SPAWN_POS) {
+                return window.PP_SPAWN_POS.clone();
+            }
+            return PP.cfg.spawnWS || new window.BABYLON.Vector3(0,1.8,0);
+        }
+
+        function forceSpawn(){
+            const rig = window.PlayerRig?.getRigRoot();
+            const rigState = window.PlayerRig?.getState();
+            
+            if (!rig || !rigState) return;
+            
+            const p = computeSpawnWS();
+            rig.position.copyFrom(p);
+
+            rigState.yaw = 0;
+            rigState.pitch = 0;
+        }
+
+        // ---------------- exterior rain (guards) ----------------
+        function exteriorRain(){
+            const sc = window.scene;
+            if (!sc) return;
+            
+            const tpl = new window.BABYLON.ParticleSystem("rain_template", 2000, sc);
+            try { tpl.particleTexture = new window.BABYLON.Texture(`${BASE_URL}assets/textures/rain.png`, sc, true, false); } catch(_){}
+            tpl.blendMode = window.BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+            tpl.isBillboardBased = true; (tpl as any).updateSpeed=0.02;
+            tpl.minSize=0.05; tpl.maxSize=0.15; tpl.minEmitPower=4; tpl.maxEmitPower=7;
+            tpl.gravity = new window.BABYLON.Vector3(0,-9.81,0);
+            
+            const emitters: any[] = [];
+            const rainBox = new window.BABYLON.TransformNode("rain_emitter",sc);
+            rainBox.position.y = 14;
+            const ps = tpl.clone("rain_ps",rainBox);
+            (ps as any).isLocal = false;
+            ps.emitter = rainBox;
+            ps.createBoxEmitter(new window.BABYLON.Vector3(-30,0,-30),new window.BABYLON.Vector3(30,0,30),new window.BABYLON.Vector3(0,-1,0),0,0);
+            emitters.push({node: rainBox, ps});
+
+            sc.onBeforeRenderObservable.add(()=>{
+                let p=sc.activeCamera?.position||window.BABYLON.Vector3.Zero();
+                const rigRoot = window.PlayerRig?.getRigRoot();
+                if(rigRoot) {
+                    p = rigRoot.position;
+                }
+                
+                for(const e of emitters){
+                    e.node.position.x = p.x;
+                    e.node.position.z = p.z;
+                    if(!e.ps.isStarted()) e.ps.start();
                 }
             });
-            window.addEventListener('pp:player:hit', () => pulse(1.0, 0.2, 200));
         }
 
-        function init() {
-            window.addEventListener("gamepadconnected", findDualSense, { passive: true });
-            window.addEventListener("gamepaddisconnected", findDualSense, { passive: true });
-            findDualSense();
-            attachEventListeners();
-            log("Initialized.");
-        }
-        
-        const api = {
-            pulse,
-        };
-
-        // FIX: Initialize window.PP with required properties to satisfy the global type.
-        // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-        window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
-        window.PP.ps5 = api;
-
-        window.addEventListener('pp:start', init, { once: true });
-    })();
-    console.log("[Loader] PS5 Controller inlined.");
-}
-
-function initializeDevtools() {
-    (function(){
-      "use strict";
-      // This script is intentionally left blank as its logic has been moved.
-    })();
-    console.log("[Loader] Devtools inlined.");
-}
-
-function initializeGhostDev() {
-    (function(){
-      "use strict";
-      // This script is intentionally left blank as its logic has been moved.
-    })();
-    console.log("[Loader] Ghost Dev inlined.");
-}
-
-function initializeLogger() {
-    (function(){
-        if(window.SimLog) return;
-
-        window.SimLog = {
-            events: [] as any[],
-            enabled: true,
-            record: function(type: string, data: any){ 
-                if(!this.enabled) return;
-                this.events.push({ time: performance.now(), type, data }); 
-            },
-            exportJSON: function(){ return JSON.stringify(this.events,null,2); },
-            saveToFile: function(filename="sim_log.json"){
-                try{
-                    const blob = new Blob([this.exportJSON()], { type: "application/json" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = filename;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    console.log("[SimLog] Saved", this.events.length, "events");
-                }catch(e){ console.warn("[SimLog] Save failed", e); }
-            }
-        };
-
-        const recordPlayer = ()=> {
-            const rigRoot = window.PlayerRig?.getRigRoot();
-            if(rigRoot) window.SimLog?.record("playerTick", { pos: {x: rigRoot.position.x, y: rigRoot.position.y, z: rigRoot.position.z} });
-        };
-        const recordCamera = ()=> {
-            // FIX: Accessing window.camera is now type-safe.
-            const cam = window.camera;
-            if(cam) window.SimLog?.record("cameraTick", { pos: {x: cam.globalPosition.x, y: cam.globalPosition.y, z: cam.globalPosition.z}, rot: {x: cam.rotation.x, y: cam.rotation.y, z: cam.rotation.z} });
-        };
-        
-        function startLogging() {
-            const scene = window.scene;
-            if (scene) {
-                scene.onBeforeRenderObservable.add(()=>{
-                    recordPlayer();
-                    recordCamera();
-                });
-                console.log("[SimLog] Player and camera tick logging attached.");
-            } else {
-                console.warn("[SimLog] Scene not ready for logging hooks.");
-            }
-        }
-        
-        window.addEventListener("pp:ghost:attack", (e: any) => {
-            window.SimLog?.record("ghostAttack", { ghost: e.detail?.ghostType, target: e.detail?.target });
-        });
-
-        window.addEventListener("keydown",(e)=>{
-            if(e.altKey && e.code==="KeyS"){
-                e.preventDefault();
-                window.SimLog?.saveToFile();
-            }
-        });
-        
-        window.addEventListener("pp:start", startLogging, { once: true });
-
-        console.log("[SimLog] Initialized — Alt+S to save log");
-    })();
-    console.log("[Loader] Logger inlined.");
-}
-
-function initializeBootstrap() {
-    (function(){
-    "use strict";
-
-    const log = (...a: any[]) => console.log("[Bootstrap]", ...a);
-    const warn = (...a: any[]) => console.warn("[Bootstrap]", ...a);
-
-    let engine: any, scene: any, camera: any;
-
-    const state = {
-        isStarted: false,
-        selectedGhost: null,
-        foundEvidence: new Set(),
-    };
-    // FIX: Initialize window.PP with required properties to satisfy the global type.
-    // FIX: Add `spawnWS: null` to the cfg object to satisfy the inferred global type for PP.
-    window.PP = (window.PP || { GHOST_DATA: null, ALL_EVIDENCE: [], cfg: { spawnWS: null }, state: {}, storage: {} }) as Window['PP'];
-    window.PP.state = Object.assign(window.PP.state || {}, state);
-    window.PP.gameHasRenderedFirstFrame = false;
-
-    function showLoading(show: boolean, percent?: number, text?: string, subText?: string) {
-        const loadingOverlay = document.getElementById('loading-overlay');
-        const loadingBar = document.getElementById('loading-bar');
-        const loadingText = document.getElementById('loading-text');
-        const loadingSubText = document.getElementById('loading-sub-text');
-
-        if (!loadingOverlay || !loadingBar || !loadingText || !loadingSubText) return;
-
-        if (show) {
-            loadingOverlay.style.display = 'flex';
-            setTimeout(()=> loadingOverlay.style.opacity = '1', 10);
-            if (percent !== undefined) {
-                 (loadingBar as HTMLElement).style.width = `${percent}%`;
-            }
-            if (text) {
-                 loadingText.textContent = text;
-            }
-            if (subText !== undefined) {
-                loadingSubText.textContent = subText;
-            }
-        } else {
-            loadingOverlay.style.opacity = '0';
-            setTimeout(()=> loadingOverlay.style.display = 'none', 500);
-        }
-    }
-    window.showLoading = showLoading;
-
-    async function setupEngine() {
-        log("1. Setting up engine and scene...");
-        
-        const canvas = document.getElementById('renderCanvas');
-        if (!canvas) {
-            throw new Error("renderCanvas element not found in the DOM!");
-        }
-        
-        engine = new window.BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-        scene = new window.BABYLON.Scene(engine);
-        scene.collisionsEnabled = true;
-        scene.gravity = new window.BABYLON.Vector3(0, -9.81, 0);
-
-        camera = new window.BABYLON.FreeCamera("mainCam", new window.BABYLON.Vector3(0, 1.8, -5), scene);
-        camera.attachControl(canvas, false);
-        scene.activeCamera = camera;
-
-        const hemi = new window.BABYLON.HemisphericLight("hemi", new window.BABYLON.Vector3(0, 1, 0), scene);
-        hemi.intensity = 0.8;
-        scene.clearColor = new window.BABYLON.Color4(0.0, 0.0, 0.0, 1.0);
-
-        const debugGround = window.BABYLON.MeshBuilder.CreateGround("debugGround", {width: 20, height: 20}, scene);
-        debugGround.isPickable = false;
-        const debugSphere = window.BABYLON.MeshBuilder.CreateSphere("debugSphere", {diameter: 1}, scene);
-        debugSphere.position.y = 1;
-        debugSphere.isPickable = false;
-        const debugMat = new window.BABYLON.StandardMaterial("debugMat", scene);
-        debugMat.diffuseColor = new window.BABYLON.Color3(1.0, 0.0, 1.0);
-        debugGround.material = debugMat;
-        debugSphere.material = debugMat;
-
-        (window as any).engine = engine;
-        window.scene = scene;
-        (window as any).camera = camera;
-        
-        window.PP.runtime?.exportGlobals(engine, scene, camera);
-
-        window.addEventListener('resize', () => engine.resize());
-        
-        engine.runRenderLoop(() => {
-            if (scene && scene.activeCamera) {
-                scene.render();
-            }
-        });
-        
-        log("Engine and scene OK. Render loop started for smoke test.");
-    }
-
-    async function loadSelectedMap(mapId: string) {
-        const mapData = window.PP.mapManifest.find((m: any) => m.id === mapId);
-        if (!mapData) {
-            throw new Error(`Map with id "${mapId}" not found in manifest.`);
-        }
-
-        log(`Loading map: ${mapData.title}`);
-        if (mapData.id === 'procedural_house' && window.ProHouseGenerator) {
-            await window.ProHouseGenerator.generateMap(scene);
-            log("Procedural map generated.");
-        } else if (mapData.file && window.PP.mapManager && typeof window.PP.mapManager.loadMap === 'function') {
-            await window.PP.mapManager.loadMap(mapData);
-            log("Static map loaded.");
-        } else {
-            throw new Error(`Map '${mapData.title}' has no valid loader defined.`);
-        }
-    }
-
-    async function setupMapAndWeather(mapId: string) {
-        log("3. Loading map and initializing weather...");
-        showLoading(true, 40, "Building World...", "Loading map data...");
-        
-        await loadSelectedMap(mapId);
-
-        showLoading(true, 70, "Building World...", "Initializing weather systems...");
-        if(window.EnvAndSound && typeof window.EnvAndSound.firstInteractionBoot === 'function') {
-            window.EnvAndSound.firstInteractionBoot();
-            const weathers = ["Clear", "Rainstorm", "Snow", "Bloodmoon"];
-            const choice = weathers[Math.floor(Math.random() * weathers.length)];
-            window.EnvAndSound.setWeather(choice, { intensity: 0.5 + Math.random() * 0.5 });
-            log(`Initial weather set to: ${choice}`);
-        } else {
-            warn("EnvAndSound system not found.");
-        }
-
-        if (typeof (window as any).applyDoorsConfig === 'function') {
-            (window as any).applyDoorsConfig(scene);
-            log("Door configurations applied.");
-        }
-    }
-
-    function setupGameplaySystems() {
-        log("4. Initializing gameplay systems...");
-        showLoading(true, 75, "Waking Entities...", "Initializing ghost logic...");
-
-        if (window.PP.ghost?.init) {
-            window.PP.ghost.init(scene);
-            log("Initialized ghost logic.");
-        } else {
-            warn("Ghost logic module not found for initialization.");
-        }
-
-        showLoading(true, 80, "Waking Entities...", "Selecting a ghost...");
-        const ghostNames = Object.keys(window.PP.GHOST_DATA || {});
-        if (ghostNames.length > 0) {
-            const randomGhostName = ghostNames[Math.floor(Math.random() * ghostNames.length)];
-            window.PP.state.selectedGhost = window.PP.GHOST_DATA[randomGhostName];
-            log(`Selected Ghost: ${window.PP.state.selectedGhost.name}`);
-            if (window.PP.ghost) {
-                window.PP.ghost.data = window.PP.state.selectedGhost;
-            }
-        } else {
-            warn("GHOST_DATA is empty! Cannot select a ghost.");
-        }
-        
-        showLoading(true, 85, "Waking Entities...", "Initializing tools and systems...");
-        if (window.PP.inventory?.models?.init) {
-            window.PP.inventory.models.init(scene);
-            log("Initialized item models.");
-        }
-        
-        Object.values(window.PP.tools || {}).forEach((tool: any) => {
-            if (typeof tool.init === 'function') {
-                try {
-                    tool.init(scene);
-                } catch (e) {
-                    warn(`Error initializing a tool:`, e);
-                }
-            }
-        });
-        
-        ['salt', 'writing_book', 'uv_prints', 'lantern', 'lighter'].forEach(sysName => {
-            const sys = (window as any).PP_SYSTEMS?.[sysName] || (window as any)[sysName.toUpperCase()];
-            if(sys && typeof sys.init === 'function') {
-                 try {
-                    sys.init(scene);
-                 } catch(e){
-                    warn(`Error initializing system ${sysName}:`, e);
-                 }
-            }
-        });
-    }
-
-    async function startGame(mapId: string) {
-        if (window.PP.state.isStarted) return;
-        log(`Starting game content loading for map: ${mapId}`);
-        
-        showLoading(true, 25, "Creating Player...", "");
-        
-        await setupMapAndWeather(mapId);
-        setupGameplaySystems();
-        
-        showLoading(true, 90, "Finalizing...");
-        
-        window.PP.state.isStarted = true;
-        (window as any).__PP_ALREADY_STARTED__ = true;
-        window.dispatchEvent(new CustomEvent('pp:start'));
-        log("Game start event dispatched!");
-
-        if(window.PlayerRig) {
-            log("Enabling player movement.");
-            window.PlayerRig.enableMovement(true);
-        }
-        
-        window.PP.pointerLock?.lock();
-        
-        setTimeout(() => {
-            showLoading(false);
-        }, 500);
-    }
-
-    function setupGlobalHelpers() {
-        window.PP.checkForEvidence = (evidenceKey: string) => {
-            if (!window.PP.state.selectedGhost) return false;
-            return window.PP.state.selectedGhost.evidence.includes(evidenceKey);
-        };
-
-        window.PP.foundEvidence = (evidenceKey: string) => {
-            (window.PP.state.foundEvidence as Set<string>).add(evidenceKey);
-            log(`Evidence found: ${evidenceKey}. Total: ${window.PP.state.foundEvidence.size}/3`);
-            window.dispatchEvent(new CustomEvent('pp:evidence:found', { detail: { evidence: evidenceKey }}));
-        };
-
-        window.addEventListener('pp:belt:equip', (e: any) => {
-            const { item, slot } = e.detail;
-            if (!item) return;
-            window.dispatchEvent(new CustomEvent('pp:belt:unequip_all', { detail: { except: item.id } }));
-            window.dispatchEvent(new CustomEvent(`pp:tool:equip:${item.id}`));
-        });
-
-         window.addEventListener('pp:belt:unequip', (e: any) => {
-            const { item, slot } = e.detail;
-            if (!item) return;
-            window.dispatchEvent(new CustomEvent(`pp:tool:unequip:${item.id}`));
-        });
-    }
-
-    async function initialize() {
-        setupGlobalHelpers();
-        
-        const fallbackBtn = document.getElementById('fallback-refresh-btn');
-        if (fallbackBtn) {
-            fallbackBtn.addEventListener('click', () => window.location.reload());
-        }
-        
-        const fallbackTimer = setTimeout(() => {
-            if (!window.PP.gameHasRenderedFirstFrame) {
-                console.error("Fallback Triggered: Game failed to render a frame within 15 seconds.");
-                showLoading(false);
-                const fallbackOverlay = document.getElementById('fallback-overlay');
-                if (fallbackOverlay) (fallbackOverlay as HTMLElement).style.display = 'flex';
-            }
-        }, 15000);
-
-        window.addEventListener('pp:start-investigation', async (e: any) => {
-            const mapId = e.detail?.mapId;
-            if (!mapId) {
-                console.error("Start event fired without a mapId.");
-                return;
-            }
-            
-            try {
-                await startGame(mapId);
-            } catch(error) {
-                console.error("CRITICAL FAILURE DURING GAME START:", error);
-                clearTimeout(fallbackTimer);
-                showLoading(false);
-                const fallbackOverlay = document.getElementById('fallback-overlay');
-                if (fallbackOverlay) (fallbackOverlay as HTMLElement).style.display = 'flex';
-            }
-        }, { once: true });
-
-
-        try {
-            log("Waiting for critical systems to be ready...");
-            showLoading(true, 5, "Initializing...", "Waiting for systems...");
-            await window.PP.waitFor!([
-                'playerRig',
-                'ghostLogic',
-                'mapLoader',
-                'inputManager',
-                'envAndSound',
-                'pointerLock'
-            ]);
-            log("All systems ready. Proceeding with engine setup.");
-
-            showLoading(true, 10, "Initializing Engine...", "Setting up Babylon.js");
-            await setupEngine();
-            
-            scene.onAfterRenderObservable.addOnce(() => {
-                log("First frame rendered successfully (Smoke Test Passed).");
-                window.PP.gameHasRenderedFirstFrame = true;
-                clearTimeout(fallbackTimer);
-                
-                scene.getMeshByName("debugGround")?.dispose();
-                scene.getMeshByName("debugSphere")?.dispose();
-                scene.getMaterialByName("debugMat")?.dispose();
-                
-                showLoading(false);
-                setTimeout(() => {
-                    if (window.PP?.vanUI?.show) {
-                        window.PP.vanUI.show();
-                    } else {
-                        warn("Van UI not found. Cannot start game selection.");
-                        const fallbackOverlay = document.getElementById('fallback-overlay');
-                        if(fallbackOverlay) {
-                            fallbackOverlay.querySelector('h2')!.textContent = "UI Error";
-                            fallbackOverlay.querySelector('p')!.textContent = "The main menu failed to load.";
-                            fallbackOverlay.style.display = 'flex';
-                        }
-                    }
-                }, 500);
-            });
-
-        } catch(error) {
-            console.error("CRITICAL FAILURE DURING INITIALIZATION:", error);
-            clearTimeout(fallbackTimer);
-            showLoading(false);
-            const fallbackOverlay = document.getElementById('fallback-overlay');
-            if (fallbackOverlay) (fallbackOverlay as HTMLElement).style.display = 'flex';
-        }
-    }
-
-    initialize();
-
-    })();
-    console.log("[Loader] Bootstrap inlined.");
-}
-
-/**
- * Main function to load all game scripts sequentially.
- */
-async function main() {
-  try {
-    // Initializations that were already inlined
-    initializeSettings();
-    initializeRuntime();
-    initializePlayerRigController();
-    initializeGhostData();
-    initializeGhostLogic();
-    
-    console.log('[Loader] Starting inlined script initialization...');
-
-    // Inlined scripts in order
-    initializeInputManager();
-    initializePointerLockManager();
-    initializeEnvAndSound();
-    initializeMapLoader();
-    initializeMapManager();
-    initializePhasmaMapAndGhost();
-    initializeInventorySystem();
-    initializeSaltSystem();
-    initializeWritingBook();
-    initializeUvPrints();
-    initializeLighter();
-    initializeLantern();
-    initializeDotsSystem();
-    initializeEmf();
-    initializeParabolicMic();
-    initializeSpiritBox();
-    initializeBeltManager();
-    initializeHudUi();
-    initializeNotebookUi();
-    initializeReticle();
-    initializeVanUi();
-    initializeEffectsSanityMed();
-    initializeGhostCam();
-    initializeMinimap();
-    initializeMoon();
-    initializeGameplayPatch();
-    initializePs5Controller();
-    initializeDevtools();
-    initializeGhostDev();
-    initializeLogger();
-    
-    // Bootstrap runs last to start the game logic
-    initializeBootstrap();
-
-    console.log('[Loader] All scripts inlined and initialized successfully. Bootstrap has run.');
-  } catch (error) {
-    console.error("A critical error occurred during initialization:", error);
-    const loadingText = document.getElementById('loading-text');
-    if (loadingText) {
-        loadingText.textContent = 'A critical error occurred. Please check the console.';
-        (loadingText.parentElement!.querySelector('#loading-sub-text') as HTMLElement).textContent = (error as Error).message;
-    }
-    const fallbackOverlay = document.getElementById('fallback-overlay');
-    if (fallbackOverlay) {
-        fallbackOverlay.style.display = 'flex';
-    }
-    const loadingOverlay = document.getElementById('loading-overlay');
-    if (loadingOverlay) {
-        loadingOverlay.style.display = 'none';
-    }
-  }
-}
-
-// Start the loading process once the DOM is ready.
-document.addEventListener('DOMContentLoaded', main);
-
-// FIX: Add an empty export to make this file a module, which is required for `declare global`.
-export {};
+        // ---------------- post-load hook ----------------
+        (function attachAfterLoad
