@@ -1,0 +1,227 @@
+# AI AGENT IMPORTANT NOTE: Always update these logs and read the context before deciding what the issue might be, so that way you wont do the same thing twice.
+# =================================================================================================================
+# PhasmaPhoney Discrepancy & Resolution Log
+
+This log tracks known issues, bugs, and architectural discrepancies within the codebase, along with their resolutions. Each entry has a unique reference ID for easy tracking.
+
+---
+## [REF: D-013] - Loading Stall Due to Babylon.js Dependency Conflict
+
+**File(s) Involved:**
+- `services/HouseBuilder.ts`
+- `index.html`
+
+**Date Reported:** 2024-08-11
+
+**Description:**
+The application's loading screen would appear but never progress. The root cause was a conflict in how the Babylon.js library was being accessed. The `index.html` file loads Babylon.js via a global `<script>` tag, which creates a `window.BABYLON` object. However, the `HouseBuilder.ts` service was attempting to load Babylon.js modules using ES `import` statements (e.g., `import { Scene } from '@babylonjs/core'`). This created a conflict where the imported modules were not resolving correctly, causing the `buildHouse` function to fail silently and stalling the entire loading process.
+
+**Status:** Resolved
+
+**Resolution:**
+The `HouseBuilder.ts` file was refactored to align with the global script loading strategy defined in `index.html`. All ES module imports from `@babylonjs/core` were removed. All references to Babylon.js classes, types, and functions (e.g., `Scene`, `Vector3`, `MeshBuilder`) were updated to use the global `BABYLON` object (e.g., `BABYLON.Scene`, `BABYLON.Vector3`, `BABYLON.MeshBuilder`). This ensures the entire application consistently uses the single, globally-loaded instance of the Babylon.js engine, resolving the loading stall.
+**Date Resolved:** 2024-08-11
+---
+## [REF: D-012] - UI Redesign of Loadout and Loading Screens
+
+**File(s) Involved:**
+- `store.ts`
+- `components/LoadingScreen.tsx`
+- `components/MainMenu.tsx`
+- `index.css`
+
+**Date Reported:** 2024-08-10
+
+**Description:**
+The user requested a significant redesign of two UI screens.
+1.  **Loading Screen:** The standard progress bar was replaced with a dynamic "chase" sequence. A randomly selected ghost icon now moves across the screen towards a randomly selected, wobbling player icon as loading progresses. This required adding state to Zustand for the icon URLs and creating custom CSS animations.
+2.  **Loadout Screen:** The previous icon-based grid was replaced with a text-based, two-column layout. The left column lists available items, and hovering over an item reveals a tooltip with its description. The right column serves as the "manifest," showing the three selected item slots. This change was implemented to provide a cleaner, more organized view without relying on icons.
+
+**A note was also made to avoid any future modifications to `index.html` as it has been a source of recurring issues when changed.**
+
+**Status:** Resolved
+
+**Resolution:**
+The `LoadingScreen.tsx` component was updated to render the new animated icon chase bar. The `LoadoutScreen` component within `MainMenu.tsx` was rewritten to use the new list-based layout with CSS tooltips. The Zustand store (`store.ts`) was updated to support the random icon selection for the loading screen. New CSS keyframe animations were added to `index.css`.
+**Date Resolved:** 2024-08-10
+---
+## [REF: D-011] - Build Configuration Conflict in `index.html`
+
+**File(s) Involved:**
+- `index.html`
+- `package.json`
+
+**Date Reported:** 2024-08-09
+
+**Description:**
+The application's `index.html` contained legacy CDN script includes and a `<script type="importmap">` block, which directly conflicted with the project's Vite-based build setup. This caused unreliable module loading and prevented dependencies from being managed correctly through `package.json`.
+
+**Status:** Resolved
+
+**Resolution:**
+The `index.html` file was cleaned to remove all CDN script tags and the `importmap`. The application now relies solely on Vite to bundle and manage all dependencies. The `package.json` file was updated to explicitly include `react`, `react-dom`, `@babylonjs/core`, `@babylonjs/loaders`, `cannon`, and `@types/cannon` to ensure a stable and correct build.
+**Date Resolved:** 2024-08-09
+---
+## [REF: D-010] - Major Architectural Refactor to React/Babylon.js
+
+**File(s) Involved:**
+- Entire codebase.
+
+**Date Reported:** 2024-08-08
+
+**Description:**
+Per user request, the entire application was refactored from a vanilla TypeScript/Three.js architecture back to a React/Babylon.js stack. The previous manager classes (`Game`, `ThreeManager`, `UIManager`, `InputManager`) have been replaced by a component-based architecture using React components and custom hooks (`GameCanvas`, `useGameLogic`, `usePlayerInput`, etc.).
+
+**Status:** Resolved
+
+**Resolution:**
+The refactor is complete. The application is now bootstrapped via `index.tsx` into a main `App.tsx` component that manages the game's state and UI flow. The `GameCanvas.tsx` component now encapsulates all Babylon.js rendering logic. This change was made to improve UI/logic separation and leverage the React component model. The previous vanilla architecture is now considered obsolete.
+**Date Resolved:** 2024-08-08
+---
+## [REF: D-009] - Temporary System-Wide Disablement for Debugging
+
+**File(s) Involved:**
+- `components/hooks/useSceneSetup.tsx`
+- `components/hooks/useGameLoop.tsx`
+- `services/HouseBuilder.ts`
+- `components/GameCanvas.tsx`
+- `components/hooks/useAssetLoader.tsx`
+
+**Date Reported:** 2024-08-06
+
+**Description:**
+In response to persistent instability and difficult-to-diagnose issues, a decision was made to strip the application down to its most basic components to establish a stable baseline. This involves temporarily disabling major systems that are common sources of complexity and bugs.
+
+**Status:** Resolved (Obsolete)
+
+**Resolution:**
+This entire effort became obsolete and was fully resolved by the radical refactoring of the entire application from Babylon.js/React to a vanilla TypeScript/Three.js architecture.
+**Date Resolved:** 2024-08-07
+---
+## [REF: D-001] - Performance Bottleneck in Procedural House Generation
+
+**File(s) Involved:**
+- `services/HouseBuilder.ts`
+
+**Date Reported:** 2024-07-29
+
+**Description:**
+The initial implementation of procedural house generation in `buildHouse` used Constructive Solid Geometry (CSG) operations. This approach was computationally expensive, causing a noticeable delay during the "Raising walls..." step of the loading screen.
+
+**Status:** Resolved
+
+**Resolution:**
+The `HouseBuilder.ts` service was refactored to use a more performant method of merging simple box meshes instead of CSG. This significantly improved loading times. The current implementation in Three.js continues this performant approach.
+**Date Resolved:** 2024-07-29
+---
+## [REF: D-002] - GUI Loading Failure and Black Screen
+
+**File(s) Involved:**
+- `services/MonitorManager.ts`
+
+**Date Reported:** 2024-07-30
+
+**Description:**
+The application would present a black screen, likely caused by a race condition in `MonitorManager.ts` where GUI texture updates were attempted before initialization was complete.
+
+**Status:** Resolved
+
+**Resolution:**
+Resolved by the complete migration of the application from React/Babylon.js to a vanilla TypeScript architecture. The entire React rendering layer and Babylon.GUI, which were the root cause of the instability, have been removed. UI is now managed via direct DOM manipulation.
+**Date Resolved:** 2024-08-07
+---
+## [REF: D-003] - Application Fails to Render with React Error #31
+
+**File(s) Involved:**
+- `index.html`
+
+**Date Reported:** 2024-07-31
+
+**Description:**
+The application failed to load due to "Minified React error #31," caused by conflicting React versions being loaded from different CDNs in the `importmap`.
+
+**Status:** Resolved
+
+**Resolution:**
+Resolved by the complete migration of the application from React to a vanilla TypeScript architecture. The removal of React and the `importmap` in favor of a Vite-managed build process eliminated this entire class of error.
+**Date Resolved:** 2024-08-07
+---
+## [REF: D-004] - Dependency Management and Build Process
+
+**File(s) Involved:**
+- `index.html`, `package.json`, `vite.config.ts` (and others)
+
+**Date Reported:** 2024-08-01
+
+**Description:**
+The application relied on a fragile `importmap` and CDN scripts for all dependencies.
+
+**Status:** Resolved
+
+**Resolution:**
+The entire project was migrated to use Vite. A `package.json` was created, and all dependencies are now managed via npm and bundled. This provides a stable and reliable build process.
+**Date Resolved:** 2024-08-01
+---
+## [REF: D-005] - Application Fails to Render with React Error #185
+
+**File(s) Involved:**
+- `index.tsx`
+
+**Date Reported:** 2024-08-02
+
+**Description:**
+The application failed with `createRoot(...): Target container is not a DOM element.` due to a fragile and complex bootstrapping logic in `index.tsx`.
+
+**Status:** Resolved
+
+**Resolution:**
+Resolved by the complete migration of the application from React to a vanilla TypeScript architecture. The application no longer uses `createRoot` or any React bootstrapping logic.
+**Date Resolved:** 2024-08-07
+---
+## [REF: D-006] - React Error #185 due to Vite and Importmap Conflict
+
+**File(s) Involved:**
+- `index.html`
+
+**Date Reported:** 2024-08-03
+
+**Description:**
+A remnant `<script type="importmap">` block in `index.html` from the pre-Vite architecture was causing a critical conflict with the bundled version of React, leading to an initialization failure.
+
+**Status:** Resolved
+
+**Resolution:**
+Resolved by the complete migration of the application from React to a vanilla TypeScript architecture and the removal of the `importmap`.
+**Date Resolved:** 2024-08-07
+---
+## [REF: D-007] - Critical Module Load Failure (404) for Babylon.js
+
+**File(s) Involved:**
+- `index.html`
+
+**Date Reported:** 2024-08-04
+
+**Description:**
+The application was failing to load Babylon.js modules due to a conflict between Vite and a legacy `<script type="importmap">`.
+
+**Status:** Resolved
+
+**Resolution:**
+Resolved by migrating to a Vite-based build system and then subsequently migrating from Babylon.js to Three.js, where dependencies are correctly managed via `package.json`.
+**Date Resolved:** 2024-08-07
+---
+## [REF: D-008] - Unstable Physics Engine Initialization in Vite
+
+**File(s) Involved:**
+- `components/hooks/useSceneSetup.tsx`
+
+**Date Reported:** 2024-08-05
+
+**Description:**
+The Babylon.js physics engine initialization was unstable due to reliance on a global `window.CANNON` variable, which is an anti-pattern when using a module bundler like Vite.
+
+**Status:** Resolved (Obsolete)
+
+**Resolution:**
+This issue is obsolete, as the project has migrated away from Babylon.js and its physics plugin. Physics will be re-implemented using a Three.js-compatible library in the future.
+**Date Resolved:** 2024-08-07
